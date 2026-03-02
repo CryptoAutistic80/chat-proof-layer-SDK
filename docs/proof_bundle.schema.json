@@ -1,0 +1,347 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://proof-layer.local/schemas/proof_bundle.schema.json",
+  "title": "Proof Bundle (PoC v0.1)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "bundle_version",
+    "bundle_id",
+    "created_at",
+    "actor",
+    "subject",
+    "model",
+    "inputs",
+    "outputs",
+    "trace",
+    "artefacts",
+    "policy",
+    "integrity"
+  ],
+  "properties": {
+    "bundle_version": {
+      "type": "string",
+      "const": "0.1"
+    },
+    "bundle_id": {
+      "type": "string",
+      "minLength": 8,
+      "maxLength": 64
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "actor": {
+      "$ref": "#/$defs/actor"
+    },
+    "subject": {
+      "$ref": "#/$defs/subject"
+    },
+    "model": {
+      "$ref": "#/$defs/model"
+    },
+    "inputs": {
+      "$ref": "#/$defs/inputs"
+    },
+    "outputs": {
+      "$ref": "#/$defs/outputs"
+    },
+    "trace": {
+      "$ref": "#/$defs/trace"
+    },
+    "artefacts": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/artefact"
+      }
+    },
+    "policy": {
+      "$ref": "#/$defs/policy"
+    },
+    "integrity": {
+      "$ref": "#/$defs/integrity"
+    },
+    "timestamp": {
+      "type": [
+        "null",
+        "object",
+        "string"
+      ]
+    },
+    "receipt": {
+      "type": [
+        "null",
+        "object",
+        "string"
+      ]
+    }
+  },
+  "$defs": {
+    "sha256Digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "actor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "issuer",
+        "app_id",
+        "env",
+        "signing_key_id"
+      ],
+      "properties": {
+        "issuer": {
+          "type": "string",
+          "minLength": 1
+        },
+        "app_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "env": {
+          "type": "string",
+          "minLength": 1
+        },
+        "signing_key_id": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "subject": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "request_id"
+      ],
+      "properties": {
+        "request_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "thread_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "user_ref": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "model": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "provider",
+        "model",
+        "parameters"
+      ],
+      "properties": {
+        "provider": {
+          "type": "string",
+          "minLength": 1
+        },
+        "model": {
+          "type": "string",
+          "minLength": 1
+        },
+        "parameters": {
+          "type": [
+            "object",
+            "array",
+            "string",
+            "number",
+            "integer",
+            "boolean",
+            "null"
+          ]
+        }
+      }
+    },
+    "inputs": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "messages_commitment"
+      ],
+      "properties": {
+        "messages_commitment": {
+          "$ref": "#/$defs/sha256Digest"
+        },
+        "retrieval_commitment": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/sha256Digest"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "outputs": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "assistant_text_commitment"
+      ],
+      "properties": {
+        "assistant_text_commitment": {
+          "$ref": "#/$defs/sha256Digest"
+        },
+        "tool_outputs_commitment": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/sha256Digest"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "trace": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "otel_genai_semconv_version",
+        "trace_commitment"
+      ],
+      "properties": {
+        "otel_genai_semconv_version": {
+          "type": "string",
+          "minLength": 1
+        },
+        "trace_commitment": {
+          "$ref": "#/$defs/sha256Digest"
+        }
+      }
+    },
+    "artefact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "digest",
+        "size",
+        "content_type"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^(?!/)(?!.*\\.\\.)[^\\u0000]+$"
+        },
+        "digest": {
+          "$ref": "#/$defs/sha256Digest"
+        },
+        "size": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "content_type": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "redactions",
+        "encryption"
+      ],
+      "properties": {
+        "redactions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "encryption": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "enabled"
+          ],
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            }
+          }
+        }
+      }
+    },
+    "integrity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "canonicalization",
+        "hash",
+        "header_digest",
+        "bundle_root_algorithm",
+        "bundle_root",
+        "signature"
+      ],
+      "properties": {
+        "canonicalization": {
+          "type": "string",
+          "const": "RFC8785-JCS"
+        },
+        "hash": {
+          "type": "string",
+          "const": "SHA-256"
+        },
+        "header_digest": {
+          "$ref": "#/$defs/sha256Digest"
+        },
+        "bundle_root_algorithm": {
+          "type": "string",
+          "const": "pl-merkle-sha256-v1"
+        },
+        "bundle_root": {
+          "$ref": "#/$defs/sha256Digest"
+        },
+        "signature": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "format",
+            "alg",
+            "kid",
+            "value"
+          ],
+          "properties": {
+            "format": {
+              "type": "string",
+              "const": "JWS"
+            },
+            "alg": {
+              "type": "string",
+              "const": "EdDSA"
+            },
+            "kid": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "value": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        }
+      }
+    }
+  }
+}

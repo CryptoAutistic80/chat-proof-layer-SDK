@@ -1,0 +1,29 @@
+{
+  "files": [
+    {
+      "name": "artefacts/prompt.json",
+      "digest": "sha256:01f53d6229f0e4a60d3da9d3064a4daa007c0ea5d56b49f620d82a65309c0e94",
+      "size": 152
+    },
+    {
+      "name": "artefacts/response.json",
+      "digest": "sha256:5f801b1af400da4c8f8c0050fc308bda4545d662a1fd0c32e60d1cb6f95cd06a",
+      "size": 231
+    },
+    {
+      "name": "proof_bundle.canonical.json",
+      "digest": "sha256:a6542c647a6c7f5b866c00295ace8d941a47ef373b5c54c180702933e3f30c9a",
+      "size": 1162
+    },
+    {
+      "name": "proof_bundle.json",
+      "digest": "sha256:d43ffe6ee81d0b3f3568ef301df379c5739c2b14b5a75d9de86f22974ddf6824",
+      "size": 2115
+    },
+    {
+      "name": "proof_bundle.sig",
+      "digest": "sha256:10f451f9789a98419557fb6e9cd105fb754f2edd25c9f7104afee537e096e8fc",
+      "size": 229
+    }
+  ]
+}

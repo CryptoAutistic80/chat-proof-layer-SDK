@@ -1,0 +1,29 @@
+{
+  "vectors": [
+    {
+      "name": "basic_key_order",
+      "raw_json": "{\"z\":1,\"a\":2}",
+      "canonical_json": "{\"a\":2,\"z\":1}"
+    },
+    {
+      "name": "nested_structures",
+      "raw_json": "{\"a\":[3,{\"d\":\"x\",\"c\":null},true,false],\"b\":{\"z\":0,\"a\":\"x\"}}",
+      "canonical_json": "{\"a\":[3,{\"c\":null,\"d\":\"x\"},true,false],\"b\":{\"a\":\"x\",\"z\":0}}"
+    },
+    {
+      "name": "number_rendering",
+      "raw_json": "{\"numbers\":[333333333.33333329,1E30,4.50,2e-3,0.000000000000000000000000001]}",
+      "canonical_json": "{\"numbers\":[333333333.3333333,1e+30,4.5,0.002,1e-27]}"
+    },
+    {
+      "name": "string_escaping",
+      "raw_json": "{\"string\":\"\\u20ac$\\u000f\\nA'B\\\"\\\\\\\"/\"}",
+      "canonical_json": "{\"string\":\"\u20ac$\\u000f\\nA'B\\\"\\\\\\\"/\"}"
+    },
+    {
+      "name": "utf16_key_order",
+      "raw_json": "{\"\\ud83d\\ude00\":\"grin\",\"\\ufb33\":\"dalet\",\"a\":\"latin\"}",
+      "canonical_json": "{\"a\":\"latin\",\"\ud83d\ude00\":\"grin\",\"\ufb33\":\"dalet\"}"
+    }
+  ]
+}

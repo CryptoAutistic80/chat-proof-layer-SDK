@@ -1,0 +1,35 @@
+{
+  "bundle_id": "PLFIXEDGOLDEN000000000000000001",
+  "created_at": "2026-03-02T00:00:00+00:00",
+  "signing_kid": "kid-dev-01",
+  "header_digest": "sha256:a6542c647a6c7f5b866c00295ace8d941a47ef373b5c54c180702933e3f30c9a",
+  "bundle_root": "sha256:75d0508dbf9e3f88f3e1b8e8723c893533f422a181ace3ea83c24549a4014f29",
+  "signature_jws": "eyJhbGciOiJFZERTQSIsImtpZCI6ImtpZC1kZXYtMDEifQ.c2hhMjU2Ojc1ZDA1MDhkYmY5ZTNmODhmM2UxYjhlODcyM2M4OTM1MzNmNDIyYTE4MWFjZTNlYTgzYzI0NTQ5YTQwMTRmMjk.oU85_eT8d_y-HWZb5lXCRXdZj-jUG69FiylHKsD8mMdWp-kDW5QN9d4L9E7OWUKVXtoOJUJ_5qpog4C6RmnpAw",
+  "canonical_header_sha256": "sha256:a6542c647a6c7f5b866c00295ace8d941a47ef373b5c54c180702933e3f30c9a",
+  "artefact_digests": {
+    "prompt.json": "sha256:01f53d6229f0e4a60d3da9d3064a4daa007c0ea5d56b49f620d82a65309c0e94",
+    "response.json": "sha256:5f801b1af400da4c8f8c0050fc308bda4545d662a1fd0c32e60d1cb6f95cd06a"
+  },
+  "manifest_entries": {
+    "artefacts/prompt.json": {
+      "digest": "sha256:01f53d6229f0e4a60d3da9d3064a4daa007c0ea5d56b49f620d82a65309c0e94",
+      "size": 152
+    },
+    "artefacts/response.json": {
+      "digest": "sha256:5f801b1af400da4c8f8c0050fc308bda4545d662a1fd0c32e60d1cb6f95cd06a",
+      "size": 231
+    },
+    "proof_bundle.canonical.json": {
+      "digest": "sha256:a6542c647a6c7f5b866c00295ace8d941a47ef373b5c54c180702933e3f30c9a",
+      "size": 1162
+    },
+    "proof_bundle.json": {
+      "digest": "sha256:d43ffe6ee81d0b3f3568ef301df379c5739c2b14b5a75d9de86f22974ddf6824",
+      "size": 2115
+    },
+    "proof_bundle.sig": {
+      "digest": "sha256:10f451f9789a98419557fb6e9cd105fb754f2edd25c9f7104afee537e096e8fc",
+      "size": 229
+    }
+  }
+}

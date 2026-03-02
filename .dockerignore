@@ -1,0 +1,10 @@
+.git
+.gitignore
+target
+storage
+keys
+web-demo/node_modules
+web-demo/dist
+**/__pycache__
+**/*.pyc
+**/node_modules

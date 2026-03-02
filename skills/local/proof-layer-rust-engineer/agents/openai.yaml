@@ -1,0 +1,4 @@
+interface:
+  display_name: "Proof Layer Rust Engineer"
+  short_description: "Rust architect for AI proof-layer builds"
+  default_prompt: "Use $proof-layer-rust-engineer to implement the next phase from proof-layer-poc-plan.md with tests and verification checks."

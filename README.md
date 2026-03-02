@@ -2,6 +2,39 @@
 
 Rust-first PoC for cryptographically verifiable AI interaction bundles.
 
+## Why This Is Needed
+
+AI systems are increasingly used in workflows where people later need to answer simple but high-stakes questions:
+
+- What exactly did we send to the model?
+- What exactly came back?
+- Has that record been changed since it was created?
+- Can a third party verify this without trusting our server?
+
+Normal logs are useful, but they are not tamper-evident by default. This project adds a proof layer that turns an AI run into a signed evidence package so teams can validate integrity later, including offline.
+
+## How We Achieve It (Plain English)
+
+At a high level, we do four things:
+
+1. Capture the run inputs/outputs and artefacts.
+2. Canonicalize and hash that data in a deterministic way.
+3. Build a single integrity root (Merkle commitment) and sign it with Ed25519.
+4. Package everything into `bundle.pkg` so anyone with the public key can verify it.
+
+That means verification does not depend on trusting this service at verification time. If any byte of header data, artefact data, or signature is changed, verification fails.
+
+## Verification Guarantees
+
+The PoC is built to provide practical integrity guarantees:
+
+- Deterministic canonicalization (RFC 8785 style) for stable hashing across runtimes.
+- Strict digest parsing and algorithm checks.
+- Tamper detection for header fields, artefact bytes, manifest, and signature.
+- Offline verification with only `bundle.pkg` + public key.
+
+What it does **not** claim: model determinism or legal finality. It proves what was captured and sealed in one execution, not that the model would produce the same output again.
+
 ## Workspace
 
 - `packages/core-rust` (`proof-layer-core`): canonicalization, hashing, Merkle commitment, Ed25519 JWS sign/verify, bundle build/verify logic.

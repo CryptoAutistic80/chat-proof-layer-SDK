@@ -12,11 +12,12 @@ Completed:
   `proofctl create --system-id/--retention-class/--evidence-type`,
   `proofctl verify --check-timestamp/--check-receipt`,
   and `proofctl inspect --show-items/--show-merkle`.
+- Migrated vault metadata storage from `sled` to SQLite and added `/readyz` plus basic `/v1/bundles` query filtering on role/type/date fields.
 - Restored a clean Rust verification loop: `cargo test --workspace` and `cargo clippy --workspace --all-targets -- -D warnings` both pass.
 
 Still outstanding from `plan.md`:
 
 - JSON schema coverage is now started, but the full pack/timestamp/transparency schemas are not implemented.
-- The vault is still `sled`-backed; SQLite/PostgreSQL, retention policies, and pack assembly are not built yet.
+- The vault now uses SQLite, but PostgreSQL, retention policies, soft-delete/hard-delete flow, and pack assembly are not built yet.
 - Node and Python SDKs are still HTTP-client based; NAPI-RS and PyO3 bindings are not built yet.
 - RFC 3161 timestamping, transparency receipts, selective disclosure CLI flows, and evidence pack export remain future phases.

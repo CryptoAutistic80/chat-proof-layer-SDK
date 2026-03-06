@@ -44,16 +44,16 @@ Core defaults:
 ### `crates/vault` (`proof-service`)
 
 - Runtime: Rust + Axum
-- Metadata persistence: `sled`
+- Metadata persistence: SQLite via `sqlx`
 - Artifact storage: local filesystem at `./storage/artefacts/{bundle_id}/{name}`
 - CORS enabled for local web demo interoperability
+- Current query surface: `GET /v1/bundles?system_id=&role=&type=&from=&to=&page=&limit=`
 
-Suggested `sled` trees:
+Current SQLite tables:
 
-- `bundles_by_id`: `bundle_id -> proof_bundle.json bytes`
-- `idx_request_id`: `request_id|bundle_id -> bundle_id`
-- `idx_created_at`: `created_at|bundle_id -> bundle_id`
-- `idx_app_id`: `app_id|created_at|bundle_id -> bundle_id`
+- `bundles`: top-level bundle metadata plus serialized bundle JSON and canonical header bytes
+- `evidence_items`: one row per evidence item for type-based filtering
+- `artefacts`: stored artefact metadata and blob paths
 
 ### `crates/cli` (`proofctl`)
 

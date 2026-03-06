@@ -1,7 +1,7 @@
 use anyhow::{Context, Result, bail};
 use axum::{
     Json, Router,
-    extract::{DefaultBodyLimit, Path, State},
+    extract::{DefaultBodyLimit, Path, Query, State},
     http::StatusCode,
     response::IntoResponse,
     routing::{get, post},
@@ -11,11 +11,15 @@ use chrono::Utc;
 use ed25519_dalek::SigningKey;
 use flate2::read::GzDecoder;
 use proof_layer_core::{
-    ArtefactInput, BuildBundleError, CaptureEvent, CaptureInput, ProofBundle, build_bundle,
-    decode_private_key_pem, decode_public_key_pem, sha256_prefixed,
-    validate_bundle_integrity_fields,
+    ArtefactInput, BuildBundleError, CaptureEvent, CaptureInput, EvidenceItem, ProofBundle,
+    build_bundle, canonicalize_value, decode_private_key_pem, decode_public_key_pem,
+    sha256_prefixed, validate_bundle_integrity_fields,
 };
 use serde::{Deserialize, Serialize};
+use sqlx::{
+    FromRow, QueryBuilder, Row, Sqlite, SqlitePool,
+    sqlite::{SqliteConnectOptions, SqlitePoolOptions},
+};
 use std::{
     collections::{BTreeMap, HashSet},
     env,
@@ -23,6 +27,7 @@ use std::{
     io::{ErrorKind, Read, Write},
     net::SocketAddr,
     path::{Component, Path as FsPath, PathBuf},
+    str::FromStr,
     sync::Arc,
 };
 use tower_http::cors::{Any, CorsLayer};
@@ -35,7 +40,7 @@ const PACKAGE_FORMAT: &str = "pl-bundle-pkg-v1";
 
 #[derive(Clone)]
 struct AppState {
-    db: sled::Db,
+    db: SqlitePool,
     storage_dir: PathBuf,
     signing_key: Arc<SigningKey>,
     signing_kid: String,
@@ -127,6 +132,40 @@ struct VerifyResponse {
     artefacts_verified: usize,
 }
 
+#[derive(Debug, Deserialize)]
+struct BundleQuery {
+    system_id: Option<String>,
+    role: Option<String>,
+    #[serde(rename = "type")]
+    item_type: Option<String>,
+    from: Option<String>,
+    to: Option<String>,
+    page: Option<u32>,
+    limit: Option<u32>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct ListBundlesResponse {
+    page: u32,
+    limit: u32,
+    items: Vec<BundleSummary>,
+}
+
+#[derive(Debug, Serialize, Deserialize, FromRow)]
+struct BundleSummary {
+    bundle_id: String,
+    bundle_version: String,
+    created_at: String,
+    actor_role: String,
+    system_id: Option<String>,
+    model_id: Option<String>,
+    bundle_root: String,
+    signature_alg: String,
+    retention_class: String,
+    has_timestamp: bool,
+    has_receipt: bool,
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     tracing_subscriber::fmt()
@@ -150,9 +189,9 @@ async fn main() -> Result<()> {
 
     let db_path = env::var("PROOF_SERVICE_DB_PATH")
         .map(PathBuf::from)
-        .unwrap_or_else(|_| storage_dir.join("sled"));
-    let db = sled::open(&db_path)
-        .with_context(|| format!("failed to open sled db {}", db_path.display()))?;
+        .unwrap_or_else(|_| storage_dir.join("metadata.db"));
+    let db = open_sqlite_pool(&db_path).await?;
+    initialize_sqlite_schema(&db).await?;
 
     let signing_key = load_signing_key()?;
     let signing_kid = env::var("PROOF_SIGNING_KEY_ID").unwrap_or_else(|_| "kid-dev-01".to_string());
@@ -185,7 +224,8 @@ fn build_router(state: AppState, max_payload_bytes: usize) -> Router {
 
     Router::new()
         .route("/healthz", get(healthz))
-        .route("/v1/bundles", post(create_bundle))
+        .route("/readyz", get(readyz))
+        .route("/v1/bundles", get(list_bundles).post(create_bundle))
         .route("/v1/bundles/{bundle_id}", get(get_bundle))
         .route(
             "/v1/bundles/{bundle_id}/artefacts/{name}",
@@ -199,6 +239,14 @@ fn build_router(state: AppState, max_payload_bytes: usize) -> Router {
 
 async fn healthz() -> impl IntoResponse {
     (StatusCode::OK, "ok")
+}
+
+async fn readyz(State(state): State<AppState>) -> Result<impl IntoResponse, ApiError> {
+    sqlx::query("SELECT 1")
+        .execute(&state.db)
+        .await
+        .map_err(ApiError::internal_anyhow)?;
+    Ok((StatusCode::OK, "ok"))
 }
 
 async fn create_bundle(
@@ -253,7 +301,9 @@ async fn create_bundle(
 
     persist_artefacts(&state.storage_dir, &bundle_id, &artefacts)
         .map_err(ApiError::internal_anyhow)?;
-    persist_bundle_metadata(&state.db, &bundle).map_err(ApiError::internal_anyhow)?;
+    persist_bundle_metadata(&state.db, &state.storage_dir, &bundle)
+        .await
+        .map_err(ApiError::internal_anyhow)?;
 
     Ok((
         StatusCode::CREATED,
@@ -266,19 +316,91 @@ async fn create_bundle(
     ))
 }
 
+async fn list_bundles(
+    State(state): State<AppState>,
+    Query(query): Query<BundleQuery>,
+) -> Result<impl IntoResponse, ApiError> {
+    let page = query.page.unwrap_or(1).max(1);
+    let limit = query.limit.unwrap_or(50).clamp(1, 100);
+    let offset = i64::from((page - 1) * limit);
+
+    let mut builder = QueryBuilder::<Sqlite>::new(
+        "SELECT DISTINCT \
+            b.bundle_id, \
+            b.bundle_version, \
+            b.created_at, \
+            b.actor_role, \
+            b.system_id, \
+            b.model_id, \
+            b.bundle_root, \
+            b.signature_alg, \
+            b.retention_class, \
+            b.has_timestamp, \
+            b.has_receipt \
+         FROM bundles b ",
+    );
+
+    if query.item_type.is_some() {
+        builder.push(" JOIN evidence_items i ON i.bundle_id = b.bundle_id ");
+    }
+
+    builder.push(" WHERE b.deleted_at IS NULL ");
+
+    if let Some(system_id) = query.system_id.as_deref() {
+        builder.push(" AND b.system_id = ");
+        builder.push_bind(system_id);
+    }
+    if let Some(role) = query.role.as_deref() {
+        builder.push(" AND b.actor_role = ");
+        builder.push_bind(role);
+    }
+    if let Some(item_type) = query.item_type.as_deref() {
+        builder.push(" AND i.item_type = ");
+        builder.push_bind(item_type);
+    }
+    if let Some(from) = query.from.as_deref() {
+        builder.push(" AND b.created_at >= ");
+        builder.push_bind(from);
+    }
+    if let Some(to) = query.to.as_deref() {
+        builder.push(" AND b.created_at <= ");
+        builder.push_bind(to);
+    }
+
+    builder.push(" ORDER BY b.created_at DESC, b.bundle_id DESC LIMIT ");
+    builder.push_bind(i64::from(limit));
+    builder.push(" OFFSET ");
+    builder.push_bind(offset);
+
+    let items = builder
+        .build_query_as::<BundleSummary>()
+        .fetch_all(&state.db)
+        .await
+        .map_err(ApiError::internal_anyhow)?;
+
+    Ok((
+        StatusCode::OK,
+        Json(ListBundlesResponse { page, limit, items }),
+    ))
+}
+
 async fn get_bundle(
     State(state): State<AppState>,
     Path(bundle_id): Path<String>,
 ) -> Result<impl IntoResponse, ApiError> {
-    let key = bundle_key(&bundle_id);
-    let value = state
-        .db
-        .get(key)
-        .map_err(|err| ApiError::internal_anyhow(err.into()))?
-        .ok_or_else(|| ApiError::not_found("bundle not found"))?;
+    let value =
+        sqlx::query("SELECT bundle_json FROM bundles WHERE bundle_id = ? AND deleted_at IS NULL")
+            .bind(&bundle_id)
+            .fetch_optional(&state.db)
+            .await
+            .map_err(ApiError::internal_anyhow)?
+            .ok_or_else(|| ApiError::not_found("bundle not found"))?;
 
+    let bundle_json: String = value
+        .try_get("bundle_json")
+        .map_err(ApiError::internal_anyhow)?;
     let bundle: ProofBundle =
-        serde_json::from_slice(&value).map_err(|err| ApiError::internal_anyhow(err.into()))?;
+        serde_json::from_str(&bundle_json).map_err(ApiError::internal_anyhow)?;
     Ok((StatusCode::OK, Json(bundle)))
 }
 
@@ -325,7 +447,7 @@ fn verify_inline_request(
     max_payload_bytes: usize,
 ) -> Result<VerifyResponse, ApiError> {
     validate_bundle_integrity_fields(&request.bundle)
-        .map_err(|err| ApiError::bad_request_anyhow(err.into()))?;
+        .map_err(ApiError::bad_request_anyhow)?;
 
     let verifying_key = decode_public_key_pem(&request.public_key_pem)
         .map_err(|err| ApiError::bad_request(format!("invalid public key: {err}")))?;
@@ -382,13 +504,13 @@ fn verify_package_request(
         .map_err(ApiError::bad_request_anyhow)?;
     let bundle = parse_bundle_file(&files).map_err(ApiError::bad_request_anyhow)?;
     validate_bundle_integrity_fields(&bundle)
-        .map_err(|err| ApiError::bad_request_anyhow(err.into()))?;
+        .map_err(ApiError::bad_request_anyhow)?;
     let verifying_key = decode_public_key_pem(&request.public_key_pem)
         .map_err(|err| ApiError::bad_request(format!("invalid public key: {err}")))?;
 
     let recomputed_canonical = bundle
         .canonical_header_bytes()
-        .map_err(|err| ApiError::bad_request_anyhow(err.into()))?;
+        .map_err(ApiError::bad_request_anyhow)?;
     let canonical_file = files
         .get("proof_bundle.canonical.json")
         .ok_or_else(|| ApiError::bad_request("package missing proof_bundle.canonical.json"))?;
@@ -591,30 +713,118 @@ fn persist_artefacts(base: &FsPath, bundle_id: &str, artefacts: &[ArtefactInput]
     Ok(())
 }
 
-fn persist_bundle_metadata(db: &sled::Db, bundle: &ProofBundle) -> Result<()> {
-    let bundle_json = serde_json::to_vec(bundle)?;
+async fn persist_bundle_metadata(
+    db: &SqlitePool,
+    storage_dir: &FsPath,
+    bundle: &ProofBundle,
+) -> Result<()> {
+    let bundle_json = serde_json::to_string(bundle)?;
+    let canonical_bytes = bundle.canonical_header_bytes()?;
+    let retention_class = bundle
+        .policy
+        .retention_class
+        .clone()
+        .unwrap_or_else(|| "unspecified".to_string());
 
-    let mut batch = sled::Batch::default();
-    batch.insert(bundle_key(&bundle.bundle_id).into_bytes(), bundle_json);
-    if let Some(request_id) = bundle.subject.request_id.as_deref() {
-        batch.insert(
-            idx_request_key(request_id, &bundle.bundle_id).into_bytes(),
-            bundle.bundle_id.as_bytes(),
-        );
+    let mut tx = db
+        .begin()
+        .await
+        .context("failed to begin sqlite transaction")?;
+
+    sqlx::query(
+        "INSERT INTO bundles (
+            bundle_id,
+            bundle_version,
+            created_at,
+            actor_role,
+            actor_org_id,
+            system_id,
+            model_id,
+            deployment_id,
+            request_id,
+            app_id,
+            bundle_root,
+            signature_alg,
+            has_timestamp,
+            has_receipt,
+            retention_class,
+            deleted_at,
+            bundle_json,
+            canonical_bytes
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)",
+    )
+    .bind(&bundle.bundle_id)
+    .bind(&bundle.bundle_version)
+    .bind(&bundle.created_at)
+    .bind(actor_role_name(bundle))
+    .bind(bundle.actor.organization_id.as_deref())
+    .bind(bundle.subject.system_id.as_deref())
+    .bind(bundle.subject.model_id.as_deref())
+    .bind(bundle.subject.deployment_id.as_deref())
+    .bind(bundle.subject.request_id.as_deref())
+    .bind(&bundle.actor.app_id)
+    .bind(&bundle.integrity.bundle_root)
+    .bind(&bundle.integrity.signature.alg)
+    .bind(bundle.timestamp.is_some())
+    .bind(bundle.receipt.is_some())
+    .bind(&retention_class)
+    .bind(&bundle_json)
+    .bind(canonical_bytes)
+    .execute(&mut *tx)
+    .await
+    .context("failed to insert bundle row")?;
+
+    for (index, item) in bundle.items.iter().enumerate() {
+        let item_value = serde_json::to_value(item)?;
+        let item_commitment = sha256_prefixed(&canonicalize_value(&item_value)?);
+        let metadata_json = serde_json::to_string(&item_value)?;
+
+        sqlx::query(
+            "INSERT INTO evidence_items (
+                bundle_id,
+                item_index,
+                item_type,
+                obligation_ref,
+                item_commitment,
+                metadata_json
+            ) VALUES (?, ?, ?, NULL, ?, ?)",
+        )
+        .bind(&bundle.bundle_id)
+        .bind(index as i64)
+        .bind(evidence_item_type(item))
+        .bind(item_commitment)
+        .bind(metadata_json)
+        .execute(&mut *tx)
+        .await
+        .with_context(|| format!("failed to insert evidence item index {index}"))?;
     }
-    batch.insert(
-        idx_created_at_key(&bundle.created_at, &bundle.bundle_id).into_bytes(),
-        bundle.bundle_id.as_bytes(),
-    );
-    batch.insert(
-        idx_app_key(&bundle.actor.app_id, &bundle.created_at, &bundle.bundle_id).into_bytes(),
-        bundle.bundle_id.as_bytes(),
-    );
 
-    db.apply_batch(batch)
-        .context("failed to write sled batch")?;
-    db.flush().context("failed to flush sled db")?;
+    for artefact in &bundle.artefacts {
+        let storage_path = artefact_path(storage_dir, &bundle.bundle_id, &artefact.name)?;
+        sqlx::query(
+            "INSERT INTO artefacts (
+                bundle_id,
+                name,
+                digest,
+                size,
+                content_type,
+                storage_path
+            ) VALUES (?, ?, ?, ?, ?, ?)",
+        )
+        .bind(&bundle.bundle_id)
+        .bind(&artefact.name)
+        .bind(&artefact.digest)
+        .bind(artefact.size as i64)
+        .bind(&artefact.content_type)
+        .bind(storage_path.to_string_lossy().to_string())
+        .execute(&mut *tx)
+        .await
+        .with_context(|| format!("failed to insert artefact metadata {}", artefact.name))?;
+    }
 
+    tx.commit()
+        .await
+        .context("failed to commit sqlite transaction")?;
     Ok(())
 }
 
@@ -623,24 +833,29 @@ fn map_build_bundle_error(err: BuildBundleError) -> ApiError {
         BuildBundleError::EmptyArtefacts
         | BuildBundleError::EmptyArtefactName
         | BuildBundleError::DuplicateArtefactName(_) => ApiError::bad_request(err.to_string()),
-        _ => ApiError::internal_anyhow(err.into()),
+        _ => ApiError::internal_anyhow(err),
     }
 }
 
-fn bundle_key(bundle_id: &str) -> String {
-    format!("bundle/{bundle_id}")
+fn actor_role_name(bundle: &ProofBundle) -> &'static str {
+    match bundle.actor.role {
+        proof_layer_core::ActorRole::Provider => "provider",
+        proof_layer_core::ActorRole::Deployer => "deployer",
+        proof_layer_core::ActorRole::Integrator => "integrator",
+    }
 }
 
-fn idx_request_key(request_id: &str, bundle_id: &str) -> String {
-    format!("idx/request_id/{request_id}/{bundle_id}")
-}
-
-fn idx_created_at_key(created_at: &str, bundle_id: &str) -> String {
-    format!("idx/created_at/{created_at}/{bundle_id}")
-}
-
-fn idx_app_key(app_id: &str, created_at: &str, bundle_id: &str) -> String {
-    format!("idx/app_id/{app_id}/{created_at}/{bundle_id}")
+fn evidence_item_type(item: &EvidenceItem) -> &'static str {
+    match item {
+        EvidenceItem::LlmInteraction(_) => "llm_interaction",
+        EvidenceItem::ToolCall(_) => "tool_call",
+        EvidenceItem::Retrieval(_) => "retrieval",
+        EvidenceItem::HumanOversight(_) => "human_oversight",
+        EvidenceItem::PolicyDecision(_) => "policy_decision",
+        EvidenceItem::RiskAssessment(_) => "risk_assessment",
+        EvidenceItem::DataGovernance(_) => "data_governance",
+        EvidenceItem::TechnicalDoc(_) => "technical_doc",
+    }
 }
 
 fn artefact_path(base: &FsPath, bundle_id: &str, name: &str) -> Result<PathBuf> {
@@ -694,6 +909,82 @@ fn generate_bundle_id() -> String {
     Ulid::new().to_string()
 }
 
+async fn open_sqlite_pool(path: &FsPath) -> Result<SqlitePool> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)
+            .with_context(|| format!("failed to create sqlite parent dir {}", parent.display()))?;
+    }
+
+    let options = SqliteConnectOptions::from_str("sqlite://")
+        .context("failed to construct sqlite connect options")?
+        .filename(path)
+        .create_if_missing(true)
+        .foreign_keys(true);
+
+    SqlitePoolOptions::new()
+        .max_connections(5)
+        .connect_with(options)
+        .await
+        .with_context(|| format!("failed to open sqlite db {}", path.display()))
+}
+
+async fn initialize_sqlite_schema(db: &SqlitePool) -> Result<()> {
+    let statements = [
+        "CREATE TABLE IF NOT EXISTS bundles (
+            bundle_id TEXT PRIMARY KEY,
+            bundle_version TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            actor_role TEXT NOT NULL,
+            actor_org_id TEXT,
+            system_id TEXT,
+            model_id TEXT,
+            deployment_id TEXT,
+            request_id TEXT,
+            app_id TEXT NOT NULL,
+            bundle_root TEXT NOT NULL,
+            signature_alg TEXT NOT NULL,
+            has_timestamp BOOLEAN NOT NULL DEFAULT FALSE,
+            has_receipt BOOLEAN NOT NULL DEFAULT FALSE,
+            retention_class TEXT NOT NULL,
+            deleted_at TEXT,
+            bundle_json TEXT NOT NULL,
+            canonical_bytes BLOB NOT NULL
+        )",
+        "CREATE INDEX IF NOT EXISTS idx_bundles_system ON bundles(system_id, created_at)",
+        "CREATE INDEX IF NOT EXISTS idx_bundles_role ON bundles(actor_role, created_at)",
+        "CREATE INDEX IF NOT EXISTS idx_bundles_request ON bundles(request_id, created_at)",
+        "CREATE INDEX IF NOT EXISTS idx_bundles_app ON bundles(app_id, created_at)",
+        "CREATE TABLE IF NOT EXISTS evidence_items (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            bundle_id TEXT NOT NULL REFERENCES bundles(bundle_id) ON DELETE CASCADE,
+            item_index INTEGER NOT NULL,
+            item_type TEXT NOT NULL,
+            obligation_ref TEXT,
+            item_commitment TEXT NOT NULL,
+            metadata_json TEXT NOT NULL
+        )",
+        "CREATE INDEX IF NOT EXISTS idx_items_type ON evidence_items(item_type, bundle_id)",
+        "CREATE TABLE IF NOT EXISTS artefacts (
+            bundle_id TEXT NOT NULL REFERENCES bundles(bundle_id) ON DELETE CASCADE,
+            name TEXT NOT NULL,
+            digest TEXT NOT NULL,
+            size INTEGER NOT NULL,
+            content_type TEXT NOT NULL,
+            storage_path TEXT NOT NULL,
+            PRIMARY KEY (bundle_id, name)
+        )",
+    ];
+
+    for statement in statements {
+        sqlx::query(statement)
+            .execute(db)
+            .await
+            .with_context(|| format!("failed to execute sqlite schema statement: {statement}"))?;
+    }
+
+    Ok(())
+}
+
 #[derive(Debug)]
 struct ApiError {
     status: StatusCode,
@@ -708,10 +999,10 @@ impl ApiError {
         }
     }
 
-    fn bad_request_anyhow(err: anyhow::Error) -> Self {
+    fn bad_request_anyhow(err: impl Into<anyhow::Error>) -> Self {
         Self {
             status: StatusCode::BAD_REQUEST,
-            message: err.to_string(),
+            message: err.into().to_string(),
         }
     }
 
@@ -722,7 +1013,8 @@ impl ApiError {
         }
     }
 
-    fn internal_anyhow(err: anyhow::Error) -> Self {
+    fn internal_anyhow(err: impl Into<anyhow::Error>) -> Self {
+        let err = err.into();
         error!("internal error: {err:#}");
         Self {
             status: StatusCode::INTERNAL_SERVER_ERROR,
@@ -791,13 +1083,15 @@ mod tests {
         }
     }
 
-    fn test_state(max_payload_bytes: usize) -> AppState {
+    async fn test_state(max_payload_bytes: usize) -> AppState {
         let storage_dir = std::env::temp_dir().join(format!(
             "proof-service-test-storage-{}",
             rand::random::<u64>()
         ));
         std::fs::create_dir_all(&storage_dir).unwrap();
-        let db = sled::Config::default().temporary(true).open().unwrap();
+        let db_path = storage_dir.join("metadata.db");
+        let db = open_sqlite_pool(&db_path).await.unwrap();
+        initialize_sqlite_schema(&db).await.unwrap();
         let signing_key = SigningKey::from_bytes(&rand::random::<[u8; 32]>());
         AppState {
             db,
@@ -874,14 +1168,23 @@ mod tests {
         assert!(err.to_string().contains("path traversal"));
     }
 
-    #[test]
-    fn bundle_key_format() {
-        assert_eq!(bundle_key("01ABC"), "bundle/01ABC");
+    #[tokio::test]
+    async fn readyz_checks_sqlite_health() {
+        let state = test_state(DEFAULT_MAX_PAYLOAD_BYTES).await;
+        let app = build_router(state, DEFAULT_MAX_PAYLOAD_BYTES);
+
+        let request = Request::builder()
+            .method("GET")
+            .uri("/readyz")
+            .body(Body::empty())
+            .unwrap();
+        let response = app.oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
     }
 
     #[tokio::test]
     async fn create_get_verify_flow_works() {
-        let state = test_state(DEFAULT_MAX_PAYLOAD_BYTES);
+        let state = test_state(DEFAULT_MAX_PAYLOAD_BYTES).await;
         let public_key_pem = encode_public_key_pem(&state.signing_key.verifying_key());
         let app = build_router(state, DEFAULT_MAX_PAYLOAD_BYTES);
 
@@ -978,7 +1281,7 @@ mod tests {
 
     #[tokio::test]
     async fn verify_package_flow_works() {
-        let state = test_state(DEFAULT_MAX_PAYLOAD_BYTES);
+        let state = test_state(DEFAULT_MAX_PAYLOAD_BYTES).await;
         let public_key_pem = encode_public_key_pem(&state.signing_key.verifying_key());
         let app = build_router(state, DEFAULT_MAX_PAYLOAD_BYTES);
 
@@ -1056,7 +1359,7 @@ mod tests {
 
     #[tokio::test]
     async fn verify_package_manifest_mismatch_returns_invalid() {
-        let state = test_state(DEFAULT_MAX_PAYLOAD_BYTES);
+        let state = test_state(DEFAULT_MAX_PAYLOAD_BYTES).await;
         let public_key_pem = encode_public_key_pem(&state.signing_key.verifying_key());
         let app = build_router(state, DEFAULT_MAX_PAYLOAD_BYTES);
 
@@ -1135,7 +1438,7 @@ mod tests {
     #[tokio::test]
     async fn create_bundle_rejects_oversized_artefact() {
         let state_limit = 32;
-        let state = test_state(state_limit);
+        let state = test_state(state_limit).await;
         let app = build_router(state, DEFAULT_MAX_PAYLOAD_BYTES);
         let oversized = vec![b'a'; state_limit + 1];
 
@@ -1161,7 +1464,7 @@ mod tests {
 
     #[tokio::test]
     async fn create_bundle_rejects_duplicate_artefact_names() {
-        let state = test_state(DEFAULT_MAX_PAYLOAD_BYTES);
+        let state = test_state(DEFAULT_MAX_PAYLOAD_BYTES).await;
         let app = build_router(state, DEFAULT_MAX_PAYLOAD_BYTES);
         let payload = CreateBundleRequest {
             capture: SealableCaptureInput::Legacy(sample_capture()),
@@ -1191,7 +1494,7 @@ mod tests {
 
     #[tokio::test]
     async fn get_missing_artefact_returns_not_found() {
-        let state = test_state(DEFAULT_MAX_PAYLOAD_BYTES);
+        let state = test_state(DEFAULT_MAX_PAYLOAD_BYTES).await;
         let app = build_router(state, DEFAULT_MAX_PAYLOAD_BYTES);
 
         let request = Request::builder()
@@ -1201,5 +1504,45 @@ mod tests {
             .unwrap();
         let response = app.oneshot(request).await.unwrap();
         assert_eq!(response.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn list_bundles_filters_by_role_and_item_type() {
+        let state = test_state(DEFAULT_MAX_PAYLOAD_BYTES).await;
+        let app = build_router(state, DEFAULT_MAX_PAYLOAD_BYTES);
+
+        let create_payload = CreateBundleRequest {
+            capture: SealableCaptureInput::Legacy(sample_capture()),
+            artefacts: vec![InlineArtefact {
+                name: "prompt.json".to_string(),
+                content_type: "application/json".to_string(),
+                data_base64: Base64::encode_string(br#"{"prompt":"hello"}"#),
+            }],
+        };
+
+        let create_req = Request::builder()
+            .method("POST")
+            .uri("/v1/bundles")
+            .header("content-type", "application/json")
+            .body(Body::from(serde_json::to_vec(&create_payload).unwrap()))
+            .unwrap();
+        let create_res = app.clone().oneshot(create_req).await.unwrap();
+        assert_eq!(create_res.status(), StatusCode::CREATED);
+
+        let query_req = Request::builder()
+            .method("GET")
+            .uri("/v1/bundles?role=provider&type=llm_interaction&page=1&limit=10")
+            .body(Body::empty())
+            .unwrap();
+        let query_res = app.oneshot(query_req).await.unwrap();
+        assert_eq!(query_res.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(query_res.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let response: ListBundlesResponse = serde_json::from_slice(&body).unwrap();
+        assert_eq!(response.page, 1);
+        assert_eq!(response.limit, 10);
+        assert_eq!(response.items.len(), 1);
+        assert_eq!(response.items[0].actor_role, "provider");
     }
 }

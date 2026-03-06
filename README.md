@@ -39,7 +39,7 @@ What it does **not** claim: model determinism or legal finality. It proves what 
 
 - `crates/core` (`proof-layer-core`): RFC 8785 canonicalization, hashing, Merkle commitment + inclusion proofs, Ed25519 JWS sign/verify, v1.0 evidence bundle build/verify logic, and v0.1 -> v1.0 migration helpers.
 - `crates/cli` (`proofctl`): keygen, create bundle package, verify package offline, inspect package.
-- `crates/vault` (`proof-service`): Axum service with `sled` metadata storage and local artifact storage.
+- `crates/vault` (`proof-service`): Axum service with SQLite metadata storage and local artifact storage.
 - `packages/sdk-node`: Node proof client + OpenAI/Anthropic-style wrappers + tool/OTel helpers.
 - `packages/sdk-python`: Python proof client + wrappers + decorator + callback/tool/OTel helpers.
 - `web-demo`: Vite + React single-page demo UI.
@@ -94,7 +94,9 @@ docker compose up --build
 ### Service Endpoints
 
 - `GET /healthz`
+- `GET /readyz`
 - `POST /v1/bundles`
+- `GET /v1/bundles?system_id=&role=&type=&from=&to=&page=&limit=`
 - `GET /v1/bundles/{bundle_id}`
 - `GET /v1/bundles/{bundle_id}/artefacts/{name}`
 - `POST /v1/verify` (supports inline bundle+artefacts or packaged `bundle.pkg`)
@@ -219,6 +221,7 @@ npm run dev
 - `proofctl create` also supports Phase 2 migration overrides such as `--system-id`, `--retention-class`, and `--evidence-type`.
 - `proofctl verify` now exposes `--check-timestamp` and `--check-receipt`; these fail explicitly when requested because RFC 3161 and receipt verification are not implemented yet.
 - `proofctl inspect` now supports `--show-items` and `--show-merkle`.
+- The vault now persists metadata in SQLite and indexes evidence items for basic `/v1/bundles` filtering by role, item type, and date range.
 - Canonicalization and signing semantics follow `docs/architecture.md`.
 - Verification is designed to work offline with `bundle.pkg` + public key.
 - JSON Schemas: `schemas/evidence_bundle.schema.json`, `schemas/capture_event.schema.json`, `schemas/evidence_item.schema.json`.

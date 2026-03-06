@@ -5,7 +5,8 @@ use clap::{Parser, Subcommand, ValueEnum};
 use ed25519_dalek::SigningKey;
 use flate2::{Compression, read::GzDecoder, write::GzEncoder};
 use proof_layer_core::{
-    ArtefactInput, CaptureEvent, CaptureInput, ProofBundle, build_bundle, decode_private_key_pem,
+    ArtefactInput, CaptureEvent, CaptureInput, EvidenceItem, ProofBundle, build_bundle,
+    build_inclusion_proof, capture_input_v01_to_event, decode_private_key_pem,
     decode_public_key_pem, encode_private_key_pem, encode_public_key_pem, sha256_prefixed,
     validate_bundle_integrity_fields,
 };
@@ -52,6 +53,12 @@ enum Commands {
         created_at: Option<String>,
         #[arg(long, default_value = "kid-dev-01")]
         signing_kid: String,
+        #[arg(long)]
+        evidence_type: Option<EvidenceTypeArg>,
+        #[arg(long)]
+        retention_class: Option<String>,
+        #[arg(long)]
+        system_id: Option<String>,
     },
     /// Verify a proof bundle package offline.
     Verify {
@@ -61,6 +68,10 @@ enum Commands {
         key: PathBuf,
         #[arg(long, default_value = "human")]
         format: OutputFormat,
+        #[arg(long)]
+        check_timestamp: bool,
+        #[arg(long)]
+        check_receipt: bool,
     },
     /// Print key fields from a proof bundle package.
     Inspect {
@@ -68,6 +79,10 @@ enum Commands {
         input: PathBuf,
         #[arg(long, default_value = "human")]
         format: OutputFormat,
+        #[arg(long)]
+        show_items: bool,
+        #[arg(long)]
+        show_merkle: bool,
     },
 }
 
@@ -81,6 +96,19 @@ struct ArtefactArg {
 enum OutputFormat {
     Human,
     Json,
+}
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq, ValueEnum)]
+#[value(rename_all = "snake_case")]
+enum EvidenceTypeArg {
+    LlmInteraction,
+    ToolCall,
+    Retrieval,
+    HumanOversight,
+    PolicyDecision,
+    RiskAssessment,
+    DataGovernance,
+    TechnicalDoc,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -115,6 +143,8 @@ struct VerifyReport {
     manifest_ok: bool,
     message: String,
     artefacts_verified: usize,
+    timestamp: OptionalCheckReport,
+    receipt: OptionalCheckReport,
 }
 
 #[derive(Debug, Deserialize)]
@@ -122,6 +152,90 @@ struct VerifyReport {
 enum SealableCaptureInput {
     V10(CaptureEvent),
     Legacy(CaptureInput),
+}
+
+#[derive(Debug, Clone)]
+struct CreateOverrides {
+    evidence_type: Option<EvidenceTypeArg>,
+    retention_class: Option<String>,
+    system_id: Option<String>,
+}
+
+struct CreateCommandInput<'a> {
+    input_path: &'a Path,
+    artefacts: &'a [ArtefactArg],
+    key_path: &'a Path,
+    out_path: &'a Path,
+    bundle_id: Option<&'a str>,
+    created_at: Option<&'a str>,
+    signing_kid: &'a str,
+    overrides: &'a CreateOverrides,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+enum OptionalCheckState {
+    Skipped,
+    Missing,
+    Unsupported,
+    Valid,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+struct OptionalCheckReport {
+    state: OptionalCheckState,
+    message: String,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+struct InspectMerkleLeaf {
+    index: usize,
+    label: String,
+    digest: String,
+    proof_steps: usize,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+struct InspectMerkleView {
+    algorithm: String,
+    root: String,
+    leaves: Vec<InspectMerkleLeaf>,
+}
+
+#[derive(Debug, Serialize)]
+struct InspectJsonOutput<'a> {
+    bundle: &'a ProofBundle,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    merkle: Option<InspectMerkleView>,
+}
+
+impl EvidenceTypeArg {
+    fn matches_item(self, item: &EvidenceItem) -> bool {
+        matches!(
+            (self, item),
+            (Self::LlmInteraction, EvidenceItem::LlmInteraction(_))
+                | (Self::ToolCall, EvidenceItem::ToolCall(_))
+                | (Self::Retrieval, EvidenceItem::Retrieval(_))
+                | (Self::HumanOversight, EvidenceItem::HumanOversight(_))
+                | (Self::PolicyDecision, EvidenceItem::PolicyDecision(_))
+                | (Self::RiskAssessment, EvidenceItem::RiskAssessment(_))
+                | (Self::DataGovernance, EvidenceItem::DataGovernance(_))
+                | (Self::TechnicalDoc, EvidenceItem::TechnicalDoc(_))
+        )
+    }
+
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::LlmInteraction => "llm_interaction",
+            Self::ToolCall => "tool_call",
+            Self::Retrieval => "retrieval",
+            Self::HumanOversight => "human_oversight",
+            Self::PolicyDecision => "policy_decision",
+            Self::RiskAssessment => "risk_assessment",
+            Self::DataGovernance => "data_governance",
+            Self::TechnicalDoc => "technical_doc",
+        }
+    }
 }
 
 fn main() -> Result<()> {
@@ -142,17 +256,36 @@ fn main() -> Result<()> {
             bundle_id,
             created_at,
             signing_kid,
-        } => cmd_create(
-            &input,
-            &artefact,
-            &key,
-            &out,
-            bundle_id.as_deref(),
-            created_at.as_deref(),
-            &signing_kid,
-        ),
-        Commands::Verify { input, key, format } => cmd_verify(&input, &key, format),
-        Commands::Inspect { input, format } => cmd_inspect(&input, format),
+            evidence_type,
+            retention_class,
+            system_id,
+        } => cmd_create(CreateCommandInput {
+            input_path: &input,
+            artefacts: &artefact,
+            key_path: &key,
+            out_path: &out,
+            bundle_id: bundle_id.as_deref(),
+            created_at: created_at.as_deref(),
+            signing_kid: &signing_kid,
+            overrides: &CreateOverrides {
+                evidence_type,
+                retention_class,
+                system_id,
+            },
+        }),
+        Commands::Verify {
+            input,
+            key,
+            format,
+            check_timestamp,
+            check_receipt,
+        } => cmd_verify(&input, &key, format, check_timestamp, check_receipt),
+        Commands::Inspect {
+            input,
+            format,
+            show_items,
+            show_merkle,
+        } => cmd_inspect(&input, format, show_items, show_merkle),
     }
 }
 
@@ -179,25 +312,17 @@ fn cmd_keygen(out_dir: &Path) -> Result<()> {
     Ok(())
 }
 
-fn cmd_create(
-    input_path: &Path,
-    artefacts: &[ArtefactArg],
-    key_path: &Path,
-    out_path: &Path,
-    bundle_id: Option<&str>,
-    created_at: Option<&str>,
-    signing_kid: &str,
-) -> Result<()> {
-    if artefacts.is_empty() {
+fn cmd_create(args: CreateCommandInput<'_>) -> Result<()> {
+    if args.artefacts.is_empty() {
         bail!("at least one --artefact name=path value is required");
     }
-    if signing_kid.trim().is_empty() {
+    if args.signing_kid.trim().is_empty() {
         bail!("signing kid must not be empty");
     }
 
     let max_payload_bytes = max_payload_bytes()?;
-    let capture_json =
-        fs::read(input_path).with_context(|| format!("failed to read {}", input_path.display()))?;
+    let capture_json = fs::read(args.input_path)
+        .with_context(|| format!("failed to read {}", args.input_path.display()))?;
     if capture_json.len() > max_payload_bytes {
         bail!(
             "capture input {} bytes exceeds max {} bytes",
@@ -205,17 +330,23 @@ fn cmd_create(
             max_payload_bytes
         );
     }
-    let capture: SealableCaptureInput = serde_json::from_slice(&capture_json)
-        .with_context(|| format!("failed to parse capture JSON from {}", input_path.display()))?;
+    let capture: SealableCaptureInput =
+        serde_json::from_slice(&capture_json).with_context(|| {
+            format!(
+                "failed to parse capture JSON from {}",
+                args.input_path.display()
+            )
+        })?;
+    let capture = apply_create_overrides(materialize_capture_event(capture), args.overrides)?;
 
-    let signing_key_pem = fs::read_to_string(key_path)
-        .with_context(|| format!("failed to read {}", key_path.display()))?;
+    let signing_key_pem = fs::read_to_string(args.key_path)
+        .with_context(|| format!("failed to read {}", args.key_path.display()))?;
     let signing_key = decode_private_key_pem(&signing_key_pem)
-        .with_context(|| format!("failed to parse signing key {}", key_path.display()))?;
+        .with_context(|| format!("failed to parse signing key {}", args.key_path.display()))?;
 
-    let mut artefact_inputs = Vec::with_capacity(artefacts.len());
+    let mut artefact_inputs = Vec::with_capacity(args.artefacts.len());
     let mut artefact_files = BTreeMap::new();
-    for artefact in artefacts {
+    for artefact in args.artefacts {
         validate_artefact_name(&artefact.name)?;
         let bytes = fs::read(&artefact.path)
             .with_context(|| format!("failed to read artefact {}", artefact.path.display()))?;
@@ -236,7 +367,7 @@ fn cmd_create(
         });
     }
 
-    let bundle_id = match bundle_id {
+    let bundle_id = match args.bundle_id {
         Some(raw) => {
             let trimmed = raw.trim();
             if trimmed.is_empty() {
@@ -246,25 +377,15 @@ fn cmd_create(
         }
         None => generate_bundle_id(),
     };
-    let created_at = parse_created_at(created_at)?;
-    let bundle = match capture {
-        SealableCaptureInput::V10(capture) => build_bundle(
-            capture,
-            &artefact_inputs,
-            &signing_key,
-            signing_kid,
-            &bundle_id,
-            created_at,
-        )?,
-        SealableCaptureInput::Legacy(capture) => build_bundle(
-            capture,
-            &artefact_inputs,
-            &signing_key,
-            signing_kid,
-            &bundle_id,
-            created_at,
-        )?,
-    };
+    let created_at = parse_created_at(args.created_at)?;
+    let bundle = build_bundle(
+        capture,
+        &artefact_inputs,
+        &signing_key,
+        args.signing_kid,
+        &bundle_id,
+        created_at,
+    )?;
 
     let canonical_header = bundle.canonical_header_bytes()?;
     let bundle_json = serde_json::to_vec_pretty(&bundle)?;
@@ -292,15 +413,21 @@ fn cmd_create(
     let manifest_bytes = serde_json::to_vec_pretty(&manifest)?;
     package_files.insert("manifest.json".to_string(), manifest_bytes);
 
-    write_bundle_package(out_path, &package_files)?;
-    info!("created {}", out_path.display());
+    write_bundle_package(args.out_path, &package_files)?;
+    info!("created {}", args.out_path.display());
     info!("bundle_id={}", bundle.bundle_id);
     info!("bundle_root={}", bundle.integrity.bundle_root);
 
     Ok(())
 }
 
-fn cmd_verify(input_path: &Path, key_path: &Path, format: OutputFormat) -> Result<()> {
+fn cmd_verify(
+    input_path: &Path,
+    key_path: &Path,
+    format: OutputFormat,
+    check_timestamp: bool,
+    check_receipt: bool,
+) -> Result<()> {
     let max_payload_bytes = max_payload_bytes()?;
     let package_size = fs::metadata(input_path)
         .with_context(|| format!("failed to stat {}", input_path.display()))?
@@ -337,10 +464,49 @@ fn cmd_verify(input_path: &Path, key_path: &Path, format: OutputFormat) -> Resul
 
     let artefacts = extract_artefacts(&files)?;
     let verification = bundle.verify_with_artefacts(&artefacts, &verifying_key);
+    let mut failures = Vec::new();
+    if !canonicalization_ok {
+        failures.push("canonicalized header bytes mismatch package".to_string());
+    }
+    if !signature_ok {
+        failures.push("proof_bundle.sig mismatch".to_string());
+    }
+    if !manifest_ok {
+        failures.push("manifest mismatch".to_string());
+    }
 
-    let (artefact_integrity_ok, message, artefacts_verified) = match verification {
-        Ok(summary) => (true, "VALID".to_string(), summary.artefact_count),
-        Err(err) => (false, format!("INVALID: {err}"), 0),
+    let (artefact_integrity_ok, artefacts_verified) = match verification {
+        Ok(summary) => (true, summary.artefact_count),
+        Err(err) => {
+            failures.push(format!("core verification failed: {err}"));
+            (false, 0)
+        }
+    };
+
+    let timestamp = evaluate_optional_check(
+        "timestamp",
+        "RFC 3161 timestamp verification",
+        bundle.timestamp.is_some(),
+        check_timestamp,
+    );
+    if check_timestamp && timestamp.state != OptionalCheckState::Valid {
+        failures.push(timestamp.message.clone());
+    }
+
+    let receipt = evaluate_optional_check(
+        "transparency receipt",
+        "transparency receipt verification",
+        bundle.receipt.is_some(),
+        check_receipt,
+    );
+    if check_receipt && receipt.state != OptionalCheckState::Valid {
+        failures.push(receipt.message.clone());
+    }
+
+    let message = if failures.is_empty() {
+        "VALID".to_string()
+    } else {
+        format!("INVALID: {}", failures.join("; "))
     };
 
     let report = VerifyReport {
@@ -350,6 +516,8 @@ fn cmd_verify(input_path: &Path, key_path: &Path, format: OutputFormat) -> Resul
         manifest_ok,
         message,
         artefacts_verified,
+        timestamp,
+        receipt,
     };
 
     match format {
@@ -363,6 +531,8 @@ fn cmd_verify(input_path: &Path, key_path: &Path, format: OutputFormat) -> Resul
         && report.artefact_integrity_ok
         && report.signature_ok
         && report.manifest_ok
+        && (!check_timestamp || report.timestamp.state == OptionalCheckState::Valid)
+        && (!check_receipt || report.receipt.state == OptionalCheckState::Valid)
     {
         Ok(())
     } else {
@@ -370,7 +540,12 @@ fn cmd_verify(input_path: &Path, key_path: &Path, format: OutputFormat) -> Resul
     }
 }
 
-fn cmd_inspect(input_path: &Path, format: OutputFormat) -> Result<()> {
+fn cmd_inspect(
+    input_path: &Path,
+    format: OutputFormat,
+    show_items: bool,
+    show_merkle: bool,
+) -> Result<()> {
     let max_payload_bytes = max_payload_bytes()?;
     let package_size = fs::metadata(input_path)
         .with_context(|| format!("failed to stat {}", input_path.display()))?
@@ -385,6 +560,12 @@ fn cmd_inspect(input_path: &Path, format: OutputFormat) -> Result<()> {
 
     let files = read_bundle_package(input_path)?;
     let bundle = parse_bundle_file(&files)?;
+
+    let merkle_view = if show_merkle {
+        Some(build_merkle_inspect_view(&bundle)?)
+    } else {
+        None
+    };
 
     match format {
         OutputFormat::Human => {
@@ -406,13 +587,197 @@ fn cmd_inspect(input_path: &Path, format: OutputFormat) -> Result<()> {
             println!("artefacts: {}", bundle.artefacts.len());
             println!("bundle_root: {}", bundle.integrity.bundle_root);
             println!("signature.kid: {}", bundle.integrity.signature.kid);
+            if show_items {
+                println!();
+                println!("evidence_items:");
+                for (index, item) in bundle.items.iter().enumerate() {
+                    println!("  {index}: {}", describe_evidence_item(item));
+                }
+            }
+            if let Some(merkle_view) = merkle_view {
+                println!();
+                println!(
+                    "merkle: algorithm={} root={}",
+                    merkle_view.algorithm, merkle_view.root
+                );
+                for leaf in merkle_view.leaves {
+                    println!(
+                        "  [{}] {} digest={} proof_steps={}",
+                        leaf.index, leaf.label, leaf.digest, leaf.proof_steps
+                    );
+                }
+            }
         }
         OutputFormat::Json => {
-            println!("{}", serde_json::to_string_pretty(&bundle)?);
+            if show_merkle {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&InspectJsonOutput {
+                        bundle: &bundle,
+                        merkle: merkle_view,
+                    })?
+                );
+            } else {
+                println!("{}", serde_json::to_string_pretty(&bundle)?);
+            }
         }
     }
 
     Ok(())
+}
+
+fn materialize_capture_event(capture: SealableCaptureInput) -> CaptureEvent {
+    match capture {
+        SealableCaptureInput::V10(capture) => capture,
+        SealableCaptureInput::Legacy(capture) => capture_input_v01_to_event(capture),
+    }
+}
+
+fn apply_create_overrides(
+    mut capture: CaptureEvent,
+    overrides: &CreateOverrides,
+) -> Result<CaptureEvent> {
+    if let Some(system_id) = overrides.system_id.as_deref() {
+        let system_id = system_id.trim();
+        if system_id.is_empty() {
+            bail!("system_id must not be empty");
+        }
+        capture.subject.system_id = Some(system_id.to_string());
+    }
+
+    if let Some(retention_class) = overrides.retention_class.as_deref() {
+        let retention_class = retention_class.trim();
+        if retention_class.is_empty() {
+            bail!("retention_class must not be empty");
+        }
+        capture.policy.retention_class = Some(retention_class.to_string());
+    }
+
+    if let Some(evidence_type) = overrides.evidence_type {
+        let Some(index) = capture
+            .items
+            .iter()
+            .position(|item| evidence_type.matches_item(item))
+        else {
+            bail!(
+                "capture event does not contain requested evidence type {}",
+                evidence_type.as_str()
+            );
+        };
+        if index != 0 {
+            capture.items.swap(0, index);
+        }
+    }
+
+    Ok(capture)
+}
+
+fn build_merkle_inspect_view(bundle: &ProofBundle) -> Result<InspectMerkleView> {
+    let mut digests = Vec::with_capacity(1 + bundle.artefacts.len());
+    digests.push(bundle.integrity.header_digest.clone());
+    digests.extend(
+        bundle
+            .artefacts
+            .iter()
+            .map(|artefact| artefact.digest.clone()),
+    );
+
+    let mut leaves = Vec::with_capacity(digests.len());
+    for (index, digest) in digests.iter().enumerate() {
+        let proof = build_inclusion_proof(&digests, index)?;
+        let label = if index == 0 {
+            "header_digest".to_string()
+        } else {
+            format!("artefact:{}", bundle.artefacts[index - 1].name)
+        };
+
+        leaves.push(InspectMerkleLeaf {
+            index,
+            label,
+            digest: digest.clone(),
+            proof_steps: proof.path.len(),
+        });
+    }
+
+    Ok(InspectMerkleView {
+        algorithm: bundle.integrity.bundle_root_algorithm.clone(),
+        root: bundle.integrity.bundle_root.clone(),
+        leaves,
+    })
+}
+
+fn describe_evidence_item(item: &EvidenceItem) -> String {
+    match item {
+        EvidenceItem::LlmInteraction(data) => format!(
+            "llm_interaction provider={} model={} input={} output={}",
+            data.provider,
+            data.model,
+            abbreviate_digest(&data.input_commitment),
+            abbreviate_digest(&data.output_commitment)
+        ),
+        EvidenceItem::ToolCall(data) => {
+            format!("tool_call tool_name={}", data.tool_name)
+        }
+        EvidenceItem::Retrieval(data) => format!(
+            "retrieval corpus={} result={}",
+            data.corpus,
+            abbreviate_digest(&data.result_commitment)
+        ),
+        EvidenceItem::HumanOversight(data) => {
+            format!("human_oversight action={}", data.action)
+        }
+        EvidenceItem::PolicyDecision(data) => format!(
+            "policy_decision policy={} decision={}",
+            data.policy_name, data.decision
+        ),
+        EvidenceItem::RiskAssessment(data) => format!(
+            "risk_assessment risk_id={} severity={} status={}",
+            data.risk_id, data.severity, data.status
+        ),
+        EvidenceItem::DataGovernance(data) => {
+            format!("data_governance decision={}", data.decision)
+        }
+        EvidenceItem::TechnicalDoc(data) => {
+            format!("technical_doc document_ref={}", data.document_ref)
+        }
+    }
+}
+
+fn abbreviate_digest(value: &str) -> String {
+    if value.len() <= 22 {
+        return value.to_string();
+    }
+    format!("{}...{}", &value[..15], &value[value.len() - 6..])
+}
+
+fn evaluate_optional_check(
+    label: &str,
+    mechanism: &str,
+    present: bool,
+    requested: bool,
+) -> OptionalCheckReport {
+    if !requested {
+        return OptionalCheckReport {
+            state: OptionalCheckState::Skipped,
+            message: if present {
+                format!("{label} present but not checked")
+            } else {
+                format!("{label} not present (optional)")
+            },
+        };
+    }
+
+    if !present {
+        return OptionalCheckReport {
+            state: OptionalCheckState::Missing,
+            message: format!("{label} check requested but bundle has no {label}"),
+        };
+    }
+
+    OptionalCheckReport {
+        state: OptionalCheckState::Unsupported,
+        message: format!("{label} present but {mechanism} is not implemented yet"),
+    }
 }
 
 fn write_bundle_package(out_path: &Path, files: &BTreeMap<String, Vec<u8>>) -> Result<()> {
@@ -591,10 +956,26 @@ fn print_human_verify_report(report: &VerifyReport) {
             "manifest mismatch"
         }
     );
-    println!("[–] Timestamp — no RFC 3161 token present (optional)");
-    println!("[–] Transparency receipt — not present (optional)");
+    println!(
+        "[{}] Timestamp — {}",
+        optional_check_marker(&report.timestamp.state),
+        report.timestamp.message
+    );
+    println!(
+        "[{}] Transparency receipt — {}",
+        optional_check_marker(&report.receipt.state),
+        report.receipt.message
+    );
     println!();
     println!("Verification result: {}", report.message);
+}
+
+fn optional_check_marker(state: &OptionalCheckState) -> &'static str {
+    match state {
+        OptionalCheckState::Valid => "✓",
+        OptionalCheckState::Skipped => "–",
+        OptionalCheckState::Missing | OptionalCheckState::Unsupported => "✗",
+    }
 }
 
 fn parse_artefact_arg(value: &str) -> Result<ArtefactArg, String> {
@@ -708,7 +1089,130 @@ fn parse_payload_limit(value: Option<&str>) -> Result<usize> {
 mod tests {
     use super::*;
     use flate2::{Compression, write::GzEncoder};
+    use proof_layer_core::{
+        Actor, ActorRole, EncryptionPolicy, EvidenceContext, LlmInteractionEvidence, Policy,
+        Subject,
+    };
+    use serde_json::json;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn sample_legacy_capture() -> CaptureInput {
+        CaptureInput {
+            actor: proof_layer_core::schema::v01::Actor {
+                issuer: "proof-layer-local".to_string(),
+                app_id: "demo".to_string(),
+                env: "dev".to_string(),
+                signing_key_id: "kid-dev-01".to_string(),
+            },
+            subject: proof_layer_core::schema::v01::Subject {
+                request_id: "req-123".to_string(),
+                thread_id: Some("thr-1".to_string()),
+                user_ref: Some("hmac_sha256:abc".to_string()),
+            },
+            model: proof_layer_core::ModelInfo {
+                provider: "anthropic".to_string(),
+                model: "claude-sonnet-4-6".to_string(),
+                parameters: json!({"temperature": 0.2}),
+            },
+            inputs: proof_layer_core::Inputs {
+                messages_commitment:
+                    "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                        .to_string(),
+                retrieval_commitment: None,
+            },
+            outputs: proof_layer_core::Outputs {
+                assistant_text_commitment:
+                    "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+                        .to_string(),
+                tool_outputs_commitment: None,
+            },
+            trace: proof_layer_core::Trace {
+                otel_genai_semconv_version: "1.0.0".to_string(),
+                trace_commitment:
+                    "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+                        .to_string(),
+            },
+            policy: Policy {
+                redactions: vec![],
+                encryption: EncryptionPolicy { enabled: false },
+                retention_class: None,
+            },
+        }
+    }
+
+    fn sample_event() -> CaptureEvent {
+        CaptureEvent {
+            actor: Actor {
+                issuer: "proof-layer-local".to_string(),
+                app_id: "demo".to_string(),
+                env: "dev".to_string(),
+                signing_key_id: "kid-dev-01".to_string(),
+                role: ActorRole::Provider,
+                organization_id: None,
+            },
+            subject: Subject {
+                request_id: Some("req-123".to_string()),
+                thread_id: Some("thr-1".to_string()),
+                user_ref: Some("hmac_sha256:abc".to_string()),
+                system_id: None,
+                model_id: Some("anthropic:claude-sonnet-4-6".to_string()),
+                deployment_id: None,
+                version: Some("2026.03".to_string()),
+            },
+            context: EvidenceContext {
+                provider: Some("anthropic".to_string()),
+                model: Some("claude-sonnet-4-6".to_string()),
+                parameters: json!({"temperature": 0.2}),
+                trace_commitment: Some(
+                    "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+                        .to_string(),
+                ),
+                otel_genai_semconv_version: Some("1.0.0".to_string()),
+            },
+            items: vec![EvidenceItem::LlmInteraction(LlmInteractionEvidence {
+                provider: "anthropic".to_string(),
+                model: "claude-sonnet-4-6".to_string(),
+                parameters: json!({"temperature": 0.2}),
+                input_commitment:
+                    "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                        .to_string(),
+                retrieval_commitment: None,
+                output_commitment:
+                    "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+                        .to_string(),
+                tool_outputs_commitment: None,
+                token_usage: None,
+                latency_ms: Some(42),
+                trace_commitment: Some(
+                    "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+                        .to_string(),
+                ),
+                trace_semconv_version: Some("1.0.0".to_string()),
+            })],
+            policy: Policy {
+                redactions: vec![],
+                encryption: EncryptionPolicy { enabled: false },
+                retention_class: None,
+            },
+        }
+    }
+
+    fn sample_bundle() -> ProofBundle {
+        let signing_key = SigningKey::from_bytes(&[7_u8; 32]);
+        build_bundle(
+            sample_event(),
+            &[ArtefactInput {
+                name: "prompt.json".to_string(),
+                content_type: "application/json".to_string(),
+                bytes: br#"{"hello":"world"}"#.to_vec(),
+            }],
+            &signing_key,
+            "kid-dev-01",
+            "01JNFVDSM64DJN8SNMZP63YQC8",
+            parse_created_at(Some("2026-03-02T00:00:00Z")).unwrap(),
+        )
+        .unwrap()
+    }
 
     #[test]
     fn artefact_arg_parser_accepts_name_and_path() {
@@ -751,6 +1255,76 @@ mod tests {
     fn parse_created_at_rejects_invalid_value() {
         let err = parse_created_at(Some("not-a-date")).unwrap_err();
         assert!(err.to_string().contains("RFC3339"));
+    }
+
+    #[test]
+    fn create_overrides_apply_system_and_retention() {
+        let event = apply_create_overrides(
+            materialize_capture_event(SealableCaptureInput::Legacy(sample_legacy_capture())),
+            &CreateOverrides {
+                evidence_type: Some(EvidenceTypeArg::LlmInteraction),
+                retention_class: Some("runtime_logs".to_string()),
+                system_id: Some("system-123".to_string()),
+            },
+        )
+        .unwrap();
+
+        assert_eq!(event.subject.system_id.as_deref(), Some("system-123"));
+        assert_eq!(
+            event.policy.retention_class.as_deref(),
+            Some("runtime_logs")
+        );
+        assert!(matches!(
+            event.items.first(),
+            Some(EvidenceItem::LlmInteraction(_))
+        ));
+    }
+
+    #[test]
+    fn create_overrides_reject_missing_evidence_type() {
+        let mut event = sample_event();
+        event.items = vec![EvidenceItem::TechnicalDoc(
+            proof_layer_core::schema::TechnicalDocEvidence {
+                document_ref: "doc-1".to_string(),
+                section: None,
+                commitment: None,
+            },
+        )];
+
+        let err = apply_create_overrides(
+            event,
+            &CreateOverrides {
+                evidence_type: Some(EvidenceTypeArg::LlmInteraction),
+                retention_class: None,
+                system_id: None,
+            },
+        )
+        .unwrap_err();
+
+        assert!(
+            err.to_string()
+                .contains("does not contain requested evidence type llm_interaction")
+        );
+    }
+
+    #[test]
+    fn merkle_inspect_view_includes_header_leaf() {
+        let bundle = sample_bundle();
+        let view = build_merkle_inspect_view(&bundle).unwrap();
+
+        assert_eq!(view.root, bundle.integrity.bundle_root);
+        assert_eq!(view.leaves[0].label, "header_digest");
+        assert_eq!(view.leaves[0].digest, bundle.integrity.header_digest);
+        assert_eq!(view.leaves.len(), 1 + bundle.artefacts.len());
+    }
+
+    #[test]
+    fn optional_check_reports_missing_and_unsupported_states() {
+        let missing = evaluate_optional_check("timestamp", "RFC 3161 verification", false, true);
+        assert_eq!(missing.state, OptionalCheckState::Missing);
+
+        let unsupported = evaluate_optional_check("timestamp", "RFC 3161 verification", true, true);
+        assert_eq!(unsupported.state, OptionalCheckState::Unsupported);
     }
 
     #[test]

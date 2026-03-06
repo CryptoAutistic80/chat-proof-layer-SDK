@@ -63,12 +63,17 @@ cargo run -p proofctl -- create \
 
 # Optional deterministic inputs for reproducible vectors:
 # --bundle-id PLFIXED0001 --created-at 2026-03-02T00:00:00Z --signing-kid kid-dev-01
+# Optional v1 override flags during migration:
+# --system-id system-123 --retention-class runtime_logs --evidence-type llm_interaction
 
 # 4) Verify offline
 cargo run -p proofctl -- verify --in ./bundle.pkg --key ./keys/verify.pub
 
 # 5) Inspect
 cargo run -p proofctl -- inspect --in ./bundle.pkg --format human
+
+# Richer inspect output
+cargo run -p proofctl -- inspect --in ./bundle.pkg --show-items --show-merkle
 ```
 
 ## Run Proof Service
@@ -211,6 +216,9 @@ npm run dev
 - Proof package is gzip-compressed JSON (`bundle.pkg`) containing named files (`proof_bundle.json`, `proof_bundle.canonical.json`, `proof_bundle.sig`, `artefacts/*`, `manifest.json`).
 - Bundles now serialize as `bundle_version: "1.0"` with typed `items` plus `context`.
 - `proofctl create` and `POST /v1/bundles` accept either the legacy PoC capture shape or the v1.0 capture shape during migration.
+- `proofctl create` also supports Phase 2 migration overrides such as `--system-id`, `--retention-class`, and `--evidence-type`.
+- `proofctl verify` now exposes `--check-timestamp` and `--check-receipt`; these fail explicitly when requested because RFC 3161 and receipt verification are not implemented yet.
+- `proofctl inspect` now supports `--show-items` and `--show-merkle`.
 - Canonicalization and signing semantics follow `docs/architecture.md`.
 - Verification is designed to work offline with `bundle.pkg` + public key.
 - JSON Schemas: `schemas/evidence_bundle.schema.json`, `schemas/capture_event.schema.json`, `schemas/evidence_item.schema.json`.

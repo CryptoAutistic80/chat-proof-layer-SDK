@@ -8,6 +8,10 @@ Completed:
 - Extended Merkle support with inclusion-proof generation and verification.
 - Updated `proofctl` and `proof-service` to accept both legacy capture JSON and v1 capture JSON.
 - Regenerated the deterministic golden fixture set for `bundle_version: "1.0"`.
+- Added the next Phase 2 CLI slice:
+  `proofctl create --system-id/--retention-class/--evidence-type`,
+  `proofctl verify --check-timestamp/--check-receipt`,
+  and `proofctl inspect --show-items/--show-merkle`.
 - Restored a clean Rust verification loop: `cargo test --workspace` and `cargo clippy --workspace --all-targets -- -D warnings` both pass.
 
 Still outstanding from `plan.md`:

@@ -48,12 +48,12 @@ Core defaults:
 - Artifact storage: local filesystem at `./storage/artefacts/{bundle_id}/{name}`
 - CORS enabled for local web demo interoperability
 - Current query surface: `GET /v1/bundles?system_id=&role=&type=&from=&to=&page=&limit=`
-- Retention operations: `GET /v1/retention/status`, `POST /v1/retention/scan`
+- Retention operations: `DELETE /v1/bundles/{id}`, `POST /v1/bundles/{id}/legal-hold`, `DELETE /v1/bundles/{id}/legal-hold`, `GET /v1/retention/status`, `POST /v1/retention/scan`
 - Pack export operations: `POST /v1/packs`, `GET /v1/packs/{id}`, `GET /v1/packs/{id}/manifest`, `GET /v1/packs/{id}/export`
 
 Current SQLite tables:
 
-- `bundles`: top-level bundle metadata plus serialized bundle JSON and canonical header bytes
+- `bundles`: top-level bundle metadata plus serialized bundle JSON, canonical header bytes, expiry timestamps, soft-delete markers, and legal-hold state
 - `evidence_items`: one row per evidence item for type-based filtering plus derived `obligation_ref` tags
 - `artefacts`: stored artefact metadata and blob paths
 - `retention_policies`: seeded retention schedules used to compute `expires_at`
@@ -72,6 +72,12 @@ Current pack export behavior:
 - Vault pack assembly uses a heuristic curation profile (`pack-rules-v1`).
 - Selection currently keys off actor role, evidence item type, retention class, and derived obligation references.
 - Exported pack archives still contain full `bundle.pkg` members; redaction/selective disclosure is a later phase.
+
+Current retention behavior:
+
+- Bundle creation computes `expires_at` from the retention policy table.
+- Manual `DELETE /v1/bundles/{id}` is a soft-delete and is blocked by active legal holds.
+- `POST /v1/retention/scan` soft-deletes expired active bundles, skips held bundles, and hard-deletes soft-deleted bundles once `deleted_at + grace_period` has passed.
 
 ### `packages/sdk-node` and `packages/sdk-python`
 

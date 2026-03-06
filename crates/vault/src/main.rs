@@ -325,6 +325,14 @@ struct StoredPackArtefactRow {
     storage_path: String,
 }
 
+#[derive(Debug, FromRow)]
+struct BundleRetentionRow {
+    bundle_id: String,
+    deleted_at: Option<String>,
+    legal_hold_reason: Option<String>,
+    legal_hold_until: Option<String>,
+}
+
 #[derive(Debug)]
 struct PackArtefactBytes {
     name: String,
@@ -383,6 +391,11 @@ async fn main() -> Result<()> {
         .ok()
         .and_then(|v| v.parse::<usize>().ok())
         .unwrap_or(DEFAULT_MAX_PAYLOAD_BYTES);
+    let retention_grace_period_days = env::var("PROOF_SERVICE_RETENTION_GRACE_DAYS")
+        .ok()
+        .map(|raw| parse_retention_grace_period_days(&raw))
+        .transpose()?
+        .unwrap_or(DEFAULT_RETENTION_GRACE_PERIOD_DAYS);
 
     let state = AppState {
         db,
@@ -390,6 +403,7 @@ async fn main() -> Result<()> {
         signing_key: Arc::new(signing_key),
         signing_kid,
         max_payload_bytes,
+        retention_grace_period_days,
     };
 
     let app = build_router(state, max_payload_bytes);
@@ -410,10 +424,17 @@ fn build_router(state: AppState, max_payload_bytes: usize) -> Router {
         .route("/healthz", get(healthz))
         .route("/readyz", get(readyz))
         .route("/v1/bundles", get(list_bundles).post(create_bundle))
-        .route("/v1/bundles/{bundle_id}", get(get_bundle))
+        .route(
+            "/v1/bundles/{bundle_id}",
+            get(get_bundle).delete(delete_bundle),
+        )
         .route(
             "/v1/bundles/{bundle_id}/artefacts/{name}",
             get(get_artefact),
+        )
+        .route(
+            "/v1/bundles/{bundle_id}/legal-hold",
+            post(set_legal_hold).delete(release_legal_hold),
         )
         .route("/v1/packs", post(create_pack))
         .route("/v1/packs/{pack_id}", get(get_pack))
@@ -513,6 +534,7 @@ async fn list_bundles(
     State(state): State<AppState>,
     Query(query): Query<BundleQuery>,
 ) -> Result<impl IntoResponse, ApiError> {
+    let now = Utc::now().to_rfc3339();
     let page = query.page.unwrap_or(1).max(1);
     let limit = query.limit.unwrap_or(50).clamp(1, 100);
     let offset = i64::from((page - 1) * limit);
@@ -529,6 +551,11 @@ async fn list_bundles(
             b.signature_alg, \
             b.retention_class, \
             b.expires_at, \
+            CASE WHEN b.legal_hold_reason IS NOT NULL AND (b.legal_hold_until IS NULL OR b.legal_hold_until > ",
+    );
+    builder.push_bind(&now);
+    builder.push(
+        ") THEN TRUE ELSE FALSE END AS has_legal_hold, \
             b.has_timestamp, \
             b.has_receipt \
          FROM bundles b ",
@@ -580,6 +607,8 @@ async fn list_bundles(
 
 async fn retention_status(State(state): State<AppState>) -> Result<impl IntoResponse, ApiError> {
     let now = Utc::now().to_rfc3339();
+    let hard_delete_before =
+        (Utc::now() - chrono::Duration::days(state.retention_grace_period_days)).to_rfc3339();
     let rows = sqlx::query(
         "SELECT
             p.retention_class,
@@ -590,7 +619,9 @@ async fn retention_status(State(state): State<AppState>) -> Result<impl IntoResp
             COUNT(b.bundle_id) AS total_bundles,
             COALESCE(SUM(CASE WHEN b.deleted_at IS NULL THEN 1 ELSE 0 END), 0) AS active_bundles,
             COALESCE(SUM(CASE WHEN b.deleted_at IS NOT NULL THEN 1 ELSE 0 END), 0) AS deleted_bundles,
-            COALESCE(SUM(CASE WHEN b.deleted_at IS NULL AND b.expires_at IS NOT NULL AND b.expires_at <= ? THEN 1 ELSE 0 END), 0) AS expired_active_bundles,
+            COALESCE(SUM(CASE WHEN b.legal_hold_reason IS NOT NULL AND (b.legal_hold_until IS NULL OR b.legal_hold_until > ?) THEN 1 ELSE 0 END), 0) AS held_bundles,
+            COALESCE(SUM(CASE WHEN b.deleted_at IS NULL AND b.expires_at IS NOT NULL AND b.expires_at <= ? AND NOT (b.legal_hold_reason IS NOT NULL AND (b.legal_hold_until IS NULL OR b.legal_hold_until > ?)) THEN 1 ELSE 0 END), 0) AS expired_active_bundles,
+            COALESCE(SUM(CASE WHEN b.deleted_at IS NOT NULL AND b.deleted_at <= ? AND NOT (b.legal_hold_reason IS NOT NULL AND (b.legal_hold_until IS NULL OR b.legal_hold_until > ?)) THEN 1 ELSE 0 END), 0) AS hard_delete_ready_bundles,
             MIN(CASE WHEN b.deleted_at IS NULL THEN b.expires_at END) AS next_expiry
          FROM retention_policies p
          LEFT JOIN bundles b ON b.retention_class = p.retention_class
@@ -602,6 +633,10 @@ async fn retention_status(State(state): State<AppState>) -> Result<impl IntoResp
             p.active
          ORDER BY p.retention_class",
     )
+    .bind(&now)
+    .bind(&now)
+    .bind(&now)
+    .bind(&hard_delete_before)
     .bind(&now)
     .fetch_all(&state.db)
     .await
@@ -632,8 +667,14 @@ async fn retention_status(State(state): State<AppState>) -> Result<impl IntoResp
             deleted_bundles: row
                 .try_get("deleted_bundles")
                 .map_err(ApiError::internal_anyhow)?,
+            held_bundles: row
+                .try_get("held_bundles")
+                .map_err(ApiError::internal_anyhow)?,
             expired_active_bundles: row
                 .try_get("expired_active_bundles")
+                .map_err(ApiError::internal_anyhow)?,
+            hard_delete_ready_bundles: row
+                .try_get("hard_delete_ready_bundles")
                 .map_err(ApiError::internal_anyhow)?,
             next_expiry: row
                 .try_get("next_expiry")
@@ -645,6 +686,7 @@ async fn retention_status(State(state): State<AppState>) -> Result<impl IntoResp
         StatusCode::OK,
         Json(RetentionStatusResponse {
             scanned_at: now,
+            grace_period_days: state.retention_grace_period_days,
             policies,
         }),
     ))
@@ -652,24 +694,171 @@ async fn retention_status(State(state): State<AppState>) -> Result<impl IntoResp
 
 async fn retention_scan(State(state): State<AppState>) -> Result<impl IntoResponse, ApiError> {
     let now = Utc::now().to_rfc3339();
-    let result = sqlx::query(
+    let hard_delete_before =
+        (Utc::now() - chrono::Duration::days(state.retention_grace_period_days)).to_rfc3339();
+    let held_skipped: i64 = sqlx::query_scalar(
+        "SELECT COUNT(bundle_id)
+         FROM bundles
+         WHERE legal_hold_reason IS NOT NULL
+           AND (legal_hold_until IS NULL OR legal_hold_until > ?)
+           AND (
+                (deleted_at IS NULL AND expires_at IS NOT NULL AND expires_at <= ?)
+                OR (deleted_at IS NOT NULL AND deleted_at <= ?)
+           )",
+    )
+    .bind(&now)
+    .bind(&now)
+    .bind(&hard_delete_before)
+    .fetch_one(&state.db)
+    .await
+    .map_err(ApiError::internal_anyhow)?;
+
+    let soft_delete_result = sqlx::query(
         "UPDATE bundles
          SET deleted_at = ?
          WHERE deleted_at IS NULL
            AND expires_at IS NOT NULL
-           AND expires_at <= ?",
+           AND expires_at <= ?
+           AND NOT (
+                legal_hold_reason IS NOT NULL
+                AND (legal_hold_until IS NULL OR legal_hold_until > ?)
+           )",
     )
     .bind(&now)
     .bind(&now)
+    .bind(&now)
+    .execute(&state.db)
+    .await
+    .map_err(ApiError::internal_anyhow)?;
+    let hard_deleted = hard_delete_bundles(&state, &hard_delete_before, &now)
+        .await
+        .map_err(ApiError::internal_anyhow)?;
+
+    Ok((
+        StatusCode::OK,
+        Json(RetentionScanResponse {
+            scanned_at: now,
+            grace_period_days: state.retention_grace_period_days,
+            soft_deleted: soft_delete_result.rows_affected(),
+            hard_deleted,
+            held_skipped: held_skipped as u64,
+        }),
+    ))
+}
+
+async fn delete_bundle(
+    State(state): State<AppState>,
+    Path(bundle_id): Path<String>,
+) -> Result<impl IntoResponse, ApiError> {
+    let row = load_bundle_retention_row(&state.db, &bundle_id)
+        .await
+        .map_err(ApiError::internal_anyhow)?
+        .ok_or_else(|| ApiError::not_found("bundle not found"))?;
+
+    let now = Utc::now().to_rfc3339();
+    if legal_hold_is_active(
+        row.legal_hold_reason.as_deref(),
+        row.legal_hold_until.as_deref(),
+        &now,
+    ) {
+        return Err(ApiError::conflict(
+            "bundle has an active legal hold and cannot be deleted",
+        ));
+    }
+
+    let deleted_at = if let Some(deleted_at) = row.deleted_at {
+        deleted_at
+    } else {
+        sqlx::query("UPDATE bundles SET deleted_at = ? WHERE bundle_id = ?")
+            .bind(&now)
+            .bind(&bundle_id)
+            .execute(&state.db)
+            .await
+            .map_err(ApiError::internal_anyhow)?;
+        now
+    };
+
+    Ok((
+        StatusCode::OK,
+        Json(DeleteBundleResponse {
+            bundle_id,
+            deleted_at,
+        }),
+    ))
+}
+
+async fn set_legal_hold(
+    State(state): State<AppState>,
+    Path(bundle_id): Path<String>,
+    Json(request): Json<LegalHoldRequest>,
+) -> Result<impl IntoResponse, ApiError> {
+    let row = load_bundle_retention_row(&state.db, &bundle_id)
+        .await
+        .map_err(ApiError::internal_anyhow)?
+        .ok_or_else(|| ApiError::not_found("bundle not found"))?;
+
+    let now = Utc::now().to_rfc3339();
+    let reason =
+        normalize_legal_hold_reason(&request.reason).map_err(ApiError::bad_request_anyhow)?;
+    let until = normalize_legal_hold_until(request.until.as_deref(), &now)
+        .map_err(ApiError::bad_request_anyhow)?;
+
+    sqlx::query(
+        "UPDATE bundles
+         SET legal_hold_reason = ?,
+             legal_hold_until = ?,
+             legal_hold_placed_at = ?
+         WHERE bundle_id = ?",
+    )
+    .bind(&reason)
+    .bind(until.as_deref())
+    .bind(&now)
+    .bind(&bundle_id)
     .execute(&state.db)
     .await
     .map_err(ApiError::internal_anyhow)?;
 
     Ok((
         StatusCode::OK,
-        Json(RetentionScanResponse {
-            scanned_at: now,
-            soft_deleted: result.rows_affected(),
+        Json(LegalHoldResponse {
+            bundle_id: row.bundle_id,
+            active: true,
+            reason: Some(reason),
+            placed_at: Some(now),
+            until,
+        }),
+    ))
+}
+
+async fn release_legal_hold(
+    State(state): State<AppState>,
+    Path(bundle_id): Path<String>,
+) -> Result<impl IntoResponse, ApiError> {
+    let row = load_bundle_retention_row(&state.db, &bundle_id)
+        .await
+        .map_err(ApiError::internal_anyhow)?
+        .ok_or_else(|| ApiError::not_found("bundle not found"))?;
+
+    sqlx::query(
+        "UPDATE bundles
+         SET legal_hold_reason = NULL,
+             legal_hold_until = NULL,
+             legal_hold_placed_at = NULL
+         WHERE bundle_id = ?",
+    )
+    .bind(&bundle_id)
+    .execute(&state.db)
+    .await
+    .map_err(ApiError::internal_anyhow)?;
+
+    Ok((
+        StatusCode::OK,
+        Json(LegalHoldResponse {
+            bundle_id: row.bundle_id,
+            active: false,
+            reason: None,
+            placed_at: None,
+            until: None,
         }),
     ))
 }
@@ -1593,6 +1782,160 @@ fn parse_pack_manifest(row: &StoredPackRow) -> Result<PackManifest> {
     Ok(manifest)
 }
 
+fn parse_retention_grace_period_days(raw: &str) -> Result<i64> {
+    let days = raw
+        .trim()
+        .parse::<i64>()
+        .with_context(|| format!("invalid PROOF_SERVICE_RETENTION_GRACE_DAYS value {raw}"))?;
+    if days < 0 {
+        bail!("PROOF_SERVICE_RETENTION_GRACE_DAYS must be >= 0");
+    }
+    Ok(days)
+}
+
+fn normalize_legal_hold_reason(raw: &str) -> Result<String> {
+    let reason = raw.trim();
+    if reason.is_empty() {
+        bail!("legal hold reason must not be empty");
+    }
+    Ok(reason.to_string())
+}
+
+fn normalize_legal_hold_until(value: Option<&str>, now: &str) -> Result<Option<String>> {
+    let Some(value) = value else {
+        return Ok(None);
+    };
+
+    let until = value.trim();
+    if until.is_empty() {
+        bail!("legal hold until must not be empty");
+    }
+
+    let parsed_until = chrono::DateTime::parse_from_rfc3339(until)
+        .with_context(|| format!("legal hold until must be RFC3339, got {until}"))?
+        .with_timezone(&Utc);
+    let parsed_now = chrono::DateTime::parse_from_rfc3339(now)
+        .with_context(|| format!("current timestamp must be RFC3339, got {now}"))?
+        .with_timezone(&Utc);
+    if parsed_until <= parsed_now {
+        bail!("legal hold until must be in the future");
+    }
+
+    Ok(Some(parsed_until.to_rfc3339()))
+}
+
+fn legal_hold_is_active(reason: Option<&str>, until: Option<&str>, now: &str) -> bool {
+    let Some(reason) = reason else {
+        return false;
+    };
+    if reason.trim().is_empty() {
+        return false;
+    }
+
+    match until {
+        Some(until) => chrono::DateTime::parse_from_rfc3339(until)
+            .ok()
+            .zip(chrono::DateTime::parse_from_rfc3339(now).ok())
+            .map(|(until, now)| until.with_timezone(&Utc) > now.with_timezone(&Utc))
+            .unwrap_or(false),
+        None => true,
+    }
+}
+
+async fn load_bundle_retention_row(
+    db: &SqlitePool,
+    bundle_id: &str,
+) -> Result<Option<BundleRetentionRow>> {
+    sqlx::query_as::<_, BundleRetentionRow>(
+        "SELECT
+            bundle_id,
+            deleted_at,
+            legal_hold_reason,
+            legal_hold_until
+         FROM bundles
+         WHERE bundle_id = ?",
+    )
+    .bind(bundle_id)
+    .fetch_optional(db)
+    .await
+    .with_context(|| format!("failed to load bundle retention state for {bundle_id}"))
+}
+
+async fn hard_delete_bundles(state: &AppState, hard_delete_before: &str, now: &str) -> Result<u64> {
+    let rows = sqlx::query(
+        "SELECT bundle_id
+         FROM bundles
+         WHERE deleted_at IS NOT NULL
+           AND deleted_at <= ?
+           AND NOT (
+                legal_hold_reason IS NOT NULL
+                AND (legal_hold_until IS NULL OR legal_hold_until > ?)
+           )
+         ORDER BY bundle_id ASC",
+    )
+    .bind(hard_delete_before)
+    .bind(now)
+    .fetch_all(&state.db)
+    .await
+    .context("failed to fetch hard-delete bundle candidates")?;
+
+    let mut hard_deleted = 0_u64;
+    for row in rows {
+        let bundle_id: String = row.try_get("bundle_id")?;
+        delete_bundle_storage(&state.db, &state.storage_dir, &bundle_id).await?;
+        sqlx::query("DELETE FROM bundles WHERE bundle_id = ?")
+            .bind(&bundle_id)
+            .execute(&state.db)
+            .await
+            .with_context(|| format!("failed to delete bundle metadata for {bundle_id}"))?;
+        hard_deleted += 1;
+    }
+
+    Ok(hard_deleted)
+}
+
+async fn delete_bundle_storage(
+    db: &SqlitePool,
+    storage_dir: &FsPath,
+    bundle_id: &str,
+) -> Result<()> {
+    let rows = sqlx::query(
+        "SELECT storage_path
+         FROM artefacts
+         WHERE bundle_id = ?",
+    )
+    .bind(bundle_id)
+    .fetch_all(db)
+    .await
+    .with_context(|| format!("failed to load artefact paths for {bundle_id}"))?;
+
+    for row in rows {
+        let storage_path: String = row.try_get("storage_path")?;
+        match fs::remove_file(&storage_path) {
+            Ok(()) => {}
+            Err(err) if err.kind() == ErrorKind::NotFound => {}
+            Err(err) => {
+                return Err(anyhow::Error::new(err)
+                    .context(format!("failed to remove artefact {storage_path}")));
+            }
+        }
+    }
+
+    let bundle_dir = storage_dir.join("artefacts").join(bundle_id);
+    match fs::remove_dir_all(&bundle_dir) {
+        Ok(()) => {}
+        Err(err) if err.kind() == ErrorKind::NotFound => {}
+        Err(err) => {
+            return Err(anyhow::Error::new(err).context(format!(
+                "failed to remove artefact directory {}",
+                bundle_dir.display()
+            )));
+        }
+    }
+
+    Ok(())
+}
+
 fn load_signing_key() -> Result<SigningKey> {
     if let Ok(path) = env::var("PROOF_SIGNING_KEY_PATH") {
         let contents = fs::read_to_string(&path)
@@ -1914,6 +2257,9 @@ async fn initialize_sqlite_schema(db: &SqlitePool) -> Result<()> {
             retention_class TEXT NOT NULL,
             expires_at TEXT,
             deleted_at TEXT,
+            legal_hold_reason TEXT,
+            legal_hold_until TEXT,
+            legal_hold_placed_at TEXT,
             bundle_json TEXT NOT NULL,
             canonical_bytes BLOB NOT NULL
         )",
@@ -1922,6 +2268,7 @@ async fn initialize_sqlite_schema(db: &SqlitePool) -> Result<()> {
         "CREATE INDEX IF NOT EXISTS idx_bundles_request ON bundles(request_id, created_at)",
         "CREATE INDEX IF NOT EXISTS idx_bundles_app ON bundles(app_id, created_at)",
         "CREATE INDEX IF NOT EXISTS idx_bundles_retention ON bundles(retention_class, expires_at)",
+        "CREATE INDEX IF NOT EXISTS idx_bundles_legal_hold ON bundles(legal_hold_until, deleted_at)",
         "CREATE TABLE IF NOT EXISTS evidence_items (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             bundle_id TEXT NOT NULL REFERENCES bundles(bundle_id) ON DELETE CASCADE,
@@ -1972,6 +2319,9 @@ async fn initialize_sqlite_schema(db: &SqlitePool) -> Result<()> {
     }
 
     ensure_sqlite_column(db, "bundles", "expires_at", "TEXT").await?;
+    ensure_sqlite_column(db, "bundles", "legal_hold_reason", "TEXT").await?;
+    ensure_sqlite_column(db, "bundles", "legal_hold_until", "TEXT").await?;
+    ensure_sqlite_column(db, "bundles", "legal_hold_placed_at", "TEXT").await?;
 
     Ok(())
 }
@@ -2139,6 +2489,13 @@ impl ApiError {
         }
     }
 
+    fn conflict(message: impl Into<String>) -> Self {
+        Self {
+            status: StatusCode::CONFLICT,
+            message: message.into(),
+        }
+    }
+
     fn internal_anyhow(err: impl Into<anyhow::Error>) -> Self {
         let err = err.into();
         error!("internal error: {err:#}");
@@ -2247,6 +2604,7 @@ mod tests {
             signing_key: Arc::new(signing_key),
             signing_kid: "kid-dev-01".to_string(),
             max_payload_bytes,
+            retention_grace_period_days: DEFAULT_RETENTION_GRACE_PERIOD_DAYS,
         }
     }
 
@@ -2718,6 +3076,7 @@ mod tests {
         assert_eq!(response.items.len(), 1);
         assert_eq!(response.items[0].actor_role, "provider");
         assert!(response.items[0].expires_at.is_some());
+        assert!(!response.items[0].has_legal_hold);
     }
 
     #[tokio::test]
@@ -2754,12 +3113,18 @@ mod tests {
             .await
             .unwrap();
         let response: RetentionStatusResponse = serde_json::from_slice(&body).unwrap();
+        assert_eq!(
+            response.grace_period_days,
+            DEFAULT_RETENTION_GRACE_PERIOD_DAYS
+        );
         let unspecified = response
             .policies
             .iter()
             .find(|policy| policy.retention_class == "unspecified")
             .unwrap();
         assert_eq!(unspecified.active_bundles, 1);
+        assert_eq!(unspecified.held_bundles, 0);
+        assert_eq!(unspecified.hard_delete_ready_bundles, 0);
         assert!(unspecified.next_expiry.is_some());
     }
 
@@ -2805,6 +3170,8 @@ mod tests {
             .unwrap();
         let response: RetentionScanResponse = serde_json::from_slice(&body).unwrap();
         assert_eq!(response.soft_deleted, 1);
+        assert_eq!(response.hard_deleted, 0);
+        assert_eq!(response.held_skipped, 0);
 
         let list_req = Request::builder()
             .method("GET")
@@ -2818,6 +3185,172 @@ mod tests {
             .unwrap();
         let response: ListBundlesResponse = serde_json::from_slice(&body).unwrap();
         assert!(response.items.is_empty());
+    }
+
+    #[tokio::test]
+    async fn legal_hold_blocks_manual_and_scan_deletion_until_released() {
+        let state = test_state(DEFAULT_MAX_PAYLOAD_BYTES).await;
+        let db = state.db.clone();
+        let app = build_router(state, DEFAULT_MAX_PAYLOAD_BYTES);
+
+        let created = create_bundle_response(
+            &app,
+            &CreateBundleRequest {
+                capture: SealableCaptureInput::V10(sample_event_with_profile(
+                    "system-hold",
+                    proof_layer_core::ActorRole::Provider,
+                    sample_event_with_system("system-hold").items,
+                    Some("runtime_logs"),
+                )),
+                artefacts: vec![InlineArtefact {
+                    name: "prompt.json".to_string(),
+                    content_type: "application/json".to_string(),
+                    data_base64: Base64::encode_string(br#"{"prompt":"held"}"#),
+                }],
+            },
+        )
+        .await;
+
+        let hold_req = Request::builder()
+            .method("POST")
+            .uri(format!("/v1/bundles/{}/legal-hold", created.bundle_id))
+            .header("content-type", "application/json")
+            .body(Body::from(
+                serde_json::to_vec(&LegalHoldRequest {
+                    reason: "regulatory inquiry".to_string(),
+                    until: None,
+                })
+                .unwrap(),
+            ))
+            .unwrap();
+        let hold_res = app.clone().oneshot(hold_req).await.unwrap();
+        assert_eq!(hold_res.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(hold_res.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let hold: LegalHoldResponse = serde_json::from_slice(&body).unwrap();
+        assert!(hold.active);
+        assert_eq!(hold.reason.as_deref(), Some("regulatory inquiry"));
+
+        sqlx::query("UPDATE bundles SET expires_at = ? WHERE bundle_id = ?")
+            .bind("2020-01-01T00:00:00+00:00")
+            .bind(&created.bundle_id)
+            .execute(&db)
+            .await
+            .unwrap();
+
+        let delete_req = Request::builder()
+            .method("DELETE")
+            .uri(format!("/v1/bundles/{}", created.bundle_id))
+            .body(Body::empty())
+            .unwrap();
+        let delete_res = app.clone().oneshot(delete_req).await.unwrap();
+        assert_eq!(delete_res.status(), StatusCode::CONFLICT);
+
+        let scan_req = Request::builder()
+            .method("POST")
+            .uri("/v1/retention/scan")
+            .body(Body::empty())
+            .unwrap();
+        let scan_res = app.clone().oneshot(scan_req).await.unwrap();
+        assert_eq!(scan_res.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(scan_res.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let response: RetentionScanResponse = serde_json::from_slice(&body).unwrap();
+        assert_eq!(response.soft_deleted, 0);
+        assert_eq!(response.hard_deleted, 0);
+        assert_eq!(response.held_skipped, 1);
+
+        let release_req = Request::builder()
+            .method("DELETE")
+            .uri(format!("/v1/bundles/{}/legal-hold", created.bundle_id))
+            .body(Body::empty())
+            .unwrap();
+        let release_res = app.clone().oneshot(release_req).await.unwrap();
+        assert_eq!(release_res.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(release_res.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let released: LegalHoldResponse = serde_json::from_slice(&body).unwrap();
+        assert!(!released.active);
+
+        let scan_req = Request::builder()
+            .method("POST")
+            .uri("/v1/retention/scan")
+            .body(Body::empty())
+            .unwrap();
+        let scan_res = app.clone().oneshot(scan_req).await.unwrap();
+        assert_eq!(scan_res.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(scan_res.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let response: RetentionScanResponse = serde_json::from_slice(&body).unwrap();
+        assert_eq!(response.soft_deleted, 1);
+        assert_eq!(response.hard_deleted, 0);
+    }
+
+    #[tokio::test]
+    async fn retention_scan_hard_deletes_soft_deleted_bundles_after_grace_period() {
+        let state = test_state(DEFAULT_MAX_PAYLOAD_BYTES).await;
+        let db = state.db.clone();
+        let storage_dir = state.storage_dir.clone();
+        let app = build_router(state, DEFAULT_MAX_PAYLOAD_BYTES);
+
+        let created = create_bundle_response(
+            &app,
+            &CreateBundleRequest {
+                capture: SealableCaptureInput::Legacy(sample_capture()),
+                artefacts: vec![InlineArtefact {
+                    name: "prompt.json".to_string(),
+                    content_type: "application/json".to_string(),
+                    data_base64: Base64::encode_string(br#"{"prompt":"cleanup"}"#),
+                }],
+            },
+        )
+        .await;
+
+        let delete_req = Request::builder()
+            .method("DELETE")
+            .uri(format!("/v1/bundles/{}", created.bundle_id))
+            .body(Body::empty())
+            .unwrap();
+        let delete_res = app.clone().oneshot(delete_req).await.unwrap();
+        assert_eq!(delete_res.status(), StatusCode::OK);
+
+        sqlx::query("UPDATE bundles SET deleted_at = ? WHERE bundle_id = ?")
+            .bind("2020-01-01T00:00:00+00:00")
+            .bind(&created.bundle_id)
+            .execute(&db)
+            .await
+            .unwrap();
+
+        let artefact_dir = storage_dir.join("artefacts").join(&created.bundle_id);
+        assert!(artefact_dir.exists());
+
+        let scan_req = Request::builder()
+            .method("POST")
+            .uri("/v1/retention/scan")
+            .body(Body::empty())
+            .unwrap();
+        let scan_res = app.clone().oneshot(scan_req).await.unwrap();
+        assert_eq!(scan_res.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(scan_res.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let response: RetentionScanResponse = serde_json::from_slice(&body).unwrap();
+        assert_eq!(response.soft_deleted, 0);
+        assert_eq!(response.hard_deleted, 1);
+        assert_eq!(response.held_skipped, 0);
+
+        let remaining: Option<String> =
+            sqlx::query_scalar("SELECT bundle_id FROM bundles WHERE bundle_id = ?")
+                .bind(&created.bundle_id)
+                .fetch_optional(&db)
+                .await
+                .unwrap();
+        assert!(remaining.is_none());
+        assert!(!artefact_dir.exists());
     }
 
     #[tokio::test]

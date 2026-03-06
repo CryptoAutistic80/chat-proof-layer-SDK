@@ -14,6 +14,7 @@ Completed:
   and `proofctl inspect --show-items/--show-merkle`.
 - Migrated vault metadata storage from `sled` to SQLite and added `/readyz` plus basic `/v1/bundles` query filtering on role/type/date fields.
 - Added the first retention engine slice: seeded retention policies, computed `expires_at`, `/v1/retention/status`, and `/v1/retention/scan` soft-delete flow.
+- Hardened retention with legal holds, manual `DELETE /v1/bundles/{id}` soft-delete semantics, and grace-period hard-delete of artefact blobs + metadata after retention scan.
 - Added the first pack export slice:
   `POST /v1/packs`,
   `GET /v1/packs/{id}`,
@@ -29,6 +30,6 @@ Completed:
 Still outstanding from `plan.md`:
 
 - JSON schema coverage is now started, but timestamp/transparency and richer export/archive schemas are not implemented.
-- The vault now uses SQLite with basic retention and curated pack export, but PostgreSQL, legal hold, hard-delete/grace-period flow, and redacted/Annex-complete pack assembly are not built yet.
+- The vault now uses SQLite with legal-hold-aware retention and curated pack export, but PostgreSQL, configurable retention policy updates, and redacted/Annex-complete pack assembly are not built yet.
 - Node and Python SDKs are still HTTP-client based; NAPI-RS and PyO3 bindings are not built yet.
 - RFC 3161 timestamping, transparency receipts, and selective disclosure CLI flows remain future phases.

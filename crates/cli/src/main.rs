@@ -5,10 +5,11 @@ use clap::{Parser, Subcommand, ValueEnum};
 use ed25519_dalek::SigningKey;
 use flate2::{Compression, read::GzDecoder, write::GzEncoder};
 use proof_layer_core::{
-    ArtefactInput, CaptureEvent, CaptureInput, EvidenceItem, ProofBundle, build_bundle,
-    build_inclusion_proof, capture_input_v01_to_event, decode_private_key_pem,
-    decode_public_key_pem, encode_private_key_pem, encode_public_key_pem, sha256_prefixed,
-    validate_bundle_integrity_fields,
+    ArtefactInput, CaptureEvent, CaptureInput, EvidenceItem, ProofBundle,
+    Rfc3161HttpTimestampProvider, TimestampProvider, build_bundle, build_inclusion_proof,
+    capture_input_v01_to_event, decode_private_key_pem, decode_public_key_pem,
+    encode_private_key_pem, encode_public_key_pem, sha256_prefixed, timestamp_digest,
+    validate_bundle_integrity_fields, verify_timestamp,
 };
 use reqwest::blocking::{Client, Response};
 use serde::{Deserialize, Serialize};
@@ -60,6 +61,8 @@ enum Commands {
         retention_class: Option<String>,
         #[arg(long)]
         system_id: Option<String>,
+        #[arg(long)]
+        timestamp_url: Option<String>,
     },
     /// Verify a proof bundle package offline.
     Verify {
@@ -199,6 +202,7 @@ struct CreateCommandInput<'a> {
     created_at: Option<&'a str>,
     signing_kid: &'a str,
     overrides: &'a CreateOverrides,
+    timestamp_url: Option<&'a str>,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -207,6 +211,7 @@ enum OptionalCheckState {
     Skipped,
     Missing,
     Unsupported,
+    Invalid,
     Valid,
 }
 
@@ -331,6 +336,7 @@ fn main() -> Result<()> {
             evidence_type,
             retention_class,
             system_id,
+            timestamp_url,
         } => cmd_create(CreateCommandInput {
             input_path: &input,
             artefacts: &artefact,
@@ -344,6 +350,7 @@ fn main() -> Result<()> {
                 retention_class,
                 system_id,
             },
+            timestamp_url: timestamp_url.as_deref(),
         }),
         Commands::Verify {
             input,
@@ -473,6 +480,16 @@ fn cmd_create(args: CreateCommandInput<'_>) -> Result<()> {
         &bundle_id,
         created_at,
     )?;
+    let mut bundle = bundle;
+    if let Some(timestamp_url) = args.timestamp_url {
+        let provider = Rfc3161HttpTimestampProvider::new(timestamp_url.to_string());
+        let verification = attach_timestamp_to_bundle(&mut bundle, &provider)?;
+        info!(
+            "timestamp provider={} generated_at={}",
+            verification.provider.as_deref().unwrap_or("rfc3161"),
+            verification.generated_at
+        );
+    }
 
     let canonical_header = bundle.canonical_header_bytes()?;
     let bundle_json = serde_json::to_vec_pretty(&bundle)?;
@@ -570,12 +587,7 @@ fn cmd_verify(
         }
     };
 
-    let timestamp = evaluate_optional_check(
-        "timestamp",
-        "RFC 3161 timestamp verification",
-        bundle.timestamp.is_some(),
-        check_timestamp,
-    );
+    let timestamp = evaluate_timestamp_check(&bundle, check_timestamp);
     if check_timestamp && timestamp.state != OptionalCheckState::Valid {
         failures.push(timestamp.message.clone());
     }
@@ -949,6 +961,63 @@ fn evaluate_optional_check(
     }
 }
 
+fn evaluate_timestamp_check(bundle: &ProofBundle, requested: bool) -> OptionalCheckReport {
+    if !requested {
+        return OptionalCheckReport {
+            state: OptionalCheckState::Skipped,
+            message: if bundle.timestamp.is_some() {
+                "timestamp present but not checked".to_string()
+            } else {
+                "timestamp not present (optional)".to_string()
+            },
+        };
+    }
+
+    let Some(timestamp) = bundle.timestamp.as_ref() else {
+        return OptionalCheckReport {
+            state: OptionalCheckState::Missing,
+            message: "timestamp check requested but bundle has no timestamp".to_string(),
+        };
+    };
+
+    match verify_timestamp(timestamp, &bundle.integrity.bundle_root) {
+        Ok(verification) => OptionalCheckReport {
+            state: OptionalCheckState::Valid,
+            message: format!(
+                "RFC 3161 token valid at {} ({} signer{})",
+                verification.generated_at,
+                verification.signer_count,
+                if verification.signer_count == 1 {
+                    ""
+                } else {
+                    "s"
+                }
+            ),
+        },
+        Err(err) => OptionalCheckReport {
+            state: OptionalCheckState::Invalid,
+            message: format!("RFC 3161 timestamp verification failed: {err}"),
+        },
+    }
+}
+
+fn attach_timestamp_to_bundle(
+    bundle: &mut ProofBundle,
+    provider: &dyn TimestampProvider,
+) -> Result<proof_layer_core::TimestampVerification> {
+    if bundle.timestamp.is_some() {
+        bail!("bundle already contains a timestamp token");
+    }
+
+    let token = timestamp_digest(&bundle.integrity.bundle_root, provider)
+        .context("failed to request timestamp token")?;
+    let verification = verify_timestamp(&token, &bundle.integrity.bundle_root)
+        .context("failed to verify returned timestamp token")?;
+    bundle.timestamp = Some(token);
+
+    Ok(verification)
+}
+
 fn write_bundle_package(out_path: &Path, files: &BTreeMap<String, Vec<u8>>) -> Result<()> {
     let parent = out_path.parent().unwrap_or_else(|| Path::new("."));
     fs::create_dir_all(parent)
@@ -1143,7 +1212,9 @@ fn optional_check_marker(state: &OptionalCheckState) -> &'static str {
     match state {
         OptionalCheckState::Valid => "✓",
         OptionalCheckState::Skipped => "–",
-        OptionalCheckState::Missing | OptionalCheckState::Unsupported => "✗",
+        OptionalCheckState::Missing
+        | OptionalCheckState::Unsupported
+        | OptionalCheckState::Invalid => "✗",
     }
 }
 
@@ -1304,13 +1375,22 @@ fn parse_payload_limit(value: Option<&str>) -> Result<usize> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bcder::{Integer, Mode, OctetString, Oid, encode::Values};
+    use cryptographic_message_syntax::{
+        Bytes, SignedDataBuilder, SignerBuilder,
+        asn1::rfc3161::{MessageImprint, OID_CONTENT_TYPE_TST_INFO, TstInfo},
+    };
     use flate2::{Compression, write::GzEncoder};
     use proof_layer_core::{
         Actor, ActorRole, EncryptionPolicy, EvidenceContext, LlmInteractionEvidence, Policy,
-        Subject,
+        RFC3161_TIMESTAMP_KIND, Subject, TimestampError, TimestampToken,
     };
     use serde_json::json;
     use std::time::{SystemTime, UNIX_EPOCH};
+    use x509_certificate::{
+        CapturedX509Certificate, DigestAlgorithm, InMemorySigningKeyPair, KeyAlgorithm,
+        X509CertificateBuilder,
+    };
 
     fn sample_legacy_capture() -> CaptureInput {
         CaptureInput {
@@ -1428,6 +1508,84 @@ mod tests {
             parse_created_at(Some("2026-03-02T00:00:00Z")).unwrap(),
         )
         .unwrap()
+    }
+
+    struct StaticTimestampProvider {
+        token: TimestampToken,
+    }
+
+    impl TimestampProvider for StaticTimestampProvider {
+        fn timestamp(&self, _digest: &str) -> Result<TimestampToken, TimestampError> {
+            Ok(self.token.clone())
+        }
+    }
+
+    fn build_test_timestamp_token(digest: &str, provider: Option<&str>) -> TimestampToken {
+        let signed_data_der = build_test_signed_data_der(digest);
+        TimestampToken {
+            kind: RFC3161_TIMESTAMP_KIND.to_string(),
+            provider: provider.map(str::to_string),
+            token_base64: base64ct::Base64::encode_string(&signed_data_der),
+        }
+    }
+
+    fn build_test_signed_data_der(digest: &str) -> Vec<u8> {
+        let (certificate, signing_key) = build_test_certificate();
+        let tst_info_der = build_test_tst_info_der(digest);
+
+        SignedDataBuilder::default()
+            .content_inline(tst_info_der)
+            .content_type(Oid(Bytes::copy_from_slice(
+                OID_CONTENT_TYPE_TST_INFO.as_ref(),
+            )))
+            .certificate(certificate.clone())
+            .signer(SignerBuilder::new(&signing_key, certificate))
+            .build_der()
+            .unwrap()
+    }
+
+    fn build_test_tst_info_der(digest: &str) -> Vec<u8> {
+        let mut imprint_hasher = DigestAlgorithm::Sha256.digester();
+        imprint_hasher.update(digest.as_bytes());
+        let imprint = imprint_hasher.finish();
+
+        let tst_info = TstInfo {
+            version: Integer::from(1),
+            policy: Oid(Bytes::copy_from_slice(&[42, 3, 4])),
+            message_imprint: MessageImprint {
+                hash_algorithm: DigestAlgorithm::Sha256.into(),
+                hashed_message: OctetString::new(Bytes::copy_from_slice(imprint.as_ref())),
+            },
+            serial_number: Integer::from(42),
+            gen_time: chrono::DateTime::parse_from_rfc3339("2026-03-06T12:00:00Z")
+                .unwrap()
+                .with_timezone(&Utc)
+                .into(),
+            accuracy: None,
+            ordering: Some(false),
+            nonce: Some(Integer::from(7)),
+            tsa: None,
+            extensions: None,
+        };
+
+        let mut der = Vec::new();
+        tst_info
+            .encode_ref()
+            .write_encoded(Mode::Der, &mut der)
+            .unwrap();
+        der
+    }
+
+    fn build_test_certificate() -> (CapturedX509Certificate, InMemorySigningKeyPair) {
+        let mut builder = X509CertificateBuilder::default();
+        builder
+            .subject()
+            .append_common_name_utf8_string("proof-layer-test-tsa")
+            .unwrap();
+        builder.subject().append_country_utf8_string("GB").unwrap();
+        builder
+            .create_with_random_keypair(KeyAlgorithm::Ed25519)
+            .unwrap()
     }
 
     #[test]
@@ -1553,12 +1711,37 @@ mod tests {
     }
 
     #[test]
-    fn optional_check_reports_missing_and_unsupported_states() {
-        let missing = evaluate_optional_check("timestamp", "RFC 3161 verification", false, true);
+    fn optional_check_reports_missing_invalid_and_unsupported_states() {
+        let missing = evaluate_timestamp_check(&sample_bundle(), true);
         assert_eq!(missing.state, OptionalCheckState::Missing);
 
-        let unsupported = evaluate_optional_check("timestamp", "RFC 3161 verification", true, true);
+        let mut bundle = sample_bundle();
+        bundle.timestamp = Some(build_test_timestamp_token(
+            "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            Some("test-tsa"),
+        ));
+        let invalid = evaluate_timestamp_check(&bundle, true);
+        assert_eq!(invalid.state, OptionalCheckState::Invalid);
+
+        let unsupported =
+            evaluate_optional_check("transparency receipt", "receipt verification", true, true);
         assert_eq!(unsupported.state, OptionalCheckState::Unsupported);
+    }
+
+    #[test]
+    fn attach_timestamp_to_bundle_sets_verifiable_token() {
+        let mut bundle = sample_bundle();
+        let provider = StaticTimestampProvider {
+            token: build_test_timestamp_token(&bundle.integrity.bundle_root, Some("test-tsa")),
+        };
+
+        let verification = attach_timestamp_to_bundle(&mut bundle, &provider).unwrap();
+        assert_eq!(verification.provider.as_deref(), Some("test-tsa"));
+        assert!(bundle.timestamp.is_some());
+
+        let timestamp_report = evaluate_timestamp_check(&bundle, true);
+        assert_eq!(timestamp_report.state, OptionalCheckState::Valid);
+        assert!(timestamp_report.message.contains("RFC 3161 token valid"));
     }
 
     #[test]

@@ -29,6 +29,11 @@ Completed:
   `PUT /v1/config/transparency`,
   persisted timestamp/transparency provider settings in SQLite,
   and returned those settings from `GET /v1/config`.
+- Added the first real assurance slice:
+  `crates/core/src/timestamp/` with RFC 3161 request/verify support,
+  `proofctl create --timestamp-url`,
+  `proofctl verify --check-timestamp`,
+  and vault `POST /v1/bundles/{id}/timestamp` backed by persisted timestamp config.
 - Added the first pack export slice:
   `POST /v1/packs`,
   `GET /v1/packs/{id}`,
@@ -44,6 +49,7 @@ Completed:
 Still outstanding from `plan.md`:
 
 - JSON schema coverage is now started, but timestamp/transparency and richer export/archive schemas are not implemented.
-- The vault now uses SQLite with legal-hold-aware retention, audit logging, retention/timestamp/transparency configuration, and curated pack export, but PostgreSQL and redacted/Annex-complete pack assembly are not built yet.
+- The vault now uses SQLite with legal-hold-aware retention, audit logging, retention/timestamp/transparency configuration, curated pack export, and RFC 3161 bundle timestamp attachment, but PostgreSQL and redacted/Annex-complete pack assembly are not built yet.
 - Node and Python SDKs are still HTTP-client based; NAPI-RS and PyO3 bindings are not built yet.
-- RFC 3161 timestamping, transparency receipts, and selective disclosure CLI flows remain future phases; the new assurance config endpoints are currently control-plane only.
+- Transparency receipts and selective disclosure CLI flows remain future phases.
+- RFC 3161 verification currently checks CMS signature integrity and message-imprint binding, but TSA certificate-chain / revocation trust validation and eIDAS-qualified trust policy are still outstanding.

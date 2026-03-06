@@ -93,6 +93,15 @@ Signature payload bytes MUST be the UTF-8 bytes of `integrity.bundle_root` exact
 
 Verification MUST compare against the exact same UTF-8 byte sequence.
 
+## Timestamp Semantics
+
+If `timestamp` is present:
+
+- `kind` MUST be `rfc3161`
+- `token_base64` MUST contain DER-encoded CMS `SignedData`
+- the RFC 3161 message imprint is computed over the UTF-8 bytes of `integrity.bundle_root`
+- `timestamp` remains outside the canonical header projection and outside the signed payload so it can be attached after initial bundle signing
+
 ## Field Constraints
 
 ### Common Formats
@@ -147,7 +156,8 @@ Implementations MUST execute, in order:
 4. Recompute artifact digests and compare.
 5. Recompute `bundle_root` and compare.
 6. Verify JWS signature over UTF-8 `bundle_root` bytes using issuer public key.
-7. Report optional checks (timestamp/receipt) as skipped if absent.
+7. If timestamp verification is requested and `timestamp` is present, verify the RFC 3161 token CMS signature and ensure its message imprint matches SHA-256 over UTF-8 `integrity.bundle_root` bytes.
+8. Report optional checks (timestamp/receipt) as skipped if absent or not requested.
 
 Any required check failure MUST produce an invalid result.
 

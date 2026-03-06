@@ -49,6 +49,7 @@ Core defaults:
 - CORS enabled for local web demo interoperability
 - Current query surface: `GET /v1/bundles?system_id=&role=&type=&from=&to=&page=&limit=`
 - Retention operations: `DELETE /v1/bundles/{id}`, `POST /v1/bundles/{id}/legal-hold`, `DELETE /v1/bundles/{id}/legal-hold`, `GET /v1/retention/status`, `POST /v1/retention/scan`
+- Timestamp operation: `POST /v1/bundles/{id}/timestamp`
 - Audit operations: `GET /v1/audit-trail?action=&bundle_id=&pack_id=&page=&limit=`
 - Configuration operations: `GET /v1/config`, `PUT /v1/config/retention`, `PUT /v1/config/timestamp`, `PUT /v1/config/transparency`
 - Pack export operations: `POST /v1/packs`, `GET /v1/packs/{id}`, `GET /v1/packs/{id}/manifest`, `GET /v1/packs/{id}/export`
@@ -93,10 +94,11 @@ Current config behavior:
 
 - `GET /v1/config` returns the active service view for payload limits, signing algorithm/key id, storage backends, retention grace period, retention policies, and persisted timestamp/transparency provider settings.
 - `PUT /v1/config/retention` upserts retention policy rows in SQLite.
-- `PUT /v1/config/timestamp` persists RFC 3161 provider configuration (`enabled`, `provider`, `url`, optional `assurance`) for future timestamp issuance/verification work.
+- `PUT /v1/config/timestamp` persists RFC 3161 provider configuration (`enabled`, `provider`, `url`, optional `assurance`) used by the timestamp attachment endpoint.
 - `PUT /v1/config/transparency` persists transparency provider configuration (`none`, `rekor`, `scitt`) plus URL when applicable.
+- `POST /v1/bundles/{id}/timestamp` loads a stored active bundle, requests an RFC 3161 token over the UTF-8 bytes of `integrity.bundle_root`, stores the token in bundle JSON, and flips `has_timestamp`.
 - When an updated retention policy remains active, the vault recomputes `expires_at` for existing active bundles in that class.
-- Assurance config is control-plane only today; enabling timestamp or transparency in config does not yet attach tokens/receipts to bundles.
+- Transparency config is still control-plane only today; timestamp config is active for RFC 3161 issuance.
 
 ### `packages/sdk-node` and `packages/sdk-python`
 
@@ -117,7 +119,8 @@ Current config behavior:
    - `[header_digest, artefact_digest_1, artefact_digest_2, ...]`
 9. Sign UTF-8 bytes of `bundle_root` using Ed25519 JWS compact serialization.
 10. Persist bundle metadata + indexes in SQLite and artifact bytes on disk.
-11. Return `bundle_id`, `bundle_root`, signature metadata, and timestamp.
+11. Optionally request an RFC 3161 token over UTF-8 `bundle_root` bytes.
+12. Return `bundle_id`, `bundle_root`, signature metadata, and optional timestamp.
 
 ## Deterministic Byte-Level Contracts
 
@@ -177,7 +180,8 @@ It does not claim model replay determinism.
 
 ## Out of Scope for PoC
 
-- RFC 3161 trusted timestamping (stub only)
+- RFC 3161 timestamp request + basic token verification
+- TSA certificate-chain / revocation trust validation
 - SCITT/Sigstore transparency receipts
 - HSM/KMS-backed keys
 - WORM/cloud object lock

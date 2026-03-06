@@ -12,8 +12,9 @@ use ed25519_dalek::SigningKey;
 use flate2::{Compression, read::GzDecoder, write::GzEncoder};
 use proof_layer_core::{
     ArtefactInput, BuildBundleError, CaptureEvent, CaptureInput, EvidenceItem, ProofBundle,
-    build_bundle, canonicalize_value, decode_private_key_pem, decode_public_key_pem,
-    sha256_prefixed, validate_bundle_integrity_fields,
+    Rfc3161HttpTimestampProvider, TimestampToken, TimestampVerification, build_bundle,
+    canonicalize_value, decode_private_key_pem, decode_public_key_pem, sha256_prefixed,
+    timestamp_digest, validate_bundle_integrity_fields, verify_timestamp,
 };
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use sqlx::{
@@ -225,6 +226,15 @@ struct RetentionScanResponse {
 struct DeleteBundleResponse {
     bundle_id: String,
     deleted_at: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct TimestampBundleResponse {
+    bundle_id: String,
+    kind: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    provider: Option<String>,
+    generated_at: String,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -575,6 +585,7 @@ fn build_router(state: AppState, max_payload_bytes: usize) -> Router {
             "/v1/bundles/{bundle_id}/legal-hold",
             post(set_legal_hold).delete(release_legal_hold),
         )
+        .route("/v1/bundles/{bundle_id}/timestamp", post(timestamp_bundle))
         .route("/v1/audit-trail", get(list_audit_trail))
         .route("/v1/config", get(get_config))
         .route("/v1/config/retention", put(update_retention_config))
@@ -1191,6 +1202,69 @@ async fn delete_bundle(
         Json(DeleteBundleResponse {
             bundle_id,
             deleted_at,
+        }),
+    ))
+}
+
+async fn timestamp_bundle(
+    State(state): State<AppState>,
+    Path(bundle_id): Path<String>,
+) -> Result<impl IntoResponse, ApiError> {
+    let mut bundle = load_active_bundle(&state.db, &bundle_id)
+        .await
+        .map_err(ApiError::internal_anyhow)?
+        .ok_or_else(|| ApiError::not_found("bundle not found"))?;
+    if bundle.timestamp.is_some() {
+        return Err(ApiError::conflict("bundle already has a timestamp token"));
+    }
+
+    let config = load_timestamp_config(&state.db)
+        .await
+        .map_err(ApiError::internal_anyhow)?;
+    if !config.enabled {
+        return Err(ApiError::conflict(
+            "timestamping is disabled in vault config",
+        ));
+    }
+
+    let bundle_root = bundle.integrity.bundle_root.clone();
+    let provider = Rfc3161HttpTimestampProvider::with_label(config.url.clone(), config.provider);
+    let token = tokio::task::spawn_blocking(move || timestamp_digest(&bundle_root, &provider))
+        .await
+        .map_err(ApiError::internal_anyhow)?
+        .map_err(ApiError::internal_anyhow)?;
+
+    let verification =
+        apply_timestamp_token_to_bundle(&mut bundle, token).map_err(ApiError::internal_anyhow)?;
+    persist_bundle_timestamp(&state.db, &bundle)
+        .await
+        .map_err(ApiError::internal_anyhow)?;
+    append_audit_log(
+        &state.db,
+        "timestamp_bundle",
+        Some(AUDIT_ACTOR_API),
+        Some(&bundle.bundle_id),
+        None,
+        serde_json::json!({
+            "kind": bundle.timestamp.as_ref().map(|token| token.kind.clone()),
+            "provider": bundle.timestamp.as_ref().and_then(|token| token.provider.clone()),
+            "generated_at": verification.generated_at,
+        }),
+    )
+    .await
+    .map_err(ApiError::internal_anyhow)?;
+
+    let timestamp = bundle
+        .timestamp
+        .as_ref()
+        .expect("timestamp was just applied");
+    Ok((
+        StatusCode::OK,
+        Json(TimestampBundleResponse {
+            bundle_id: bundle.bundle_id,
+            kind: timestamp.kind.clone(),
+            provider: timestamp.provider.clone(),
+            generated_at: verification.generated_at,
         }),
     ))
 }
@@ -2310,6 +2384,19 @@ fn parse_pack_manifest(row: &StoredPackRow) -> Result<PackManifest> {
     Ok(manifest)
 }
 
+fn apply_timestamp_token_to_bundle(
+    bundle: &mut ProofBundle,
+    token: TimestampToken,
+) -> Result<TimestampVerification> {
+    if bundle.timestamp.is_some() {
+        bail!("bundle already has a timestamp token");
+    }
+
+    let verification = verify_timestamp(&token, &bundle.integrity.bundle_root)?;
+    bundle.timestamp = Some(token);
+    Ok(verification)
+}
+
 fn map_audit_log_row(row: StoredAuditLogRow) -> Result<AuditLogEntry> {
     Ok(AuditLogEntry {
         id: row.id,
@@ -2583,6 +2670,23 @@ async fn load_retention_policies(db: &SqlitePool) -> Result<Vec<RetentionPolicyC
             active: row.active,
         })
         .collect())
+}
+
+async fn load_active_bundle(db: &SqlitePool, bundle_id: &str) -> Result<Option<ProofBundle>> {
+    let bundle_json: Option<String> = sqlx::query_scalar(
+        "SELECT bundle_json FROM bundles WHERE bundle_id = ? AND deleted_at IS NULL",
+    )
+    .bind(bundle_id)
+    .fetch_optional(db)
+    .await
+    .with_context(|| format!("failed to load bundle {bundle_id}"))?;
+
+    bundle_json
+        .map(|bundle_json| {
+            serde_json::from_str(&bundle_json)
+                .with_context(|| format!("failed to parse bundle_json for {bundle_id}"))
+        })
+        .transpose()
 }
 
 async fn upsert_retention_policy(db: &SqlitePool, policy: &RetentionPolicyConfig) -> Result<()> {
@@ -2973,6 +3077,22 @@ async fn persist_bundle_metadata(
     tx.commit()
         .await
         .context("failed to commit sqlite transaction")?;
+    Ok(())
+}
+
+async fn persist_bundle_timestamp(db: &SqlitePool, bundle: &ProofBundle) -> Result<()> {
+    let bundle_json = serde_json::to_string(bundle)?;
+    sqlx::query(
+        "UPDATE bundles
+         SET has_timestamp = ?, bundle_json = ?
+         WHERE bundle_id = ?",
+    )
+    .bind(bundle.timestamp.is_some())
+    .bind(bundle_json)
+    .bind(&bundle.bundle_id)
+    .execute(db)
+    .await
+    .with_context(|| format!("failed to update timestamp for bundle {}", bundle.bundle_id))?;
     Ok(())
 }
 
@@ -3409,10 +3529,21 @@ impl IntoResponse for ApiError {
 mod tests {
     use super::*;
     use axum::{body::Body, http::Request};
+    use bcder::{Integer, Mode, OctetString, Oid, encode::Values};
+    use cryptographic_message_syntax::{
+        Bytes, SignedDataBuilder, SignerBuilder,
+        asn1::rfc3161::{MessageImprint, OID_CONTENT_TYPE_TST_INFO, TstInfo},
+    };
     use flate2::{Compression, read::GzDecoder, write::GzEncoder};
-    use proof_layer_core::{encode_public_key_pem, sha256_prefixed};
+    use proof_layer_core::{
+        RFC3161_TIMESTAMP_KIND, TimestampToken, encode_public_key_pem, sha256_prefixed,
+    };
     use std::io::{Read, Write};
     use tower::ServiceExt;
+    use x509_certificate::{
+        CapturedX509Certificate, DigestAlgorithm, InMemorySigningKeyPair, KeyAlgorithm,
+        X509CertificateBuilder,
+    };
 
     fn sample_capture() -> CaptureInput {
         CaptureInput {
@@ -3498,6 +3629,74 @@ mod tests {
             max_payload_bytes,
             retention_grace_period_days: DEFAULT_RETENTION_GRACE_PERIOD_DAYS,
         }
+    }
+
+    fn build_test_timestamp_token(digest: &str, provider: Option<&str>) -> TimestampToken {
+        let signed_data_der = build_test_signed_data_der(digest);
+        TimestampToken {
+            kind: RFC3161_TIMESTAMP_KIND.to_string(),
+            provider: provider.map(str::to_string),
+            token_base64: Base64::encode_string(&signed_data_der),
+        }
+    }
+
+    fn build_test_signed_data_der(digest: &str) -> Vec<u8> {
+        let (certificate, signing_key) = build_test_certificate();
+        let tst_info_der = build_test_tst_info_der(digest);
+
+        SignedDataBuilder::default()
+            .content_inline(tst_info_der)
+            .content_type(Oid(Bytes::copy_from_slice(
+                OID_CONTENT_TYPE_TST_INFO.as_ref(),
+            )))
+            .certificate(certificate.clone())
+            .signer(SignerBuilder::new(&signing_key, certificate))
+            .build_der()
+            .unwrap()
+    }
+
+    fn build_test_tst_info_der(digest: &str) -> Vec<u8> {
+        let mut imprint_hasher = DigestAlgorithm::Sha256.digester();
+        imprint_hasher.update(digest.as_bytes());
+        let imprint = imprint_hasher.finish();
+
+        let tst_info = TstInfo {
+            version: Integer::from(1),
+            policy: Oid(Bytes::copy_from_slice(&[42, 3, 4])),
+            message_imprint: MessageImprint {
+                hash_algorithm: DigestAlgorithm::Sha256.into(),
+                hashed_message: OctetString::new(Bytes::copy_from_slice(imprint.as_ref())),
+            },
+            serial_number: Integer::from(42),
+            gen_time: chrono::DateTime::parse_from_rfc3339("2026-03-06T12:00:00Z")
+                .unwrap()
+                .with_timezone(&Utc)
+                .into(),
+            accuracy: None,
+            ordering: Some(false),
+            nonce: Some(Integer::from(7)),
+            tsa: None,
+            extensions: None,
+        };
+
+        let mut der = Vec::new();
+        tst_info
+            .encode_ref()
+            .write_encoded(Mode::Der, &mut der)
+            .unwrap();
+        der
+    }
+
+    fn build_test_certificate() -> (CapturedX509Certificate, InMemorySigningKeyPair) {
+        let mut builder = X509CertificateBuilder::default();
+        builder
+            .subject()
+            .append_common_name_utf8_string("proof-layer-test-tsa")
+            .unwrap();
+        builder.subject().append_country_utf8_string("GB").unwrap();
+        builder
+            .create_with_random_keypair(KeyAlgorithm::Ed25519)
+            .unwrap()
     }
 
     fn build_package_bytes(
@@ -4405,6 +4604,77 @@ mod tests {
         assert_eq!(config.transparency.provider, DEFAULT_TRANSPARENCY_PROVIDER);
         assert_eq!(config.transparency.url, None);
         assert!(config.audit.enabled);
+    }
+
+    #[tokio::test]
+    async fn timestamp_bundle_endpoint_requires_enabled_timestamp_config() {
+        let state = test_state(DEFAULT_MAX_PAYLOAD_BYTES).await;
+        let app = build_router(state, DEFAULT_MAX_PAYLOAD_BYTES);
+
+        let created = create_bundle_response(
+            &app,
+            &CreateBundleRequest {
+                capture: SealableCaptureInput::Legacy(sample_capture()),
+                artefacts: vec![InlineArtefact {
+                    name: "prompt.json".to_string(),
+                    content_type: "application/json".to_string(),
+                    data_base64: Base64::encode_string(br#"{"prompt":"timestamp"}"#),
+                }],
+            },
+        )
+        .await;
+
+        let request = Request::builder()
+            .method("POST")
+            .uri(format!("/v1/bundles/{}/timestamp", created.bundle_id))
+            .body(Body::empty())
+            .unwrap();
+        let response = app.oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::CONFLICT);
+    }
+
+    #[tokio::test]
+    async fn apply_timestamp_token_to_bundle_persists_bundle_timestamp() {
+        let state = test_state(DEFAULT_MAX_PAYLOAD_BYTES).await;
+        let db = state.db.clone();
+        let app = build_router(state, DEFAULT_MAX_PAYLOAD_BYTES);
+
+        let created = create_bundle_response(
+            &app,
+            &CreateBundleRequest {
+                capture: SealableCaptureInput::Legacy(sample_capture()),
+                artefacts: vec![InlineArtefact {
+                    name: "prompt.json".to_string(),
+                    content_type: "application/json".to_string(),
+                    data_base64: Base64::encode_string(br#"{"prompt":"timestamp"}"#),
+                }],
+            },
+        )
+        .await;
+
+        let mut bundle = load_active_bundle(&db, &created.bundle_id)
+            .await
+            .unwrap()
+            .unwrap();
+        let token = build_test_timestamp_token(&bundle.integrity.bundle_root, Some("test-tsa"));
+
+        let verification = apply_timestamp_token_to_bundle(&mut bundle, token).unwrap();
+        assert_eq!(verification.provider.as_deref(), Some("test-tsa"));
+        persist_bundle_timestamp(&db, &bundle).await.unwrap();
+
+        let stored = load_active_bundle(&db, &created.bundle_id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(stored.timestamp.is_some());
+
+        let has_timestamp: bool =
+            sqlx::query_scalar("SELECT has_timestamp FROM bundles WHERE bundle_id = ?")
+                .bind(&created.bundle_id)
+                .fetch_one(&db)
+                .await
+                .unwrap();
+        assert!(has_timestamp);
     }
 
     #[tokio::test]

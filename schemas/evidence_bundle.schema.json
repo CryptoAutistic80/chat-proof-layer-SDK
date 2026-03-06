@@ -144,15 +144,15 @@
       ],
       "properties": {
         "kind": {
-          "type": "string",
-          "minLength": 1
+          "const": "rfc3161"
         },
         "provider": {
           "type": "string"
         },
         "token_base64": {
           "type": "string",
-          "minLength": 1
+          "minLength": 1,
+          "description": "Base64 of DER-encoded RFC 3161 CMS SignedData."
         }
       }
     },

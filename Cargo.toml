@@ -15,8 +15,10 @@ license = "MIT"
 anyhow = "1.0.100"
 axum = "0.8.8"
 base64ct = { version = "1.8.0", features = ["alloc"] }
+bcder = "0.7.6"
 chrono = { version = "0.4.42", features = ["clock", "serde"] }
 clap = { version = "4.5.60", features = ["derive"] }
+cryptographic-message-syntax = "0.28.0"
 ed25519-dalek = { version = "2.2.0", features = ["rand_core"] }
 flate2 = "1.1.9"
 hex = "0.4.3"
@@ -33,3 +35,4 @@ tower-http = { version = "0.6.6", features = ["cors"] }
 tracing = "0.1.41"
 tracing-subscriber = { version = "0.3.20", features = ["env-filter", "fmt"] }
 ulid = { version = "1.2.1", features = ["serde"] }
+x509-certificate = "0.25.0"

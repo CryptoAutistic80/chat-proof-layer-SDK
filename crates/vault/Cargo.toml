@@ -26,4 +26,7 @@ proof-layer-core = { path = "../core" }
 ulid.workspace = true
 
 [dev-dependencies]
+bcder.workspace = true
+cryptographic-message-syntax.workspace = true
 tower = { version = "0.5.3", features = ["util"] }
+x509-certificate.workspace = true

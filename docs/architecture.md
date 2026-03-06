@@ -54,7 +54,7 @@ Core defaults:
 Current SQLite tables:
 
 - `bundles`: top-level bundle metadata plus serialized bundle JSON and canonical header bytes
-- `evidence_items`: one row per evidence item for type-based filtering
+- `evidence_items`: one row per evidence item for type-based filtering plus derived `obligation_ref` tags
 - `artefacts`: stored artefact metadata and blob paths
 - `retention_policies`: seeded retention schedules used to compute `expires_at`
 - `packs`: pack manifests and export paths
@@ -66,6 +66,12 @@ Current SQLite tables:
 - `verify`: offline integrity and signature verification
 - `inspect`: human/JSON diagnostics
 - `pack`: request a vault export pack and write the archive locally
+
+Current pack export behavior:
+
+- Vault pack assembly uses a heuristic curation profile (`pack-rules-v1`).
+- Selection currently keys off actor role, evidence item type, retention class, and derived obligation references.
+- Exported pack archives still contain full `bundle.pkg` members; redaction/selective disclosure is a later phase.
 
 ### `packages/sdk-node` and `packages/sdk-python`
 

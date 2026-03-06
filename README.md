@@ -235,8 +235,9 @@ npm run dev
 - `proofctl verify` now exposes `--check-timestamp` and `--check-receipt`; these fail explicitly when requested because RFC 3161 and receipt verification are not implemented yet.
 - `proofctl inspect` now supports `--show-items` and `--show-merkle`.
 - `proofctl pack` now requests pack assembly from the vault and downloads the resulting `pl-evidence-pack-v1` archive.
-- The vault now persists metadata in SQLite, computes bundle expiry from seeded retention policies, exposes retention scan/status endpoints, and indexes evidence items for `/v1/bundles` filtering.
-- Pack assembly is now available through `/v1/packs`; the current slice exports matching bundles as embedded `bundle.pkg` files plus a manifest, but does not yet apply Annex-specific curation/redaction rules.
+- The vault now persists metadata in SQLite, computes bundle expiry from seeded retention policies, derives per-item `obligation_ref` tags, exposes retention scan/status endpoints, and indexes evidence items for `/v1/bundles` filtering.
+- Pack assembly is now available through `/v1/packs`; packs apply an initial heuristic curation profile (`pack-rules-v1`) based on actor role, evidence item types, retention class, and derived obligation refs, then export matching bundles as embedded `bundle.pkg` files plus a manifest.
+- Pack redaction/selective disclosure is still not implemented; current exports remain full bundle packages.
 - Canonicalization and signing semantics follow `docs/architecture.md`.
 - Verification is designed to work offline with `bundle.pkg` + public key.
 - JSON Schemas: `schemas/evidence_bundle.schema.json`, `schemas/capture_event.schema.json`, `schemas/evidence_item.schema.json`, `schemas/evidence_pack.schema.json`.

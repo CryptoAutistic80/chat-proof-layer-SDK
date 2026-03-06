@@ -8,6 +8,7 @@
   "required": [
     "pack_id",
     "pack_type",
+    "curation_profile",
     "generated_at",
     "bundle_ids",
     "bundles"
@@ -20,6 +21,10 @@
     "pack_type": {
       "type": "string",
       "minLength": 1
+    },
+    "curation_profile": {
+      "type": "string",
+      "const": "pack-rules-v1"
     },
     "generated_at": {
       "type": "string",
@@ -56,7 +61,8 @@
           "created_at",
           "actor_role",
           "retention_class",
-          "item_types"
+          "item_types",
+          "matched_rules"
         ],
         "properties": {
           "bundle_id": {
@@ -88,6 +94,21 @@
             "minLength": 1
           },
           "item_types": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "obligation_refs": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "matched_rules": {
             "type": "array",
             "minItems": 1,
             "items": {

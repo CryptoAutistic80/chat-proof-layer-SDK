@@ -20,11 +20,15 @@ Completed:
   `GET /v1/packs/{id}/manifest`,
   `GET /v1/packs/{id}/export`,
   plus `proofctl pack --type/--vault-url/--system-id/--from/--to --out`.
+- Added the next pack hardening slice:
+  derived `obligation_ref` tagging for indexed evidence items,
+  pack-type curation rules (`pack-rules-v1`) based on actor role/item type/retention class,
+  and manifest-level match reasons for why each bundle was included.
 - Restored a clean Rust verification loop: `cargo test --workspace` and `cargo clippy --workspace --all-targets -- -D warnings` both pass.
 
 Still outstanding from `plan.md`:
 
 - JSON schema coverage is now started, but timestamp/transparency and richer export/archive schemas are not implemented.
-- The vault now uses SQLite with basic retention and pack export, but PostgreSQL, legal hold, hard-delete/grace-period flow, and Annex-specific pack curation/redaction are not built yet.
+- The vault now uses SQLite with basic retention and curated pack export, but PostgreSQL, legal hold, hard-delete/grace-period flow, and redacted/Annex-complete pack assembly are not built yet.
 - Node and Python SDKs are still HTTP-client based; NAPI-RS and PyO3 bindings are not built yet.
 - RFC 3161 timestamping, transparency receipts, and selective disclosure CLI flows remain future phases.

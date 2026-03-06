@@ -36,9 +36,11 @@ use ulid::Ulid;
 
 const DEFAULT_ADDR: &str = "0.0.0.0:8080";
 const DEFAULT_MAX_PAYLOAD_BYTES: usize = 10 * 1024 * 1024;
+const DEFAULT_RETENTION_GRACE_PERIOD_DAYS: i64 = 30;
 const PACKAGE_FORMAT: &str = "pl-bundle-pkg-v1";
 const PACK_EXPORT_FORMAT: &str = "pl-evidence-pack-v1";
 const PACK_EXPORT_FILE_NAME: &str = "evidence_pack.pkg";
+const PACK_CURATION_PROFILE: &str = "pack-rules-v1";
 
 #[derive(Clone)]
 struct AppState {
@@ -47,6 +49,7 @@ struct AppState {
     signing_key: Arc<SigningKey>,
     signing_kid: String,
     max_payload_bytes: usize,
+    retention_grace_period_days: i64,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -165,6 +168,7 @@ struct BundleSummary {
     signature_alg: String,
     retention_class: String,
     expires_at: Option<String>,
+    has_legal_hold: bool,
     has_timestamp: bool,
     has_receipt: bool,
 }
@@ -172,6 +176,7 @@ struct BundleSummary {
 #[derive(Debug, Serialize, Deserialize)]
 struct RetentionStatusResponse {
     scanned_at: String,
+    grace_period_days: i64,
     policies: Vec<RetentionStatusItem>,
 }
 
@@ -185,14 +190,44 @@ struct RetentionStatusItem {
     total_bundles: i64,
     active_bundles: i64,
     deleted_bundles: i64,
+    held_bundles: i64,
     expired_active_bundles: i64,
+    hard_delete_ready_bundles: i64,
     next_expiry: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 struct RetentionScanResponse {
     scanned_at: String,
+    grace_period_days: i64,
     soft_deleted: u64,
+    hard_deleted: u64,
+    held_skipped: u64,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct DeleteBundleResponse {
+    bundle_id: String,
+    deleted_at: String,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct LegalHoldRequest {
+    reason: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    until: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct LegalHoldResponse {
+    bundle_id: String,
+    active: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    reason: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    placed_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    until: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -225,6 +260,7 @@ struct PackSummaryResponse {
 struct PackManifest {
     pack_id: String,
     pack_type: String,
+    curation_profile: String,
     generated_at: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     system_id: Option<String>,
@@ -247,6 +283,9 @@ struct PackBundleEntry {
     model_id: Option<String>,
     retention_class: String,
     item_types: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    obligation_refs: Vec<String>,
+    matched_rules: Vec<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -292,6 +331,22 @@ struct PackArtefactBytes {
     bytes: Vec<u8>,
 }
 
+struct PackProfile {
+    pack_type: &'static str,
+    allowed_roles: &'static [&'static str],
+    item_types: &'static [&'static str],
+    retention_classes: &'static [&'static str],
+    obligation_refs: &'static [&'static str],
+}
+
+struct CuratedPackBundle {
+    row: PackSourceBundleRow,
+    bundle: ProofBundle,
+    item_types: Vec<String>,
+    obligation_refs: Vec<String>,
+    matched_rules: Vec<String>,
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     tracing_subscriber::fmt()
@@ -320,6 +375,7 @@ async fn main() -> Result<()> {
     initialize_sqlite_schema(&db).await?;
     seed_default_retention_policies(&db).await?;
     backfill_bundle_expiries(&db).await?;
+    backfill_item_obligation_refs(&db).await?;
 
     let signing_key = load_signing_key()?;
     let signing_kid = env::var("PROOF_SIGNING_KEY_ID").unwrap_or_else(|_| "kid-dev-01".to_string());
@@ -623,44 +679,49 @@ async fn create_pack(
     Json(request): Json<CreatePackRequest>,
 ) -> Result<impl IntoResponse, ApiError> {
     let request = normalize_create_pack_request(request).map_err(ApiError::bad_request_anyhow)?;
+    let profile = pack_profile(&request.pack_type).map_err(ApiError::bad_request_anyhow)?;
     let rows = query_pack_source_bundles(&state.db, &request)
         .await
         .map_err(ApiError::internal_anyhow)?;
+    let curated_rows = curate_pack_bundles(&profile, rows).map_err(ApiError::internal_anyhow)?;
 
-    if rows.is_empty() {
+    if curated_rows.is_empty() {
         return Err(ApiError::bad_request(
-            "pack query matched no active bundles",
+            "pack query matched no bundles after curation rules",
         ));
     }
 
     let pack_id = generate_bundle_id();
     let created_at = Utc::now().to_rfc3339();
-    let mut bundle_ids = Vec::with_capacity(rows.len());
-    let mut bundle_entries = Vec::with_capacity(rows.len());
-    let mut files = Vec::with_capacity(rows.len());
+    let mut bundle_ids = Vec::with_capacity(curated_rows.len());
+    let mut bundle_entries = Vec::with_capacity(curated_rows.len());
+    let mut files = Vec::with_capacity(curated_rows.len());
 
-    for row in rows {
-        let bundle: ProofBundle =
-            serde_json::from_str(&row.bundle_json).map_err(ApiError::internal_anyhow)?;
-        let artefacts = load_pack_artefacts(&state.db, &bundle.bundle_id)
+    for curated in curated_rows {
+        let artefacts = load_pack_artefacts(&state.db, &curated.bundle.bundle_id)
             .await
             .map_err(ApiError::internal_anyhow)?;
-        let package_bytes =
-            build_bundle_package_bytes(&bundle, row.bundle_json.as_bytes(), &artefacts)
-                .map_err(ApiError::internal_anyhow)?;
+        let package_bytes = build_bundle_package_bytes(
+            &curated.bundle,
+            curated.row.bundle_json.as_bytes(),
+            &artefacts,
+        )
+        .map_err(ApiError::internal_anyhow)?;
 
-        bundle_ids.push(row.bundle_id.clone());
+        bundle_ids.push(curated.row.bundle_id.clone());
         bundle_entries.push(PackBundleEntry {
-            bundle_id: row.bundle_id.clone(),
-            created_at: row.created_at,
-            actor_role: row.actor_role,
-            system_id: row.system_id,
-            model_id: row.model_id,
-            retention_class: row.retention_class,
-            item_types: bundle_item_types(&bundle),
+            bundle_id: curated.row.bundle_id.clone(),
+            created_at: curated.row.created_at,
+            actor_role: curated.row.actor_role,
+            system_id: curated.row.system_id,
+            model_id: curated.row.model_id,
+            retention_class: curated.row.retention_class,
+            item_types: curated.item_types,
+            obligation_refs: curated.obligation_refs,
+            matched_rules: curated.matched_rules,
         });
         files.push(PackagedFile {
-            name: format!("bundles/{}.pkg", row.bundle_id),
+            name: format!("bundles/{}.pkg", curated.row.bundle_id),
             data_base64: Base64::encode_string(&package_bytes),
         });
     }
@@ -668,6 +729,7 @@ async fn create_pack(
     let manifest = PackManifest {
         pack_id: pack_id.clone(),
         pack_type: request.pack_type.clone(),
+        curation_profile: PACK_CURATION_PROFILE.to_string(),
         generated_at: created_at.clone(),
         system_id: request.system_id.clone(),
         from: request.from.clone(),
@@ -1092,6 +1154,168 @@ fn pack_summary(manifest: &PackManifest) -> PackSummaryResponse {
     }
 }
 
+fn pack_profile(pack_type: &str) -> Result<PackProfile> {
+    match pack_type {
+        "annex_iv" => Ok(PackProfile {
+            pack_type: "annex_iv",
+            allowed_roles: &[],
+            item_types: &[
+                "technical_doc",
+                "risk_assessment",
+                "data_governance",
+                "human_oversight",
+            ],
+            retention_classes: &["technical_doc", "risk_mgmt"],
+            obligation_refs: &["art11_annex_iv", "art9", "art10", "art14"],
+        }),
+        "annex_xi" => Ok(PackProfile {
+            pack_type: "annex_xi",
+            allowed_roles: &["provider"],
+            item_types: &[
+                "llm_interaction",
+                "retrieval",
+                "policy_decision",
+                "technical_doc",
+                "risk_assessment",
+            ],
+            retention_classes: &["technical_doc", "risk_mgmt"],
+            obligation_refs: &["art11_annex_iv", "art9", "art12_19_26"],
+        }),
+        "annex_xii" => Ok(PackProfile {
+            pack_type: "annex_xii",
+            allowed_roles: &["provider", "integrator"],
+            item_types: &[
+                "llm_interaction",
+                "human_oversight",
+                "policy_decision",
+                "technical_doc",
+            ],
+            retention_classes: &["technical_doc"],
+            obligation_refs: &["art11_annex_iv", "art14"],
+        }),
+        "runtime_logs" => Ok(PackProfile {
+            pack_type: "runtime_logs",
+            allowed_roles: &[],
+            item_types: &[
+                "llm_interaction",
+                "tool_call",
+                "retrieval",
+                "human_oversight",
+                "policy_decision",
+            ],
+            retention_classes: &["runtime_logs"],
+            obligation_refs: &["art12_19_26"],
+        }),
+        "risk_mgmt" => Ok(PackProfile {
+            pack_type: "risk_mgmt",
+            allowed_roles: &[],
+            item_types: &["risk_assessment", "policy_decision", "human_oversight"],
+            retention_classes: &["risk_mgmt"],
+            obligation_refs: &["art9"],
+        }),
+        "ai_literacy" => Ok(PackProfile {
+            pack_type: "ai_literacy",
+            allowed_roles: &[],
+            item_types: &[],
+            retention_classes: &["ai_literacy"],
+            obligation_refs: &["art4"],
+        }),
+        "systemic_risk" => Ok(PackProfile {
+            pack_type: "systemic_risk",
+            allowed_roles: &["provider"],
+            item_types: &[
+                "risk_assessment",
+                "llm_interaction",
+                "technical_doc",
+                "policy_decision",
+            ],
+            retention_classes: &["risk_mgmt", "technical_doc"],
+            obligation_refs: &["art9", "art11_annex_iv"],
+        }),
+        "incident_response" => Ok(PackProfile {
+            pack_type: "incident_response",
+            allowed_roles: &[],
+            item_types: &[
+                "risk_assessment",
+                "human_oversight",
+                "policy_decision",
+                "technical_doc",
+            ],
+            retention_classes: &["risk_mgmt", "technical_doc"],
+            obligation_refs: &["art9", "art11_annex_iv", "art14"],
+        }),
+        _ => bail!("unsupported pack_type {pack_type}"),
+    }
+}
+
+fn curate_pack_bundles(
+    profile: &PackProfile,
+    rows: Vec<PackSourceBundleRow>,
+) -> Result<Vec<CuratedPackBundle>> {
+    let mut curated = Vec::new();
+
+    for row in rows {
+        let bundle: ProofBundle =
+            serde_json::from_str(&row.bundle_json).context("failed to parse stored bundle JSON")?;
+        let item_types = bundle_item_types(&bundle);
+        let obligation_refs = bundle_obligation_refs(&bundle);
+        let bundle_role = actor_role_name(&bundle);
+
+        if !profile.allowed_roles.is_empty() && !profile.allowed_roles.contains(&bundle_role) {
+            continue;
+        }
+
+        let matched_item_types = item_types
+            .iter()
+            .filter(|item_type| profile.item_types.contains(&item_type.as_str()))
+            .cloned()
+            .collect::<Vec<_>>();
+        let matched_obligation_refs = obligation_refs
+            .iter()
+            .filter(|obligation_ref| profile.obligation_refs.contains(&obligation_ref.as_str()))
+            .cloned()
+            .collect::<Vec<_>>();
+        let retention_class = bundle
+            .policy
+            .retention_class
+            .clone()
+            .unwrap_or_else(|| "unspecified".to_string());
+        let matched_retention = profile
+            .retention_classes
+            .contains(&retention_class.as_str());
+
+        if matched_item_types.is_empty() && matched_obligation_refs.is_empty() && !matched_retention
+        {
+            continue;
+        }
+
+        let mut matched_rules = Vec::new();
+        matched_rules.push(format!("pack_type:{}", profile.pack_type));
+        if !profile.allowed_roles.is_empty() {
+            matched_rules.push(format!("actor_role:{bundle_role}"));
+        }
+        for item_type in matched_item_types {
+            matched_rules.push(format!("item_type:{item_type}"));
+        }
+        for obligation_ref in matched_obligation_refs {
+            matched_rules.push(format!("obligation_ref:{obligation_ref}"));
+        }
+        if matched_retention {
+            matched_rules.push(format!("retention_class:{retention_class}"));
+        }
+
+        curated.push(CuratedPackBundle {
+            row,
+            bundle,
+            item_types,
+            obligation_refs,
+            matched_rules,
+        });
+    }
+
+    Ok(curated)
+}
+
 async fn query_pack_source_bundles(
     db: &SqlitePool,
     request: &CreatePackRequest,
@@ -1217,6 +1441,37 @@ fn gzip_json_bytes<T: Serialize>(value: &T) -> Result<Vec<u8>> {
     encoder.finish().context("failed to finalize gzip archive")
 }
 
+fn bundle_obligation_refs(bundle: &ProofBundle) -> Vec<String> {
+    let mut refs = BTreeSet::new();
+    for item in &bundle.items {
+        if let Some(obligation_ref) = evidence_item_obligation_ref(bundle, item) {
+            refs.insert(obligation_ref.to_string());
+        }
+    }
+    refs.into_iter().collect()
+}
+
+fn evidence_item_obligation_ref(bundle: &ProofBundle, item: &EvidenceItem) -> Option<&'static str> {
+    match item {
+        EvidenceItem::TechnicalDoc(_) => Some("art11_annex_iv"),
+        EvidenceItem::RiskAssessment(_) => Some("art9"),
+        EvidenceItem::DataGovernance(_) => Some("art10"),
+        EvidenceItem::HumanOversight(_) => Some("art14"),
+        EvidenceItem::LlmInteraction(_)
+        | EvidenceItem::ToolCall(_)
+        | EvidenceItem::Retrieval(_) => match bundle.policy.retention_class.as_deref() {
+            Some("runtime_logs") => Some("art12_19_26"),
+            _ => None,
+        },
+        EvidenceItem::PolicyDecision(_) => match bundle.policy.retention_class.as_deref() {
+            Some("risk_mgmt") => Some("art9"),
+            Some("runtime_logs") => Some("art12_19_26"),
+            Some("ai_literacy") => Some("art4"),
+            _ => None,
+        },
+    }
+}
+
 fn bundle_item_types(bundle: &ProofBundle) -> Vec<String> {
     let mut types = BTreeSet::new();
     for item in &bundle.items {
@@ -1315,6 +1570,12 @@ fn parse_pack_manifest(row: &StoredPackRow) -> Result<PackManifest> {
     }
     if manifest.pack_type != row.pack_type {
         bail!("pack manifest type mismatch for {}", row.pack_id);
+    }
+    if manifest.curation_profile != PACK_CURATION_PROFILE {
+        bail!(
+            "pack manifest curation profile mismatch for {}",
+            row.pack_id
+        );
     }
     if manifest.generated_at != row.created_at {
         bail!("pack manifest created_at mismatch for {}", row.pack_id);
@@ -1446,6 +1707,7 @@ async fn persist_bundle_metadata(
         let item_value = serde_json::to_value(item)?;
         let item_commitment = sha256_prefixed(&canonicalize_value(&item_value)?);
         let metadata_json = serde_json::to_string(&item_value)?;
+        let obligation_ref = evidence_item_obligation_ref(bundle, item);
 
         sqlx::query(
             "INSERT INTO evidence_items (
@@ -1455,11 +1717,12 @@ async fn persist_bundle_metadata(
                 obligation_ref,
                 item_commitment,
                 metadata_json
-            ) VALUES (?, ?, ?, NULL, ?, ?)",
+            ) VALUES (?, ?, ?, ?, ?, ?)",
         )
         .bind(&bundle.bundle_id)
         .bind(index as i64)
         .bind(evidence_item_type(item))
+        .bind(obligation_ref)
         .bind(item_commitment)
         .bind(metadata_json)
         .execute(&mut *tx)
@@ -1669,6 +1932,7 @@ async fn initialize_sqlite_schema(db: &SqlitePool) -> Result<()> {
             metadata_json TEXT NOT NULL
         )",
         "CREATE INDEX IF NOT EXISTS idx_items_type ON evidence_items(item_type, bundle_id)",
+        "CREATE INDEX IF NOT EXISTS idx_items_obligation ON evidence_items(obligation_ref, bundle_id)",
         "CREATE TABLE IF NOT EXISTS artefacts (
             bundle_id TEXT NOT NULL REFERENCES bundles(bundle_id) ON DELETE CASCADE,
             name TEXT NOT NULL,
@@ -1800,6 +2064,53 @@ async fn backfill_bundle_expiries(db: &SqlitePool) -> Result<()> {
     Ok(())
 }
 
+async fn backfill_item_obligation_refs(db: &SqlitePool) -> Result<()> {
+    let rows = sqlx::query(
+        "SELECT DISTINCT b.bundle_id, b.bundle_json
+         FROM bundles b
+         JOIN evidence_items i ON i.bundle_id = b.bundle_id
+         WHERE i.obligation_ref IS NULL",
+    )
+    .fetch_all(db)
+    .await
+    .context("failed to fetch bundles missing obligation_ref values")?;
+
+    for row in rows {
+        let bundle_id: String = row.try_get("bundle_id")?;
+        let bundle_json: String = row.try_get("bundle_json")?;
+        let bundle: ProofBundle = serde_json::from_str(&bundle_json)
+            .with_context(|| format!("failed to parse bundle_json for {bundle_id}"))?;
+
+        for (index, item) in bundle.items.iter().enumerate() {
+            let obligation_ref = evidence_item_obligation_ref(&bundle, item);
+            if obligation_ref.is_none() {
+                continue;
+            }
+
+            sqlx::query(
+                "UPDATE evidence_items
+                 SET obligation_ref = ?
+                 WHERE bundle_id = ?
+                   AND item_index = ?
+                   AND obligation_ref IS NULL",
+            )
+            .bind(obligation_ref)
+            .bind(&bundle_id)
+            .bind(index as i64)
+            .execute(db)
+            .await
+            .with_context(|| {
+                format!(
+                    "failed to backfill obligation_ref for bundle {} item {}",
+                    bundle_id, index
+                )
+            })?;
+        }
+    }
+
+    Ok(())
+}
+
 #[derive(Debug)]
 struct ApiError {
     status: StatusCode,
@@ -1904,6 +2215,19 @@ mod tests {
         event
     }
 
+    fn sample_event_with_profile(
+        system_id: &str,
+        role: proof_layer_core::ActorRole,
+        items: Vec<EvidenceItem>,
+        retention_class: Option<&str>,
+    ) -> CaptureEvent {
+        let mut event = sample_event_with_system(system_id);
+        event.actor.role = role;
+        event.items = items;
+        event.policy.retention_class = retention_class.map(str::to_string);
+        event
+    }
+
     async fn test_state(max_payload_bytes: usize) -> AppState {
         let storage_dir = std::env::temp_dir().join(format!(
             "proof-service-test-storage-{}",
@@ -1915,6 +2239,7 @@ mod tests {
         initialize_sqlite_schema(&db).await.unwrap();
         seed_default_retention_policies(&db).await.unwrap();
         backfill_bundle_expiries(&db).await.unwrap();
+        backfill_item_obligation_refs(&db).await.unwrap();
         let signing_key = SigningKey::from_bytes(&rand::random::<[u8; 32]>());
         AppState {
             db,
@@ -1990,6 +2315,24 @@ mod tests {
         let mut json = Vec::new();
         decoder.read_to_end(&mut json).unwrap();
         serde_json::from_slice(&json).unwrap()
+    }
+
+    async fn create_bundle_response(
+        app: &Router,
+        payload: &CreateBundleRequest,
+    ) -> CreateBundleResponse {
+        let request = Request::builder()
+            .method("POST")
+            .uri("/v1/bundles")
+            .header("content-type", "application/json")
+            .body(Body::from(serde_json::to_vec(payload).unwrap()))
+            .unwrap();
+        let response = app.clone().oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::CREATED);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        serde_json::from_slice(&body).unwrap()
     }
 
     #[test]
@@ -2478,30 +2821,101 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn create_pack_filters_and_exports_verifiable_bundle_packages() {
+    async fn create_pack_applies_runtime_log_curation_and_exports_verifiable_bundle_packages() {
         let state = test_state(DEFAULT_MAX_PAYLOAD_BYTES).await;
+        let db = state.db.clone();
         let public_key_pem = encode_public_key_pem(&state.signing_key.verifying_key());
         let app = build_router(state, DEFAULT_MAX_PAYLOAD_BYTES);
 
-        for system_id in ["system-a", "system-b"] {
-            let create_payload = CreateBundleRequest {
-                capture: SealableCaptureInput::V10(sample_event_with_system(system_id)),
+        let llm_items = sample_event_with_system("system-a").items;
+        let llm_bundle = create_bundle_response(
+            &app,
+            &CreateBundleRequest {
+                capture: SealableCaptureInput::V10(sample_event_with_profile(
+                    "system-a",
+                    proof_layer_core::ActorRole::Provider,
+                    llm_items,
+                    Some("runtime_logs"),
+                )),
                 artefacts: vec![InlineArtefact {
                     name: "prompt.json".to_string(),
                     content_type: "application/json".to_string(),
                     data_base64: Base64::encode_string(br#"{"prompt":"hello"}"#),
                 }],
-            };
+            },
+        )
+        .await;
 
-            let create_req = Request::builder()
-                .method("POST")
-                .uri("/v1/bundles")
-                .header("content-type", "application/json")
-                .body(Body::from(serde_json::to_vec(&create_payload).unwrap()))
-                .unwrap();
-            let create_res = app.clone().oneshot(create_req).await.unwrap();
-            assert_eq!(create_res.status(), StatusCode::CREATED);
-        }
+        create_bundle_response(
+            &app,
+            &CreateBundleRequest {
+                capture: SealableCaptureInput::V10(sample_event_with_profile(
+                    "system-a",
+                    proof_layer_core::ActorRole::Provider,
+                    vec![EvidenceItem::TechnicalDoc(
+                        proof_layer_core::schema::TechnicalDocEvidence {
+                            document_ref: "doc-1".to_string(),
+                            section: Some("accuracy".to_string()),
+                            commitment: Some(
+                                "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+                                    .to_string(),
+                            ),
+                        },
+                    )],
+                    Some("technical_doc"),
+                )),
+                artefacts: vec![InlineArtefact {
+                    name: "doc.json".to_string(),
+                    content_type: "application/json".to_string(),
+                    data_base64: Base64::encode_string(br#"{"doc":"annex iv"}"#),
+                }],
+            },
+        )
+        .await;
+
+        create_bundle_response(
+            &app,
+            &CreateBundleRequest {
+                capture: SealableCaptureInput::V10(sample_event_with_profile(
+                    "system-a",
+                    proof_layer_core::ActorRole::Deployer,
+                    vec![EvidenceItem::RiskAssessment(
+                        proof_layer_core::schema::RiskAssessmentEvidence {
+                            risk_id: "risk-1".to_string(),
+                            severity: "high".to_string(),
+                            status: "open".to_string(),
+                            summary: Some("runtime incident".to_string()),
+                            metadata: serde_json::json!({"source":"monitoring"}),
+                        },
+                    )],
+                    Some("risk_mgmt"),
+                )),
+                artefacts: vec![InlineArtefact {
+                    name: "risk.json".to_string(),
+                    content_type: "application/json".to_string(),
+                    data_base64: Base64::encode_string(br#"{"risk":"open"}"#),
+                }],
+            },
+        )
+        .await;
+
+        create_bundle_response(
+            &app,
+            &CreateBundleRequest {
+                capture: SealableCaptureInput::V10(sample_event_with_profile(
+                    "system-b",
+                    proof_layer_core::ActorRole::Provider,
+                    sample_event_with_system("system-b").items,
+                    Some("runtime_logs"),
+                )),
+                artefacts: vec![InlineArtefact {
+                    name: "prompt.json".to_string(),
+                    content_type: "application/json".to_string(),
+                    data_base64: Base64::encode_string(br#"{"prompt":"other-system"}"#),
+                }],
+            },
+        )
+        .await;
 
         let pack_req = Request::builder()
             .method("POST")
@@ -2553,8 +2967,33 @@ mod tests {
         let manifest: PackManifest = serde_json::from_slice(&body).unwrap();
         assert_eq!(manifest.bundle_ids, pack.bundle_ids);
         assert_eq!(manifest.bundles.len(), 1);
+        assert_eq!(manifest.curation_profile, PACK_CURATION_PROFILE);
         assert_eq!(manifest.bundles[0].system_id.as_deref(), Some("system-a"));
         assert_eq!(manifest.bundles[0].item_types, vec!["llm_interaction"]);
+        assert_eq!(manifest.bundles[0].obligation_refs, vec!["art12_19_26"]);
+        assert!(
+            manifest.bundles[0]
+                .matched_rules
+                .contains(&"retention_class:runtime_logs".to_string())
+        );
+        assert!(
+            manifest.bundles[0]
+                .matched_rules
+                .contains(&"item_type:llm_interaction".to_string())
+        );
+
+        let obligation_ref: Option<String> = sqlx::query_scalar(
+            "SELECT obligation_ref
+             FROM evidence_items
+             WHERE bundle_id = ?
+             ORDER BY item_index
+             LIMIT 1",
+        )
+        .bind(&llm_bundle.bundle_id)
+        .fetch_one(&db)
+        .await
+        .unwrap();
+        assert_eq!(obligation_ref.as_deref(), Some("art12_19_26"));
 
         let export_req = Request::builder()
             .method("GET")
@@ -2595,5 +3034,115 @@ mod tests {
         let verify_response: VerifyResponse = serde_json::from_slice(&body).unwrap();
         assert!(verify_response.valid);
         assert_eq!(verify_response.artefacts_verified, 1);
+    }
+
+    #[tokio::test]
+    async fn annex_xi_pack_requires_provider_role_and_preserves_match_metadata() {
+        let state = test_state(DEFAULT_MAX_PAYLOAD_BYTES).await;
+        let app = build_router(state, DEFAULT_MAX_PAYLOAD_BYTES);
+
+        let provider_bundle = create_bundle_response(
+            &app,
+            &CreateBundleRequest {
+                capture: SealableCaptureInput::V10(sample_event_with_profile(
+                    "system-z",
+                    proof_layer_core::ActorRole::Provider,
+                    vec![EvidenceItem::TechnicalDoc(
+                        proof_layer_core::schema::TechnicalDocEvidence {
+                            document_ref: "provider-doc".to_string(),
+                            section: Some("model-card".to_string()),
+                            commitment: Some(
+                                "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+                                    .to_string(),
+                            ),
+                        },
+                    )],
+                    Some("technical_doc"),
+                )),
+                artefacts: vec![InlineArtefact {
+                    name: "provider-doc.json".to_string(),
+                    content_type: "application/json".to_string(),
+                    data_base64: Base64::encode_string(br#"{"doc":"provider"}"#),
+                }],
+            },
+        )
+        .await;
+
+        create_bundle_response(
+            &app,
+            &CreateBundleRequest {
+                capture: SealableCaptureInput::V10(sample_event_with_profile(
+                    "system-z",
+                    proof_layer_core::ActorRole::Integrator,
+                    vec![EvidenceItem::TechnicalDoc(
+                        proof_layer_core::schema::TechnicalDocEvidence {
+                            document_ref: "integrator-doc".to_string(),
+                            section: Some("integration-guide".to_string()),
+                            commitment: Some(
+                                "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+                                    .to_string(),
+                            ),
+                        },
+                    )],
+                    Some("technical_doc"),
+                )),
+                artefacts: vec![InlineArtefact {
+                    name: "integrator-doc.json".to_string(),
+                    content_type: "application/json".to_string(),
+                    data_base64: Base64::encode_string(br#"{"doc":"integrator"}"#),
+                }],
+            },
+        )
+        .await;
+
+        let pack_req = Request::builder()
+            .method("POST")
+            .uri("/v1/packs")
+            .header("content-type", "application/json")
+            .body(Body::from(
+                serde_json::to_vec(&CreatePackRequest {
+                    pack_type: "annex_xi".to_string(),
+                    system_id: Some("system-z".to_string()),
+                    from: None,
+                    to: None,
+                })
+                .unwrap(),
+            ))
+            .unwrap();
+        let pack_res = app.clone().oneshot(pack_req).await.unwrap();
+        assert_eq!(pack_res.status(), StatusCode::CREATED);
+        let body = axum::body::to_bytes(pack_res.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let pack: PackSummaryResponse = serde_json::from_slice(&body).unwrap();
+
+        assert_eq!(pack.bundle_count, 1);
+        assert_eq!(pack.bundle_ids, vec![provider_bundle.bundle_id]);
+
+        let manifest_req = Request::builder()
+            .method("GET")
+            .uri(format!("/v1/packs/{}/manifest", pack.pack_id))
+            .body(Body::empty())
+            .unwrap();
+        let manifest_res = app.oneshot(manifest_req).await.unwrap();
+        assert_eq!(manifest_res.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(manifest_res.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let manifest: PackManifest = serde_json::from_slice(&body).unwrap();
+
+        assert_eq!(manifest.bundles.len(), 1);
+        assert_eq!(manifest.bundles[0].actor_role, "provider");
+        assert_eq!(manifest.bundles[0].obligation_refs, vec!["art11_annex_iv"]);
+        assert!(
+            manifest.bundles[0]
+                .matched_rules
+                .contains(&"actor_role:provider".to_string())
+        );
+        assert!(
+            manifest.bundles[0]
+                .matched_rules
+                .contains(&"item_type:technical_doc".to_string())
+        );
     }
 }

@@ -50,6 +50,7 @@ Core defaults:
 - Current query surface: `GET /v1/bundles?system_id=&role=&type=&from=&to=&page=&limit=`
 - Retention operations: `DELETE /v1/bundles/{id}`, `POST /v1/bundles/{id}/legal-hold`, `DELETE /v1/bundles/{id}/legal-hold`, `GET /v1/retention/status`, `POST /v1/retention/scan`
 - Audit operations: `GET /v1/audit-trail?action=&bundle_id=&pack_id=&page=&limit=`
+- Configuration operations: `GET /v1/config`, `PUT /v1/config/retention`, `PUT /v1/config/timestamp`, `PUT /v1/config/transparency`
 - Pack export operations: `POST /v1/packs`, `GET /v1/packs/{id}`, `GET /v1/packs/{id}/manifest`, `GET /v1/packs/{id}/export`
 
 Current SQLite tables:
@@ -58,6 +59,7 @@ Current SQLite tables:
 - `evidence_items`: one row per evidence item for type-based filtering plus derived `obligation_ref` tags
 - `artefacts`: stored artefact metadata and blob paths
 - `retention_policies`: seeded retention schedules used to compute `expires_at`
+- `service_config`: persisted JSON-backed runtime config for timestamp/transparency providers
 - `audit_log`: append-only request/action trail with bundle/pack linkage and JSON details
 - `packs`: pack manifests and export paths
 
@@ -86,6 +88,15 @@ Current audit behavior:
 - Vault writes append-only audit rows for create/read/verify/delete/legal-hold/retention-scan and pack operations.
 - Audit rows currently use service-side actor labels (`api`, `system`) because authn/authz is not implemented yet.
 - Audit logging is stored in SQLite and queryable through `GET /v1/audit-trail`.
+
+Current config behavior:
+
+- `GET /v1/config` returns the active service view for payload limits, signing algorithm/key id, storage backends, retention grace period, retention policies, and persisted timestamp/transparency provider settings.
+- `PUT /v1/config/retention` upserts retention policy rows in SQLite.
+- `PUT /v1/config/timestamp` persists RFC 3161 provider configuration (`enabled`, `provider`, `url`, optional `assurance`) for future timestamp issuance/verification work.
+- `PUT /v1/config/transparency` persists transparency provider configuration (`none`, `rekor`, `scitt`) plus URL when applicable.
+- When an updated retention policy remains active, the vault recomputes `expires_at` for existing active bundles in that class.
+- Assurance config is control-plane only today; enabling timestamp or transparency in config does not yet attach tokens/receipts to bundles.
 
 ### `packages/sdk-node` and `packages/sdk-python`
 

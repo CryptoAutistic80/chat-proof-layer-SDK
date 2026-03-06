@@ -19,6 +19,16 @@ Completed:
   append-only `audit_log` persistence,
   `GET /v1/audit-trail`,
   and logging for bundle, retention, legal-hold, verify, and pack actions.
+- Added the first configuration slice:
+  `GET /v1/config`,
+  `PUT /v1/config/retention`,
+  SQLite-backed retention policy upserts,
+  and active-bundle expiry refresh when updated policies remain enabled.
+- Completed the remaining config-plane slice:
+  `PUT /v1/config/timestamp`,
+  `PUT /v1/config/transparency`,
+  persisted timestamp/transparency provider settings in SQLite,
+  and returned those settings from `GET /v1/config`.
 - Added the first pack export slice:
   `POST /v1/packs`,
   `GET /v1/packs/{id}`,
@@ -34,6 +44,6 @@ Completed:
 Still outstanding from `plan.md`:
 
 - JSON schema coverage is now started, but timestamp/transparency and richer export/archive schemas are not implemented.
-- The vault now uses SQLite with legal-hold-aware retention, append-only audit logging, and curated pack export, but PostgreSQL, configurable retention policy updates, and redacted/Annex-complete pack assembly are not built yet.
+- The vault now uses SQLite with legal-hold-aware retention, audit logging, retention/timestamp/transparency configuration, and curated pack export, but PostgreSQL and redacted/Annex-complete pack assembly are not built yet.
 - Node and Python SDKs are still HTTP-client based; NAPI-RS and PyO3 bindings are not built yet.
-- RFC 3161 timestamping, transparency receipts, and selective disclosure CLI flows remain future phases.
+- RFC 3161 timestamping, transparency receipts, and selective disclosure CLI flows remain future phases; the new assurance config endpoints are currently control-plane only.

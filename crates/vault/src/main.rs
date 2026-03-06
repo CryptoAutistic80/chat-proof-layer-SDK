@@ -4,7 +4,7 @@ use axum::{
     extract::{DefaultBodyLimit, Path, Query, State},
     http::StatusCode,
     response::IntoResponse,
-    routing::{get, post},
+    routing::{get, post, put},
 };
 use base64ct::{Base64, Encoding};
 use chrono::Utc;
@@ -15,7 +15,7 @@ use proof_layer_core::{
     build_bundle, canonicalize_value, decode_private_key_pem, decode_public_key_pem,
     sha256_prefixed, validate_bundle_integrity_fields,
 };
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use sqlx::{
     FromRow, QueryBuilder, Row, Sqlite, SqlitePool,
     sqlite::{SqliteConnectOptions, SqlitePoolOptions},
@@ -43,6 +43,11 @@ const PACK_EXPORT_FILE_NAME: &str = "evidence_pack.pkg";
 const PACK_CURATION_PROFILE: &str = "pack-rules-v1";
 const AUDIT_ACTOR_API: &str = "api";
 const AUDIT_ACTOR_SYSTEM: &str = "system";
+const SERVICE_CONFIG_KEY_TIMESTAMP: &str = "timestamp";
+const SERVICE_CONFIG_KEY_TRANSPARENCY: &str = "transparency";
+const DEFAULT_TIMESTAMP_PROVIDER: &str = "rfc3161";
+const DEFAULT_TIMESTAMP_URL: &str = "http://timestamp.digicert.com";
+const DEFAULT_TRANSPARENCY_PROVIDER: &str = "none";
 
 #[derive(Clone)]
 struct AppState {
@@ -251,6 +256,88 @@ struct AuditLogEntry {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+struct VaultConfigResponse {
+    service: VaultServiceConfigView,
+    signing: VaultSigningConfigView,
+    storage: VaultStorageConfigView,
+    retention: RetentionConfigView,
+    timestamp: TimestampConfig,
+    transparency: TransparencyConfig,
+    audit: AuditConfigView,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct VaultServiceConfigView {
+    max_payload_bytes: usize,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct VaultSigningConfigView {
+    key_id: String,
+    algorithm: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct VaultStorageConfigView {
+    metadata_backend: String,
+    blob_backend: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct RetentionConfigView {
+    grace_period_days: i64,
+    policies: Vec<RetentionPolicyConfig>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct RetentionPolicyConfig {
+    retention_class: String,
+    min_duration_days: i64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    max_duration_days: Option<i64>,
+    legal_basis: String,
+    active: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+struct TimestampConfig {
+    enabled: bool,
+    provider: String,
+    url: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    assurance: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+struct TransparencyConfig {
+    enabled: bool,
+    provider: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    url: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct AuditConfigView {
+    enabled: bool,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct UpdateRetentionConfigRequest {
+    policies: Vec<RetentionPolicyConfig>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct UpdateRetentionConfigResponse {
+    updated: usize,
+    policies: Vec<RetentionPolicyConfig>,
+}
+
+#[derive(Debug, FromRow)]
+struct StoredServiceConfigRow {
+    config_json: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
 struct LegalHoldResponse {
     bundle_id: String,
     active: bool,
@@ -376,6 +463,15 @@ struct StoredAuditLogRow {
     details_json: String,
 }
 
+#[derive(Debug, Clone, FromRow)]
+struct StoredRetentionPolicyRow {
+    retention_class: String,
+    min_duration_days: i64,
+    max_duration_days: Option<i64>,
+    legal_basis: String,
+    active: bool,
+}
+
 #[derive(Debug)]
 struct PackArtefactBytes {
     name: String,
@@ -480,6 +576,10 @@ fn build_router(state: AppState, max_payload_bytes: usize) -> Router {
             post(set_legal_hold).delete(release_legal_hold),
         )
         .route("/v1/audit-trail", get(list_audit_trail))
+        .route("/v1/config", get(get_config))
+        .route("/v1/config/retention", put(update_retention_config))
+        .route("/v1/config/timestamp", put(update_timestamp_config))
+        .route("/v1/config/transparency", put(update_transparency_config))
         .route("/v1/packs", post(create_pack))
         .route("/v1/packs/{pack_id}", get(get_pack))
         .route("/v1/packs/{pack_id}/manifest", get(get_pack_manifest))
@@ -910,6 +1010,134 @@ async fn list_audit_trail(
         StatusCode::OK,
         Json(AuditTrailResponse { page, limit, items }),
     ))
+}
+
+async fn get_config(State(state): State<AppState>) -> Result<impl IntoResponse, ApiError> {
+    let response = build_vault_config_response(&state)
+        .await
+        .map_err(ApiError::internal_anyhow)?;
+    append_audit_log(
+        &state.db,
+        "get_config",
+        Some(AUDIT_ACTOR_API),
+        None,
+        None,
+        serde_json::json!({
+            "retention_policy_count": response.retention.policies.len(),
+            "grace_period_days": response.retention.grace_period_days,
+            "timestamp_enabled": response.timestamp.enabled,
+            "timestamp_provider": &response.timestamp.provider,
+            "transparency_enabled": response.transparency.enabled,
+            "transparency_provider": &response.transparency.provider,
+        }),
+    )
+    .await
+    .map_err(ApiError::internal_anyhow)?;
+
+    Ok((StatusCode::OK, Json(response)))
+}
+
+async fn update_retention_config(
+    State(state): State<AppState>,
+    Json(request): Json<UpdateRetentionConfigRequest>,
+) -> Result<impl IntoResponse, ApiError> {
+    let request =
+        validate_update_retention_config_request(request).map_err(ApiError::bad_request_anyhow)?;
+
+    for policy in &request.policies {
+        upsert_retention_policy(&state.db, policy)
+            .await
+            .map_err(ApiError::internal_anyhow)?;
+        if policy.active {
+            refresh_active_bundle_expiries_for_class(&state.db, &policy.retention_class)
+                .await
+                .map_err(ApiError::internal_anyhow)?;
+        }
+    }
+
+    let policies = load_retention_policies(&state.db)
+        .await
+        .map_err(ApiError::internal_anyhow)?;
+    append_audit_log(
+        &state.db,
+        "update_retention_config",
+        Some(AUDIT_ACTOR_API),
+        None,
+        None,
+        serde_json::json!({
+            "updated": request.policies.len(),
+            "classes": request
+                .policies
+                .iter()
+                .map(|policy| policy.retention_class.clone())
+                .collect::<Vec<_>>(),
+        }),
+    )
+    .await
+    .map_err(ApiError::internal_anyhow)?;
+
+    Ok((
+        StatusCode::OK,
+        Json(UpdateRetentionConfigResponse {
+            updated: request.policies.len(),
+            policies,
+        }),
+    ))
+}
+
+async fn update_timestamp_config(
+    State(state): State<AppState>,
+    Json(request): Json<TimestampConfig>,
+) -> Result<impl IntoResponse, ApiError> {
+    let config = validate_timestamp_config(request).map_err(ApiError::bad_request_anyhow)?;
+    upsert_service_config(&state.db, SERVICE_CONFIG_KEY_TIMESTAMP, &config)
+        .await
+        .map_err(ApiError::internal_anyhow)?;
+
+    append_audit_log(
+        &state.db,
+        "update_timestamp_config",
+        Some(AUDIT_ACTOR_API),
+        None,
+        None,
+        serde_json::json!({
+            "enabled": config.enabled,
+            "provider": &config.provider,
+            "url": &config.url,
+            "assurance": &config.assurance,
+        }),
+    )
+    .await
+    .map_err(ApiError::internal_anyhow)?;
+
+    Ok((StatusCode::OK, Json(config)))
+}
+
+async fn update_transparency_config(
+    State(state): State<AppState>,
+    Json(request): Json<TransparencyConfig>,
+) -> Result<impl IntoResponse, ApiError> {
+    let config = validate_transparency_config(request).map_err(ApiError::bad_request_anyhow)?;
+    upsert_service_config(&state.db, SERVICE_CONFIG_KEY_TRANSPARENCY, &config)
+        .await
+        .map_err(ApiError::internal_anyhow)?;
+
+    append_audit_log(
+        &state.db,
+        "update_transparency_config",
+        Some(AUDIT_ACTOR_API),
+        None,
+        None,
+        serde_json::json!({
+            "enabled": config.enabled,
+            "provider": &config.provider,
+            "url": &config.url,
+        }),
+    )
+    .await
+    .map_err(ApiError::internal_anyhow)?;
+
+    Ok((StatusCode::OK, Json(config)))
 }
 
 async fn delete_bundle(
@@ -2126,6 +2354,308 @@ async fn append_audit_log(
     Ok(())
 }
 
+async fn build_vault_config_response(state: &AppState) -> Result<VaultConfigResponse> {
+    Ok(VaultConfigResponse {
+        service: VaultServiceConfigView {
+            max_payload_bytes: state.max_payload_bytes,
+        },
+        signing: VaultSigningConfigView {
+            key_id: state.signing_kid.clone(),
+            algorithm: "ed25519".to_string(),
+        },
+        storage: VaultStorageConfigView {
+            metadata_backend: "sqlite".to_string(),
+            blob_backend: "filesystem".to_string(),
+        },
+        retention: RetentionConfigView {
+            grace_period_days: state.retention_grace_period_days,
+            policies: load_retention_policies(&state.db).await?,
+        },
+        timestamp: load_timestamp_config(&state.db).await?,
+        transparency: load_transparency_config(&state.db).await?,
+        audit: AuditConfigView { enabled: true },
+    })
+}
+
+fn validate_update_retention_config_request(
+    request: UpdateRetentionConfigRequest,
+) -> Result<UpdateRetentionConfigRequest> {
+    if request.policies.is_empty() {
+        bail!("retention config request must include at least one policy");
+    }
+
+    let mut seen = HashSet::new();
+    for policy in &request.policies {
+        validate_retention_policy_config(policy)?;
+        if !seen.insert(policy.retention_class.clone()) {
+            bail!(
+                "duplicate retention_class in request: {}",
+                policy.retention_class
+            );
+        }
+    }
+
+    Ok(request)
+}
+
+fn validate_retention_policy_config(policy: &RetentionPolicyConfig) -> Result<()> {
+    if policy.retention_class.trim().is_empty() {
+        bail!("retention_class must not be empty");
+    }
+    if policy.legal_basis.trim().is_empty() {
+        bail!("legal_basis must not be empty");
+    }
+    if policy.min_duration_days < 0 {
+        bail!("min_duration_days must be >= 0");
+    }
+    if let Some(max_duration_days) = policy.max_duration_days
+        && max_duration_days < policy.min_duration_days
+    {
+        bail!("max_duration_days must be >= min_duration_days");
+    }
+    Ok(())
+}
+
+fn validate_timestamp_config(mut config: TimestampConfig) -> Result<TimestampConfig> {
+    config.provider = config.provider.trim().to_ascii_lowercase();
+    config.url = config.url.trim().to_string();
+    config.assurance =
+        normalize_optional_string(config.assurance).map(|value| value.to_ascii_lowercase());
+
+    if config.provider != DEFAULT_TIMESTAMP_PROVIDER {
+        bail!("timestamp provider must be {}", DEFAULT_TIMESTAMP_PROVIDER);
+    }
+    if config.url.is_empty() {
+        bail!("timestamp url must not be empty");
+    }
+    validate_http_url(&config.url, "timestamp url")?;
+
+    if let Some(assurance) = &config.assurance
+        && assurance != "standard"
+        && assurance != "qualified"
+    {
+        bail!("timestamp assurance must be standard or qualified");
+    }
+
+    Ok(config)
+}
+
+fn validate_transparency_config(mut config: TransparencyConfig) -> Result<TransparencyConfig> {
+    config.provider = config.provider.trim().to_ascii_lowercase();
+    config.url = normalize_optional_string(config.url);
+
+    match config.provider.as_str() {
+        "none" => {
+            if config.enabled {
+                bail!("transparency provider none cannot be enabled");
+            }
+            if config.url.is_some() {
+                bail!("transparency url must be omitted when provider is none");
+            }
+        }
+        "rekor" | "scitt" => {
+            let url = config.url.as_deref().ok_or_else(|| {
+                anyhow::anyhow!("transparency url is required when provider is configured")
+            })?;
+            validate_http_url(url, "transparency url")?;
+        }
+        _ => bail!("transparency provider must be one of none, rekor, or scitt"),
+    }
+
+    Ok(config)
+}
+
+fn validate_http_url(value: &str, field_name: &str) -> Result<()> {
+    if !(value.starts_with("http://") || value.starts_with("https://")) {
+        bail!("{field_name} must start with http:// or https://");
+    }
+    Ok(())
+}
+
+fn normalize_optional_string(value: Option<String>) -> Option<String> {
+    value.and_then(|value| {
+        let trimmed = value.trim();
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed.to_string())
+        }
+    })
+}
+
+fn default_timestamp_config() -> TimestampConfig {
+    TimestampConfig {
+        enabled: false,
+        provider: DEFAULT_TIMESTAMP_PROVIDER.to_string(),
+        url: DEFAULT_TIMESTAMP_URL.to_string(),
+        assurance: None,
+    }
+}
+
+fn default_transparency_config() -> TransparencyConfig {
+    TransparencyConfig {
+        enabled: false,
+        provider: DEFAULT_TRANSPARENCY_PROVIDER.to_string(),
+        url: None,
+    }
+}
+
+async fn load_timestamp_config(db: &SqlitePool) -> Result<TimestampConfig> {
+    match load_service_config::<TimestampConfig>(db, SERVICE_CONFIG_KEY_TIMESTAMP).await? {
+        Some(config) => validate_timestamp_config(config),
+        None => Ok(default_timestamp_config()),
+    }
+}
+
+async fn load_transparency_config(db: &SqlitePool) -> Result<TransparencyConfig> {
+    match load_service_config::<TransparencyConfig>(db, SERVICE_CONFIG_KEY_TRANSPARENCY).await? {
+        Some(config) => validate_transparency_config(config),
+        None => Ok(default_transparency_config()),
+    }
+}
+
+async fn load_service_config<T>(db: &SqlitePool, key: &str) -> Result<Option<T>>
+where
+    T: DeserializeOwned,
+{
+    let row = sqlx::query_as::<_, StoredServiceConfigRow>(
+        "SELECT config_json FROM service_config WHERE config_key = ?",
+    )
+    .bind(key)
+    .fetch_optional(db)
+    .await
+    .with_context(|| format!("failed to load service config {key}"))?;
+
+    row.map(|row| {
+        serde_json::from_str(&row.config_json)
+            .with_context(|| format!("failed to parse service config {key}"))
+    })
+    .transpose()
+}
+
+async fn upsert_service_config<T>(db: &SqlitePool, key: &str, value: &T) -> Result<()>
+where
+    T: Serialize,
+{
+    let config_json = serde_json::to_string(value)
+        .with_context(|| format!("failed to serialize service config {key}"))?;
+    sqlx::query(
+        "INSERT INTO service_config (
+            config_key,
+            config_json,
+            updated_at
+        ) VALUES (?, ?, ?)
+        ON CONFLICT(config_key) DO UPDATE SET
+            config_json = excluded.config_json,
+            updated_at = excluded.updated_at",
+    )
+    .bind(key)
+    .bind(config_json)
+    .bind(Utc::now().to_rfc3339())
+    .execute(db)
+    .await
+    .with_context(|| format!("failed to upsert service config {key}"))?;
+    Ok(())
+}
+
+async fn load_retention_policies(db: &SqlitePool) -> Result<Vec<RetentionPolicyConfig>> {
+    let rows = sqlx::query_as::<_, StoredRetentionPolicyRow>(
+        "SELECT
+            retention_class,
+            min_duration_days,
+            max_duration_days,
+            legal_basis,
+            active
+         FROM retention_policies
+         ORDER BY retention_class ASC",
+    )
+    .fetch_all(db)
+    .await
+    .context("failed to load retention policies")?;
+
+    Ok(rows
+        .into_iter()
+        .map(|row| RetentionPolicyConfig {
+            retention_class: row.retention_class,
+            min_duration_days: row.min_duration_days,
+            max_duration_days: row.max_duration_days,
+            legal_basis: row.legal_basis,
+            active: row.active,
+        })
+        .collect())
+}
+
+async fn upsert_retention_policy(db: &SqlitePool, policy: &RetentionPolicyConfig) -> Result<()> {
+    sqlx::query(
+        "INSERT INTO retention_policies (
+            retention_class,
+            min_duration_days,
+            max_duration_days,
+            legal_basis,
+            active
+        ) VALUES (?, ?, ?, ?, ?)
+        ON CONFLICT(retention_class) DO UPDATE SET
+            min_duration_days = excluded.min_duration_days,
+            max_duration_days = excluded.max_duration_days,
+            legal_basis = excluded.legal_basis,
+            active = excluded.active",
+    )
+    .bind(policy.retention_class.trim())
+    .bind(policy.min_duration_days)
+    .bind(policy.max_duration_days)
+    .bind(policy.legal_basis.trim())
+    .bind(policy.active)
+    .execute(db)
+    .await
+    .with_context(|| {
+        format!(
+            "failed to upsert retention policy {}",
+            policy.retention_class
+        )
+    })?;
+    Ok(())
+}
+
+async fn refresh_active_bundle_expiries_for_class(
+    db: &SqlitePool,
+    retention_class: &str,
+) -> Result<()> {
+    let rows = sqlx::query(
+        "SELECT bundle_id, created_at
+         FROM bundles
+         WHERE deleted_at IS NULL
+           AND retention_class = ?",
+    )
+    .bind(retention_class)
+    .fetch_all(db)
+    .await
+    .with_context(|| {
+        format!(
+            "failed to fetch active bundles for retention class {}",
+            retention_class
+        )
+    })?;
+
+    for row in rows {
+        let bundle_id: String = row.try_get("bundle_id")?;
+        let created_at: String = row.try_get("created_at")?;
+        let expires_at = resolve_expires_at(db, retention_class, &created_at).await?;
+        sqlx::query("UPDATE bundles SET expires_at = ? WHERE bundle_id = ?")
+            .bind(expires_at)
+            .bind(&bundle_id)
+            .execute(db)
+            .await
+            .with_context(|| {
+                format!(
+                    "failed to refresh expires_at for bundle {} in class {}",
+                    bundle_id, retention_class
+                )
+            })?;
+    }
+
+    Ok(())
+}
+
 fn parse_retention_grace_period_days(raw: &str) -> Result<i64> {
     let days = raw
         .trim()
@@ -2665,6 +3195,11 @@ async fn initialize_sqlite_schema(db: &SqlitePool) -> Result<()> {
             max_duration_days INTEGER,
             legal_basis TEXT NOT NULL,
             active BOOLEAN NOT NULL DEFAULT TRUE
+        )",
+        "CREATE TABLE IF NOT EXISTS service_config (
+            config_key TEXT PRIMARY KEY,
+            config_json TEXT NOT NULL,
+            updated_at TEXT NOT NULL
         )",
     ];
 
@@ -3826,6 +4361,373 @@ mod tests {
                 .get("valid")
                 .and_then(|v| v.as_bool()),
             Some(true)
+        );
+    }
+
+    #[tokio::test]
+    async fn get_config_returns_runtime_retention_and_assurance_views() {
+        let state = test_state(DEFAULT_MAX_PAYLOAD_BYTES).await;
+        let app = build_router(state, DEFAULT_MAX_PAYLOAD_BYTES);
+
+        let request = Request::builder()
+            .method("GET")
+            .uri("/v1/config")
+            .body(Body::empty())
+            .unwrap();
+        let response = app.oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let config: VaultConfigResponse = serde_json::from_slice(&body).unwrap();
+
+        assert_eq!(config.service.max_payload_bytes, DEFAULT_MAX_PAYLOAD_BYTES);
+        assert_eq!(config.signing.key_id, "kid-dev-01");
+        assert_eq!(config.signing.algorithm, "ed25519");
+        assert_eq!(config.storage.metadata_backend, "sqlite");
+        assert_eq!(config.storage.blob_backend, "filesystem");
+        assert_eq!(
+            config.retention.grace_period_days,
+            DEFAULT_RETENTION_GRACE_PERIOD_DAYS
+        );
+        assert!(
+            config
+                .retention
+                .policies
+                .iter()
+                .any(|policy| policy.retention_class == "unspecified")
+        );
+        assert!(!config.timestamp.enabled);
+        assert_eq!(config.timestamp.provider, DEFAULT_TIMESTAMP_PROVIDER);
+        assert_eq!(config.timestamp.url, DEFAULT_TIMESTAMP_URL);
+        assert_eq!(config.timestamp.assurance, None);
+        assert!(!config.transparency.enabled);
+        assert_eq!(config.transparency.provider, DEFAULT_TRANSPARENCY_PROVIDER);
+        assert_eq!(config.transparency.url, None);
+        assert!(config.audit.enabled);
+    }
+
+    #[tokio::test]
+    async fn update_retention_config_upserts_policy_and_refreshes_bundle_expiry() {
+        let state = test_state(DEFAULT_MAX_PAYLOAD_BYTES).await;
+        let db = state.db.clone();
+        let app = build_router(state, DEFAULT_MAX_PAYLOAD_BYTES);
+
+        let put_req = Request::builder()
+            .method("PUT")
+            .uri("/v1/config/retention")
+            .header("content-type", "application/json")
+            .body(Body::from(
+                serde_json::to_vec(&UpdateRetentionConfigRequest {
+                    policies: vec![RetentionPolicyConfig {
+                        retention_class: "custom_short".to_string(),
+                        min_duration_days: 10,
+                        max_duration_days: Some(30),
+                        legal_basis: "test_policy".to_string(),
+                        active: true,
+                    }],
+                })
+                .unwrap(),
+            ))
+            .unwrap();
+        let put_res = app.clone().oneshot(put_req).await.unwrap();
+        assert_eq!(put_res.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(put_res.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let response: UpdateRetentionConfigResponse = serde_json::from_slice(&body).unwrap();
+        assert_eq!(response.updated, 1);
+        assert!(
+            response
+                .policies
+                .iter()
+                .any(|policy| policy.retention_class == "custom_short")
+        );
+
+        let created = create_bundle_response(
+            &app,
+            &CreateBundleRequest {
+                capture: SealableCaptureInput::V10(sample_event_with_profile(
+                    "system-config",
+                    proof_layer_core::ActorRole::Provider,
+                    sample_event_with_system("system-config").items,
+                    Some("custom_short"),
+                )),
+                artefacts: vec![InlineArtefact {
+                    name: "prompt.json".to_string(),
+                    content_type: "application/json".to_string(),
+                    data_base64: Base64::encode_string(br#"{"prompt":"config"}"#),
+                }],
+            },
+        )
+        .await;
+
+        let before: String =
+            sqlx::query_scalar("SELECT expires_at FROM bundles WHERE bundle_id = ?")
+                .bind(&created.bundle_id)
+                .fetch_one(&db)
+                .await
+                .unwrap();
+
+        let put_req = Request::builder()
+            .method("PUT")
+            .uri("/v1/config/retention")
+            .header("content-type", "application/json")
+            .body(Body::from(
+                serde_json::to_vec(&UpdateRetentionConfigRequest {
+                    policies: vec![RetentionPolicyConfig {
+                        retention_class: "custom_short".to_string(),
+                        min_duration_days: 20,
+                        max_duration_days: Some(40),
+                        legal_basis: "test_policy_v2".to_string(),
+                        active: true,
+                    }],
+                })
+                .unwrap(),
+            ))
+            .unwrap();
+        let put_res = app.clone().oneshot(put_req).await.unwrap();
+        assert_eq!(put_res.status(), StatusCode::OK);
+
+        let after: String =
+            sqlx::query_scalar("SELECT expires_at FROM bundles WHERE bundle_id = ?")
+                .bind(&created.bundle_id)
+                .fetch_one(&db)
+                .await
+                .unwrap();
+
+        let before = chrono::DateTime::parse_from_rfc3339(&before).unwrap();
+        let after = chrono::DateTime::parse_from_rfc3339(&after).unwrap();
+        assert!(after > before);
+
+        let request = Request::builder()
+            .method("GET")
+            .uri("/v1/config")
+            .body(Body::empty())
+            .unwrap();
+        let response = app.clone().oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let config: VaultConfigResponse = serde_json::from_slice(&body).unwrap();
+        let custom = config
+            .retention
+            .policies
+            .iter()
+            .find(|policy| policy.retention_class == "custom_short")
+            .unwrap();
+        assert_eq!(custom.min_duration_days, 20);
+        assert_eq!(custom.max_duration_days, Some(40));
+        assert_eq!(custom.legal_basis, "test_policy_v2");
+
+        let put_req = Request::builder()
+            .method("PUT")
+            .uri("/v1/config/retention")
+            .header("content-type", "application/json")
+            .body(Body::from(
+                serde_json::to_vec(&UpdateRetentionConfigRequest {
+                    policies: vec![RetentionPolicyConfig {
+                        retention_class: "custom_short".to_string(),
+                        min_duration_days: 20,
+                        max_duration_days: Some(40),
+                        legal_basis: "test_policy_v2".to_string(),
+                        active: false,
+                    }],
+                })
+                .unwrap(),
+            ))
+            .unwrap();
+        let put_res = app.clone().oneshot(put_req).await.unwrap();
+        assert_eq!(put_res.status(), StatusCode::OK);
+
+        let create_req = Request::builder()
+            .method("POST")
+            .uri("/v1/bundles")
+            .header("content-type", "application/json")
+            .body(Body::from(
+                serde_json::to_vec(&CreateBundleRequest {
+                    capture: SealableCaptureInput::V10(sample_event_with_profile(
+                        "system-config",
+                        proof_layer_core::ActorRole::Provider,
+                        sample_event_with_system("system-config").items,
+                        Some("custom_short"),
+                    )),
+                    artefacts: vec![InlineArtefact {
+                        name: "prompt.json".to_string(),
+                        content_type: "application/json".to_string(),
+                        data_base64: Base64::encode_string(br#"{"prompt":"inactive"}"#),
+                    }],
+                })
+                .unwrap(),
+            ))
+            .unwrap();
+        let create_res = app.oneshot(create_req).await.unwrap();
+        assert_eq!(create_res.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn update_timestamp_config_persists_and_is_returned_from_get_config() {
+        let state = test_state(DEFAULT_MAX_PAYLOAD_BYTES).await;
+        let db = state.db.clone();
+        let app = build_router(state, DEFAULT_MAX_PAYLOAD_BYTES);
+
+        let put_req = Request::builder()
+            .method("PUT")
+            .uri("/v1/config/timestamp")
+            .header("content-type", "application/json")
+            .body(Body::from(
+                serde_json::to_vec(&TimestampConfig {
+                    enabled: true,
+                    provider: "RFC3161".to_string(),
+                    url: "https://tsa.example.test".to_string(),
+                    assurance: Some("Qualified".to_string()),
+                })
+                .unwrap(),
+            ))
+            .unwrap();
+        let put_res = app.clone().oneshot(put_req).await.unwrap();
+        assert_eq!(put_res.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(put_res.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let updated: TimestampConfig = serde_json::from_slice(&body).unwrap();
+        assert_eq!(
+            updated,
+            TimestampConfig {
+                enabled: true,
+                provider: DEFAULT_TIMESTAMP_PROVIDER.to_string(),
+                url: "https://tsa.example.test".to_string(),
+                assurance: Some("qualified".to_string()),
+            }
+        );
+
+        let get_req = Request::builder()
+            .method("GET")
+            .uri("/v1/config")
+            .body(Body::empty())
+            .unwrap();
+        let get_res = app.clone().oneshot(get_req).await.unwrap();
+        assert_eq!(get_res.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(get_res.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let config: VaultConfigResponse = serde_json::from_slice(&body).unwrap();
+        assert_eq!(config.timestamp, updated);
+
+        let audit_details: String = sqlx::query_scalar(
+            "SELECT details_json FROM audit_log WHERE action = ? ORDER BY id DESC LIMIT 1",
+        )
+        .bind("get_config")
+        .fetch_one(&db)
+        .await
+        .unwrap();
+        let audit: serde_json::Value = serde_json::from_str(&audit_details).unwrap();
+        assert_eq!(
+            audit
+                .get("timestamp_provider")
+                .and_then(serde_json::Value::as_str),
+            Some(DEFAULT_TIMESTAMP_PROVIDER)
+        );
+
+        let update_audit_details: String = sqlx::query_scalar(
+            "SELECT details_json FROM audit_log WHERE action = ? ORDER BY id DESC LIMIT 1",
+        )
+        .bind("update_timestamp_config")
+        .fetch_one(&db)
+        .await
+        .unwrap();
+        let update_audit: serde_json::Value = serde_json::from_str(&update_audit_details).unwrap();
+        assert_eq!(
+            update_audit
+                .get("enabled")
+                .and_then(serde_json::Value::as_bool),
+            Some(true)
+        );
+        assert_eq!(
+            update_audit
+                .get("assurance")
+                .and_then(serde_json::Value::as_str),
+            Some("qualified")
+        );
+    }
+
+    #[tokio::test]
+    async fn update_transparency_config_persists_and_validates_provider_shape() {
+        let state = test_state(DEFAULT_MAX_PAYLOAD_BYTES).await;
+        let db = state.db.clone();
+        let app = build_router(state, DEFAULT_MAX_PAYLOAD_BYTES);
+
+        let bad_put_req = Request::builder()
+            .method("PUT")
+            .uri("/v1/config/transparency")
+            .header("content-type", "application/json")
+            .body(Body::from(
+                serde_json::to_vec(&TransparencyConfig {
+                    enabled: true,
+                    provider: "none".to_string(),
+                    url: None,
+                })
+                .unwrap(),
+            ))
+            .unwrap();
+        let bad_put_res = app.clone().oneshot(bad_put_req).await.unwrap();
+        assert_eq!(bad_put_res.status(), StatusCode::BAD_REQUEST);
+
+        let put_req = Request::builder()
+            .method("PUT")
+            .uri("/v1/config/transparency")
+            .header("content-type", "application/json")
+            .body(Body::from(
+                serde_json::to_vec(&TransparencyConfig {
+                    enabled: true,
+                    provider: "Rekor".to_string(),
+                    url: Some("https://rekor.example.test".to_string()),
+                })
+                .unwrap(),
+            ))
+            .unwrap();
+        let put_res = app.clone().oneshot(put_req).await.unwrap();
+        assert_eq!(put_res.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(put_res.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let updated: TransparencyConfig = serde_json::from_slice(&body).unwrap();
+        assert_eq!(
+            updated,
+            TransparencyConfig {
+                enabled: true,
+                provider: "rekor".to_string(),
+                url: Some("https://rekor.example.test".to_string()),
+            }
+        );
+
+        let get_req = Request::builder()
+            .method("GET")
+            .uri("/v1/config")
+            .body(Body::empty())
+            .unwrap();
+        let get_res = app.clone().oneshot(get_req).await.unwrap();
+        assert_eq!(get_res.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(get_res.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let config: VaultConfigResponse = serde_json::from_slice(&body).unwrap();
+        assert_eq!(config.transparency, updated);
+
+        let update_audit_details: String = sqlx::query_scalar(
+            "SELECT details_json FROM audit_log WHERE action = ? ORDER BY id DESC LIMIT 1",
+        )
+        .bind("update_transparency_config")
+        .fetch_one(&db)
+        .await
+        .unwrap();
+        let update_audit: serde_json::Value = serde_json::from_str(&update_audit_details).unwrap();
+        assert_eq!(
+            update_audit
+                .get("provider")
+                .and_then(serde_json::Value::as_str),
+            Some("rekor")
         );
     }
 

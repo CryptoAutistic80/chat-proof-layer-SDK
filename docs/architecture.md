@@ -47,9 +47,11 @@ Core defaults:
 - Metadata persistence: SQLite via `sqlx`
 - Artifact storage: local filesystem at `./storage/artefacts/{bundle_id}/{name}`
 - CORS enabled for local web demo interoperability
-- Current query surface: `GET /v1/bundles?system_id=&role=&type=&from=&to=&page=&limit=`
+- Current query surface: `GET /v1/bundles?system_id=&role=&type=&has_timestamp=&has_receipt=&assurance_level=&from=&to=&page=&limit=`
 - Retention operations: `DELETE /v1/bundles/{id}`, `POST /v1/bundles/{id}/legal-hold`, `DELETE /v1/bundles/{id}/legal-hold`, `GET /v1/retention/status`, `POST /v1/retention/scan`
 - Timestamp operation: `POST /v1/bundles/{id}/timestamp`
+- Transparency operation: `POST /v1/bundles/{id}/anchor`
+- Assurance verification operations: `POST /v1/verify/timestamp`, `POST /v1/verify/receipt`
 - Audit operations: `GET /v1/audit-trail?action=&bundle_id=&pack_id=&page=&limit=`
 - Configuration operations: `GET /v1/config`, `PUT /v1/config/retention`, `PUT /v1/config/timestamp`, `PUT /v1/config/transparency`
 - Pack export operations: `POST /v1/packs`, `GET /v1/packs/{id}`, `GET /v1/packs/{id}/manifest`, `GET /v1/packs/{id}/export`
@@ -86,7 +88,7 @@ Current retention behavior:
 
 Current audit behavior:
 
-- Vault writes append-only audit rows for create/read/verify/delete/legal-hold/retention-scan and pack operations.
+- Vault writes append-only audit rows for create/read/verify/delete/legal-hold/retention-scan, assurance verification, and pack operations.
 - Audit rows currently use service-side actor labels (`api`, `system`) because authn/authz is not implemented yet.
 - Audit logging is stored in SQLite and queryable through `GET /v1/audit-trail`.
 
@@ -97,8 +99,10 @@ Current config behavior:
 - `PUT /v1/config/timestamp` persists RFC 3161 provider configuration (`enabled`, `provider`, `url`, optional `assurance`) used by the timestamp attachment endpoint.
 - `PUT /v1/config/transparency` persists transparency provider configuration (`none`, `rekor`, `scitt`) plus URL when applicable.
 - `POST /v1/bundles/{id}/timestamp` loads a stored active bundle, requests an RFC 3161 token over the UTF-8 bytes of `integrity.bundle_root`, stores the token in bundle JSON, and flips `has_timestamp`.
+- `POST /v1/bundles/{id}/anchor` loads a stored active timestamped bundle, submits its RFC 3161 token to Rekor as an `rfc3161` entry, stores the returned receipt in bundle JSON, and flips `has_receipt`.
+- `POST /v1/verify/timestamp` and `POST /v1/verify/receipt` accept either direct assurance artefacts or a stored `bundle_id`, returning typed verification details without requiring full package verification.
 - When an updated retention policy remains active, the vault recomputes `expires_at` for existing active bundles in that class.
-- Transparency config is still control-plane only today; timestamp config is active for RFC 3161 issuance.
+- Transparency config is active for Rekor RFC 3161 anchoring; `scitt` remains an explicit stub.
 
 ### `packages/sdk-node` and `packages/sdk-python`
 
@@ -120,7 +124,8 @@ Current config behavior:
 9. Sign UTF-8 bytes of `bundle_root` using Ed25519 JWS compact serialization.
 10. Persist bundle metadata + indexes in SQLite and artifact bytes on disk.
 11. Optionally request an RFC 3161 token over UTF-8 `bundle_root` bytes.
-12. Return `bundle_id`, `bundle_root`, signature metadata, and optional timestamp.
+12. Optionally submit that RFC 3161 token to Rekor as an `rfc3161` entry and store the returned receipt.
+13. Return `bundle_id`, `bundle_root`, signature metadata, and optional assurance artefacts.
 
 ## Deterministic Byte-Level Contracts
 
@@ -158,7 +163,8 @@ A verifier needs only:
 - issuer public key
 
 No network calls are required for core verification.
-Timestamp and transparency checks are optional in PoC and report as skipped/missing.
+Timestamp and transparency checks are optional in PoC and report as skipped/missing when not requested.
+Current assurance verification checks bundle-root binding, embedded RFC 3161 token validity, and receipt field presence, but not TSA trust chains or Rekor SET/inclusion proof cryptographic trust.
 
 ## Provider-Agnostic Boundary
 
@@ -182,7 +188,8 @@ It does not claim model replay determinism.
 
 - RFC 3161 timestamp request + basic token verification
 - TSA certificate-chain / revocation trust validation
-- SCITT/Sigstore transparency receipts
+- Rekor signed-entry-timestamp / inclusion-proof cryptographic verification
+- SCITT receipts
 - HSM/KMS-backed keys
 - WORM/cloud object lock
 - Policy-driven encryption/redaction enforcement

@@ -12,9 +12,11 @@ use ed25519_dalek::SigningKey;
 use flate2::{Compression, read::GzDecoder, write::GzEncoder};
 use proof_layer_core::{
     ArtefactInput, BuildBundleError, CaptureEvent, CaptureInput, EvidenceItem, ProofBundle,
-    Rfc3161HttpTimestampProvider, TimestampToken, TimestampVerification, build_bundle,
-    canonicalize_value, decode_private_key_pem, decode_public_key_pem, sha256_prefixed,
-    timestamp_digest, validate_bundle_integrity_fields, verify_timestamp,
+    ReceiptVerification, RekorTransparencyProvider, Rfc3161HttpTimestampProvider, TimestampToken,
+    TimestampVerification, TransparencyReceipt, anchor_bundle as anchor_bundle_receipt,
+    build_bundle, canonicalize_value, decode_private_key_pem, decode_public_key_pem,
+    sha256_prefixed, timestamp_digest, validate_bundle_integrity_fields, verify_receipt,
+    verify_timestamp,
 };
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use sqlx::{
@@ -145,12 +147,55 @@ struct VerifyResponse {
     artefacts_verified: usize,
 }
 
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(untagged)]
+enum VerifyTimestampRequest {
+    BundleId {
+        bundle_id: String,
+    },
+    Direct {
+        bundle_root: String,
+        timestamp: TimestampToken,
+    },
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(untagged)]
+enum VerifyReceiptRequest {
+    BundleId {
+        bundle_id: String,
+    },
+    Direct {
+        bundle_root: String,
+        receipt: TransparencyReceipt,
+    },
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct VerifyTimestampResponse {
+    valid: bool,
+    message: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    verification: Option<TimestampVerification>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct VerifyReceiptResponse {
+    valid: bool,
+    message: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    verification: Option<ReceiptVerification>,
+}
+
 #[derive(Debug, Deserialize)]
 struct BundleQuery {
     system_id: Option<String>,
     role: Option<String>,
     #[serde(rename = "type")]
     item_type: Option<String>,
+    has_timestamp: Option<bool>,
+    has_receipt: Option<bool>,
+    assurance_level: Option<String>,
     from: Option<String>,
     to: Option<String>,
     page: Option<u32>,
@@ -188,6 +233,7 @@ struct BundleSummary {
     has_legal_hold: bool,
     has_timestamp: bool,
     has_receipt: bool,
+    assurance_level: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -235,6 +281,17 @@ struct TimestampBundleResponse {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     provider: Option<String>,
     generated_at: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct AnchorBundleResponse {
+    bundle_id: String,
+    kind: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    provider: Option<String>,
+    entry_uuid: String,
+    integrated_time: String,
+    log_index: u64,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -586,6 +643,7 @@ fn build_router(state: AppState, max_payload_bytes: usize) -> Router {
             post(set_legal_hold).delete(release_legal_hold),
         )
         .route("/v1/bundles/{bundle_id}/timestamp", post(timestamp_bundle))
+        .route("/v1/bundles/{bundle_id}/anchor", post(anchor_bundle))
         .route("/v1/audit-trail", get(list_audit_trail))
         .route("/v1/config", get(get_config))
         .route("/v1/config/retention", put(update_retention_config))
@@ -598,6 +656,8 @@ fn build_router(state: AppState, max_payload_bytes: usize) -> Router {
         .route("/v1/retention/status", get(retention_status))
         .route("/v1/retention/scan", post(retention_scan))
         .route("/v1/verify", post(verify_bundle))
+        .route("/v1/verify/timestamp", post(verify_timestamp_token))
+        .route("/v1/verify/receipt", post(verify_transparency_receipt))
         .layer(cors)
         .layer(DefaultBodyLimit::max(max_payload_bytes))
         .with_state(state)
@@ -705,6 +765,8 @@ async fn list_bundles(
     Query(query): Query<BundleQuery>,
 ) -> Result<impl IntoResponse, ApiError> {
     let now = Utc::now().to_rfc3339();
+    let assurance_level = normalize_assurance_level_filter(query.assurance_level.as_deref())
+        .map_err(ApiError::bad_request_anyhow)?;
     let page = query.page.unwrap_or(1).max(1);
     let limit = query.limit.unwrap_or(50).clamp(1, 100);
     let offset = i64::from((page - 1) * limit);
@@ -727,7 +789,12 @@ async fn list_bundles(
     builder.push(
         ") THEN TRUE ELSE FALSE END AS has_legal_hold, \
             b.has_timestamp, \
-            b.has_receipt \
+            b.has_receipt, \
+            CASE \
+                WHEN b.has_receipt THEN 'transparency_anchored' \
+                WHEN b.has_timestamp THEN 'timestamped' \
+                ELSE 'signed' \
+            END AS assurance_level \
          FROM bundles b ",
     );
 
@@ -748,6 +815,24 @@ async fn list_bundles(
     if let Some(item_type) = query.item_type.as_deref() {
         builder.push(" AND i.item_type = ");
         builder.push_bind(item_type);
+    }
+    if let Some(has_timestamp) = query.has_timestamp {
+        builder.push(" AND b.has_timestamp = ");
+        builder.push_bind(has_timestamp);
+    }
+    if let Some(has_receipt) = query.has_receipt {
+        builder.push(" AND b.has_receipt = ");
+        builder.push_bind(has_receipt);
+    }
+    if let Some(assurance_level) = assurance_level.as_deref() {
+        builder.push(
+            " AND CASE \
+                WHEN b.has_receipt THEN 'transparency_anchored' \
+                WHEN b.has_timestamp THEN 'timestamped' \
+                ELSE 'signed' \
+            END = ",
+        );
+        builder.push_bind(assurance_level);
     }
     if let Some(from) = query.from.as_deref() {
         builder.push(" AND b.created_at >= ");
@@ -782,6 +867,9 @@ async fn list_bundles(
                 "system_id": query.system_id,
                 "role": query.role,
                 "item_type": query.item_type,
+                "has_timestamp": query.has_timestamp,
+                "has_receipt": query.has_receipt,
+                "assurance_level": assurance_level,
                 "from": query.from,
                 "to": query.to,
             }
@@ -1269,6 +1357,100 @@ async fn timestamp_bundle(
     ))
 }
 
+async fn anchor_bundle(
+    State(state): State<AppState>,
+    Path(bundle_id): Path<String>,
+) -> Result<impl IntoResponse, ApiError> {
+    let mut bundle = load_active_bundle(&state.db, &bundle_id)
+        .await
+        .map_err(ApiError::internal_anyhow)?
+        .ok_or_else(|| ApiError::not_found("bundle not found"))?;
+    if bundle.receipt.is_some() {
+        return Err(ApiError::conflict(
+            "bundle already has a transparency receipt",
+        ));
+    }
+    if bundle.timestamp.is_none() {
+        return Err(ApiError::conflict(
+            "bundle must be timestamped before transparency anchoring",
+        ));
+    }
+
+    let config = load_transparency_config(&state.db)
+        .await
+        .map_err(ApiError::internal_anyhow)?;
+    if !config.enabled {
+        return Err(ApiError::conflict(
+            "transparency anchoring is disabled in vault config",
+        ));
+    }
+
+    let receipt = match config.provider.as_str() {
+        "rekor" => {
+            let url = config.url.clone().ok_or_else(|| {
+                ApiError::internal_anyhow(anyhow::anyhow!(
+                    "transparency config enabled for rekor without url"
+                ))
+            })?;
+            let provider = RekorTransparencyProvider::with_label(url, config.provider.clone());
+            let bundle_for_submission = bundle.clone();
+            tokio::task::spawn_blocking(move || {
+                anchor_bundle_receipt(&bundle_for_submission, &provider)
+            })
+            .await
+            .map_err(ApiError::internal_anyhow)?
+            .map_err(ApiError::internal_anyhow)?
+        }
+        "scitt" => {
+            return Err(ApiError {
+                status: StatusCode::NOT_IMPLEMENTED,
+                message: "scitt transparency anchoring is not implemented yet".to_string(),
+            });
+        }
+        _ => {
+            return Err(ApiError::conflict(
+                "transparency anchoring is disabled in vault config",
+            ));
+        }
+    };
+
+    let verification =
+        apply_receipt_to_bundle(&mut bundle, receipt).map_err(ApiError::internal_anyhow)?;
+    persist_bundle_receipt(&state.db, &bundle)
+        .await
+        .map_err(ApiError::internal_anyhow)?;
+    append_audit_log(
+        &state.db,
+        "anchor_bundle",
+        Some(AUDIT_ACTOR_API),
+        Some(&bundle.bundle_id),
+        None,
+        serde_json::json!({
+            "kind": bundle.receipt.as_ref().map(|receipt| receipt.kind.clone()),
+            "provider": bundle.receipt.as_ref().and_then(|receipt| receipt.provider.clone()),
+            "entry_uuid": verification.entry_uuid,
+            "integrated_time": verification.integrated_time,
+            "log_index": verification.log_index,
+            "log_url": verification.log_url,
+        }),
+    )
+    .await
+    .map_err(ApiError::internal_anyhow)?;
+
+    let receipt = bundle.receipt.as_ref().expect("receipt was just applied");
+    Ok((
+        StatusCode::OK,
+        Json(AnchorBundleResponse {
+            bundle_id: bundle.bundle_id,
+            kind: receipt.kind.clone(),
+            provider: receipt.provider.clone(),
+            entry_uuid: verification.entry_uuid,
+            integrated_time: verification.integrated_time,
+            log_index: verification.log_index,
+        }),
+    ))
+}
+
 async fn set_legal_hold(
     State(state): State<AppState>,
     Path(bundle_id): Path<String>,
@@ -1649,6 +1831,87 @@ async fn verify_bundle(
     Ok((StatusCode::OK, Json(response)))
 }
 
+async fn verify_timestamp_token(
+    State(state): State<AppState>,
+    Json(request): Json<VerifyTimestampRequest>,
+) -> Result<impl IntoResponse, ApiError> {
+    let (bundle_id, bundle_root, timestamp) =
+        resolve_timestamp_verification_target(&state.db, request)
+            .await
+            .map_err(ApiError::bad_request_anyhow)?;
+
+    let response = match verify_timestamp(&timestamp, &bundle_root) {
+        Ok(verification) => VerifyTimestampResponse {
+            valid: true,
+            message: format!(
+                "VALID: RFC 3161 token verified at {}",
+                verification.generated_at
+            ),
+            verification: Some(verification),
+        },
+        Err(err) => VerifyTimestampResponse {
+            valid: false,
+            message: format!("INVALID: {err}"),
+            verification: None,
+        },
+    };
+    append_audit_log(
+        &state.db,
+        "verify_timestamp",
+        Some(AUDIT_ACTOR_API),
+        bundle_id.as_deref(),
+        None,
+        serde_json::json!({
+            "valid": response.valid,
+            "message": response.message.clone(),
+        }),
+    )
+    .await
+    .map_err(ApiError::internal_anyhow)?;
+
+    Ok((StatusCode::OK, Json(response)))
+}
+
+async fn verify_transparency_receipt(
+    State(state): State<AppState>,
+    Json(request): Json<VerifyReceiptRequest>,
+) -> Result<impl IntoResponse, ApiError> {
+    let (bundle_id, bundle_root, receipt) = resolve_receipt_verification_target(&state.db, request)
+        .await
+        .map_err(ApiError::bad_request_anyhow)?;
+
+    let response = match verify_receipt(&receipt, &bundle_root) {
+        Ok(verification) => VerifyReceiptResponse {
+            valid: true,
+            message: format!(
+                "VALID: transparency receipt verified at {}",
+                verification.integrated_time
+            ),
+            verification: Some(verification),
+        },
+        Err(err) => VerifyReceiptResponse {
+            valid: false,
+            message: format!("INVALID: {err}"),
+            verification: None,
+        },
+    };
+    append_audit_log(
+        &state.db,
+        "verify_receipt",
+        Some(AUDIT_ACTOR_API),
+        bundle_id.as_deref(),
+        None,
+        serde_json::json!({
+            "valid": response.valid,
+            "message": response.message.clone(),
+        }),
+    )
+    .await
+    .map_err(ApiError::internal_anyhow)?;
+
+    Ok((StatusCode::OK, Json(response)))
+}
+
 fn verify_inline_request(
     request: InlineVerifyRequest,
     max_payload_bytes: usize,
@@ -1761,6 +2024,48 @@ fn verify_package_request(
         message,
         artefacts_verified,
     })
+}
+
+async fn resolve_timestamp_verification_target(
+    db: &SqlitePool,
+    request: VerifyTimestampRequest,
+) -> Result<(Option<String>, String, TimestampToken)> {
+    match request {
+        VerifyTimestampRequest::BundleId { bundle_id } => {
+            let bundle = load_active_bundle(db, &bundle_id)
+                .await?
+                .ok_or_else(|| anyhow::anyhow!("bundle not found"))?;
+            let timestamp = bundle
+                .timestamp
+                .ok_or_else(|| anyhow::anyhow!("bundle has no timestamp token"))?;
+            Ok((Some(bundle_id), bundle.integrity.bundle_root, timestamp))
+        }
+        VerifyTimestampRequest::Direct {
+            bundle_root,
+            timestamp,
+        } => Ok((None, bundle_root, timestamp)),
+    }
+}
+
+async fn resolve_receipt_verification_target(
+    db: &SqlitePool,
+    request: VerifyReceiptRequest,
+) -> Result<(Option<String>, String, TransparencyReceipt)> {
+    match request {
+        VerifyReceiptRequest::BundleId { bundle_id } => {
+            let bundle = load_active_bundle(db, &bundle_id)
+                .await?
+                .ok_or_else(|| anyhow::anyhow!("bundle not found"))?;
+            let receipt = bundle
+                .receipt
+                .ok_or_else(|| anyhow::anyhow!("bundle has no transparency receipt"))?;
+            Ok((Some(bundle_id), bundle.integrity.bundle_root, receipt))
+        }
+        VerifyReceiptRequest::Direct {
+            bundle_root,
+            receipt,
+        } => Ok((None, bundle_root, receipt)),
+    }
 }
 
 fn read_bundle_package_from_bytes(
@@ -2397,6 +2702,19 @@ fn apply_timestamp_token_to_bundle(
     Ok(verification)
 }
 
+fn apply_receipt_to_bundle(
+    bundle: &mut ProofBundle,
+    receipt: TransparencyReceipt,
+) -> Result<ReceiptVerification> {
+    if bundle.receipt.is_some() {
+        bail!("bundle already has a transparency receipt");
+    }
+
+    let verification = verify_receipt(&receipt, &bundle.integrity.bundle_root)?;
+    bundle.receipt = Some(receipt);
+    Ok(verification)
+}
+
 fn map_audit_log_row(row: StoredAuditLogRow) -> Result<AuditLogEntry> {
     Ok(AuditLogEntry {
         id: row.id,
@@ -2568,6 +2886,20 @@ fn normalize_optional_string(value: Option<String>) -> Option<String> {
             Some(trimmed.to_string())
         }
     })
+}
+
+fn normalize_assurance_level_filter(value: Option<&str>) -> Result<Option<String>> {
+    let Some(value) = value else {
+        return Ok(None);
+    };
+    let normalized = value.trim().to_ascii_lowercase();
+    if normalized.is_empty() {
+        return Ok(None);
+    }
+    match normalized.as_str() {
+        "signed" | "timestamped" | "transparency_anchored" => Ok(Some(normalized)),
+        _ => bail!("assurance_level must be one of signed, timestamped, or transparency_anchored"),
+    }
 }
 
 fn default_timestamp_config() -> TimestampConfig {
@@ -3096,6 +3428,22 @@ async fn persist_bundle_timestamp(db: &SqlitePool, bundle: &ProofBundle) -> Resu
     Ok(())
 }
 
+async fn persist_bundle_receipt(db: &SqlitePool, bundle: &ProofBundle) -> Result<()> {
+    let bundle_json = serde_json::to_string(bundle)?;
+    sqlx::query(
+        "UPDATE bundles
+         SET has_receipt = ?, bundle_json = ?
+         WHERE bundle_id = ?",
+    )
+    .bind(bundle.receipt.is_some())
+    .bind(bundle_json)
+    .bind(&bundle.bundle_id)
+    .execute(db)
+    .await
+    .with_context(|| format!("failed to update receipt for bundle {}", bundle.bundle_id))?;
+    Ok(())
+}
+
 fn map_build_bundle_error(err: BuildBundleError) -> ApiError {
     match err {
         BuildBundleError::EmptyArtefacts
@@ -3536,7 +3884,9 @@ mod tests {
     };
     use flate2::{Compression, read::GzDecoder, write::GzEncoder};
     use proof_layer_core::{
-        RFC3161_TIMESTAMP_KIND, TimestampToken, encode_public_key_pem, sha256_prefixed,
+        REKOR_RFC3161_API_VERSION, REKOR_RFC3161_ENTRY_KIND, REKOR_TRANSPARENCY_KIND,
+        RFC3161_TIMESTAMP_KIND, TimestampToken, TransparencyReceipt, encode_public_key_pem,
+        sha256_prefixed,
     };
     use std::io::{Read, Write};
     use tower::ServiceExt;
@@ -3637,6 +3987,49 @@ mod tests {
             kind: RFC3161_TIMESTAMP_KIND.to_string(),
             provider: provider.map(str::to_string),
             token_base64: Base64::encode_string(&signed_data_der),
+        }
+    }
+
+    fn build_test_rekor_receipt(bundle_root: &str, provider: Option<&str>) -> TransparencyReceipt {
+        let token = build_test_timestamp_token(bundle_root, provider);
+        TransparencyReceipt {
+            kind: REKOR_TRANSPARENCY_KIND.to_string(),
+            provider: provider.map(str::to_string),
+            body: serde_json::json!({
+                "log_url": "https://rekor.sigstore.dev",
+                "entry_uuid": "abababababababababababababababababababababababababababababababab",
+                "log_entry": {
+                    "abababababababababababababababababababababababababababababababab": {
+                        "body": Base64::encode_string(
+                            serde_json::to_string(&serde_json::json!({
+                                "kind": REKOR_RFC3161_ENTRY_KIND,
+                                "apiVersion": REKOR_RFC3161_API_VERSION,
+                                "spec": {
+                                    "tsr": {
+                                        "content": token.token_base64,
+                                    }
+                                }
+                            }))
+                            .unwrap()
+                            .as_bytes()
+                        ),
+                        "integratedTime": 1772802000_i64,
+                        "logID": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
+                        "logIndex": 7,
+                        "verification": {
+                            "inclusionProof": {
+                                "logIndex": 7,
+                                "treeSize": 8,
+                                "rootHash": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+                                "hashes": [
+                                    "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+                                ]
+                            },
+                            "signedEntryTimestamp": Base64::encode_string(b"rekor-set")
+                        }
+                    }
+                }
+            }),
         }
     }
 
@@ -4168,6 +4561,57 @@ mod tests {
         assert_eq!(response.items[0].actor_role, "provider");
         assert!(response.items[0].expires_at.is_some());
         assert!(!response.items[0].has_legal_hold);
+        assert_eq!(response.items[0].assurance_level, "signed");
+    }
+
+    #[tokio::test]
+    async fn list_bundles_filters_by_assurance_flags() {
+        let state = test_state(DEFAULT_MAX_PAYLOAD_BYTES).await;
+        let db = state.db.clone();
+        let app = build_router(state, DEFAULT_MAX_PAYLOAD_BYTES);
+
+        let created = create_bundle_response(
+            &app,
+            &CreateBundleRequest {
+                capture: SealableCaptureInput::Legacy(sample_capture()),
+                artefacts: vec![InlineArtefact {
+                    name: "prompt.json".to_string(),
+                    content_type: "application/json".to_string(),
+                    data_base64: Base64::encode_string(br#"{"prompt":"assurance"}"#),
+                }],
+            },
+        )
+        .await;
+
+        let mut bundle = load_active_bundle(&db, &created.bundle_id)
+            .await
+            .unwrap()
+            .unwrap();
+        bundle.timestamp = Some(build_test_timestamp_token(
+            &bundle.integrity.bundle_root,
+            Some("test-tsa"),
+        ));
+        persist_bundle_timestamp(&db, &bundle).await.unwrap();
+        let receipt = build_test_rekor_receipt(&bundle.integrity.bundle_root, Some("rekor"));
+        apply_receipt_to_bundle(&mut bundle, receipt).unwrap();
+        persist_bundle_receipt(&db, &bundle).await.unwrap();
+
+        let query_req = Request::builder()
+            .method("GET")
+            .uri("/v1/bundles?has_timestamp=true&has_receipt=true&assurance_level=transparency_anchored")
+            .body(Body::empty())
+            .unwrap();
+        let query_res = app.oneshot(query_req).await.unwrap();
+        assert_eq!(query_res.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(query_res.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let response: ListBundlesResponse = serde_json::from_slice(&body).unwrap();
+        assert_eq!(response.items.len(), 1);
+        assert_eq!(response.items[0].bundle_id, created.bundle_id);
+        assert!(response.items[0].has_timestamp);
+        assert!(response.items[0].has_receipt);
+        assert_eq!(response.items[0].assurance_level, "transparency_anchored");
     }
 
     #[tokio::test]
@@ -4634,6 +5078,103 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn verify_timestamp_endpoint_supports_direct_payloads() {
+        let state = test_state(DEFAULT_MAX_PAYLOAD_BYTES).await;
+        let app = build_router(state, DEFAULT_MAX_PAYLOAD_BYTES);
+        let bundle_root = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        let token = build_test_timestamp_token(bundle_root, Some("test-tsa"));
+
+        let request = Request::builder()
+            .method("POST")
+            .uri("/v1/verify/timestamp")
+            .header("content-type", "application/json")
+            .body(Body::from(
+                serde_json::to_vec(&VerifyTimestampRequest::Direct {
+                    bundle_root: bundle_root.to_string(),
+                    timestamp: token,
+                })
+                .unwrap(),
+            ))
+            .unwrap();
+        let response = app.oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let verified: VerifyTimestampResponse = serde_json::from_slice(&body).unwrap();
+        assert!(verified.valid);
+        assert!(verified.message.contains("VALID"));
+        assert!(verified.verification.is_some());
+    }
+
+    #[tokio::test]
+    async fn anchor_bundle_endpoint_requires_enabled_transparency_config() {
+        let state = test_state(DEFAULT_MAX_PAYLOAD_BYTES).await;
+        let app = build_router(state, DEFAULT_MAX_PAYLOAD_BYTES);
+
+        let created = create_bundle_response(
+            &app,
+            &CreateBundleRequest {
+                capture: SealableCaptureInput::Legacy(sample_capture()),
+                artefacts: vec![InlineArtefact {
+                    name: "prompt.json".to_string(),
+                    content_type: "application/json".to_string(),
+                    data_base64: Base64::encode_string(br#"{"prompt":"anchor"}"#),
+                }],
+            },
+        )
+        .await;
+
+        let request = Request::builder()
+            .method("POST")
+            .uri(format!("/v1/bundles/{}/anchor", created.bundle_id))
+            .body(Body::empty())
+            .unwrap();
+        let response = app.oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::CONFLICT);
+    }
+
+    #[tokio::test]
+    async fn anchor_bundle_endpoint_requires_timestamped_bundle_when_enabled() {
+        let state = test_state(DEFAULT_MAX_PAYLOAD_BYTES).await;
+        let db = state.db.clone();
+        let app = build_router(state, DEFAULT_MAX_PAYLOAD_BYTES);
+
+        upsert_service_config(
+            &db,
+            SERVICE_CONFIG_KEY_TRANSPARENCY,
+            &TransparencyConfig {
+                enabled: true,
+                provider: "rekor".to_string(),
+                url: Some("https://rekor.example.test".to_string()),
+            },
+        )
+        .await
+        .unwrap();
+
+        let created = create_bundle_response(
+            &app,
+            &CreateBundleRequest {
+                capture: SealableCaptureInput::Legacy(sample_capture()),
+                artefacts: vec![InlineArtefact {
+                    name: "prompt.json".to_string(),
+                    content_type: "application/json".to_string(),
+                    data_base64: Base64::encode_string(br#"{"prompt":"anchor"}"#),
+                }],
+            },
+        )
+        .await;
+
+        let request = Request::builder()
+            .method("POST")
+            .uri(format!("/v1/bundles/{}/anchor", created.bundle_id))
+            .body(Body::empty())
+            .unwrap();
+        let response = app.oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::CONFLICT);
+    }
+
+    #[tokio::test]
     async fn apply_timestamp_token_to_bundle_persists_bundle_timestamp() {
         let state = test_state(DEFAULT_MAX_PAYLOAD_BYTES).await;
         let db = state.db.clone();
@@ -4675,6 +5216,116 @@ mod tests {
                 .await
                 .unwrap();
         assert!(has_timestamp);
+    }
+
+    #[tokio::test]
+    async fn apply_receipt_to_bundle_persists_bundle_receipt() {
+        let state = test_state(DEFAULT_MAX_PAYLOAD_BYTES).await;
+        let db = state.db.clone();
+        let app = build_router(state, DEFAULT_MAX_PAYLOAD_BYTES);
+
+        let created = create_bundle_response(
+            &app,
+            &CreateBundleRequest {
+                capture: SealableCaptureInput::Legacy(sample_capture()),
+                artefacts: vec![InlineArtefact {
+                    name: "prompt.json".to_string(),
+                    content_type: "application/json".to_string(),
+                    data_base64: Base64::encode_string(br#"{"prompt":"receipt"}"#),
+                }],
+            },
+        )
+        .await;
+
+        let mut bundle = load_active_bundle(&db, &created.bundle_id)
+            .await
+            .unwrap()
+            .unwrap();
+        bundle.timestamp = Some(build_test_timestamp_token(
+            &bundle.integrity.bundle_root,
+            Some("test-tsa"),
+        ));
+        persist_bundle_timestamp(&db, &bundle).await.unwrap();
+
+        let receipt = build_test_rekor_receipt(&bundle.integrity.bundle_root, Some("rekor"));
+        let verification = apply_receipt_to_bundle(&mut bundle, receipt).unwrap();
+        assert_eq!(verification.provider.as_deref(), Some("rekor"));
+        assert_eq!(verification.log_index, 7);
+        persist_bundle_receipt(&db, &bundle).await.unwrap();
+
+        let stored = load_active_bundle(&db, &created.bundle_id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(stored.receipt.is_some());
+
+        let has_receipt: bool =
+            sqlx::query_scalar("SELECT has_receipt FROM bundles WHERE bundle_id = ?")
+                .bind(&created.bundle_id)
+                .fetch_one(&db)
+                .await
+                .unwrap();
+        assert!(has_receipt);
+    }
+
+    #[tokio::test]
+    async fn verify_receipt_endpoint_supports_bundle_id_lookup() {
+        let state = test_state(DEFAULT_MAX_PAYLOAD_BYTES).await;
+        let db = state.db.clone();
+        let app = build_router(state, DEFAULT_MAX_PAYLOAD_BYTES);
+
+        let created = create_bundle_response(
+            &app,
+            &CreateBundleRequest {
+                capture: SealableCaptureInput::Legacy(sample_capture()),
+                artefacts: vec![InlineArtefact {
+                    name: "prompt.json".to_string(),
+                    content_type: "application/json".to_string(),
+                    data_base64: Base64::encode_string(br#"{"prompt":"verify-receipt"}"#),
+                }],
+            },
+        )
+        .await;
+
+        let mut bundle = load_active_bundle(&db, &created.bundle_id)
+            .await
+            .unwrap()
+            .unwrap();
+        bundle.timestamp = Some(build_test_timestamp_token(
+            &bundle.integrity.bundle_root,
+            Some("test-tsa"),
+        ));
+        persist_bundle_timestamp(&db, &bundle).await.unwrap();
+        let receipt = build_test_rekor_receipt(&bundle.integrity.bundle_root, Some("rekor"));
+        apply_receipt_to_bundle(&mut bundle, receipt).unwrap();
+        persist_bundle_receipt(&db, &bundle).await.unwrap();
+
+        let request = Request::builder()
+            .method("POST")
+            .uri("/v1/verify/receipt")
+            .header("content-type", "application/json")
+            .body(Body::from(
+                serde_json::to_vec(&VerifyReceiptRequest::BundleId {
+                    bundle_id: created.bundle_id.clone(),
+                })
+                .unwrap(),
+            ))
+            .unwrap();
+        let response = app.oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let verified: VerifyReceiptResponse = serde_json::from_slice(&body).unwrap();
+        assert!(verified.valid);
+        assert!(verified.message.contains("VALID"));
+        assert_eq!(
+            verified
+                .verification
+                .as_ref()
+                .and_then(|verification| verification.provider.as_deref()),
+            Some("rekor")
+        );
     }
 
     #[tokio::test]

@@ -5,11 +5,12 @@ use clap::{Parser, Subcommand, ValueEnum};
 use ed25519_dalek::SigningKey;
 use flate2::{Compression, read::GzDecoder, write::GzEncoder};
 use proof_layer_core::{
-    ArtefactInput, CaptureEvent, CaptureInput, EvidenceItem, ProofBundle,
-    Rfc3161HttpTimestampProvider, TimestampProvider, build_bundle, build_inclusion_proof,
-    capture_input_v01_to_event, decode_private_key_pem, decode_public_key_pem,
-    encode_private_key_pem, encode_public_key_pem, sha256_prefixed, timestamp_digest,
-    validate_bundle_integrity_fields, verify_timestamp,
+    ArtefactInput, CaptureEvent, CaptureInput, EvidenceItem, ProofBundle, ReceiptVerification,
+    RekorTransparencyProvider, Rfc3161HttpTimestampProvider, TimestampProvider,
+    TransparencyProvider, anchor_bundle as anchor_bundle_receipt, build_bundle,
+    build_inclusion_proof, capture_input_v01_to_event, decode_private_key_pem,
+    decode_public_key_pem, encode_private_key_pem, encode_public_key_pem, sha256_prefixed,
+    timestamp_digest, validate_bundle_integrity_fields, verify_receipt, verify_timestamp,
 };
 use reqwest::blocking::{Client, Response};
 use serde::{Deserialize, Serialize};
@@ -63,6 +64,8 @@ enum Commands {
         system_id: Option<String>,
         #[arg(long)]
         timestamp_url: Option<String>,
+        #[arg(long)]
+        transparency_log: Option<String>,
     },
     /// Verify a proof bundle package offline.
     Verify {
@@ -175,6 +178,7 @@ struct VerifyReport {
     manifest_ok: bool,
     message: String,
     artefacts_verified: usize,
+    assurance_level: AssuranceLevel,
     timestamp: OptionalCheckReport,
     receipt: OptionalCheckReport,
 }
@@ -203,6 +207,7 @@ struct CreateCommandInput<'a> {
     signing_kid: &'a str,
     overrides: &'a CreateOverrides,
     timestamp_url: Option<&'a str>,
+    transparency_log: Option<&'a str>,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -210,7 +215,6 @@ struct CreateCommandInput<'a> {
 enum OptionalCheckState {
     Skipped,
     Missing,
-    Unsupported,
     Invalid,
     Valid,
 }
@@ -219,6 +223,14 @@ enum OptionalCheckState {
 struct OptionalCheckReport {
     state: OptionalCheckState,
     message: String,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+enum AssuranceLevel {
+    Signed,
+    Timestamped,
+    TransparencyAnchored,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -337,6 +349,7 @@ fn main() -> Result<()> {
             retention_class,
             system_id,
             timestamp_url,
+            transparency_log,
         } => cmd_create(CreateCommandInput {
             input_path: &input,
             artefacts: &artefact,
@@ -351,6 +364,7 @@ fn main() -> Result<()> {
                 system_id,
             },
             timestamp_url: timestamp_url.as_deref(),
+            transparency_log: transparency_log.as_deref(),
         }),
         Commands::Verify {
             input,
@@ -412,6 +426,11 @@ fn cmd_create(args: CreateCommandInput<'_>) -> Result<()> {
     }
     if args.signing_kid.trim().is_empty() {
         bail!("signing kid must not be empty");
+    }
+    if args.transparency_log.is_some() && args.timestamp_url.is_none() {
+        bail!(
+            "--transparency-log requires --timestamp-url because Rekor anchoring submits RFC 3161 timestamp tokens"
+        );
     }
 
     let max_payload_bytes = max_payload_bytes()?;
@@ -488,6 +507,16 @@ fn cmd_create(args: CreateCommandInput<'_>) -> Result<()> {
             "timestamp provider={} generated_at={}",
             verification.provider.as_deref().unwrap_or("rfc3161"),
             verification.generated_at
+        );
+    }
+    if let Some(transparency_log) = args.transparency_log {
+        let provider = RekorTransparencyProvider::new(transparency_log.to_string());
+        let verification = attach_receipt_to_bundle(&mut bundle, &provider)?;
+        info!(
+            "transparency provider={} entry_uuid={} log_index={}",
+            verification.provider.as_deref().unwrap_or("rekor"),
+            abbreviate_value(&verification.entry_uuid),
+            verification.log_index
         );
     }
 
@@ -592,12 +621,7 @@ fn cmd_verify(
         failures.push(timestamp.message.clone());
     }
 
-    let receipt = evaluate_optional_check(
-        "transparency receipt",
-        "transparency receipt verification",
-        bundle.receipt.is_some(),
-        check_receipt,
-    );
+    let receipt = evaluate_receipt_check(&bundle, check_receipt);
     if check_receipt && receipt.state != OptionalCheckState::Valid {
         failures.push(receipt.message.clone());
     }
@@ -615,6 +639,7 @@ fn cmd_verify(
         manifest_ok,
         message,
         artefacts_verified,
+        assurance_level: assurance_level(&bundle),
         timestamp,
         receipt,
     };
@@ -931,34 +956,11 @@ fn abbreviate_digest(value: &str) -> String {
     format!("{}...{}", &value[..15], &value[value.len() - 6..])
 }
 
-fn evaluate_optional_check(
-    label: &str,
-    mechanism: &str,
-    present: bool,
-    requested: bool,
-) -> OptionalCheckReport {
-    if !requested {
-        return OptionalCheckReport {
-            state: OptionalCheckState::Skipped,
-            message: if present {
-                format!("{label} present but not checked")
-            } else {
-                format!("{label} not present (optional)")
-            },
-        };
+fn abbreviate_value(value: &str) -> String {
+    if value.len() <= 20 {
+        return value.to_string();
     }
-
-    if !present {
-        return OptionalCheckReport {
-            state: OptionalCheckState::Missing,
-            message: format!("{label} check requested but bundle has no {label}"),
-        };
-    }
-
-    OptionalCheckReport {
-        state: OptionalCheckState::Unsupported,
-        message: format!("{label} present but {mechanism} is not implemented yet"),
-    }
+    format!("{}...{}", &value[..12], &value[value.len() - 6..])
 }
 
 fn evaluate_timestamp_check(bundle: &ProofBundle, requested: bool) -> OptionalCheckReport {
@@ -1001,6 +1003,43 @@ fn evaluate_timestamp_check(bundle: &ProofBundle, requested: bool) -> OptionalCh
     }
 }
 
+fn evaluate_receipt_check(bundle: &ProofBundle, requested: bool) -> OptionalCheckReport {
+    if !requested {
+        return OptionalCheckReport {
+            state: OptionalCheckState::Skipped,
+            message: if bundle.receipt.is_some() {
+                "transparency receipt present but not checked".to_string()
+            } else {
+                "transparency receipt not present (optional)".to_string()
+            },
+        };
+    }
+
+    let Some(receipt) = bundle.receipt.as_ref() else {
+        return OptionalCheckReport {
+            state: OptionalCheckState::Missing,
+            message: "transparency receipt check requested but bundle has no transparency receipt"
+                .to_string(),
+        };
+    };
+
+    match verify_receipt(receipt, &bundle.integrity.bundle_root) {
+        Ok(verification) => OptionalCheckReport {
+            state: OptionalCheckState::Valid,
+            message: format!(
+                "Rekor receipt valid at {} (log_index {}, entry {})",
+                verification.integrated_time,
+                verification.log_index,
+                abbreviate_value(&verification.entry_uuid)
+            ),
+        },
+        Err(err) => OptionalCheckReport {
+            state: OptionalCheckState::Invalid,
+            message: format!("transparency receipt verification failed: {err}"),
+        },
+    }
+}
+
 fn attach_timestamp_to_bundle(
     bundle: &mut ProofBundle,
     provider: &dyn TimestampProvider,
@@ -1016,6 +1055,33 @@ fn attach_timestamp_to_bundle(
     bundle.timestamp = Some(token);
 
     Ok(verification)
+}
+
+fn attach_receipt_to_bundle(
+    bundle: &mut ProofBundle,
+    provider: &dyn TransparencyProvider,
+) -> Result<ReceiptVerification> {
+    if bundle.receipt.is_some() {
+        bail!("bundle already contains a transparency receipt");
+    }
+
+    let receipt =
+        anchor_bundle_receipt(bundle, provider).context("failed to submit transparency receipt")?;
+    let verification = verify_receipt(&receipt, &bundle.integrity.bundle_root)
+        .context("failed to verify returned transparency receipt")?;
+    bundle.receipt = Some(receipt);
+
+    Ok(verification)
+}
+
+fn assurance_level(bundle: &ProofBundle) -> AssuranceLevel {
+    if bundle.receipt.is_some() {
+        AssuranceLevel::TransparencyAnchored
+    } else if bundle.timestamp.is_some() {
+        AssuranceLevel::Timestamped
+    } else {
+        AssuranceLevel::Signed
+    }
 }
 
 fn write_bundle_package(out_path: &Path, files: &BTreeMap<String, Vec<u8>>) -> Result<()> {
@@ -1204,6 +1270,10 @@ fn print_human_verify_report(report: &VerifyReport) {
         optional_check_marker(&report.receipt.state),
         report.receipt.message
     );
+    println!(
+        "Assurance level: {}",
+        assurance_level_label(report.assurance_level)
+    );
     println!();
     println!("Verification result: {}", report.message);
 }
@@ -1212,9 +1282,15 @@ fn optional_check_marker(state: &OptionalCheckState) -> &'static str {
     match state {
         OptionalCheckState::Valid => "✓",
         OptionalCheckState::Skipped => "–",
-        OptionalCheckState::Missing
-        | OptionalCheckState::Unsupported
-        | OptionalCheckState::Invalid => "✗",
+        OptionalCheckState::Missing | OptionalCheckState::Invalid => "✗",
+    }
+}
+
+fn assurance_level_label(level: AssuranceLevel) -> &'static str {
+    match level {
+        AssuranceLevel::Signed => "signed",
+        AssuranceLevel::Timestamped => "timestamped",
+        AssuranceLevel::TransparencyAnchored => "transparency_anchored",
     }
 }
 
@@ -1383,7 +1459,8 @@ mod tests {
     use flate2::{Compression, write::GzEncoder};
     use proof_layer_core::{
         Actor, ActorRole, EncryptionPolicy, EvidenceContext, LlmInteractionEvidence, Policy,
-        RFC3161_TIMESTAMP_KIND, Subject, TimestampError, TimestampToken,
+        REKOR_RFC3161_API_VERSION, REKOR_RFC3161_ENTRY_KIND, REKOR_TRANSPARENCY_KIND,
+        RFC3161_TIMESTAMP_KIND, Subject, TimestampError, TimestampToken, TransparencyReceipt,
     };
     use serde_json::json;
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -1520,12 +1597,68 @@ mod tests {
         }
     }
 
+    struct StaticTransparencyProvider {
+        receipt: TransparencyReceipt,
+    }
+
+    impl TransparencyProvider for StaticTransparencyProvider {
+        fn submit(
+            &self,
+            _entry: &proof_layer_core::TransparencyEntry,
+        ) -> std::result::Result<TransparencyReceipt, proof_layer_core::TransparencyError> {
+            Ok(self.receipt.clone())
+        }
+    }
+
     fn build_test_timestamp_token(digest: &str, provider: Option<&str>) -> TimestampToken {
         let signed_data_der = build_test_signed_data_der(digest);
         TimestampToken {
             kind: RFC3161_TIMESTAMP_KIND.to_string(),
             provider: provider.map(str::to_string),
             token_base64: base64ct::Base64::encode_string(&signed_data_der),
+        }
+    }
+
+    fn build_test_rekor_receipt(bundle_root: &str, provider: Option<&str>) -> TransparencyReceipt {
+        let token = build_test_timestamp_token(bundle_root, provider);
+        TransparencyReceipt {
+            kind: REKOR_TRANSPARENCY_KIND.to_string(),
+            provider: provider.map(str::to_string),
+            body: json!({
+                "log_url": "https://rekor.sigstore.dev",
+                "entry_uuid": "abababababababababababababababababababababababababababababababab",
+                "log_entry": {
+                    "abababababababababababababababababababababababababababababababab": {
+                        "body": base64ct::Base64::encode_string(
+                            serde_json::to_string(&json!({
+                                "kind": REKOR_RFC3161_ENTRY_KIND,
+                                "apiVersion": REKOR_RFC3161_API_VERSION,
+                                "spec": {
+                                    "tsr": {
+                                        "content": token.token_base64,
+                                    }
+                                }
+                            }))
+                            .unwrap()
+                            .as_bytes()
+                        ),
+                        "integratedTime": 1772802000_i64,
+                        "logID": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
+                        "logIndex": 7,
+                        "verification": {
+                            "inclusionProof": {
+                                "logIndex": 7,
+                                "treeSize": 8,
+                                "rootHash": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+                                "hashes": [
+                                    "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+                                ]
+                            },
+                            "signedEntryTimestamp": base64ct::Base64::encode_string(b"rekor-set")
+                        }
+                    }
+                }
+            }),
         }
     }
 
@@ -1711,7 +1844,7 @@ mod tests {
     }
 
     #[test]
-    fn optional_check_reports_missing_invalid_and_unsupported_states() {
+    fn optional_check_reports_missing_invalid_and_valid_states() {
         let missing = evaluate_timestamp_check(&sample_bundle(), true);
         assert_eq!(missing.state, OptionalCheckState::Missing);
 
@@ -1723,9 +1856,22 @@ mod tests {
         let invalid = evaluate_timestamp_check(&bundle, true);
         assert_eq!(invalid.state, OptionalCheckState::Invalid);
 
-        let unsupported =
-            evaluate_optional_check("transparency receipt", "receipt verification", true, true);
-        assert_eq!(unsupported.state, OptionalCheckState::Unsupported);
+        let missing_receipt = evaluate_receipt_check(&bundle, true);
+        assert_eq!(missing_receipt.state, OptionalCheckState::Missing);
+
+        bundle.receipt = Some(build_test_rekor_receipt(
+            &bundle.integrity.bundle_root,
+            Some("rekor"),
+        ));
+        let valid_receipt = evaluate_receipt_check(&bundle, true);
+        assert_eq!(valid_receipt.state, OptionalCheckState::Valid);
+
+        bundle.receipt = Some(build_test_rekor_receipt(
+            "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            Some("rekor"),
+        ));
+        let invalid_receipt = evaluate_receipt_check(&bundle, true);
+        assert_eq!(invalid_receipt.state, OptionalCheckState::Invalid);
     }
 
     #[test]
@@ -1742,6 +1888,27 @@ mod tests {
         let timestamp_report = evaluate_timestamp_check(&bundle, true);
         assert_eq!(timestamp_report.state, OptionalCheckState::Valid);
         assert!(timestamp_report.message.contains("RFC 3161 token valid"));
+    }
+
+    #[test]
+    fn attach_receipt_to_bundle_sets_verifiable_receipt() {
+        let mut bundle = sample_bundle();
+        bundle.timestamp = Some(build_test_timestamp_token(
+            &bundle.integrity.bundle_root,
+            Some("test-tsa"),
+        ));
+        let provider = StaticTransparencyProvider {
+            receipt: build_test_rekor_receipt(&bundle.integrity.bundle_root, Some("rekor")),
+        };
+
+        let verification = attach_receipt_to_bundle(&mut bundle, &provider).unwrap();
+        assert_eq!(verification.provider.as_deref(), Some("rekor"));
+        assert_eq!(verification.log_index, 7);
+        assert!(bundle.receipt.is_some());
+
+        let receipt_report = evaluate_receipt_check(&bundle, true);
+        assert_eq!(receipt_report.state, OptionalCheckState::Valid);
+        assert!(receipt_report.message.contains("Rekor receipt valid"));
     }
 
     #[test]

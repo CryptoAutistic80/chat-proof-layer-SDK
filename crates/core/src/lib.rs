@@ -5,6 +5,7 @@ pub mod merkle;
 pub mod schema;
 pub mod sign;
 pub mod timestamp;
+pub mod transparency;
 pub mod verify;
 
 pub mod bundle {
@@ -47,5 +48,10 @@ pub use timestamp::{
     DIGICERT_TIMESTAMP_URL, FREETSA_TIMESTAMP_URL, RFC3161_TIMESTAMP_KIND,
     Rfc3161HttpTimestampProvider, TimestampError, TimestampProvider, TimestampVerification,
     timestamp_digest, verify_timestamp,
+};
+pub use transparency::{
+    REKOR_RFC3161_API_VERSION, REKOR_RFC3161_ENTRY_KIND, REKOR_TRANSPARENCY_KIND,
+    ReceiptVerification, RekorTransparencyProvider, SIGSTORE_REKOR_URL, TransparencyEntry,
+    TransparencyError, TransparencyProvider, anchor_bundle, verify_receipt,
 };
 pub use verify::{VerifyBundleRootError, verify_bundle_root};

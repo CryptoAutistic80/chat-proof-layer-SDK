@@ -160,17 +160,41 @@
       "type": "object",
       "additionalProperties": false,
       "required": [
-        "kind"
+        "kind",
+        "body"
       ],
       "properties": {
         "kind": {
-          "type": "string",
-          "minLength": 1
+          "const": "rekor"
         },
         "provider": {
           "type": "string"
         },
-        "body": true
+        "body": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "log_url",
+            "entry_uuid",
+            "log_entry"
+          ],
+          "properties": {
+            "log_url": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Base URL of the Rekor instance that integrated the receipt."
+            },
+            "entry_uuid": {
+              "type": "string",
+              "pattern": "^([0-9a-fA-F]{64}|[0-9a-fA-F]{80})$"
+            },
+            "log_entry": {
+              "type": "object",
+              "minProperties": 1,
+              "description": "Raw Rekor LogEntry response keyed by entry UUID."
+            }
+          }
+        },
       }
     }
   }

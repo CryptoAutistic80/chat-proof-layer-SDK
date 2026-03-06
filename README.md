@@ -103,13 +103,14 @@ docker compose up --build
 - `GET /healthz`
 - `GET /readyz`
 - `POST /v1/bundles`
-- `GET /v1/bundles?system_id=&role=&type=&from=&to=&page=&limit=`
+- `GET /v1/bundles?system_id=&role=&type=&has_timestamp=&has_receipt=&assurance_level=&from=&to=&page=&limit=`
 - `GET /v1/bundles/{bundle_id}`
 - `DELETE /v1/bundles/{bundle_id}`
 - `GET /v1/bundles/{bundle_id}/artefacts/{name}`
 - `POST /v1/bundles/{bundle_id}/legal-hold`
 - `DELETE /v1/bundles/{bundle_id}/legal-hold`
 - `POST /v1/bundles/{bundle_id}/timestamp`
+- `POST /v1/bundles/{bundle_id}/anchor`
 - `GET /v1/audit-trail?action=&bundle_id=&pack_id=&page=&limit=`
 - `GET /v1/config`
 - `PUT /v1/config/retention`
@@ -122,6 +123,8 @@ docker compose up --build
 - `GET /v1/retention/status`
 - `POST /v1/retention/scan`
 - `POST /v1/verify` (supports inline bundle+artefacts or packaged `bundle.pkg`)
+- `POST /v1/verify/timestamp`
+- `POST /v1/verify/receipt`
 
 ### `POST /v1/bundles` request
 
@@ -242,15 +245,21 @@ npm run dev
 - `proofctl create` and `POST /v1/bundles` accept either the legacy PoC capture shape or the v1.0 capture shape during migration.
 - `proofctl create` also supports Phase 2 migration overrides such as `--system-id`, `--retention-class`, and `--evidence-type`.
 - `proofctl create` now supports `--timestamp-url <tsa>` and can attach an RFC 3161 token before packaging.
-- `proofctl verify --check-timestamp` now validates RFC 3161 tokens against the UTF-8 bytes of `integrity.bundle_root`; `--check-receipt` is still unsupported.
+- `proofctl create --transparency-log <rekor>` now anchors the RFC 3161 token into Rekor before packaging; this currently requires `--timestamp-url`.
+- `proofctl verify --check-timestamp` now validates RFC 3161 tokens against the UTF-8 bytes of `integrity.bundle_root`, and `--check-receipt` now validates Rekor RFC 3161 receipts against the same bundle root.
+- `proofctl verify` now reports the bundle assurance level as `signed`, `timestamped`, or `transparency_anchored`.
 - `proofctl inspect` now supports `--show-items` and `--show-merkle`.
 - `proofctl pack` now requests pack assembly from the vault and downloads the resulting `pl-evidence-pack-v1` archive.
 - The vault now persists metadata in SQLite, computes bundle expiry from seeded retention policies, derives per-item `obligation_ref` tags, exposes retention scan/status endpoints, supports legal holds, and indexes evidence items for `/v1/bundles` filtering.
+- `/v1/bundles` now also supports assurance-oriented filtering through `has_timestamp`, `has_receipt`, and `assurance_level=signed|timestamped|transparency_anchored`, and bundle summaries now report the computed assurance level.
 - Retention scans now soft-delete expired bundles, skip held bundles, and hard-delete previously soft-deleted bundles after the configured grace period (`PROOF_SERVICE_RETENTION_GRACE_DAYS`, default `30`).
 - The vault now keeps an append-only audit trail and exposes it via `/v1/audit-trail`; current actions include bundle create/read/verify/delete, legal hold changes, retention scans, and pack create/read/export events.
 - The vault now exposes `GET /v1/config`, `PUT /v1/config/retention`, `PUT /v1/config/timestamp`, and `PUT /v1/config/transparency`; retention, timestamp, and transparency settings are persisted in SQLite, and active-bundle `expires_at` values are recalculated for updated active retention classes.
 - `POST /v1/bundles/{bundle_id}/timestamp` now uses the configured RFC 3161 provider to timestamp an existing stored bundle and persist the token back into bundle JSON.
+- `POST /v1/bundles/{bundle_id}/anchor` now uses the configured Rekor provider to anchor an existing timestamped bundle and persist the receipt back into bundle JSON; `scitt` remains a stubbed provider choice.
+- `POST /v1/verify/timestamp` and `POST /v1/verify/receipt` now verify assurance artefacts either directly (`bundle_root` + token/receipt) or by stored `bundle_id`.
 - Timestamp verification currently checks CMS signature integrity and message-imprint binding, but it does not yet validate TSA certificate chains, revocation, or qualified/eIDAS trust status.
+- Transparency verification currently checks Rekor receipt structure, inclusion-proof / signed-entry-timestamp presence, and the embedded RFC 3161 token binding to `integrity.bundle_root`, but it does not yet verify Rekor signed-entry-timestamp signatures or inclusion proofs cryptographically.
 - Pack assembly is now available through `/v1/packs`; packs apply an initial heuristic curation profile (`pack-rules-v1`) based on actor role, evidence item types, retention class, and derived obligation refs, then export matching bundles as embedded `bundle.pkg` files plus a manifest.
 - Pack redaction/selective disclosure is still not implemented; current exports remain full bundle packages.
 - Canonicalization and signing semantics follow `docs/architecture.md`.

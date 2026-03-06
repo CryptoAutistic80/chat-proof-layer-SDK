@@ -102,6 +102,17 @@ If `timestamp` is present:
 - the RFC 3161 message imprint is computed over the UTF-8 bytes of `integrity.bundle_root`
 - `timestamp` remains outside the canonical header projection and outside the signed payload so it can be attached after initial bundle signing
 
+## Transparency Receipt Semantics
+
+If `receipt` is present:
+
+- `kind` MUST be `rekor`
+- `body.log_url` MUST identify the Rekor base URL used for anchoring
+- `body.entry_uuid` MUST identify the single returned Rekor log entry
+- `body.log_entry` MUST store the raw Rekor `LogEntry` JSON object keyed by `entry_uuid`
+- the embedded Rekor entry body MUST be an `rfc3161` proposed entry whose `spec.tsr.content` is the bundle's RFC 3161 token
+- `receipt` remains outside the canonical header projection and outside the signed payload so it can be attached after timestamping
+
 ## Field Constraints
 
 ### Common Formats
@@ -157,7 +168,8 @@ Implementations MUST execute, in order:
 5. Recompute `bundle_root` and compare.
 6. Verify JWS signature over UTF-8 `bundle_root` bytes using issuer public key.
 7. If timestamp verification is requested and `timestamp` is present, verify the RFC 3161 token CMS signature and ensure its message imprint matches SHA-256 over UTF-8 `integrity.bundle_root` bytes.
-8. Report optional checks (timestamp/receipt) as skipped if absent or not requested.
+8. If receipt verification is requested and `receipt` is present, verify the Rekor receipt structure, require inclusion-proof and signed-entry-timestamp fields, decode the embedded `rfc3161` entry body, and verify that embedded RFC 3161 token against UTF-8 `integrity.bundle_root` bytes.
+9. Report optional checks (timestamp/receipt) as skipped if absent or not requested.
 
 Any required check failure MUST produce an invalid result.
 

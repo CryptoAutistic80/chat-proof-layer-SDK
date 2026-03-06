@@ -34,6 +34,16 @@ Completed:
   `proofctl create --timestamp-url`,
   `proofctl verify --check-timestamp`,
   and vault `POST /v1/bundles/{id}/timestamp` backed by persisted timestamp config.
+- Added the next assurance slice:
+  `crates/core/src/transparency/` with Rekor RFC 3161 receipt submission/verification,
+  `proofctl create --transparency-log`,
+  `proofctl verify --check-receipt` plus assurance-level output,
+  and vault `POST /v1/bundles/{id}/anchor` backed by persisted transparency config.
+- Added the next vault assurance slice:
+  `POST /v1/verify/timestamp`,
+  `POST /v1/verify/receipt`,
+  direct-or-by-`bundle_id` assurance verification in the service,
+  and assurance-aware `/v1/bundles` filtering on `has_timestamp`, `has_receipt`, and computed assurance level.
 - Added the first pack export slice:
   `POST /v1/packs`,
   `GET /v1/packs/{id}`,
@@ -48,8 +58,9 @@ Completed:
 
 Still outstanding from `plan.md`:
 
-- JSON schema coverage is now started, but timestamp/transparency and richer export/archive schemas are not implemented.
+- JSON schema coverage is now started, with timestamp and Rekor transparency receipt coverage added, but richer export/archive schemas are still incomplete.
 - The vault now uses SQLite with legal-hold-aware retention, audit logging, retention/timestamp/transparency configuration, curated pack export, and RFC 3161 bundle timestamp attachment, but PostgreSQL and redacted/Annex-complete pack assembly are not built yet.
 - Node and Python SDKs are still HTTP-client based; NAPI-RS and PyO3 bindings are not built yet.
-- Transparency receipts and selective disclosure CLI flows remain future phases.
+- SCITT receipts and selective disclosure CLI flows remain future phases.
 - RFC 3161 verification currently checks CMS signature integrity and message-imprint binding, but TSA certificate-chain / revocation trust validation and eIDAS-qualified trust policy are still outstanding.
+- Rekor verification currently checks receipt structure, embedded RFC 3161 token binding, and inclusion-proof / signed-entry-timestamp presence, but not Rekor SET signature validation or inclusion-proof cryptographic verification.

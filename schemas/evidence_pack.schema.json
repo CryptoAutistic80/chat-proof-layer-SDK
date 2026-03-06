@@ -2,14 +2,15 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://proof-layer.dev/schemas/evidence_pack.schema.json",
   "title": "Evidence Pack",
-  "description": "Envelope for future Annex-aligned pack assembly. Pack generation is not implemented yet.",
+  "description": "Manifest embedded in vault-generated `pl-evidence-pack-v1` archives.",
   "type": "object",
   "additionalProperties": false,
   "required": [
     "pack_id",
     "pack_type",
     "generated_at",
-    "bundle_ids"
+    "bundle_ids",
+    "bundles"
   ],
   "properties": {
     "pack_id": {
@@ -24,6 +25,18 @@
       "type": "string",
       "format": "date-time"
     },
+    "system_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "from": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "to": {
+      "type": "string",
+      "format": "date-time"
+    },
     "bundle_ids": {
       "type": "array",
       "minItems": 1,
@@ -32,30 +45,55 @@
         "minLength": 1
       }
     },
-    "notes": {
-      "type": "string"
-    },
-    "attachments": {
+    "bundles": {
       "type": "array",
+      "minItems": 1,
       "items": {
         "type": "object",
         "additionalProperties": false,
         "required": [
-          "name",
-          "content_type"
+          "bundle_id",
+          "created_at",
+          "actor_role",
+          "retention_class",
+          "item_types"
         ],
         "properties": {
-          "name": {
+          "bundle_id": {
             "type": "string",
             "minLength": 1
           },
-          "content_type": {
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "actor_role": {
+            "type": "string",
+            "enum": [
+              "provider",
+              "deployer",
+              "integrator"
+            ]
+          },
+          "system_id": {
             "type": "string",
             "minLength": 1
           },
-          "digest": {
+          "model_id": {
             "type": "string",
-            "pattern": "^sha256:[0-9a-f]{64}$"
+            "minLength": 1
+          },
+          "retention_class": {
+            "type": "string",
+            "minLength": 1
+          },
+          "item_types": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
           }
         }
       }

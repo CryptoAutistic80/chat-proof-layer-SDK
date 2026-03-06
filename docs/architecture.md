@@ -5,8 +5,8 @@
 This document defines the PoC architecture for:
 
 - Phase 1: Rust core cryptography and canonicalization
-- Phase 2: Axum proof service with `sled` persistence
-- Phase 5: `proofctl` offline create/verify/inspect workflows
+- Phase 2: Axum proof service with SQLite persistence
+- Phase 5: `proofctl` offline create/verify/inspect workflows plus vault-backed pack export
 
 The goal is cryptographically verifiable evidence artifacts for AI interactions, not legal proof claims.
 
@@ -15,9 +15,9 @@ The goal is cryptographically verifiable evidence artifacts for AI interactions,
 The system has four main layers:
 
 1. Provider adapters (Node/Python SDKs) capture request/response/tool events.
-2. Proof service (Axum) validates capture payloads, stores artifacts, and constructs proof bundles.
+2. Proof service (Axum) validates capture payloads, stores artifacts, constructs proof bundles, and assembles export packs.
 3. Rust core implements canonicalization, hashing, Merkle commitment, signing, and verification.
-4. `proofctl` performs offline package creation, inspection, and verification.
+4. `proofctl` performs offline package creation, inspection, verification, and pack download.
 
 `POST /v1/verify` accepts either inline bundle payloads or a packaged `bundle.pkg` (base64).
 
@@ -48,12 +48,16 @@ Core defaults:
 - Artifact storage: local filesystem at `./storage/artefacts/{bundle_id}/{name}`
 - CORS enabled for local web demo interoperability
 - Current query surface: `GET /v1/bundles?system_id=&role=&type=&from=&to=&page=&limit=`
+- Retention operations: `GET /v1/retention/status`, `POST /v1/retention/scan`
+- Pack export operations: `POST /v1/packs`, `GET /v1/packs/{id}`, `GET /v1/packs/{id}/manifest`, `GET /v1/packs/{id}/export`
 
 Current SQLite tables:
 
 - `bundles`: top-level bundle metadata plus serialized bundle JSON and canonical header bytes
 - `evidence_items`: one row per evidence item for type-based filtering
 - `artefacts`: stored artefact metadata and blob paths
+- `retention_policies`: seeded retention schedules used to compute `expires_at`
+- `packs`: pack manifests and export paths
 
 ### `crates/cli` (`proofctl`)
 
@@ -61,6 +65,7 @@ Current SQLite tables:
 - `create`: build `bundle.pkg` from capture JSON + artifacts
 - `verify`: offline integrity and signature verification
 - `inspect`: human/JSON diagnostics
+- `pack`: request a vault export pack and write the archive locally
 
 ### `packages/sdk-node` and `packages/sdk-python`
 
@@ -80,7 +85,7 @@ Current SQLite tables:
 8. Compute `bundle_root` from ordered digest list:
    - `[header_digest, artefact_digest_1, artefact_digest_2, ...]`
 9. Sign UTF-8 bytes of `bundle_root` using Ed25519 JWS compact serialization.
-10. Persist bundle + indexes in one `sled::Batch`, then `flush()`.
+10. Persist bundle metadata + indexes in SQLite and artifact bytes on disk.
 11. Return `bundle_id`, `bundle_root`, signature metadata, and timestamp.
 
 ## Deterministic Byte-Level Contracts

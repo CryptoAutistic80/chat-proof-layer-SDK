@@ -9,7 +9,7 @@ use axum::{
 use base64ct::{Base64, Encoding};
 use chrono::Utc;
 use ed25519_dalek::SigningKey;
-use flate2::read::GzDecoder;
+use flate2::{Compression, read::GzDecoder, write::GzEncoder};
 use proof_layer_core::{
     ArtefactInput, BuildBundleError, CaptureEvent, CaptureInput, EvidenceItem, ProofBundle,
     build_bundle, canonicalize_value, decode_private_key_pem, decode_public_key_pem,
@@ -21,7 +21,7 @@ use sqlx::{
     sqlite::{SqliteConnectOptions, SqlitePoolOptions},
 };
 use std::{
-    collections::{BTreeMap, HashSet},
+    collections::{BTreeMap, BTreeSet, HashSet},
     env,
     fs::{self, File},
     io::{ErrorKind, Read, Write},
@@ -37,6 +37,8 @@ use ulid::Ulid;
 const DEFAULT_ADDR: &str = "0.0.0.0:8080";
 const DEFAULT_MAX_PAYLOAD_BYTES: usize = 10 * 1024 * 1024;
 const PACKAGE_FORMAT: &str = "pl-bundle-pkg-v1";
+const PACK_EXPORT_FORMAT: &str = "pl-evidence-pack-v1";
+const PACK_EXPORT_FILE_NAME: &str = "evidence_pack.pkg";
 
 #[derive(Clone)]
 struct AppState {
@@ -162,8 +164,132 @@ struct BundleSummary {
     bundle_root: String,
     signature_alg: String,
     retention_class: String,
+    expires_at: Option<String>,
     has_timestamp: bool,
     has_receipt: bool,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct RetentionStatusResponse {
+    scanned_at: String,
+    policies: Vec<RetentionStatusItem>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct RetentionStatusItem {
+    retention_class: String,
+    min_duration_days: i64,
+    max_duration_days: Option<i64>,
+    legal_basis: String,
+    active: bool,
+    total_bundles: i64,
+    active_bundles: i64,
+    deleted_bundles: i64,
+    expired_active_bundles: i64,
+    next_expiry: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct RetentionScanResponse {
+    scanned_at: String,
+    soft_deleted: u64,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct CreatePackRequest {
+    pack_type: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    system_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    from: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    to: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct PackSummaryResponse {
+    pack_id: String,
+    pack_type: String,
+    created_at: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    system_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    from: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    to: Option<String>,
+    bundle_count: usize,
+    bundle_ids: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct PackManifest {
+    pack_id: String,
+    pack_type: String,
+    generated_at: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    system_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    from: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    to: Option<String>,
+    bundle_ids: Vec<String>,
+    bundles: Vec<PackBundleEntry>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct PackBundleEntry {
+    bundle_id: String,
+    created_at: String,
+    actor_role: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    system_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    model_id: Option<String>,
+    retention_class: String,
+    item_types: Vec<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct EvidencePackArchive {
+    format: String,
+    manifest: PackManifest,
+    files: Vec<PackagedFile>,
+}
+
+#[derive(Debug, FromRow)]
+struct PackSourceBundleRow {
+    bundle_id: String,
+    created_at: String,
+    actor_role: String,
+    system_id: Option<String>,
+    model_id: Option<String>,
+    retention_class: String,
+    bundle_json: String,
+}
+
+#[derive(Debug, FromRow)]
+struct StoredPackRow {
+    pack_id: String,
+    pack_type: String,
+    created_at: String,
+    system_id: Option<String>,
+    from_date: Option<String>,
+    to_date: Option<String>,
+    bundle_count: i64,
+    export_path: String,
+    manifest_json: String,
+}
+
+#[derive(Debug, FromRow)]
+struct StoredPackArtefactRow {
+    name: String,
+    storage_path: String,
+}
+
+#[derive(Debug)]
+struct PackArtefactBytes {
+    name: String,
+    bytes: Vec<u8>,
 }
 
 #[tokio::main]
@@ -192,6 +318,8 @@ async fn main() -> Result<()> {
         .unwrap_or_else(|_| storage_dir.join("metadata.db"));
     let db = open_sqlite_pool(&db_path).await?;
     initialize_sqlite_schema(&db).await?;
+    seed_default_retention_policies(&db).await?;
+    backfill_bundle_expiries(&db).await?;
 
     let signing_key = load_signing_key()?;
     let signing_kid = env::var("PROOF_SIGNING_KEY_ID").unwrap_or_else(|_| "kid-dev-01".to_string());
@@ -231,6 +359,12 @@ fn build_router(state: AppState, max_payload_bytes: usize) -> Router {
             "/v1/bundles/{bundle_id}/artefacts/{name}",
             get(get_artefact),
         )
+        .route("/v1/packs", post(create_pack))
+        .route("/v1/packs/{pack_id}", get(get_pack))
+        .route("/v1/packs/{pack_id}/manifest", get(get_pack_manifest))
+        .route("/v1/packs/{pack_id}/export", get(get_pack_export))
+        .route("/v1/retention/status", get(retention_status))
+        .route("/v1/retention/scan", post(retention_scan))
         .route("/v1/verify", post(verify_bundle))
         .layer(cors)
         .layer(DefaultBodyLimit::max(max_payload_bytes))
@@ -299,6 +433,9 @@ async fn create_bundle(
     }
     .map_err(map_build_bundle_error)?;
 
+    resolve_bundle_expiry(&state.db, &bundle)
+        .await
+        .map_err(ApiError::bad_request_anyhow)?;
     persist_artefacts(&state.storage_dir, &bundle_id, &artefacts)
         .map_err(ApiError::internal_anyhow)?;
     persist_bundle_metadata(&state.db, &state.storage_dir, &bundle)
@@ -335,6 +472,7 @@ async fn list_bundles(
             b.bundle_root, \
             b.signature_alg, \
             b.retention_class, \
+            b.expires_at, \
             b.has_timestamp, \
             b.has_receipt \
          FROM bundles b ",
@@ -382,6 +520,222 @@ async fn list_bundles(
         StatusCode::OK,
         Json(ListBundlesResponse { page, limit, items }),
     ))
+}
+
+async fn retention_status(State(state): State<AppState>) -> Result<impl IntoResponse, ApiError> {
+    let now = Utc::now().to_rfc3339();
+    let rows = sqlx::query(
+        "SELECT
+            p.retention_class,
+            p.min_duration_days,
+            p.max_duration_days,
+            p.legal_basis,
+            p.active,
+            COUNT(b.bundle_id) AS total_bundles,
+            COALESCE(SUM(CASE WHEN b.deleted_at IS NULL THEN 1 ELSE 0 END), 0) AS active_bundles,
+            COALESCE(SUM(CASE WHEN b.deleted_at IS NOT NULL THEN 1 ELSE 0 END), 0) AS deleted_bundles,
+            COALESCE(SUM(CASE WHEN b.deleted_at IS NULL AND b.expires_at IS NOT NULL AND b.expires_at <= ? THEN 1 ELSE 0 END), 0) AS expired_active_bundles,
+            MIN(CASE WHEN b.deleted_at IS NULL THEN b.expires_at END) AS next_expiry
+         FROM retention_policies p
+         LEFT JOIN bundles b ON b.retention_class = p.retention_class
+         GROUP BY
+            p.retention_class,
+            p.min_duration_days,
+            p.max_duration_days,
+            p.legal_basis,
+            p.active
+         ORDER BY p.retention_class",
+    )
+    .bind(&now)
+    .fetch_all(&state.db)
+    .await
+    .map_err(ApiError::internal_anyhow)?;
+
+    let mut policies = Vec::with_capacity(rows.len());
+    for row in rows {
+        policies.push(RetentionStatusItem {
+            retention_class: row
+                .try_get("retention_class")
+                .map_err(ApiError::internal_anyhow)?,
+            min_duration_days: row
+                .try_get("min_duration_days")
+                .map_err(ApiError::internal_anyhow)?,
+            max_duration_days: row
+                .try_get("max_duration_days")
+                .map_err(ApiError::internal_anyhow)?,
+            legal_basis: row
+                .try_get("legal_basis")
+                .map_err(ApiError::internal_anyhow)?,
+            active: row.try_get("active").map_err(ApiError::internal_anyhow)?,
+            total_bundles: row
+                .try_get("total_bundles")
+                .map_err(ApiError::internal_anyhow)?,
+            active_bundles: row
+                .try_get("active_bundles")
+                .map_err(ApiError::internal_anyhow)?,
+            deleted_bundles: row
+                .try_get("deleted_bundles")
+                .map_err(ApiError::internal_anyhow)?,
+            expired_active_bundles: row
+                .try_get("expired_active_bundles")
+                .map_err(ApiError::internal_anyhow)?,
+            next_expiry: row
+                .try_get("next_expiry")
+                .map_err(ApiError::internal_anyhow)?,
+        });
+    }
+
+    Ok((
+        StatusCode::OK,
+        Json(RetentionStatusResponse {
+            scanned_at: now,
+            policies,
+        }),
+    ))
+}
+
+async fn retention_scan(State(state): State<AppState>) -> Result<impl IntoResponse, ApiError> {
+    let now = Utc::now().to_rfc3339();
+    let result = sqlx::query(
+        "UPDATE bundles
+         SET deleted_at = ?
+         WHERE deleted_at IS NULL
+           AND expires_at IS NOT NULL
+           AND expires_at <= ?",
+    )
+    .bind(&now)
+    .bind(&now)
+    .execute(&state.db)
+    .await
+    .map_err(ApiError::internal_anyhow)?;
+
+    Ok((
+        StatusCode::OK,
+        Json(RetentionScanResponse {
+            scanned_at: now,
+            soft_deleted: result.rows_affected(),
+        }),
+    ))
+}
+
+async fn create_pack(
+    State(state): State<AppState>,
+    Json(request): Json<CreatePackRequest>,
+) -> Result<impl IntoResponse, ApiError> {
+    let request = normalize_create_pack_request(request).map_err(ApiError::bad_request_anyhow)?;
+    let rows = query_pack_source_bundles(&state.db, &request)
+        .await
+        .map_err(ApiError::internal_anyhow)?;
+
+    if rows.is_empty() {
+        return Err(ApiError::bad_request(
+            "pack query matched no active bundles",
+        ));
+    }
+
+    let pack_id = generate_bundle_id();
+    let created_at = Utc::now().to_rfc3339();
+    let mut bundle_ids = Vec::with_capacity(rows.len());
+    let mut bundle_entries = Vec::with_capacity(rows.len());
+    let mut files = Vec::with_capacity(rows.len());
+
+    for row in rows {
+        let bundle: ProofBundle =
+            serde_json::from_str(&row.bundle_json).map_err(ApiError::internal_anyhow)?;
+        let artefacts = load_pack_artefacts(&state.db, &bundle.bundle_id)
+            .await
+            .map_err(ApiError::internal_anyhow)?;
+        let package_bytes =
+            build_bundle_package_bytes(&bundle, row.bundle_json.as_bytes(), &artefacts)
+                .map_err(ApiError::internal_anyhow)?;
+
+        bundle_ids.push(row.bundle_id.clone());
+        bundle_entries.push(PackBundleEntry {
+            bundle_id: row.bundle_id.clone(),
+            created_at: row.created_at,
+            actor_role: row.actor_role,
+            system_id: row.system_id,
+            model_id: row.model_id,
+            retention_class: row.retention_class,
+            item_types: bundle_item_types(&bundle),
+        });
+        files.push(PackagedFile {
+            name: format!("bundles/{}.pkg", row.bundle_id),
+            data_base64: Base64::encode_string(&package_bytes),
+        });
+    }
+
+    let manifest = PackManifest {
+        pack_id: pack_id.clone(),
+        pack_type: request.pack_type.clone(),
+        generated_at: created_at.clone(),
+        system_id: request.system_id.clone(),
+        from: request.from.clone(),
+        to: request.to.clone(),
+        bundle_ids,
+        bundles: bundle_entries,
+    };
+    let archive = EvidencePackArchive {
+        format: PACK_EXPORT_FORMAT.to_string(),
+        manifest: manifest.clone(),
+        files,
+    };
+    let export_bytes = gzip_json_bytes(&archive).map_err(ApiError::internal_anyhow)?;
+    let export_path = pack_export_path(&state.storage_dir, &pack_id);
+    persist_pack_export(&export_path, &export_bytes).map_err(ApiError::internal_anyhow)?;
+    persist_pack_metadata(&state.db, &manifest, &export_path)
+        .await
+        .map_err(ApiError::internal_anyhow)?;
+
+    Ok((StatusCode::CREATED, Json(pack_summary(&manifest))))
+}
+
+async fn get_pack(
+    State(state): State<AppState>,
+    Path(pack_id): Path<String>,
+) -> Result<impl IntoResponse, ApiError> {
+    let row = load_pack_row(&state.db, &pack_id)
+        .await
+        .map_err(ApiError::internal_anyhow)?
+        .ok_or_else(|| ApiError::not_found("pack not found"))?;
+    let manifest = parse_pack_manifest(&row).map_err(ApiError::internal_anyhow)?;
+    Ok((StatusCode::OK, Json(pack_summary(&manifest))))
+}
+
+async fn get_pack_manifest(
+    State(state): State<AppState>,
+    Path(pack_id): Path<String>,
+) -> Result<impl IntoResponse, ApiError> {
+    let row = load_pack_row(&state.db, &pack_id)
+        .await
+        .map_err(ApiError::internal_anyhow)?
+        .ok_or_else(|| ApiError::not_found("pack not found"))?;
+    let manifest = parse_pack_manifest(&row).map_err(ApiError::internal_anyhow)?;
+    Ok((StatusCode::OK, Json(manifest)))
+}
+
+async fn get_pack_export(
+    State(state): State<AppState>,
+    Path(pack_id): Path<String>,
+) -> Result<impl IntoResponse, ApiError> {
+    let row = load_pack_row(&state.db, &pack_id)
+        .await
+        .map_err(ApiError::internal_anyhow)?
+        .ok_or_else(|| ApiError::not_found("pack not found"))?;
+
+    let bytes = match fs::read(&row.export_path) {
+        Ok(bytes) => bytes,
+        Err(err) if err.kind() == ErrorKind::NotFound => {
+            return Err(ApiError::not_found("pack export not found"));
+        }
+        Err(err) => {
+            return Err(ApiError::internal_anyhow(anyhow::Error::new(err).context(
+                format!("failed to read pack export {}", row.export_path),
+            )));
+        }
+    };
+
+    Ok((StatusCode::OK, bytes))
 }
 
 async fn get_bundle(
@@ -446,8 +800,7 @@ fn verify_inline_request(
     request: InlineVerifyRequest,
     max_payload_bytes: usize,
 ) -> Result<VerifyResponse, ApiError> {
-    validate_bundle_integrity_fields(&request.bundle)
-        .map_err(ApiError::bad_request_anyhow)?;
+    validate_bundle_integrity_fields(&request.bundle).map_err(ApiError::bad_request_anyhow)?;
 
     let verifying_key = decode_public_key_pem(&request.public_key_pem)
         .map_err(|err| ApiError::bad_request(format!("invalid public key: {err}")))?;
@@ -503,8 +856,7 @@ fn verify_package_request(
     let files = read_bundle_package_from_bytes(&package_bytes, max_payload_bytes)
         .map_err(ApiError::bad_request_anyhow)?;
     let bundle = parse_bundle_file(&files).map_err(ApiError::bad_request_anyhow)?;
-    validate_bundle_integrity_fields(&bundle)
-        .map_err(ApiError::bad_request_anyhow)?;
+    validate_bundle_integrity_fields(&bundle).map_err(ApiError::bad_request_anyhow)?;
     let verifying_key = decode_public_key_pem(&request.public_key_pem)
         .map_err(|err| ApiError::bad_request(format!("invalid public key: {err}")))?;
 
@@ -667,6 +1019,319 @@ fn extract_artefacts(files: &BTreeMap<String, Vec<u8>>) -> Result<BTreeMap<Strin
     Ok(artefacts)
 }
 
+fn normalize_create_pack_request(mut request: CreatePackRequest) -> Result<CreatePackRequest> {
+    request.pack_type = normalize_pack_type(&request.pack_type)?;
+    request.system_id = normalize_optional_nonempty("system_id", request.system_id)?;
+    request.from = normalize_optional_rfc3339("from", request.from)?;
+    request.to = normalize_optional_rfc3339("to", request.to)?;
+
+    if let (Some(from), Some(to)) = (request.from.as_deref(), request.to.as_deref()) {
+        let from = chrono::DateTime::parse_from_rfc3339(from)
+            .with_context(|| format!("from must be RFC3339, got {from}"))?;
+        let to = chrono::DateTime::parse_from_rfc3339(to)
+            .with_context(|| format!("to must be RFC3339, got {to}"))?;
+        if from > to {
+            bail!("from must be <= to");
+        }
+    }
+
+    Ok(request)
+}
+
+fn normalize_pack_type(raw: &str) -> Result<String> {
+    let normalized = raw.trim().replace('-', "_");
+    if normalized.is_empty() {
+        bail!("pack_type must not be empty");
+    }
+
+    match normalized.as_str() {
+        "annex_iv" | "annex_xi" | "annex_xii" | "runtime_logs" | "risk_mgmt" | "ai_literacy"
+        | "systemic_risk" | "incident_response" => Ok(normalized),
+        _ => bail!("unsupported pack_type {}", raw.trim()),
+    }
+}
+
+fn normalize_optional_nonempty(label: &str, value: Option<String>) -> Result<Option<String>> {
+    match value {
+        Some(value) => {
+            let trimmed = value.trim();
+            if trimmed.is_empty() {
+                bail!("{label} must not be empty");
+            }
+            Ok(Some(trimmed.to_string()))
+        }
+        None => Ok(None),
+    }
+}
+
+fn normalize_optional_rfc3339(label: &str, value: Option<String>) -> Result<Option<String>> {
+    match value {
+        Some(value) => {
+            let trimmed = value.trim();
+            if trimmed.is_empty() {
+                bail!("{label} must not be empty");
+            }
+            let parsed = chrono::DateTime::parse_from_rfc3339(trimmed)
+                .with_context(|| format!("{label} must be RFC3339, got {trimmed}"))?;
+            Ok(Some(parsed.with_timezone(&Utc).to_rfc3339()))
+        }
+        None => Ok(None),
+    }
+}
+
+fn pack_summary(manifest: &PackManifest) -> PackSummaryResponse {
+    PackSummaryResponse {
+        pack_id: manifest.pack_id.clone(),
+        pack_type: manifest.pack_type.clone(),
+        created_at: manifest.generated_at.clone(),
+        system_id: manifest.system_id.clone(),
+        from: manifest.from.clone(),
+        to: manifest.to.clone(),
+        bundle_count: manifest.bundle_ids.len(),
+        bundle_ids: manifest.bundle_ids.clone(),
+    }
+}
+
+async fn query_pack_source_bundles(
+    db: &SqlitePool,
+    request: &CreatePackRequest,
+) -> Result<Vec<PackSourceBundleRow>> {
+    let mut builder = QueryBuilder::<Sqlite>::new(
+        "SELECT
+            bundle_id,
+            created_at,
+            actor_role,
+            system_id,
+            model_id,
+            retention_class,
+            bundle_json
+         FROM bundles
+         WHERE deleted_at IS NULL",
+    );
+
+    if let Some(system_id) = request.system_id.as_deref() {
+        builder.push(" AND system_id = ");
+        builder.push_bind(system_id);
+    }
+    if let Some(from) = request.from.as_deref() {
+        builder.push(" AND created_at >= ");
+        builder.push_bind(from);
+    }
+    if let Some(to) = request.to.as_deref() {
+        builder.push(" AND created_at <= ");
+        builder.push_bind(to);
+    }
+
+    builder.push(" ORDER BY created_at ASC, bundle_id ASC");
+
+    builder
+        .build_query_as::<PackSourceBundleRow>()
+        .fetch_all(db)
+        .await
+        .context("failed to fetch bundles for pack assembly")
+}
+
+async fn load_pack_artefacts(db: &SqlitePool, bundle_id: &str) -> Result<Vec<PackArtefactBytes>> {
+    let rows = sqlx::query_as::<_, StoredPackArtefactRow>(
+        "SELECT name, storage_path
+         FROM artefacts
+         WHERE bundle_id = ?
+         ORDER BY name ASC",
+    )
+    .bind(bundle_id)
+    .fetch_all(db)
+    .await
+    .with_context(|| format!("failed to load artefact metadata for bundle {bundle_id}"))?;
+
+    let mut artefacts = Vec::with_capacity(rows.len());
+    for row in rows {
+        let bytes = fs::read(&row.storage_path)
+            .with_context(|| format!("failed to read artefact {}", row.storage_path))?;
+        artefacts.push(PackArtefactBytes {
+            name: row.name,
+            bytes,
+        });
+    }
+
+    Ok(artefacts)
+}
+
+fn build_bundle_package_bytes(
+    bundle: &ProofBundle,
+    bundle_json_bytes: &[u8],
+    artefacts: &[PackArtefactBytes],
+) -> Result<Vec<u8>> {
+    let mut package_files = BTreeMap::<String, Vec<u8>>::new();
+    package_files.insert("proof_bundle.json".to_string(), bundle_json_bytes.to_vec());
+    package_files.insert(
+        "proof_bundle.canonical.json".to_string(),
+        bundle.canonical_header_bytes()?,
+    );
+    package_files.insert(
+        "proof_bundle.sig".to_string(),
+        bundle.integrity.signature.value.as_bytes().to_vec(),
+    );
+
+    for artefact in artefacts {
+        package_files.insert(
+            format!("artefacts/{}", artefact.name),
+            artefact.bytes.clone(),
+        );
+    }
+
+    let manifest = Manifest {
+        files: package_files
+            .iter()
+            .map(|(name, bytes)| ManifestEntry {
+                name: name.clone(),
+                digest: sha256_prefixed(bytes),
+                size: bytes.len() as u64,
+            })
+            .collect(),
+    };
+    package_files.insert(
+        "manifest.json".to_string(),
+        serde_json::to_vec_pretty(&manifest)?,
+    );
+
+    let package = BundlePackage {
+        format: PACKAGE_FORMAT.to_string(),
+        files: package_files
+            .into_iter()
+            .map(|(name, bytes)| PackagedFile {
+                name,
+                data_base64: Base64::encode_string(&bytes),
+            })
+            .collect(),
+    };
+
+    gzip_json_bytes(&package)
+}
+
+fn gzip_json_bytes<T: Serialize>(value: &T) -> Result<Vec<u8>> {
+    let json_bytes = serde_json::to_vec_pretty(value)?;
+    let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
+    encoder
+        .write_all(&json_bytes)
+        .context("failed to write gzip archive")?;
+    encoder.finish().context("failed to finalize gzip archive")
+}
+
+fn bundle_item_types(bundle: &ProofBundle) -> Vec<String> {
+    let mut types = BTreeSet::new();
+    for item in &bundle.items {
+        types.insert(evidence_item_type(item).to_string());
+    }
+    types.into_iter().collect()
+}
+
+fn pack_export_path(base: &FsPath, pack_id: &str) -> PathBuf {
+    base.join("packs").join(pack_id).join(PACK_EXPORT_FILE_NAME)
+}
+
+fn persist_pack_export(path: &FsPath, bytes: &[u8]) -> Result<()> {
+    let parent = path.parent().unwrap_or_else(|| FsPath::new("."));
+    fs::create_dir_all(parent)
+        .with_context(|| format!("failed to create pack export dir {}", parent.display()))?;
+
+    let tmp_path = path.with_extension(format!("tmp-{}", generate_bundle_id()));
+    let mut file = File::create(&tmp_path)
+        .with_context(|| format!("failed to create temp export {}", tmp_path.display()))?;
+    file.write_all(bytes)
+        .with_context(|| format!("failed to write temp export {}", tmp_path.display()))?;
+    file.sync_all()
+        .with_context(|| format!("failed to sync temp export {}", tmp_path.display()))?;
+
+    fs::rename(&tmp_path, path).with_context(|| {
+        format!(
+            "failed to atomically rename {} to {}",
+            tmp_path.display(),
+            path.display()
+        )
+    })?;
+    Ok(())
+}
+
+async fn persist_pack_metadata(
+    db: &SqlitePool,
+    manifest: &PackManifest,
+    export_path: &FsPath,
+) -> Result<()> {
+    sqlx::query(
+        "INSERT INTO packs (
+            pack_id,
+            pack_type,
+            system_id,
+            created_at,
+            from_date,
+            to_date,
+            bundle_count,
+            export_path,
+            manifest_json
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    )
+    .bind(&manifest.pack_id)
+    .bind(&manifest.pack_type)
+    .bind(manifest.system_id.as_deref())
+    .bind(&manifest.generated_at)
+    .bind(manifest.from.as_deref())
+    .bind(manifest.to.as_deref())
+    .bind(manifest.bundle_ids.len() as i64)
+    .bind(export_path.to_string_lossy().to_string())
+    .bind(serde_json::to_string(manifest)?)
+    .execute(db)
+    .await
+    .with_context(|| format!("failed to insert pack {}", manifest.pack_id))?;
+    Ok(())
+}
+
+async fn load_pack_row(db: &SqlitePool, pack_id: &str) -> Result<Option<StoredPackRow>> {
+    sqlx::query_as::<_, StoredPackRow>(
+        "SELECT
+            pack_id,
+            pack_type,
+            created_at,
+            system_id,
+            from_date,
+            to_date,
+            bundle_count,
+            export_path,
+            manifest_json
+         FROM packs
+         WHERE pack_id = ?",
+    )
+    .bind(pack_id)
+    .fetch_optional(db)
+    .await
+    .with_context(|| format!("failed to load pack {pack_id}"))
+}
+
+fn parse_pack_manifest(row: &StoredPackRow) -> Result<PackManifest> {
+    let manifest: PackManifest = serde_json::from_str(&row.manifest_json)
+        .with_context(|| format!("failed to parse manifest for pack {}", row.pack_id))?;
+
+    if manifest.pack_id != row.pack_id {
+        bail!("pack manifest id mismatch for {}", row.pack_id);
+    }
+    if manifest.pack_type != row.pack_type {
+        bail!("pack manifest type mismatch for {}", row.pack_id);
+    }
+    if manifest.generated_at != row.created_at {
+        bail!("pack manifest created_at mismatch for {}", row.pack_id);
+    }
+    if manifest.system_id != row.system_id
+        || manifest.from != row.from_date
+        || manifest.to != row.to_date
+    {
+        bail!("pack manifest filters mismatch for {}", row.pack_id);
+    }
+    if manifest.bundle_ids.len() as i64 != row.bundle_count {
+        bail!("pack manifest bundle_count mismatch for {}", row.pack_id);
+    }
+
+    Ok(manifest)
+}
+
 fn load_signing_key() -> Result<SigningKey> {
     if let Ok(path) = env::var("PROOF_SIGNING_KEY_PATH") {
         let contents = fs::read_to_string(&path)
@@ -725,6 +1390,7 @@ async fn persist_bundle_metadata(
         .retention_class
         .clone()
         .unwrap_or_else(|| "unspecified".to_string());
+    let expires_at = resolve_bundle_expiry(db, bundle).await?;
 
     let mut tx = db
         .begin()
@@ -748,10 +1414,11 @@ async fn persist_bundle_metadata(
             has_timestamp,
             has_receipt,
             retention_class,
+            expires_at,
             deleted_at,
             bundle_json,
             canonical_bytes
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)",
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)",
     )
     .bind(&bundle.bundle_id)
     .bind(&bundle.bundle_version)
@@ -768,6 +1435,7 @@ async fn persist_bundle_metadata(
     .bind(bundle.timestamp.is_some())
     .bind(bundle.receipt.is_some())
     .bind(&retention_class)
+    .bind(expires_at)
     .bind(&bundle_json)
     .bind(canonical_bytes)
     .execute(&mut *tx)
@@ -858,6 +1526,41 @@ fn evidence_item_type(item: &EvidenceItem) -> &'static str {
     }
 }
 
+async fn resolve_expires_at(
+    db: &SqlitePool,
+    retention_class: &str,
+    created_at: &str,
+) -> Result<Option<String>> {
+    let row = sqlx::query(
+        "SELECT min_duration_days
+         FROM retention_policies
+         WHERE retention_class = ? AND active = TRUE",
+    )
+    .bind(retention_class)
+    .fetch_optional(db)
+    .await
+    .with_context(|| format!("failed to load retention policy {retention_class}"))?
+    .with_context(|| format!("unknown retention policy {retention_class}"))?;
+    let min_duration_days: i64 = row.try_get("min_duration_days").with_context(|| {
+        format!("retention policy {retention_class} is missing min_duration_days")
+    })?;
+
+    let created_at = chrono::DateTime::parse_from_rfc3339(created_at)
+        .with_context(|| format!("bundle created_at must be RFC3339, got {created_at}"))?
+        .with_timezone(&Utc);
+    let expires_at = created_at + chrono::Duration::days(min_duration_days);
+    Ok(Some(expires_at.to_rfc3339()))
+}
+
+async fn resolve_bundle_expiry(db: &SqlitePool, bundle: &ProofBundle) -> Result<Option<String>> {
+    let retention_class = bundle
+        .policy
+        .retention_class
+        .as_deref()
+        .unwrap_or("unspecified");
+    resolve_expires_at(db, retention_class, &bundle.created_at).await
+}
+
 fn artefact_path(base: &FsPath, bundle_id: &str, name: &str) -> Result<PathBuf> {
     validate_artefact_name(name)?;
     Ok(base.join("artefacts").join(bundle_id).join(name))
@@ -946,6 +1649,7 @@ async fn initialize_sqlite_schema(db: &SqlitePool) -> Result<()> {
             has_timestamp BOOLEAN NOT NULL DEFAULT FALSE,
             has_receipt BOOLEAN NOT NULL DEFAULT FALSE,
             retention_class TEXT NOT NULL,
+            expires_at TEXT,
             deleted_at TEXT,
             bundle_json TEXT NOT NULL,
             canonical_bytes BLOB NOT NULL
@@ -954,6 +1658,7 @@ async fn initialize_sqlite_schema(db: &SqlitePool) -> Result<()> {
         "CREATE INDEX IF NOT EXISTS idx_bundles_role ON bundles(actor_role, created_at)",
         "CREATE INDEX IF NOT EXISTS idx_bundles_request ON bundles(request_id, created_at)",
         "CREATE INDEX IF NOT EXISTS idx_bundles_app ON bundles(app_id, created_at)",
+        "CREATE INDEX IF NOT EXISTS idx_bundles_retention ON bundles(retention_class, expires_at)",
         "CREATE TABLE IF NOT EXISTS evidence_items (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             bundle_id TEXT NOT NULL REFERENCES bundles(bundle_id) ON DELETE CASCADE,
@@ -973,6 +1678,26 @@ async fn initialize_sqlite_schema(db: &SqlitePool) -> Result<()> {
             storage_path TEXT NOT NULL,
             PRIMARY KEY (bundle_id, name)
         )",
+        "CREATE TABLE IF NOT EXISTS packs (
+            pack_id TEXT PRIMARY KEY,
+            pack_type TEXT NOT NULL,
+            system_id TEXT,
+            created_at TEXT NOT NULL,
+            from_date TEXT,
+            to_date TEXT,
+            bundle_count INTEGER NOT NULL,
+            export_path TEXT NOT NULL,
+            manifest_json TEXT NOT NULL
+        )",
+        "CREATE INDEX IF NOT EXISTS idx_packs_type ON packs(pack_type, created_at)",
+        "CREATE INDEX IF NOT EXISTS idx_packs_system ON packs(system_id, created_at)",
+        "CREATE TABLE IF NOT EXISTS retention_policies (
+            retention_class TEXT PRIMARY KEY,
+            min_duration_days INTEGER NOT NULL,
+            max_duration_days INTEGER,
+            legal_basis TEXT NOT NULL,
+            active BOOLEAN NOT NULL DEFAULT TRUE
+        )",
     ];
 
     for statement in statements {
@@ -980,6 +1705,96 @@ async fn initialize_sqlite_schema(db: &SqlitePool) -> Result<()> {
             .execute(db)
             .await
             .with_context(|| format!("failed to execute sqlite schema statement: {statement}"))?;
+    }
+
+    ensure_sqlite_column(db, "bundles", "expires_at", "TEXT").await?;
+
+    Ok(())
+}
+
+async fn ensure_sqlite_column(
+    db: &SqlitePool,
+    table: &str,
+    column: &str,
+    definition: &str,
+) -> Result<()> {
+    let pragma = format!("PRAGMA table_info({table})");
+    let rows = sqlx::query(&pragma)
+        .fetch_all(db)
+        .await
+        .with_context(|| format!("failed to inspect sqlite table {table}"))?;
+
+    let exists = rows.iter().any(|row| {
+        row.try_get::<String, _>("name")
+            .map(|name| name == column)
+            .unwrap_or(false)
+    });
+
+    if !exists {
+        let alter = format!("ALTER TABLE {table} ADD COLUMN {column} {definition}");
+        sqlx::query(&alter)
+            .execute(db)
+            .await
+            .with_context(|| format!("failed to add sqlite column {table}.{column}"))?;
+    }
+
+    Ok(())
+}
+
+async fn seed_default_retention_policies(db: &SqlitePool) -> Result<()> {
+    let defaults: [(&str, i64, Option<i64>, &str); 5] = [
+        ("unspecified", 365_i64, None, "operational_default"),
+        ("runtime_logs", 3650_i64, None, "eu_ai_act_article_12_19_26"),
+        ("risk_mgmt", 3650_i64, None, "eu_ai_act_article_9"),
+        ("technical_doc", 3650_i64, None, "eu_ai_act_annex_iv"),
+        ("ai_literacy", 1095_i64, None, "eu_ai_act_article_4"),
+    ];
+
+    for (retention_class, min_duration_days, max_duration_days, legal_basis) in defaults {
+        sqlx::query(
+            "INSERT INTO retention_policies (
+                retention_class,
+                min_duration_days,
+                max_duration_days,
+                legal_basis,
+                active
+            ) VALUES (?, ?, ?, ?, TRUE)
+            ON CONFLICT(retention_class) DO NOTHING",
+        )
+        .bind(retention_class)
+        .bind(min_duration_days)
+        .bind(max_duration_days)
+        .bind(legal_basis)
+        .execute(db)
+        .await
+        .with_context(|| format!("failed to seed retention policy {retention_class}"))?;
+    }
+
+    Ok(())
+}
+
+async fn backfill_bundle_expiries(db: &SqlitePool) -> Result<()> {
+    let rows = sqlx::query(
+        "SELECT bundle_id, created_at, retention_class
+         FROM bundles
+         WHERE expires_at IS NULL",
+    )
+    .fetch_all(db)
+    .await
+    .context("failed to fetch bundles missing expires_at")?;
+
+    for row in rows {
+        let bundle_id: String = row.try_get("bundle_id")?;
+        let created_at: String = row.try_get("created_at")?;
+        let retention_class: String = row.try_get("retention_class")?;
+        let expires_at = resolve_expires_at(db, &retention_class, &created_at).await?;
+
+        sqlx::query("UPDATE bundles SET expires_at = ? WHERE bundle_id = ?")
+            .bind(expires_at)
+            .bind(&bundle_id)
+            .execute(db)
+            .await
+            .with_context(|| format!("failed to backfill expires_at for bundle {bundle_id}"))?;
     }
 
     Ok(())
@@ -1034,9 +1849,9 @@ impl IntoResponse for ApiError {
 mod tests {
     use super::*;
     use axum::{body::Body, http::Request};
-    use flate2::{Compression, write::GzEncoder};
+    use flate2::{Compression, read::GzDecoder, write::GzEncoder};
     use proof_layer_core::{encode_public_key_pem, sha256_prefixed};
-    use std::io::Write;
+    use std::io::{Read, Write};
     use tower::ServiceExt;
 
     fn sample_capture() -> CaptureInput {
@@ -1083,6 +1898,12 @@ mod tests {
         }
     }
 
+    fn sample_event_with_system(system_id: &str) -> CaptureEvent {
+        let mut event = proof_layer_core::capture_input_v01_to_event(sample_capture());
+        event.subject.system_id = Some(system_id.to_string());
+        event
+    }
+
     async fn test_state(max_payload_bytes: usize) -> AppState {
         let storage_dir = std::env::temp_dir().join(format!(
             "proof-service-test-storage-{}",
@@ -1092,6 +1913,8 @@ mod tests {
         let db_path = storage_dir.join("metadata.db");
         let db = open_sqlite_pool(&db_path).await.unwrap();
         initialize_sqlite_schema(&db).await.unwrap();
+        seed_default_retention_policies(&db).await.unwrap();
+        backfill_bundle_expiries(&db).await.unwrap();
         let signing_key = SigningKey::from_bytes(&rand::random::<[u8; 32]>());
         AppState {
             db,
@@ -1160,6 +1983,13 @@ mod tests {
         let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
         encoder.write_all(&package_json).unwrap();
         encoder.finish().unwrap()
+    }
+
+    fn decode_pack_archive(bytes: &[u8]) -> EvidencePackArchive {
+        let mut decoder = GzDecoder::new(std::io::Cursor::new(bytes));
+        let mut json = Vec::new();
+        decoder.read_to_end(&mut json).unwrap();
+        serde_json::from_slice(&json).unwrap()
     }
 
     #[test]
@@ -1544,5 +2374,226 @@ mod tests {
         assert_eq!(response.limit, 10);
         assert_eq!(response.items.len(), 1);
         assert_eq!(response.items[0].actor_role, "provider");
+        assert!(response.items[0].expires_at.is_some());
+    }
+
+    #[tokio::test]
+    async fn retention_status_reports_seeded_policy_counts() {
+        let state = test_state(DEFAULT_MAX_PAYLOAD_BYTES).await;
+        let app = build_router(state, DEFAULT_MAX_PAYLOAD_BYTES);
+
+        let create_payload = CreateBundleRequest {
+            capture: SealableCaptureInput::Legacy(sample_capture()),
+            artefacts: vec![InlineArtefact {
+                name: "prompt.json".to_string(),
+                content_type: "application/json".to_string(),
+                data_base64: Base64::encode_string(br#"{"prompt":"hello"}"#),
+            }],
+        };
+
+        let create_req = Request::builder()
+            .method("POST")
+            .uri("/v1/bundles")
+            .header("content-type", "application/json")
+            .body(Body::from(serde_json::to_vec(&create_payload).unwrap()))
+            .unwrap();
+        let create_res = app.clone().oneshot(create_req).await.unwrap();
+        assert_eq!(create_res.status(), StatusCode::CREATED);
+
+        let status_req = Request::builder()
+            .method("GET")
+            .uri("/v1/retention/status")
+            .body(Body::empty())
+            .unwrap();
+        let status_res = app.oneshot(status_req).await.unwrap();
+        assert_eq!(status_res.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(status_res.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let response: RetentionStatusResponse = serde_json::from_slice(&body).unwrap();
+        let unspecified = response
+            .policies
+            .iter()
+            .find(|policy| policy.retention_class == "unspecified")
+            .unwrap();
+        assert_eq!(unspecified.active_bundles, 1);
+        assert!(unspecified.next_expiry.is_some());
+    }
+
+    #[tokio::test]
+    async fn retention_scan_soft_deletes_expired_bundles() {
+        let state = test_state(DEFAULT_MAX_PAYLOAD_BYTES).await;
+        let db = state.db.clone();
+        let app = build_router(state, DEFAULT_MAX_PAYLOAD_BYTES);
+
+        let create_payload = CreateBundleRequest {
+            capture: SealableCaptureInput::Legacy(sample_capture()),
+            artefacts: vec![InlineArtefact {
+                name: "prompt.json".to_string(),
+                content_type: "application/json".to_string(),
+                data_base64: Base64::encode_string(br#"{"prompt":"hello"}"#),
+            }],
+        };
+
+        let create_req = Request::builder()
+            .method("POST")
+            .uri("/v1/bundles")
+            .header("content-type", "application/json")
+            .body(Body::from(serde_json::to_vec(&create_payload).unwrap()))
+            .unwrap();
+        let create_res = app.clone().oneshot(create_req).await.unwrap();
+        assert_eq!(create_res.status(), StatusCode::CREATED);
+
+        sqlx::query("UPDATE bundles SET expires_at = ?")
+            .bind("2020-01-01T00:00:00+00:00")
+            .execute(&db)
+            .await
+            .unwrap();
+
+        let scan_req = Request::builder()
+            .method("POST")
+            .uri("/v1/retention/scan")
+            .body(Body::empty())
+            .unwrap();
+        let scan_res = app.clone().oneshot(scan_req).await.unwrap();
+        assert_eq!(scan_res.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(scan_res.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let response: RetentionScanResponse = serde_json::from_slice(&body).unwrap();
+        assert_eq!(response.soft_deleted, 1);
+
+        let list_req = Request::builder()
+            .method("GET")
+            .uri("/v1/bundles")
+            .body(Body::empty())
+            .unwrap();
+        let list_res = app.oneshot(list_req).await.unwrap();
+        assert_eq!(list_res.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(list_res.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let response: ListBundlesResponse = serde_json::from_slice(&body).unwrap();
+        assert!(response.items.is_empty());
+    }
+
+    #[tokio::test]
+    async fn create_pack_filters_and_exports_verifiable_bundle_packages() {
+        let state = test_state(DEFAULT_MAX_PAYLOAD_BYTES).await;
+        let public_key_pem = encode_public_key_pem(&state.signing_key.verifying_key());
+        let app = build_router(state, DEFAULT_MAX_PAYLOAD_BYTES);
+
+        for system_id in ["system-a", "system-b"] {
+            let create_payload = CreateBundleRequest {
+                capture: SealableCaptureInput::V10(sample_event_with_system(system_id)),
+                artefacts: vec![InlineArtefact {
+                    name: "prompt.json".to_string(),
+                    content_type: "application/json".to_string(),
+                    data_base64: Base64::encode_string(br#"{"prompt":"hello"}"#),
+                }],
+            };
+
+            let create_req = Request::builder()
+                .method("POST")
+                .uri("/v1/bundles")
+                .header("content-type", "application/json")
+                .body(Body::from(serde_json::to_vec(&create_payload).unwrap()))
+                .unwrap();
+            let create_res = app.clone().oneshot(create_req).await.unwrap();
+            assert_eq!(create_res.status(), StatusCode::CREATED);
+        }
+
+        let pack_req = Request::builder()
+            .method("POST")
+            .uri("/v1/packs")
+            .header("content-type", "application/json")
+            .body(Body::from(
+                serde_json::to_vec(&CreatePackRequest {
+                    pack_type: "runtime_logs".to_string(),
+                    system_id: Some("system-a".to_string()),
+                    from: None,
+                    to: None,
+                })
+                .unwrap(),
+            ))
+            .unwrap();
+        let pack_res = app.clone().oneshot(pack_req).await.unwrap();
+        assert_eq!(pack_res.status(), StatusCode::CREATED);
+        let body = axum::body::to_bytes(pack_res.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let pack: PackSummaryResponse = serde_json::from_slice(&body).unwrap();
+        assert_eq!(pack.pack_type, "runtime_logs");
+        assert_eq!(pack.bundle_count, 1);
+        assert_eq!(pack.bundle_ids.len(), 1);
+
+        let get_req = Request::builder()
+            .method("GET")
+            .uri(format!("/v1/packs/{}", pack.pack_id))
+            .body(Body::empty())
+            .unwrap();
+        let get_res = app.clone().oneshot(get_req).await.unwrap();
+        assert_eq!(get_res.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(get_res.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let fetched_pack: PackSummaryResponse = serde_json::from_slice(&body).unwrap();
+        assert_eq!(fetched_pack.bundle_ids, pack.bundle_ids);
+
+        let manifest_req = Request::builder()
+            .method("GET")
+            .uri(format!("/v1/packs/{}/manifest", pack.pack_id))
+            .body(Body::empty())
+            .unwrap();
+        let manifest_res = app.clone().oneshot(manifest_req).await.unwrap();
+        assert_eq!(manifest_res.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(manifest_res.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let manifest: PackManifest = serde_json::from_slice(&body).unwrap();
+        assert_eq!(manifest.bundle_ids, pack.bundle_ids);
+        assert_eq!(manifest.bundles.len(), 1);
+        assert_eq!(manifest.bundles[0].system_id.as_deref(), Some("system-a"));
+        assert_eq!(manifest.bundles[0].item_types, vec!["llm_interaction"]);
+
+        let export_req = Request::builder()
+            .method("GET")
+            .uri(format!("/v1/packs/{}/export", pack.pack_id))
+            .body(Body::empty())
+            .unwrap();
+        let export_res = app.clone().oneshot(export_req).await.unwrap();
+        assert_eq!(export_res.status(), StatusCode::OK);
+        let export_bytes = axum::body::to_bytes(export_res.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let archive = decode_pack_archive(&export_bytes);
+        assert_eq!(archive.format, PACK_EXPORT_FORMAT);
+        assert_eq!(archive.manifest.bundle_ids, pack.bundle_ids);
+        assert_eq!(archive.files.len(), 1);
+        assert_eq!(
+            archive.files[0].name,
+            format!("bundles/{}.pkg", pack.bundle_ids[0])
+        );
+
+        let verify_req = Request::builder()
+            .method("POST")
+            .uri("/v1/verify")
+            .header("content-type", "application/json")
+            .body(Body::from(
+                serde_json::to_vec(&VerifyRequest::Package(Box::new(PackageVerifyRequest {
+                    bundle_pkg_base64: archive.files[0].data_base64.clone(),
+                    public_key_pem,
+                })))
+                .unwrap(),
+            ))
+            .unwrap();
+        let verify_res = app.oneshot(verify_req).await.unwrap();
+        assert_eq!(verify_res.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(verify_res.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let verify_response: VerifyResponse = serde_json::from_slice(&body).unwrap();
+        assert!(verify_response.valid);
+        assert_eq!(verify_response.artefacts_verified, 1);
     }
 }

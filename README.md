@@ -38,8 +38,8 @@ What it does **not** claim: model determinism or legal finality. It proves what 
 ## Workspace
 
 - `crates/core` (`proof-layer-core`): RFC 8785 canonicalization, hashing, Merkle commitment + inclusion proofs, Ed25519 JWS sign/verify, v1.0 evidence bundle build/verify logic, and v0.1 -> v1.0 migration helpers.
-- `crates/cli` (`proofctl`): keygen, create bundle package, verify package offline, inspect package.
-- `crates/vault` (`proof-service`): Axum service with SQLite metadata storage and local artifact storage.
+- `crates/cli` (`proofctl`): keygen, create bundle package, verify package offline, inspect package, and download vault-assembled evidence packs.
+- `crates/vault` (`proof-service`): Axum service with SQLite metadata storage, retention scanning, pack assembly, and local artifact storage.
 - `packages/sdk-node`: Node proof client + OpenAI/Anthropic-style wrappers + tool/OTel helpers.
 - `packages/sdk-python`: Python proof client + wrappers + decorator + callback/tool/OTel helpers.
 - `web-demo`: Vite + React single-page demo UI.
@@ -74,6 +74,13 @@ cargo run -p proofctl -- inspect --in ./bundle.pkg --format human
 
 # Richer inspect output
 cargo run -p proofctl -- inspect --in ./bundle.pkg --show-items --show-merkle
+
+# Assemble and download a vault export pack
+cargo run -p proofctl -- pack \
+  --type runtime-logs \
+  --vault-url http://127.0.0.1:8080 \
+  --system-id system-123 \
+  --out ./runtime-logs.pack
 ```
 
 ## Run Proof Service
@@ -99,6 +106,12 @@ docker compose up --build
 - `GET /v1/bundles?system_id=&role=&type=&from=&to=&page=&limit=`
 - `GET /v1/bundles/{bundle_id}`
 - `GET /v1/bundles/{bundle_id}/artefacts/{name}`
+- `POST /v1/packs`
+- `GET /v1/packs/{pack_id}`
+- `GET /v1/packs/{pack_id}/manifest`
+- `GET /v1/packs/{pack_id}/export`
+- `GET /v1/retention/status`
+- `POST /v1/retention/scan`
 - `POST /v1/verify` (supports inline bundle+artefacts or packaged `bundle.pkg`)
 
 ### `POST /v1/bundles` request
@@ -221,9 +234,11 @@ npm run dev
 - `proofctl create` also supports Phase 2 migration overrides such as `--system-id`, `--retention-class`, and `--evidence-type`.
 - `proofctl verify` now exposes `--check-timestamp` and `--check-receipt`; these fail explicitly when requested because RFC 3161 and receipt verification are not implemented yet.
 - `proofctl inspect` now supports `--show-items` and `--show-merkle`.
-- The vault now persists metadata in SQLite and indexes evidence items for basic `/v1/bundles` filtering by role, item type, and date range.
+- `proofctl pack` now requests pack assembly from the vault and downloads the resulting `pl-evidence-pack-v1` archive.
+- The vault now persists metadata in SQLite, computes bundle expiry from seeded retention policies, exposes retention scan/status endpoints, and indexes evidence items for `/v1/bundles` filtering.
+- Pack assembly is now available through `/v1/packs`; the current slice exports matching bundles as embedded `bundle.pkg` files plus a manifest, but does not yet apply Annex-specific curation/redaction rules.
 - Canonicalization and signing semantics follow `docs/architecture.md`.
 - Verification is designed to work offline with `bundle.pkg` + public key.
-- JSON Schemas: `schemas/evidence_bundle.schema.json`, `schemas/capture_event.schema.json`, `schemas/evidence_item.schema.json`.
+- JSON Schemas: `schemas/evidence_bundle.schema.json`, `schemas/capture_event.schema.json`, `schemas/evidence_item.schema.json`, `schemas/evidence_pack.schema.json`.
 - Test matrix: `docs/verification-test-matrix.md`.
 - Deterministic fixture inputs: `fixtures/golden/`.

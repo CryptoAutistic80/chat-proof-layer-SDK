@@ -10,6 +10,7 @@ use proof_layer_core::{
     decode_public_key_pem, encode_private_key_pem, encode_public_key_pem, sha256_prefixed,
     validate_bundle_integrity_fields,
 };
+use reqwest::blocking::{Client, Response};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{BTreeMap, HashSet},
@@ -84,6 +85,21 @@ enum Commands {
         #[arg(long)]
         show_merkle: bool,
     },
+    /// Assemble an evidence pack via the vault and download the export archive.
+    Pack {
+        #[arg(long = "type")]
+        pack_type: PackTypeArg,
+        #[arg(long)]
+        vault_url: String,
+        #[arg(long)]
+        out: PathBuf,
+        #[arg(long)]
+        system_id: Option<String>,
+        #[arg(long)]
+        from: Option<String>,
+        #[arg(long)]
+        to: Option<String>,
+    },
 }
 
 #[derive(Clone, Debug)]
@@ -109,6 +125,19 @@ enum EvidenceTypeArg {
     RiskAssessment,
     DataGovernance,
     TechnicalDoc,
+}
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq, ValueEnum)]
+#[value(rename_all = "kebab-case")]
+enum PackTypeArg {
+    AnnexIv,
+    AnnexXi,
+    AnnexXii,
+    RuntimeLogs,
+    RiskMgmt,
+    AiLiteracy,
+    SystemicRisk,
+    IncidentResponse,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -209,6 +238,34 @@ struct InspectJsonOutput<'a> {
     merkle: Option<InspectMerkleView>,
 }
 
+#[derive(Debug, Serialize)]
+struct CreatePackRequest {
+    pack_type: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    system_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    from: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    to: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct PackSummaryResponse {
+    pack_id: String,
+    pack_type: String,
+    created_at: String,
+    system_id: Option<String>,
+    from: Option<String>,
+    to: Option<String>,
+    bundle_count: usize,
+    bundle_ids: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ErrorResponse {
+    error: String,
+}
+
 impl EvidenceTypeArg {
     fn matches_item(self, item: &EvidenceItem) -> bool {
         matches!(
@@ -234,6 +291,21 @@ impl EvidenceTypeArg {
             Self::RiskAssessment => "risk_assessment",
             Self::DataGovernance => "data_governance",
             Self::TechnicalDoc => "technical_doc",
+        }
+    }
+}
+
+impl PackTypeArg {
+    fn as_api_value(self) -> &'static str {
+        match self {
+            Self::AnnexIv => "annex_iv",
+            Self::AnnexXi => "annex_xi",
+            Self::AnnexXii => "annex_xii",
+            Self::RuntimeLogs => "runtime_logs",
+            Self::RiskMgmt => "risk_mgmt",
+            Self::AiLiteracy => "ai_literacy",
+            Self::SystemicRisk => "systemic_risk",
+            Self::IncidentResponse => "incident_response",
         }
     }
 }
@@ -286,6 +358,21 @@ fn main() -> Result<()> {
             show_items,
             show_merkle,
         } => cmd_inspect(&input, format, show_items, show_merkle),
+        Commands::Pack {
+            pack_type,
+            vault_url,
+            out,
+            system_id,
+            from,
+            to,
+        } => cmd_pack(
+            pack_type,
+            &vault_url,
+            &out,
+            system_id.as_deref(),
+            from.as_deref(),
+            to.as_deref(),
+        ),
     }
 }
 
@@ -622,6 +709,88 @@ fn cmd_inspect(
             }
         }
     }
+
+    Ok(())
+}
+
+fn cmd_pack(
+    pack_type: PackTypeArg,
+    vault_url: &str,
+    out_path: &Path,
+    system_id: Option<&str>,
+    from: Option<&str>,
+    to: Option<&str>,
+) -> Result<()> {
+    let request = CreatePackRequest {
+        pack_type: pack_type.as_api_value().to_string(),
+        system_id: normalize_optional_cli_text("system_id", system_id)?,
+        from: normalize_optional_cli_datetime("from", from)?,
+        to: normalize_optional_cli_datetime("to", to)?,
+    };
+    if let (Some(from), Some(to)) = (request.from.as_deref(), request.to.as_deref()) {
+        let from = DateTime::parse_from_rfc3339(from)
+            .with_context(|| format!("from must be RFC3339, got: {from}"))?;
+        let to = DateTime::parse_from_rfc3339(to)
+            .with_context(|| format!("to must be RFC3339, got: {to}"))?;
+        if from > to {
+            bail!("from must be <= to");
+        }
+    }
+
+    let client = Client::builder()
+        .build()
+        .context("failed to build HTTP client")?;
+    let create_url = join_vault_url(vault_url, "/v1/packs");
+    let create_response = client
+        .post(&create_url)
+        .json(&request)
+        .send()
+        .with_context(|| format!("failed to call {create_url}"))?;
+    let create_response = ensure_success(create_response, "pack create")?;
+    let pack: PackSummaryResponse = create_response
+        .json()
+        .context("failed to decode pack create response")?;
+
+    let export_url = join_vault_url(vault_url, &format!("/v1/packs/{}/export", pack.pack_id));
+    let export_response = client
+        .get(&export_url)
+        .send()
+        .with_context(|| format!("failed to call {export_url}"))?;
+    let export_response = ensure_success(export_response, "pack export download")?;
+    let export_bytes = export_response
+        .bytes()
+        .context("failed to read pack export body")?;
+
+    let max_payload_bytes = max_payload_bytes()?;
+    if export_bytes.len() > max_payload_bytes {
+        bail!(
+            "pack export {} bytes exceeds max {} bytes",
+            export_bytes.len(),
+            max_payload_bytes
+        );
+    }
+
+    let parent = out_path.parent().unwrap_or_else(|| Path::new("."));
+    fs::create_dir_all(parent)
+        .with_context(|| format!("failed to create output directory {}", parent.display()))?;
+    fs::write(out_path, &export_bytes)
+        .with_context(|| format!("failed to write {}", out_path.display()))?;
+
+    info!("wrote {}", out_path.display());
+    info!("pack_id={}", pack.pack_id);
+    info!("pack_type={}", pack.pack_type);
+    info!("bundle_count={}", pack.bundle_count);
+    if let Some(system_id) = pack.system_id.as_deref() {
+        info!("system_id={system_id}");
+    }
+    if let Some(from) = pack.from.as_deref() {
+        info!("from={from}");
+    }
+    if let Some(to) = pack.to.as_deref() {
+        info!("to={to}");
+    }
+    info!("created_at={}", pack.created_at);
+    info!("bundle_ids={}", pack.bundle_ids.join(","));
 
     Ok(())
 }
@@ -1066,6 +1235,53 @@ fn validate_package_member_name(name: &str) -> Result<()> {
     }
 }
 
+fn normalize_optional_cli_text(label: &str, value: Option<&str>) -> Result<Option<String>> {
+    match value {
+        Some(value) => {
+            let trimmed = value.trim();
+            if trimmed.is_empty() {
+                bail!("{label} must not be empty");
+            }
+            Ok(Some(trimmed.to_string()))
+        }
+        None => Ok(None),
+    }
+}
+
+fn normalize_optional_cli_datetime(label: &str, value: Option<&str>) -> Result<Option<String>> {
+    match value {
+        Some(value) => {
+            let trimmed = value.trim();
+            if trimmed.is_empty() {
+                bail!("{label} must not be empty");
+            }
+            let parsed = DateTime::parse_from_rfc3339(trimmed)
+                .with_context(|| format!("{label} must be RFC3339, got: {trimmed}"))?;
+            Ok(Some(parsed.with_timezone(&Utc).to_rfc3339()))
+        }
+        None => Ok(None),
+    }
+}
+
+fn join_vault_url(base: &str, path: &str) -> String {
+    format!("{}{}", base.trim_end_matches('/'), path)
+}
+
+fn ensure_success(response: Response, action: &str) -> Result<Response> {
+    if response.status().is_success() {
+        return Ok(response);
+    }
+
+    let status = response.status();
+    let body = response
+        .text()
+        .unwrap_or_else(|_| "<unreadable response body>".to_string());
+    let message = serde_json::from_str::<ErrorResponse>(&body)
+        .map(|body| body.error)
+        .unwrap_or(body);
+    bail!("{action} failed ({status}): {message}");
+}
+
 fn max_payload_bytes() -> Result<usize> {
     let env_value = std::env::var("PROOFCTL_MAX_PAYLOAD_BYTES")
         .or_else(|_| std::env::var("PROOF_MAX_PAYLOAD_BYTES"));
@@ -1255,6 +1471,24 @@ mod tests {
     fn parse_created_at_rejects_invalid_value() {
         let err = parse_created_at(Some("not-a-date")).unwrap_err();
         assert!(err.to_string().contains("RFC3339"));
+    }
+
+    #[test]
+    fn pack_type_maps_to_vault_api_value() {
+        assert_eq!(PackTypeArg::AnnexIv.as_api_value(), "annex_iv");
+        assert_eq!(PackTypeArg::RuntimeLogs.as_api_value(), "runtime_logs");
+    }
+
+    #[test]
+    fn pack_datetime_normalization_rejects_invalid_value() {
+        let err = normalize_optional_cli_datetime("from", Some("not-a-date")).unwrap_err();
+        assert!(err.to_string().contains("RFC3339"));
+    }
+
+    #[test]
+    fn join_vault_url_strips_trailing_slash() {
+        let joined = join_vault_url("http://127.0.0.1:8080/", "/v1/packs");
+        assert_eq!(joined, "http://127.0.0.1:8080/v1/packs");
     }
 
     #[test]

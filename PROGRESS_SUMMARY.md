@@ -39,6 +39,7 @@ Completed:
   `proofctl create --transparency-log`,
   `proofctl verify --check-receipt` plus assurance-level output,
   and vault `POST /v1/bundles/{id}/anchor` backed by persisted transparency config.
+- Hardened Rekor receipt verification to check entry UUID to leaf-hash binding and verify Merkle inclusion proofs against the advertised Rekor root hash.
 - Added the next vault assurance slice:
   `POST /v1/verify/timestamp`,
   `POST /v1/verify/receipt`,
@@ -63,4 +64,4 @@ Still outstanding from `plan.md`:
 - Node and Python SDKs are still HTTP-client based; NAPI-RS and PyO3 bindings are not built yet.
 - SCITT receipts and selective disclosure CLI flows remain future phases.
 - RFC 3161 verification currently checks CMS signature integrity and message-imprint binding, but TSA certificate-chain / revocation trust validation and eIDAS-qualified trust policy are still outstanding.
-- Rekor verification currently checks receipt structure, embedded RFC 3161 token binding, and inclusion-proof / signed-entry-timestamp presence, but not Rekor SET signature validation or inclusion-proof cryptographic verification.
+- Rekor verification currently checks receipt structure, entry UUID to leaf-hash binding, Merkle inclusion proofs, and embedded RFC 3161 token binding, but not Rekor SET signature validation.

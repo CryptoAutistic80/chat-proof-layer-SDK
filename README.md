@@ -259,7 +259,7 @@ npm run dev
 - `POST /v1/bundles/{bundle_id}/anchor` now uses the configured Rekor provider to anchor an existing timestamped bundle and persist the receipt back into bundle JSON; `scitt` remains a stubbed provider choice.
 - `POST /v1/verify/timestamp` and `POST /v1/verify/receipt` now verify assurance artefacts either directly (`bundle_root` + token/receipt) or by stored `bundle_id`.
 - Timestamp verification currently checks CMS signature integrity and message-imprint binding, but it does not yet validate TSA certificate chains, revocation, or qualified/eIDAS trust status.
-- Transparency verification currently checks Rekor receipt structure, inclusion-proof / signed-entry-timestamp presence, and the embedded RFC 3161 token binding to `integrity.bundle_root`, but it does not yet verify Rekor signed-entry-timestamp signatures or inclusion proofs cryptographically.
+- Transparency verification currently checks Rekor receipt structure, entry UUID to leaf-hash binding, the Merkle inclusion proof against the advertised Rekor root hash, and the embedded RFC 3161 token binding to `integrity.bundle_root`, but it does not yet verify Rekor signed-entry-timestamp signatures.
 - Pack assembly is now available through `/v1/packs`; packs apply an initial heuristic curation profile (`pack-rules-v1`) based on actor role, evidence item types, retention class, and derived obligation refs, then export matching bundles as embedded `bundle.pkg` files plus a manifest.
 - Pack redaction/selective disclosure is still not implemented; current exports remain full bundle packages.
 - Canonicalization and signing semantics follow `docs/architecture.md`.

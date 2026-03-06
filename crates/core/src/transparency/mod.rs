@@ -207,7 +207,9 @@ pub enum TransparencyError {
     MissingSignedEntryTimestamp,
     #[error("transparency receipt body encoding is invalid: {0}")]
     InvalidEntryEncoding(String),
-    #[error("transparency receipt inclusion proof tree_size {tree_size} is invalid for log_index {log_index}")]
+    #[error(
+        "transparency receipt inclusion proof tree_size {tree_size} is invalid for log_index {log_index}"
+    )]
     InvalidTreeSize { log_index: u64, tree_size: u64 },
     #[error("transparency receipt inclusion proof hash is invalid: {0}")]
     InvalidProofHash(String),
@@ -215,7 +217,9 @@ pub enum TransparencyError {
     InvalidRootHash(String),
     #[error("transparency receipt leaf hash did not match entry UUID")]
     LeafHashMismatch { expected: String, actual: String },
-    #[error("transparency receipt inclusion proof length {actual} did not match expected {expected}")]
+    #[error(
+        "transparency receipt inclusion proof length {actual} did not match expected {expected}"
+    )]
     InvalidProofLength { expected: usize, actual: usize },
     #[error("transparency receipt inclusion proof root mismatch")]
     InclusionProofRootMismatch { expected: String, actual: String },
@@ -611,8 +615,10 @@ mod tests {
         assert_eq!(verification.kind, REKOR_TRANSPARENCY_KIND);
         assert_eq!(verification.provider.as_deref(), Some("rekor"));
         assert_eq!(verification.log_url, SIGSTORE_REKOR_URL);
-        assert_eq!(verification.log_index, 7);
-        assert_eq!(verification.inclusion_proof_hashes, 2);
+        assert_eq!(verification.log_index, 0);
+        assert_eq!(verification.tree_size, 1);
+        assert_eq!(verification.inclusion_proof_hashes, 0);
+        assert!(verification.inclusion_proof_verified);
         assert!(verification.signed_entry_timestamp_present);
         assert!(
             verification
@@ -624,6 +630,8 @@ mod tests {
                 .timestamp_generated_at
                 .starts_with("2026-03-06T12:00:00")
         );
+        assert_eq!(verification.entry_uuid, verification.leaf_hash);
+        assert_eq!(verification.root_hash, verification.leaf_hash);
     }
 
     #[test]
@@ -639,6 +647,23 @@ mod tests {
         )
         .unwrap_err();
         assert!(matches!(err, TransparencyError::Timestamp(_)));
+    }
+
+    #[test]
+    fn verify_receipt_rejects_tampered_inclusion_proof() {
+        let bundle_root = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        let mut receipt = build_test_rekor_receipt(bundle_root, Some("rekor"));
+        let entry_uuid = receipt.body["entry_uuid"].as_str().unwrap().to_string();
+        receipt.body["log_entry"][&entry_uuid]["verification"]["inclusionProof"]["rootHash"] =
+            Value::String(
+                "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff".to_string(),
+            );
+
+        let err = verify_receipt(&receipt, bundle_root).unwrap_err();
+        assert!(matches!(
+            err,
+            TransparencyError::InclusionProofRootMismatch { .. }
+        ));
     }
 
     #[test]
@@ -666,7 +691,7 @@ mod tests {
             Some("test-tsa"),
         );
         let expected_token_base64 = token.token_base64.clone();
-        let receipt_json = build_test_rekor_log_entry_response(&token.token_base64);
+        let (_, receipt_json) = build_test_rekor_log_entry_response(&token.token_base64);
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let addr = listener.local_addr().unwrap();
 
@@ -762,50 +787,51 @@ mod tests {
 
     fn build_test_rekor_receipt(bundle_root: &str, provider: Option<&str>) -> TransparencyReceipt {
         let token = build_test_timestamp_token(bundle_root, provider);
+        let (entry_uuid, log_entry) = build_test_rekor_log_entry_response(&token.token_base64);
         TransparencyReceipt {
             kind: REKOR_TRANSPARENCY_KIND.to_string(),
             provider: provider.map(str::to_string),
             body: json!({
                 "log_url": SIGSTORE_REKOR_URL,
-                "entry_uuid": "abababababababababababababababababababababababababababababababab",
-                "log_entry": build_test_rekor_log_entry_response(&token.token_base64),
+                "entry_uuid": entry_uuid,
+                "log_entry": log_entry,
             }),
         }
     }
 
-    fn build_test_rekor_log_entry_response(token_base64: &str) -> Value {
-        json!({
-            "abababababababababababababababababababababababababababababababab": {
-                "body": Base64::encode_string(
-                    serde_json::to_string(&json!({
-                        "kind": REKOR_RFC3161_ENTRY_KIND,
-                        "apiVersion": REKOR_RFC3161_API_VERSION,
-                        "spec": {
-                            "tsr": {
-                                "content": token_base64,
-                            }
-                        }
-                    }))
-                    .unwrap()
-                    .as_bytes()
-                ),
+    fn build_test_rekor_log_entry_response(token_base64: &str) -> (String, Value) {
+        let body_bytes = serde_json::to_vec(&json!({
+            "kind": REKOR_RFC3161_ENTRY_KIND,
+            "apiVersion": REKOR_RFC3161_API_VERSION,
+            "spec": {
+                "tsr": {
+                    "content": token_base64,
+                }
+            }
+        }))
+        .unwrap();
+        let leaf_hash = hex::encode(hash_rekor_leaf(&body_bytes));
+        let mut log_entry = serde_json::Map::new();
+        log_entry.insert(
+            leaf_hash.clone(),
+            json!({
+                "body": Base64::encode_string(&body_bytes),
                 "integratedTime": 1772802000_i64,
                 "logID": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
-                "logIndex": 7,
+                "logIndex": 0,
                 "verification": {
                     "inclusionProof": {
-                        "logIndex": 7,
-                        "treeSize": 8,
-                        "rootHash": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
-                        "hashes": [
-                            "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
-                            "1111111111111111111111111111111111111111111111111111111111111111"
-                        ]
+                        "logIndex": 0,
+                        "treeSize": 1,
+                        "rootHash": leaf_hash,
+                        "hashes": []
                     },
                     "signedEntryTimestamp": Base64::encode_string(b"rekor-set")
                 }
-            }
-        })
+            }),
+        );
+
+        (leaf_hash, Value::Object(log_entry))
     }
 
     fn build_test_timestamp_token(digest: &str, provider: Option<&str>) -> TimestampToken {

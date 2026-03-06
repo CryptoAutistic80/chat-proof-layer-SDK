@@ -28,5 +28,6 @@ ulid.workspace = true
 [dev-dependencies]
 bcder.workspace = true
 cryptographic-message-syntax.workspace = true
+sha2.workspace = true
 tower = { version = "0.5.3", features = ["util"] }
 x509-certificate.workspace = true

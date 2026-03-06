@@ -3888,6 +3888,7 @@ mod tests {
         RFC3161_TIMESTAMP_KIND, TimestampToken, TransparencyReceipt, encode_public_key_pem,
         sha256_prefixed,
     };
+    use sha2::{Digest, Sha256};
     use std::io::{Read, Write};
     use tower::ServiceExt;
     use x509_certificate::{
@@ -3992,45 +3993,52 @@ mod tests {
 
     fn build_test_rekor_receipt(bundle_root: &str, provider: Option<&str>) -> TransparencyReceipt {
         let token = build_test_timestamp_token(bundle_root, provider);
+        let body_bytes = serde_json::to_vec(&serde_json::json!({
+            "kind": REKOR_RFC3161_ENTRY_KIND,
+            "apiVersion": REKOR_RFC3161_API_VERSION,
+            "spec": {
+                "tsr": {
+                    "content": token.token_base64,
+                }
+            }
+        }))
+        .unwrap();
+        let entry_uuid = rekor_leaf_hash_hex(&body_bytes);
+        let mut log_entry = serde_json::Map::new();
+        log_entry.insert(
+            entry_uuid.clone(),
+            serde_json::json!({
+                "body": Base64::encode_string(&body_bytes),
+                "integratedTime": 1772802000_i64,
+                "logID": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
+                "logIndex": 0,
+                "verification": {
+                    "inclusionProof": {
+                        "logIndex": 0,
+                        "treeSize": 1,
+                        "rootHash": entry_uuid,
+                        "hashes": []
+                    },
+                    "signedEntryTimestamp": Base64::encode_string(b"rekor-set")
+                }
+            }),
+        );
         TransparencyReceipt {
             kind: REKOR_TRANSPARENCY_KIND.to_string(),
             provider: provider.map(str::to_string),
             body: serde_json::json!({
                 "log_url": "https://rekor.sigstore.dev",
-                "entry_uuid": "abababababababababababababababababababababababababababababababab",
-                "log_entry": {
-                    "abababababababababababababababababababababababababababababababab": {
-                        "body": Base64::encode_string(
-                            serde_json::to_string(&serde_json::json!({
-                                "kind": REKOR_RFC3161_ENTRY_KIND,
-                                "apiVersion": REKOR_RFC3161_API_VERSION,
-                                "spec": {
-                                    "tsr": {
-                                        "content": token.token_base64,
-                                    }
-                                }
-                            }))
-                            .unwrap()
-                            .as_bytes()
-                        ),
-                        "integratedTime": 1772802000_i64,
-                        "logID": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
-                        "logIndex": 7,
-                        "verification": {
-                            "inclusionProof": {
-                                "logIndex": 7,
-                                "treeSize": 8,
-                                "rootHash": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
-                                "hashes": [
-                                    "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
-                                ]
-                            },
-                            "signedEntryTimestamp": Base64::encode_string(b"rekor-set")
-                        }
-                    }
-                }
+                "entry_uuid": entry_uuid,
+                "log_entry": log_entry
             }),
         }
+    }
+
+    fn rekor_leaf_hash_hex(body_bytes: &[u8]) -> String {
+        let mut hasher = Sha256::new();
+        hasher.update([0x00]);
+        hasher.update(body_bytes);
+        hex::encode(hasher.finalize())
     }
 
     fn build_test_signed_data_der(digest: &str) -> Vec<u8> {
@@ -5250,7 +5258,7 @@ mod tests {
         let receipt = build_test_rekor_receipt(&bundle.integrity.bundle_root, Some("rekor"));
         let verification = apply_receipt_to_bundle(&mut bundle, receipt).unwrap();
         assert_eq!(verification.provider.as_deref(), Some("rekor"));
-        assert_eq!(verification.log_index, 7);
+        assert_eq!(verification.log_index, 0);
         persist_bundle_receipt(&db, &bundle).await.unwrap();
 
         let stored = load_active_bundle(&db, &created.bundle_id)

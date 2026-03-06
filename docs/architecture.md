@@ -164,7 +164,7 @@ A verifier needs only:
 
 No network calls are required for core verification.
 Timestamp and transparency checks are optional in PoC and report as skipped/missing when not requested.
-Current assurance verification checks bundle-root binding, embedded RFC 3161 token validity, and receipt field presence, but not TSA trust chains or Rekor SET/inclusion proof cryptographic trust.
+Current assurance verification checks bundle-root binding, embedded RFC 3161 token validity, Rekor entry UUID to leaf-hash binding, and Rekor inclusion proofs against the advertised root hash, but not TSA trust chains or Rekor SET signature trust.
 
 ## Provider-Agnostic Boundary
 
@@ -188,7 +188,7 @@ It does not claim model replay determinism.
 
 - RFC 3161 timestamp request + basic token verification
 - TSA certificate-chain / revocation trust validation
-- Rekor signed-entry-timestamp / inclusion-proof cryptographic verification
+- Rekor signed-entry-timestamp signature verification
 - SCITT receipts
 - HSM/KMS-backed keys
 - WORM/cloud object lock

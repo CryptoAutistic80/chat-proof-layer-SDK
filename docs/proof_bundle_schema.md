@@ -168,7 +168,7 @@ Implementations MUST execute, in order:
 5. Recompute `bundle_root` and compare.
 6. Verify JWS signature over UTF-8 `bundle_root` bytes using issuer public key.
 7. If timestamp verification is requested and `timestamp` is present, verify the RFC 3161 token CMS signature and ensure its message imprint matches SHA-256 over UTF-8 `integrity.bundle_root` bytes.
-8. If receipt verification is requested and `receipt` is present, verify the Rekor receipt structure, require inclusion-proof and signed-entry-timestamp fields, decode the embedded `rfc3161` entry body, and verify that embedded RFC 3161 token against UTF-8 `integrity.bundle_root` bytes.
+8. If receipt verification is requested and `receipt` is present, verify the Rekor receipt structure, require inclusion-proof and signed-entry-timestamp fields, verify the entry UUID equals the RFC 6962 leaf hash of the Rekor body, recompute the Rekor root from the inclusion proof, decode the embedded `rfc3161` entry body, and verify that embedded RFC 3161 token against UTF-8 `integrity.bundle_root` bytes.
 9. Report optional checks (timestamp/receipt) as skipped if absent or not requested.
 
 Any required check failure MUST produce an invalid result.

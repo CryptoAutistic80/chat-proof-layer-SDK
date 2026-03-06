@@ -49,6 +49,7 @@ Core defaults:
 - CORS enabled for local web demo interoperability
 - Current query surface: `GET /v1/bundles?system_id=&role=&type=&from=&to=&page=&limit=`
 - Retention operations: `DELETE /v1/bundles/{id}`, `POST /v1/bundles/{id}/legal-hold`, `DELETE /v1/bundles/{id}/legal-hold`, `GET /v1/retention/status`, `POST /v1/retention/scan`
+- Audit operations: `GET /v1/audit-trail?action=&bundle_id=&pack_id=&page=&limit=`
 - Pack export operations: `POST /v1/packs`, `GET /v1/packs/{id}`, `GET /v1/packs/{id}/manifest`, `GET /v1/packs/{id}/export`
 
 Current SQLite tables:
@@ -57,6 +58,7 @@ Current SQLite tables:
 - `evidence_items`: one row per evidence item for type-based filtering plus derived `obligation_ref` tags
 - `artefacts`: stored artefact metadata and blob paths
 - `retention_policies`: seeded retention schedules used to compute `expires_at`
+- `audit_log`: append-only request/action trail with bundle/pack linkage and JSON details
 - `packs`: pack manifests and export paths
 
 ### `crates/cli` (`proofctl`)
@@ -78,6 +80,12 @@ Current retention behavior:
 - Bundle creation computes `expires_at` from the retention policy table.
 - Manual `DELETE /v1/bundles/{id}` is a soft-delete and is blocked by active legal holds.
 - `POST /v1/retention/scan` soft-deletes expired active bundles, skips held bundles, and hard-deletes soft-deleted bundles once `deleted_at + grace_period` has passed.
+
+Current audit behavior:
+
+- Vault writes append-only audit rows for create/read/verify/delete/legal-hold/retention-scan and pack operations.
+- Audit rows currently use service-side actor labels (`api`, `system`) because authn/authz is not implemented yet.
+- Audit logging is stored in SQLite and queryable through `GET /v1/audit-trail`.
 
 ### `packages/sdk-node` and `packages/sdk-python`
 

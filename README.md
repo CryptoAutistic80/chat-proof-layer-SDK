@@ -109,6 +109,7 @@ docker compose up --build
 - `GET /v1/bundles/{bundle_id}/artefacts/{name}`
 - `POST /v1/bundles/{bundle_id}/legal-hold`
 - `DELETE /v1/bundles/{bundle_id}/legal-hold`
+- `GET /v1/audit-trail?action=&bundle_id=&pack_id=&page=&limit=`
 - `POST /v1/packs`
 - `GET /v1/packs/{pack_id}`
 - `GET /v1/packs/{pack_id}/manifest`
@@ -240,6 +241,7 @@ npm run dev
 - `proofctl pack` now requests pack assembly from the vault and downloads the resulting `pl-evidence-pack-v1` archive.
 - The vault now persists metadata in SQLite, computes bundle expiry from seeded retention policies, derives per-item `obligation_ref` tags, exposes retention scan/status endpoints, supports legal holds, and indexes evidence items for `/v1/bundles` filtering.
 - Retention scans now soft-delete expired bundles, skip held bundles, and hard-delete previously soft-deleted bundles after the configured grace period (`PROOF_SERVICE_RETENTION_GRACE_DAYS`, default `30`).
+- The vault now keeps an append-only audit trail and exposes it via `/v1/audit-trail`; current actions include bundle create/read/verify/delete, legal hold changes, retention scans, and pack create/read/export events.
 - Pack assembly is now available through `/v1/packs`; packs apply an initial heuristic curation profile (`pack-rules-v1`) based on actor role, evidence item types, retention class, and derived obligation refs, then export matching bundles as embedded `bundle.pkg` files plus a manifest.
 - Pack redaction/selective disclosure is still not implemented; current exports remain full bundle packages.
 - Canonicalization and signing semantics follow `docs/architecture.md`.

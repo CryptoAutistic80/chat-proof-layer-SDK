@@ -41,6 +41,8 @@ const PACKAGE_FORMAT: &str = "pl-bundle-pkg-v1";
 const PACK_EXPORT_FORMAT: &str = "pl-evidence-pack-v1";
 const PACK_EXPORT_FILE_NAME: &str = "evidence_pack.pkg";
 const PACK_CURATION_PROFILE: &str = "pack-rules-v1";
+const AUDIT_ACTOR_API: &str = "api";
+const AUDIT_ACTOR_SYSTEM: &str = "system";
 
 #[derive(Clone)]
 struct AppState {
@@ -149,6 +151,15 @@ struct BundleQuery {
     limit: Option<u32>,
 }
 
+#[derive(Debug, Deserialize)]
+struct AuditTrailQuery {
+    action: Option<String>,
+    bundle_id: Option<String>,
+    pack_id: Option<String>,
+    page: Option<u32>,
+    limit: Option<u32>,
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 struct ListBundlesResponse {
     page: u32,
@@ -216,6 +227,27 @@ struct LegalHoldRequest {
     reason: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     until: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct AuditTrailResponse {
+    page: u32,
+    limit: u32,
+    items: Vec<AuditLogEntry>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct AuditLogEntry {
+    id: i64,
+    timestamp: String,
+    action: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    actor: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    bundle_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pack_id: Option<String>,
+    details: serde_json::Value,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -333,6 +365,17 @@ struct BundleRetentionRow {
     legal_hold_until: Option<String>,
 }
 
+#[derive(Debug, FromRow)]
+struct StoredAuditLogRow {
+    id: i64,
+    timestamp: String,
+    action: String,
+    actor: Option<String>,
+    bundle_id: Option<String>,
+    pack_id: Option<String>,
+    details_json: String,
+}
+
 #[derive(Debug)]
 struct PackArtefactBytes {
     name: String,
@@ -436,6 +479,7 @@ fn build_router(state: AppState, max_payload_bytes: usize) -> Router {
             "/v1/bundles/{bundle_id}/legal-hold",
             post(set_legal_hold).delete(release_legal_hold),
         )
+        .route("/v1/audit-trail", get(list_audit_trail))
         .route("/v1/packs", post(create_pack))
         .route("/v1/packs/{pack_id}", get(get_pack))
         .route("/v1/packs/{pack_id}/manifest", get(get_pack_manifest))
@@ -518,6 +562,21 @@ async fn create_bundle(
     persist_bundle_metadata(&state.db, &state.storage_dir, &bundle)
         .await
         .map_err(ApiError::internal_anyhow)?;
+    append_audit_log(
+        &state.db,
+        "create_bundle",
+        Some(AUDIT_ACTOR_API),
+        Some(&bundle.bundle_id),
+        None,
+        serde_json::json!({
+            "artefact_count": bundle.artefacts.len(),
+            "item_count": bundle.items.len(),
+            "retention_class": bundle.policy.retention_class.clone().unwrap_or_else(|| "unspecified".to_string()),
+            "system_id": bundle.subject.system_id.clone(),
+        }),
+    )
+    .await
+    .map_err(ApiError::internal_anyhow)?;
 
     Ok((
         StatusCode::CREATED,
@@ -598,6 +657,27 @@ async fn list_bundles(
         .fetch_all(&state.db)
         .await
         .map_err(ApiError::internal_anyhow)?;
+    append_audit_log(
+        &state.db,
+        "list_bundles",
+        Some(AUDIT_ACTOR_API),
+        None,
+        None,
+        serde_json::json!({
+            "page": page,
+            "limit": limit,
+            "result_count": items.len(),
+            "filters": {
+                "system_id": query.system_id,
+                "role": query.role,
+                "item_type": query.item_type,
+                "from": query.from,
+                "to": query.to,
+            }
+        }),
+    )
+    .await
+    .map_err(ApiError::internal_anyhow)?;
 
     Ok((
         StatusCode::OK,
@@ -682,6 +762,20 @@ async fn retention_status(State(state): State<AppState>) -> Result<impl IntoResp
         });
     }
 
+    append_audit_log(
+        &state.db,
+        "retention_status",
+        Some(AUDIT_ACTOR_API),
+        None,
+        None,
+        serde_json::json!({
+            "policy_count": policies.len(),
+            "grace_period_days": state.retention_grace_period_days,
+        }),
+    )
+    .await
+    .map_err(ApiError::internal_anyhow)?;
+
     Ok((
         StatusCode::OK,
         Json(RetentionStatusResponse {
@@ -733,6 +827,21 @@ async fn retention_scan(State(state): State<AppState>) -> Result<impl IntoRespon
     let hard_deleted = hard_delete_bundles(&state, &hard_delete_before, &now)
         .await
         .map_err(ApiError::internal_anyhow)?;
+    append_audit_log(
+        &state.db,
+        "retention_scan",
+        Some(AUDIT_ACTOR_SYSTEM),
+        None,
+        None,
+        serde_json::json!({
+            "grace_period_days": state.retention_grace_period_days,
+            "soft_deleted": soft_delete_result.rows_affected(),
+            "hard_deleted": hard_deleted,
+            "held_skipped": held_skipped,
+        }),
+    )
+    .await
+    .map_err(ApiError::internal_anyhow)?;
 
     Ok((
         StatusCode::OK,
@@ -743,6 +852,63 @@ async fn retention_scan(State(state): State<AppState>) -> Result<impl IntoRespon
             hard_deleted,
             held_skipped: held_skipped as u64,
         }),
+    ))
+}
+
+async fn list_audit_trail(
+    State(state): State<AppState>,
+    Query(query): Query<AuditTrailQuery>,
+) -> Result<impl IntoResponse, ApiError> {
+    let page = query.page.unwrap_or(1).max(1);
+    let limit = query.limit.unwrap_or(50).clamp(1, 100);
+    let offset = i64::from((page - 1) * limit);
+
+    let mut builder = QueryBuilder::<Sqlite>::new(
+        "SELECT
+            id,
+            timestamp,
+            action,
+            actor,
+            bundle_id,
+            pack_id,
+            details_json
+         FROM audit_log
+         WHERE 1 = 1",
+    );
+
+    if let Some(action) = query.action.as_deref() {
+        builder.push(" AND action = ");
+        builder.push_bind(action);
+    }
+    if let Some(bundle_id) = query.bundle_id.as_deref() {
+        builder.push(" AND bundle_id = ");
+        builder.push_bind(bundle_id);
+    }
+    if let Some(pack_id) = query.pack_id.as_deref() {
+        builder.push(" AND pack_id = ");
+        builder.push_bind(pack_id);
+    }
+
+    builder.push(" ORDER BY id DESC LIMIT ");
+    builder.push_bind(i64::from(limit));
+    builder.push(" OFFSET ");
+    builder.push_bind(offset);
+
+    let rows = builder
+        .build_query_as::<StoredAuditLogRow>()
+        .fetch_all(&state.db)
+        .await
+        .map_err(ApiError::internal_anyhow)?;
+
+    let items = rows
+        .into_iter()
+        .map(map_audit_log_row)
+        .collect::<Result<Vec<_>>>()
+        .map_err(ApiError::internal_anyhow)?;
+
+    Ok((
+        StatusCode::OK,
+        Json(AuditTrailResponse { page, limit, items }),
     ))
 }
 
@@ -766,6 +932,7 @@ async fn delete_bundle(
         ));
     }
 
+    let was_already_deleted = row.deleted_at.is_some();
     let deleted_at = if let Some(deleted_at) = row.deleted_at {
         deleted_at
     } else {
@@ -777,6 +944,19 @@ async fn delete_bundle(
             .map_err(ApiError::internal_anyhow)?;
         now
     };
+    append_audit_log(
+        &state.db,
+        "delete_bundle",
+        Some(AUDIT_ACTOR_API),
+        Some(&bundle_id),
+        None,
+        serde_json::json!({
+            "deleted_at": deleted_at.clone(),
+            "was_already_deleted": was_already_deleted,
+        }),
+    )
+    .await
+    .map_err(ApiError::internal_anyhow)?;
 
     Ok((
         StatusCode::OK,
@@ -817,6 +997,19 @@ async fn set_legal_hold(
     .execute(&state.db)
     .await
     .map_err(ApiError::internal_anyhow)?;
+    append_audit_log(
+        &state.db,
+        "set_legal_hold",
+        Some(AUDIT_ACTOR_API),
+        Some(&bundle_id),
+        None,
+        serde_json::json!({
+            "reason": reason.clone(),
+            "until": until.clone(),
+        }),
+    )
+    .await
+    .map_err(ApiError::internal_anyhow)?;
 
     Ok((
         StatusCode::OK,
@@ -848,6 +1041,22 @@ async fn release_legal_hold(
     )
     .bind(&bundle_id)
     .execute(&state.db)
+    .await
+    .map_err(ApiError::internal_anyhow)?;
+    append_audit_log(
+        &state.db,
+        "release_legal_hold",
+        Some(AUDIT_ACTOR_API),
+        Some(&bundle_id),
+        None,
+        serde_json::json!({
+            "had_active_hold": legal_hold_is_active(
+                row.legal_hold_reason.as_deref(),
+                row.legal_hold_until.as_deref(),
+                &Utc::now().to_rfc3339(),
+            ),
+        }),
+    )
     .await
     .map_err(ApiError::internal_anyhow)?;
 
@@ -937,6 +1146,20 @@ async fn create_pack(
     persist_pack_metadata(&state.db, &manifest, &export_path)
         .await
         .map_err(ApiError::internal_anyhow)?;
+    append_audit_log(
+        &state.db,
+        "create_pack",
+        Some(AUDIT_ACTOR_API),
+        None,
+        Some(&pack_id),
+        serde_json::json!({
+            "pack_type": manifest.pack_type.clone(),
+            "bundle_count": manifest.bundle_ids.len(),
+            "system_id": manifest.system_id.clone(),
+        }),
+    )
+    .await
+    .map_err(ApiError::internal_anyhow)?;
 
     Ok((StatusCode::CREATED, Json(pack_summary(&manifest))))
 }
@@ -950,6 +1173,19 @@ async fn get_pack(
         .map_err(ApiError::internal_anyhow)?
         .ok_or_else(|| ApiError::not_found("pack not found"))?;
     let manifest = parse_pack_manifest(&row).map_err(ApiError::internal_anyhow)?;
+    append_audit_log(
+        &state.db,
+        "get_pack",
+        Some(AUDIT_ACTOR_API),
+        None,
+        Some(&pack_id),
+        serde_json::json!({
+            "pack_type": manifest.pack_type.clone(),
+            "bundle_count": manifest.bundle_ids.len(),
+        }),
+    )
+    .await
+    .map_err(ApiError::internal_anyhow)?;
     Ok((StatusCode::OK, Json(pack_summary(&manifest))))
 }
 
@@ -962,6 +1198,18 @@ async fn get_pack_manifest(
         .map_err(ApiError::internal_anyhow)?
         .ok_or_else(|| ApiError::not_found("pack not found"))?;
     let manifest = parse_pack_manifest(&row).map_err(ApiError::internal_anyhow)?;
+    append_audit_log(
+        &state.db,
+        "get_pack_manifest",
+        Some(AUDIT_ACTOR_API),
+        None,
+        Some(&pack_id),
+        serde_json::json!({
+            "bundle_count": manifest.bundle_ids.len(),
+        }),
+    )
+    .await
+    .map_err(ApiError::internal_anyhow)?;
     Ok((StatusCode::OK, Json(manifest)))
 }
 
@@ -985,6 +1233,18 @@ async fn get_pack_export(
             )));
         }
     };
+    append_audit_log(
+        &state.db,
+        "get_pack_export",
+        Some(AUDIT_ACTOR_API),
+        None,
+        Some(&pack_id),
+        serde_json::json!({
+            "size": bytes.len(),
+        }),
+    )
+    .await
+    .map_err(ApiError::internal_anyhow)?;
 
     Ok((StatusCode::OK, bytes))
 }
@@ -1006,6 +1266,19 @@ async fn get_bundle(
         .map_err(ApiError::internal_anyhow)?;
     let bundle: ProofBundle =
         serde_json::from_str(&bundle_json).map_err(ApiError::internal_anyhow)?;
+    append_audit_log(
+        &state.db,
+        "get_bundle",
+        Some(AUDIT_ACTOR_API),
+        Some(&bundle_id),
+        None,
+        serde_json::json!({
+            "item_count": bundle.items.len(),
+            "artefact_count": bundle.artefacts.len(),
+        }),
+    )
+    .await
+    .map_err(ApiError::internal_anyhow)?;
     Ok((StatusCode::OK, Json(bundle)))
 }
 
@@ -1029,6 +1302,19 @@ async fn get_artefact(
             ));
         }
     };
+    append_audit_log(
+        &state.db,
+        "get_artefact",
+        Some(AUDIT_ACTOR_API),
+        Some(&bundle_id),
+        None,
+        serde_json::json!({
+            "name": name,
+            "size": bytes.len(),
+        }),
+    )
+    .await
+    .map_err(ApiError::internal_anyhow)?;
 
     Ok((StatusCode::OK, bytes))
 }
@@ -1043,6 +1329,20 @@ async fn verify_bundle(
             verify_package_request(*request, state.max_payload_bytes)?
         }
     };
+    append_audit_log(
+        &state.db,
+        "verify_bundle",
+        Some(AUDIT_ACTOR_API),
+        None,
+        None,
+        serde_json::json!({
+            "valid": response.valid,
+            "artefacts_verified": response.artefacts_verified,
+            "message": response.message.clone(),
+        }),
+    )
+    .await
+    .map_err(ApiError::internal_anyhow)?;
 
     Ok((StatusCode::OK, Json(response)))
 }
@@ -1782,6 +2082,50 @@ fn parse_pack_manifest(row: &StoredPackRow) -> Result<PackManifest> {
     Ok(manifest)
 }
 
+fn map_audit_log_row(row: StoredAuditLogRow) -> Result<AuditLogEntry> {
+    Ok(AuditLogEntry {
+        id: row.id,
+        timestamp: row.timestamp,
+        action: row.action,
+        actor: row.actor,
+        bundle_id: row.bundle_id,
+        pack_id: row.pack_id,
+        details: serde_json::from_str(&row.details_json).with_context(|| {
+            format!("failed to parse audit_log.details_json for row {}", row.id)
+        })?,
+    })
+}
+
+async fn append_audit_log(
+    db: &SqlitePool,
+    action: &str,
+    actor: Option<&str>,
+    bundle_id: Option<&str>,
+    pack_id: Option<&str>,
+    details: serde_json::Value,
+) -> Result<()> {
+    sqlx::query(
+        "INSERT INTO audit_log (
+            timestamp,
+            action,
+            actor,
+            bundle_id,
+            pack_id,
+            details_json
+        ) VALUES (?, ?, ?, ?, ?, ?)",
+    )
+    .bind(Utc::now().to_rfc3339())
+    .bind(action)
+    .bind(actor)
+    .bind(bundle_id)
+    .bind(pack_id)
+    .bind(serde_json::to_string(&details)?)
+    .execute(db)
+    .await
+    .with_context(|| format!("failed to append audit log action {action}"))?;
+    Ok(())
+}
+
 fn parse_retention_grace_period_days(raw: &str) -> Result<i64> {
     let days = raw
         .trim()
@@ -2289,6 +2633,19 @@ async fn initialize_sqlite_schema(db: &SqlitePool) -> Result<()> {
             storage_path TEXT NOT NULL,
             PRIMARY KEY (bundle_id, name)
         )",
+        "CREATE TABLE IF NOT EXISTS audit_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp TEXT NOT NULL,
+            action TEXT NOT NULL,
+            actor TEXT,
+            bundle_id TEXT,
+            pack_id TEXT,
+            details_json TEXT NOT NULL
+        )",
+        "CREATE INDEX IF NOT EXISTS idx_audit_timestamp ON audit_log(timestamp, id)",
+        "CREATE INDEX IF NOT EXISTS idx_audit_action ON audit_log(action, id)",
+        "CREATE INDEX IF NOT EXISTS idx_audit_bundle ON audit_log(bundle_id, id)",
+        "CREATE INDEX IF NOT EXISTS idx_audit_pack ON audit_log(pack_id, id)",
         "CREATE TABLE IF NOT EXISTS packs (
             pack_id TEXT PRIMARY KEY,
             pack_type TEXT NOT NULL,
@@ -3351,6 +3708,125 @@ mod tests {
                 .unwrap();
         assert!(remaining.is_none());
         assert!(!artefact_dir.exists());
+    }
+
+    #[tokio::test]
+    async fn audit_trail_lists_and_filters_recorded_actions() {
+        let state = test_state(DEFAULT_MAX_PAYLOAD_BYTES).await;
+        let public_key_pem = encode_public_key_pem(&state.signing_key.verifying_key());
+        let app = build_router(state, DEFAULT_MAX_PAYLOAD_BYTES);
+
+        let created = create_bundle_response(
+            &app,
+            &CreateBundleRequest {
+                capture: SealableCaptureInput::Legacy(sample_capture()),
+                artefacts: vec![InlineArtefact {
+                    name: "prompt.json".to_string(),
+                    content_type: "application/json".to_string(),
+                    data_base64: Base64::encode_string(br#"{"prompt":"audit"}"#),
+                }],
+            },
+        )
+        .await;
+
+        let get_req = Request::builder()
+            .method("GET")
+            .uri(format!("/v1/bundles/{}", created.bundle_id))
+            .body(Body::empty())
+            .unwrap();
+        let get_res = app.clone().oneshot(get_req).await.unwrap();
+        assert_eq!(get_res.status(), StatusCode::OK);
+        let get_body = axum::body::to_bytes(get_res.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let bundle: ProofBundle = serde_json::from_slice(&get_body).unwrap();
+
+        let verify_req = Request::builder()
+            .method("POST")
+            .uri("/v1/verify")
+            .header("content-type", "application/json")
+            .body(Body::from(
+                serde_json::to_vec(&VerifyRequest::Inline(Box::new(InlineVerifyRequest {
+                    bundle,
+                    artefacts: vec![InlineVerifyArtefact {
+                        name: "prompt.json".to_string(),
+                        data_base64: Base64::encode_string(br#"{"prompt":"audit"}"#),
+                    }],
+                    public_key_pem,
+                })))
+                .unwrap(),
+            ))
+            .unwrap();
+        let verify_res = app.clone().oneshot(verify_req).await.unwrap();
+        assert_eq!(verify_res.status(), StatusCode::OK);
+
+        let delete_req = Request::builder()
+            .method("DELETE")
+            .uri(format!("/v1/bundles/{}", created.bundle_id))
+            .body(Body::empty())
+            .unwrap();
+        let delete_res = app.clone().oneshot(delete_req).await.unwrap();
+        assert_eq!(delete_res.status(), StatusCode::OK);
+
+        let audit_req = Request::builder()
+            .method("GET")
+            .uri(format!("/v1/audit-trail?bundle_id={}", created.bundle_id))
+            .body(Body::empty())
+            .unwrap();
+        let audit_res = app.clone().oneshot(audit_req).await.unwrap();
+        assert_eq!(audit_res.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(audit_res.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let response: AuditTrailResponse = serde_json::from_slice(&body).unwrap();
+
+        assert!(response.items.len() >= 3);
+        assert!(
+            response
+                .items
+                .iter()
+                .any(|item| item.action == "create_bundle")
+        );
+        assert!(
+            response
+                .items
+                .iter()
+                .any(|item| item.action == "get_bundle")
+        );
+        assert!(
+            response
+                .items
+                .iter()
+                .any(|item| item.action == "delete_bundle")
+        );
+        assert!(
+            response
+                .items
+                .iter()
+                .all(|item| item.bundle_id.as_deref() == Some(created.bundle_id.as_str()))
+        );
+
+        let action_req = Request::builder()
+            .method("GET")
+            .uri("/v1/audit-trail?action=verify_bundle")
+            .body(Body::empty())
+            .unwrap();
+        let action_res = app.oneshot(action_req).await.unwrap();
+        assert_eq!(action_res.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(action_res.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let response: AuditTrailResponse = serde_json::from_slice(&body).unwrap();
+        assert_eq!(response.items.len(), 1);
+        assert_eq!(response.items[0].action, "verify_bundle");
+        assert_eq!(response.items[0].actor.as_deref(), Some(AUDIT_ACTOR_API));
+        assert_eq!(
+            response.items[0]
+                .details
+                .get("valid")
+                .and_then(|v| v.as_bool()),
+            Some(true)
+        );
     }
 
     #[tokio::test]

@@ -20,7 +20,11 @@ pub enum DigestError {
 
 pub fn sha256_prefixed(bytes: &[u8]) -> String {
     let digest = sha256_raw(bytes);
-    format!("{SHA256_PREFIX}{}", hex::encode(digest))
+    format_sha256_prefixed_digest(&digest)
+}
+
+pub fn format_sha256_prefixed_digest(bytes: &[u8]) -> String {
+    format!("{SHA256_PREFIX}{}", hex::encode(bytes))
 }
 
 pub fn sha256_prefixed_file(path: &Path) -> Result<String, io::Error> {

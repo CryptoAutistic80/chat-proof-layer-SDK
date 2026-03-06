@@ -2,10 +2,10 @@
   "bundle_id": "PLFIXEDGOLDEN000000000000000001",
   "created_at": "2026-03-02T00:00:00+00:00",
   "signing_kid": "kid-dev-01",
-  "header_digest": "sha256:a6542c647a6c7f5b866c00295ace8d941a47ef373b5c54c180702933e3f30c9a",
-  "bundle_root": "sha256:75d0508dbf9e3f88f3e1b8e8723c893533f422a181ace3ea83c24549a4014f29",
-  "signature_jws": "eyJhbGciOiJFZERTQSIsImtpZCI6ImtpZC1kZXYtMDEifQ.c2hhMjU2Ojc1ZDA1MDhkYmY5ZTNmODhmM2UxYjhlODcyM2M4OTM1MzNmNDIyYTE4MWFjZTNlYTgzYzI0NTQ5YTQwMTRmMjk.oU85_eT8d_y-HWZb5lXCRXdZj-jUG69FiylHKsD8mMdWp-kDW5QN9d4L9E7OWUKVXtoOJUJ_5qpog4C6RmnpAw",
-  "canonical_header_sha256": "sha256:a6542c647a6c7f5b866c00295ace8d941a47ef373b5c54c180702933e3f30c9a",
+  "header_digest": "sha256:5c1c9879a94ffeed67eee4d77d278d8b7577c9bdfa3d81f2e28e6caab3119154",
+  "bundle_root": "sha256:102100960f88b5358545ddb2f6198babd8aae316fe6fab0bf34cb75412b08f2e",
+  "signature_jws": "eyJhbGciOiJFZERTQSIsImtpZCI6ImtpZC1kZXYtMDEifQ.c2hhMjU2OjEwMjEwMDk2MGY4OGI1MzU4NTQ1ZGRiMmY2MTk4YmFiZDhhYWUzMTZmZTZmYWIwYmYzNGNiNzU0MTJiMDhmMmU.-kAfWxfd0lxYFMXVN2fEwzPlxHOQahG2s3jUKi6-NnJyBsVV6D9_X9Quj9N1ReOC6zrjj2M3Zpd539TBqUQaDw",
+  "canonical_header_sha256": "sha256:5c1c9879a94ffeed67eee4d77d278d8b7577c9bdfa3d81f2e28e6caab3119154",
   "artefact_digests": {
     "prompt.json": "sha256:01f53d6229f0e4a60d3da9d3064a4daa007c0ea5d56b49f620d82a65309c0e94",
     "response.json": "sha256:5f801b1af400da4c8f8c0050fc308bda4545d662a1fd0c32e60d1cb6f95cd06a"
@@ -20,15 +20,15 @@
       "size": 231
     },
     "proof_bundle.canonical.json": {
-      "digest": "sha256:a6542c647a6c7f5b866c00295ace8d941a47ef373b5c54c180702933e3f30c9a",
-      "size": 1162
+      "digest": "sha256:5c1c9879a94ffeed67eee4d77d278d8b7577c9bdfa3d81f2e28e6caab3119154",
+      "size": 1451
     },
     "proof_bundle.json": {
-      "digest": "sha256:d43ffe6ee81d0b3f3568ef301df379c5739c2b14b5a75d9de86f22974ddf6824",
-      "size": 2115
+      "digest": "sha256:02a1d960ae5587dab8c005ddcb6dd559c2c6fa7b955bfce148b5cdccdc5d0a80",
+      "size": 2526
     },
     "proof_bundle.sig": {
-      "digest": "sha256:10f451f9789a98419557fb6e9cd105fb754f2edd25c9f7104afee537e096e8fc",
+      "digest": "sha256:b371a91907fc79ed81ad112770d900110e36992acd199cb7da4484a402f0d617",
       "size": 229
     }
   }

@@ -4,12 +4,14 @@ FROM rust:1.86-bookworm AS builder
 WORKDIR /app
 
 COPY Cargo.toml Cargo.lock ./
-COPY packages/core-rust/Cargo.toml packages/core-rust/Cargo.toml
-COPY packages/cli/Cargo.toml packages/cli/Cargo.toml
-COPY packages/proof-service/Cargo.toml packages/proof-service/Cargo.toml
-COPY packages/core-rust/src packages/core-rust/src
-COPY packages/cli/src packages/cli/src
-COPY packages/proof-service/src packages/proof-service/src
+COPY crates/core/Cargo.toml crates/core/Cargo.toml
+COPY crates/cli/Cargo.toml crates/cli/Cargo.toml
+COPY crates/vault/Cargo.toml crates/vault/Cargo.toml
+COPY crates/core/src crates/core/src
+COPY crates/core/tests crates/core/tests
+COPY crates/cli/src crates/cli/src
+COPY crates/vault/src crates/vault/src
+COPY fixtures fixtures
 
 RUN cargo build --release -p proof-service
 

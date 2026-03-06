@@ -12,17 +12,17 @@
     },
     {
       "name": "proof_bundle.canonical.json",
-      "digest": "sha256:a6542c647a6c7f5b866c00295ace8d941a47ef373b5c54c180702933e3f30c9a",
-      "size": 1162
+      "digest": "sha256:5c1c9879a94ffeed67eee4d77d278d8b7577c9bdfa3d81f2e28e6caab3119154",
+      "size": 1451
     },
     {
       "name": "proof_bundle.json",
-      "digest": "sha256:d43ffe6ee81d0b3f3568ef301df379c5739c2b14b5a75d9de86f22974ddf6824",
-      "size": 2115
+      "digest": "sha256:02a1d960ae5587dab8c005ddcb6dd559c2c6fa7b955bfce148b5cdccdc5d0a80",
+      "size": 2526
     },
     {
       "name": "proof_bundle.sig",
-      "digest": "sha256:10f451f9789a98419557fb6e9cd105fb754f2edd25c9f7104afee537e096e8fc",
+      "digest": "sha256:b371a91907fc79ed81ad112770d900110e36992acd199cb7da4484a402f0d617",
       "size": 229
     }
   ]

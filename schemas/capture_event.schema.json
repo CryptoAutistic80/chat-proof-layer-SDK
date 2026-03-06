@@ -1,0 +1,132 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://proof-layer.dev/schemas/capture_event.schema.json",
+  "title": "Capture Event",
+  "description": "v1.0 capture input accepted by proofctl and the proof service.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "actor",
+    "subject",
+    "items"
+  ],
+  "properties": {
+    "actor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "issuer",
+        "app_id",
+        "env",
+        "signing_key_id"
+      ],
+      "properties": {
+        "issuer": {
+          "type": "string",
+          "minLength": 1
+        },
+        "app_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "env": {
+          "type": "string",
+          "minLength": 1
+        },
+        "signing_key_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "role": {
+          "type": "string",
+          "enum": [
+            "provider",
+            "deployer",
+            "integrator"
+          ]
+        },
+        "organization_id": {
+          "type": "string"
+        }
+      }
+    },
+    "subject": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "request_id": {
+          "type": "string"
+        },
+        "thread_id": {
+          "type": "string"
+        },
+        "user_ref": {
+          "type": "string"
+        },
+        "system_id": {
+          "type": "string"
+        },
+        "model_id": {
+          "type": "string"
+        },
+        "deployment_id": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        }
+      }
+    },
+    "context": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "provider": {
+          "type": "string"
+        },
+        "model": {
+          "type": "string"
+        },
+        "parameters": true,
+        "trace_commitment": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "otel_genai_semconv_version": {
+          "type": "string"
+        }
+      }
+    },
+    "items": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "./evidence_item.schema.json"
+      }
+    },
+    "policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "redactions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "encryption": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            }
+          }
+        },
+        "retention_class": {
+          "type": "string"
+        }
+      }
+    }
+  }
+}

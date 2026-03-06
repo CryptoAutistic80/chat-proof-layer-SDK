@@ -1,12 +1,12 @@
 use crate::{
-    bundle::{
-        ArtefactMeta, BUNDLE_ROOT_ALGORITHM, CANONICALIZATION_ALGORITHM, CaptureInput,
-        HASH_ALGORITHM, Integrity, ProofBundle, SIGNATURE_ALGORITHM, SIGNATURE_FORMAT,
-        SignatureInfo,
-    },
-    canonicalize::CanonError,
     hash::sha256_prefixed,
     merkle::{MerkleError, compute_commitment},
+    schema::migration::capture_input_v01_to_event,
+    schema::{
+        ArtefactRef, BUNDLE_ROOT_ALGORITHM, BUNDLE_VERSION, CANONICALIZATION_ALGORITHM,
+        CaptureEvent, HASH_ALGORITHM, Integrity, ProofBundle, SIGNATURE_ALGORITHM,
+        SIGNATURE_FORMAT, SignatureInfo, v01,
+    },
     sign::{SignError, sign_bundle_root},
 };
 use chrono::{DateTime, Utc};
@@ -21,6 +21,24 @@ pub struct ArtefactInput {
     pub bytes: Vec<u8>,
 }
 
+#[derive(Debug, Clone)]
+pub enum BundleBuildInput {
+    V10(CaptureEvent),
+    V01(v01::CaptureInput),
+}
+
+impl From<CaptureEvent> for BundleBuildInput {
+    fn from(value: CaptureEvent) -> Self {
+        Self::V10(value)
+    }
+}
+
+impl From<v01::CaptureInput> for BundleBuildInput {
+    fn from(value: v01::CaptureInput) -> Self {
+        Self::V01(value)
+    }
+}
+
 #[derive(Debug, Error)]
 pub enum BuildBundleError {
     #[error("artifact list cannot be empty")]
@@ -29,8 +47,12 @@ pub enum BuildBundleError {
     EmptyArtefactName,
     #[error("duplicate artifact name found: {0}")]
     DuplicateArtefactName(String),
+    #[error("bundle_id must not be empty")]
+    EmptyBundleId,
+    #[error("capture event must contain at least one evidence item")]
+    EmptyItems,
     #[error("canonicalization failed: {0}")]
-    Canonicalization(#[from] CanonError),
+    Canonicalization(#[from] crate::canon::CanonError),
     #[error("merkle commitment failed: {0}")]
     Merkle(#[from] MerkleError),
     #[error("signing failed: {0}")]
@@ -38,7 +60,7 @@ pub enum BuildBundleError {
 }
 
 pub fn build_bundle(
-    capture: CaptureInput,
+    capture: impl Into<BundleBuildInput>,
     artefacts: &[ArtefactInput],
     signing_key: &SigningKey,
     kid: &str,
@@ -48,6 +70,18 @@ pub fn build_bundle(
     if artefacts.is_empty() {
         return Err(BuildBundleError::EmptyArtefacts);
     }
+    if bundle_id.trim().is_empty() {
+        return Err(BuildBundleError::EmptyBundleId);
+    }
+
+    let mut event = match capture.into() {
+        BundleBuildInput::V10(event) => event,
+        BundleBuildInput::V01(legacy) => capture_input_v01_to_event(legacy),
+    };
+    if event.items.is_empty() {
+        return Err(BuildBundleError::EmptyItems);
+    }
+    event.actor.signing_key_id = kid.to_string();
 
     let mut seen_names = HashSet::with_capacity(artefacts.len());
     let mut artefact_meta = Vec::with_capacity(artefacts.len());
@@ -61,7 +95,7 @@ pub fn build_bundle(
             ));
         }
 
-        artefact_meta.push(ArtefactMeta {
+        artefact_meta.push(ArtefactRef {
             name: artefact.name.clone(),
             digest: sha256_prefixed(&artefact.bytes),
             size: artefact.bytes.len() as u64,
@@ -70,17 +104,15 @@ pub fn build_bundle(
     }
 
     let mut bundle = ProofBundle {
-        bundle_version: "0.1".to_string(),
+        bundle_version: BUNDLE_VERSION.to_string(),
         bundle_id: bundle_id.to_string(),
         created_at: created_at.to_rfc3339(),
-        actor: capture.actor,
-        subject: capture.subject,
-        model: capture.model,
-        inputs: capture.inputs,
-        outputs: capture.outputs,
-        trace: capture.trace,
+        actor: event.actor,
+        subject: event.subject,
+        context: event.context,
+        items: event.items,
         artefacts: artefact_meta,
-        policy: capture.policy,
+        policy: event.policy,
         integrity: Integrity {
             canonicalization: CANONICALIZATION_ALGORITHM.to_string(),
             hash: HASH_ALGORITHM.to_string(),
@@ -119,20 +151,25 @@ pub fn build_bundle(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::bundle::{
-        Actor, CaptureInput, EncryptionPolicy, Inputs, ModelInfo, Outputs, Policy, Subject, Trace,
+    use crate::{
+        bundle::{
+            Actor, ActorRole, CaptureEvent, EncryptionPolicy, EvidenceContext, EvidenceItem,
+            LlmInteractionEvidence, Policy, Subject,
+        },
+        bundle::{CaptureInput, Inputs, ModelInfo, Outputs, Trace},
     };
     use chrono::TimeZone;
+    use serde_json::json;
 
-    fn sample_capture() -> CaptureInput {
+    fn sample_legacy_capture() -> CaptureInput {
         CaptureInput {
-            actor: Actor {
+            actor: crate::schema::v01::Actor {
                 issuer: "proof-layer-local".to_string(),
                 app_id: "demo".to_string(),
                 env: "dev".to_string(),
                 signing_key_id: "kid-dev-01".to_string(),
             },
-            subject: Subject {
+            subject: crate::schema::v01::Subject {
                 request_id: "req-123".to_string(),
                 thread_id: Some("thr-1".to_string()),
                 user_ref: Some("hmac_sha256:abc".to_string()),
@@ -140,7 +177,7 @@ mod tests {
             model: ModelInfo {
                 provider: "anthropic".to_string(),
                 model: "claude-sonnet-4-6".to_string(),
-                parameters: serde_json::json!({"temperature": 0.2}),
+                parameters: json!({"temperature": 0.2}),
             },
             inputs: Inputs {
                 messages_commitment:
@@ -163,14 +200,71 @@ mod tests {
             policy: Policy {
                 redactions: vec![],
                 encryption: EncryptionPolicy { enabled: false },
+                retention_class: None,
+            },
+        }
+    }
+
+    fn sample_v10_capture() -> CaptureEvent {
+        CaptureEvent {
+            actor: Actor {
+                issuer: "proof-layer-local".to_string(),
+                app_id: "demo".to_string(),
+                env: "dev".to_string(),
+                signing_key_id: "kid-dev-01".to_string(),
+                role: ActorRole::Provider,
+                organization_id: None,
+            },
+            subject: Subject {
+                request_id: Some("req-123".to_string()),
+                thread_id: Some("thr-1".to_string()),
+                user_ref: Some("hmac_sha256:abc".to_string()),
+                system_id: Some("system-1".to_string()),
+                model_id: Some("anthropic:claude-sonnet-4-6".to_string()),
+                deployment_id: None,
+                version: Some("2026.03".to_string()),
+            },
+            context: EvidenceContext {
+                provider: Some("anthropic".to_string()),
+                model: Some("claude-sonnet-4-6".to_string()),
+                parameters: json!({"temperature": 0.2}),
+                trace_commitment: Some(
+                    "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+                        .to_string(),
+                ),
+                otel_genai_semconv_version: Some("1.0.0".to_string()),
+            },
+            items: vec![EvidenceItem::LlmInteraction(LlmInteractionEvidence {
+                provider: "anthropic".to_string(),
+                model: "claude-sonnet-4-6".to_string(),
+                parameters: json!({"temperature": 0.2}),
+                input_commitment:
+                    "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                        .to_string(),
+                retrieval_commitment: None,
+                output_commitment:
+                    "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+                        .to_string(),
+                tool_outputs_commitment: None,
+                token_usage: None,
+                latency_ms: None,
+                trace_commitment: Some(
+                    "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+                        .to_string(),
+                ),
+                trace_semconv_version: Some("1.0.0".to_string()),
+            })],
+            policy: Policy {
+                redactions: vec![],
+                encryption: EncryptionPolicy { enabled: false },
+                retention_class: Some("runtime_logs".to_string()),
             },
         }
     }
 
     #[test]
-    fn build_bundle_creates_integrity_fields() {
+    fn build_bundle_from_legacy_input_creates_v10_bundle() {
         let signing_key = SigningKey::from_bytes(&rand::random::<[u8; 32]>());
-
         let artefacts = vec![ArtefactInput {
             name: "prompt.json".to_string(),
             content_type: "application/json".to_string(),
@@ -178,7 +272,7 @@ mod tests {
         }];
 
         let bundle = build_bundle(
-            sample_capture(),
+            sample_legacy_capture(),
             &artefacts,
             &signing_key,
             "kid-dev-01",
@@ -187,7 +281,8 @@ mod tests {
         )
         .expect("bundle build should succeed");
 
-        assert_eq!(bundle.bundle_version, "0.1");
+        assert_eq!(bundle.bundle_version, BUNDLE_VERSION);
+        assert_eq!(bundle.items.len(), 1);
         assert!(bundle.integrity.header_digest.starts_with("sha256:"));
         assert!(bundle.integrity.bundle_root.starts_with("sha256:"));
         assert!(!bundle.integrity.signature.value.is_empty());
@@ -196,7 +291,6 @@ mod tests {
     #[test]
     fn duplicate_artefact_names_are_rejected() {
         let signing_key = SigningKey::from_bytes(&rand::random::<[u8; 32]>());
-
         let artefacts = vec![
             ArtefactInput {
                 name: "prompt.json".to_string(),
@@ -211,7 +305,7 @@ mod tests {
         ];
 
         let err = build_bundle(
-            sample_capture(),
+            sample_legacy_capture(),
             &artefacts,
             &signing_key,
             "kid-dev-01",
@@ -241,7 +335,7 @@ mod tests {
 
         let created_at = Utc.with_ymd_and_hms(2026, 3, 2, 0, 0, 0).unwrap();
         let bundle_a = build_bundle(
-            sample_capture(),
+            sample_v10_capture(),
             &artefacts,
             &signing_key,
             "kid-dev-01",
@@ -250,7 +344,7 @@ mod tests {
         )
         .expect("bundle build should succeed");
         let bundle_b = build_bundle(
-            sample_capture(),
+            sample_v10_capture(),
             &artefacts,
             &signing_key,
             "kid-dev-01",
@@ -259,6 +353,10 @@ mod tests {
         )
         .expect("bundle build should succeed");
 
+        assert_eq!(
+            bundle_a.canonical_header_bytes().unwrap(),
+            bundle_b.canonical_header_bytes().unwrap()
+        );
         assert_eq!(
             bundle_a.integrity.header_digest,
             bundle_b.integrity.header_digest

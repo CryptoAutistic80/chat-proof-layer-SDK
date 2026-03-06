@@ -1,6 +1,6 @@
-# Proof Layer SDK (PoC)
+# Proof Layer SDK
 
-Rust-first PoC for cryptographically verifiable AI interaction bundles.
+Rust-first SDK and service for cryptographically verifiable AI interaction evidence bundles.
 
 ## Why This Is Needed
 
@@ -26,7 +26,7 @@ That means verification does not depend on trusting this service at verification
 
 ## Verification Guarantees
 
-The PoC is built to provide practical integrity guarantees:
+The current implementation provides practical integrity guarantees:
 
 - Deterministic canonicalization (RFC 8785 style) for stable hashing across runtimes.
 - Strict digest parsing and algorithm checks.
@@ -37,9 +37,9 @@ What it does **not** claim: model determinism or legal finality. It proves what 
 
 ## Workspace
 
-- `packages/core-rust` (`proof-layer-core`): canonicalization, hashing, Merkle commitment, Ed25519 JWS sign/verify, bundle build/verify logic.
-- `packages/cli` (`proofctl`): keygen, create bundle package, verify package offline, inspect package.
-- `packages/proof-service`: Axum service with `sled` metadata storage and local artifact storage.
+- `crates/core` (`proof-layer-core`): RFC 8785 canonicalization, hashing, Merkle commitment + inclusion proofs, Ed25519 JWS sign/verify, v1.0 evidence bundle build/verify logic, and v0.1 -> v1.0 migration helpers.
+- `crates/cli` (`proofctl`): keygen, create bundle package, verify package offline, inspect package.
+- `crates/vault` (`proof-service`): Axum service with `sled` metadata storage and local artifact storage.
 - `packages/sdk-node`: Node proof client + OpenAI/Anthropic-style wrappers + tool/OTel helpers.
 - `packages/sdk-python`: Python proof client + wrappers + decorator + callback/tool/OTel helpers.
 - `web-demo`: Vite + React single-page demo UI.
@@ -51,7 +51,8 @@ What it does **not** claim: model determinism or legal finality. It proves what 
 # 1) Generate dev keys
 cargo run -p proofctl -- keygen --out ./keys
 
-# 2) Create a capture JSON file (see docs/proof_bundle_schema.md)
+# 2) Create a capture JSON file.
+#    `proofctl create` accepts either the legacy PoC capture shape or the v1.0 `CaptureEvent` shape.
 # 3) Create a bundle package
 cargo run -p proofctl -- create \
   --input ./capture.json \
@@ -102,28 +103,36 @@ docker compose up --build
       "issuer": "proof-layer-local",
       "app_id": "demo",
       "env": "dev",
-      "signing_key_id": "kid-dev-01"
+      "signing_key_id": "kid-dev-01",
+      "role": "provider"
     },
     "subject": {
       "request_id": "req_123",
       "thread_id": "thr_1",
-      "user_ref": "hmac_sha256:abc"
+      "user_ref": "hmac_sha256:abc",
+      "model_id": "anthropic:claude-sonnet-4-6"
     },
-    "model": {
+    "context": {
       "provider": "anthropic",
       "model": "claude-sonnet-4-6",
-      "parameters": { "temperature": 0.2 }
+      "parameters": { "temperature": 0.2 },
+      "trace_commitment": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "otel_genai_semconv_version": "1.0.0"
     },
-    "inputs": {
-      "messages_commitment": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-    },
-    "outputs": {
-      "assistant_text_commitment": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
-    },
-    "trace": {
-      "otel_genai_semconv_version": "1.0.0",
-      "trace_commitment": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
-    },
+    "items": [
+      {
+        "type": "llm_interaction",
+        "data": {
+          "provider": "anthropic",
+          "model": "claude-sonnet-4-6",
+          "parameters": { "temperature": 0.2 },
+          "input_commitment": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "output_commitment": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "trace_commitment": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "trace_semconv_version": "1.0.0"
+        }
+      }
+    ],
     "policy": {
       "redactions": [],
       "encryption": { "enabled": false }
@@ -200,8 +209,10 @@ npm run dev
 ## Notes
 
 - Proof package is gzip-compressed JSON (`bundle.pkg`) containing named files (`proof_bundle.json`, `proof_bundle.canonical.json`, `proof_bundle.sig`, `artefacts/*`, `manifest.json`).
-- Canonicalization and signing semantics follow `docs/architecture.md` and `docs/proof_bundle_schema.md`.
+- Bundles now serialize as `bundle_version: "1.0"` with typed `items` plus `context`.
+- `proofctl create` and `POST /v1/bundles` accept either the legacy PoC capture shape or the v1.0 capture shape during migration.
+- Canonicalization and signing semantics follow `docs/architecture.md`.
 - Verification is designed to work offline with `bundle.pkg` + public key.
-- JSON Schema: `docs/proof_bundle.schema.json`.
+- JSON Schemas: `schemas/evidence_bundle.schema.json`, `schemas/capture_event.schema.json`, `schemas/evidence_item.schema.json`.
 - Test matrix: `docs/verification-test-matrix.md`.
 - Deterministic fixture inputs: `fixtures/golden/`.

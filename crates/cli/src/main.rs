@@ -5,7 +5,7 @@ use clap::{Parser, Subcommand, ValueEnum};
 use ed25519_dalek::SigningKey;
 use flate2::{Compression, read::GzDecoder, write::GzEncoder};
 use proof_layer_core::{
-    ArtefactInput, CaptureInput, ProofBundle, build_bundle, decode_private_key_pem,
+    ArtefactInput, CaptureEvent, CaptureInput, ProofBundle, build_bundle, decode_private_key_pem,
     decode_public_key_pem, encode_private_key_pem, encode_public_key_pem, sha256_prefixed,
     validate_bundle_integrity_fields,
 };
@@ -17,6 +17,7 @@ use std::{
     path::{Component, Path, PathBuf},
 };
 use tracing::info;
+use ulid::Ulid;
 
 const DEFAULT_MAX_PAYLOAD_BYTES: usize = 10 * 1024 * 1024;
 
@@ -116,6 +117,13 @@ struct VerifyReport {
     artefacts_verified: usize,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum SealableCaptureInput {
+    V10(CaptureEvent),
+    Legacy(CaptureInput),
+}
+
 fn main() -> Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(std::env::var("RUST_LOG").unwrap_or_else(|_| "proofctl=info".to_string()))
@@ -197,7 +205,7 @@ fn cmd_create(
             max_payload_bytes
         );
     }
-    let capture: CaptureInput = serde_json::from_slice(&capture_json)
+    let capture: SealableCaptureInput = serde_json::from_slice(&capture_json)
         .with_context(|| format!("failed to parse capture JSON from {}", input_path.display()))?;
 
     let signing_key_pem = fs::read_to_string(key_path)
@@ -239,14 +247,24 @@ fn cmd_create(
         None => generate_bundle_id(),
     };
     let created_at = parse_created_at(created_at)?;
-    let bundle = build_bundle(
-        capture,
-        &artefact_inputs,
-        &signing_key,
-        signing_kid,
-        &bundle_id,
-        created_at,
-    )?;
+    let bundle = match capture {
+        SealableCaptureInput::V10(capture) => build_bundle(
+            capture,
+            &artefact_inputs,
+            &signing_key,
+            signing_kid,
+            &bundle_id,
+            created_at,
+        )?,
+        SealableCaptureInput::Legacy(capture) => build_bundle(
+            capture,
+            &artefact_inputs,
+            &signing_key,
+            signing_kid,
+            &bundle_id,
+            created_at,
+        )?,
+    };
 
     let canonical_header = bundle.canonical_header_bytes()?;
     let bundle_json = serde_json::to_vec_pretty(&bundle)?;
@@ -370,10 +388,21 @@ fn cmd_inspect(input_path: &Path, format: OutputFormat) -> Result<()> {
 
     match format {
         OutputFormat::Human => {
+            let provider = bundle
+                .primary_llm_interaction()
+                .map(|item| item.provider.as_str())
+                .or(bundle.context.provider.as_deref())
+                .unwrap_or("n/a");
+            let model = bundle
+                .primary_llm_interaction()
+                .map(|item| item.model.as_str())
+                .or(bundle.context.model.as_deref())
+                .unwrap_or("n/a");
             println!("bundle_id: {}", bundle.bundle_id);
             println!("created_at: {}", bundle.created_at);
-            println!("provider: {}", bundle.model.provider);
-            println!("model: {}", bundle.model.model);
+            println!("provider: {}", provider);
+            println!("model: {}", model);
+            println!("items: {}", bundle.items.len());
             println!("artefacts: {}", bundle.artefacts.len());
             println!("bundle_root: {}", bundle.integrity.bundle_root);
             println!("signature.kid: {}", bundle.integrity.signature.kid);
@@ -622,9 +651,7 @@ fn guess_content_type(name: &str) -> String {
 }
 
 fn generate_bundle_id() -> String {
-    let millis = Utc::now().timestamp_millis();
-    let random = rand::random::<[u8; 8]>();
-    format!("PL{:x}{}", millis, hex::encode(random)).to_uppercase()
+    Ulid::new().to_string()
 }
 
 fn parse_created_at(value: Option<&str>) -> Result<DateTime<Utc>> {

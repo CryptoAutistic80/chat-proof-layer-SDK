@@ -1,4 +1,4 @@
-# AI Output Proof Layer Architecture (PoC v0.1)
+# AI Output Proof Layer Architecture
 
 ## Scope
 
@@ -23,24 +23,25 @@ The system has four main layers:
 
 ## Components
 
-### `packages/core-rust`
+### `crates/core`
 
 Single-purpose modules:
 
-- `canonicalize.rs`
+- `canon/mod.rs`
 - `hash.rs`
-- `merkle.rs`
-- `sign.rs`
+- `merkle/mod.rs`
+- `schema/mod.rs`
+- `sign/mod.rs`
 - `verify.rs`
 
 Core defaults:
 
-- Canonicalization: deterministic RFC 8785-style canonical JSON writer in `core-rust` (`canonicalize.rs`)
+- Canonicalization: deterministic RFC 8785-style canonical JSON writer in `crates/core/src/canon/mod.rs`
 - Hash: SHA-256 (`sha2`)
 - Signature: Ed25519 (`ed25519-dalek` 2.2.x, `verify_strict()`)
 - IDs: ULID
 
-### `packages/proof-service`
+### `crates/vault` (`proof-service`)
 
 - Runtime: Rust + Axum
 - Metadata persistence: `sled`
@@ -54,7 +55,7 @@ Suggested `sled` trees:
 - `idx_created_at`: `created_at|bundle_id -> bundle_id`
 - `idx_app_id`: `app_id|created_at|bundle_id -> bundle_id`
 
-### `packages/cli` (`proofctl`)
+### `crates/cli` (`proofctl`)
 
 - `keygen`: generate dev key pairs
 - `create`: build `bundle.pkg` from capture JSON + artifacts
@@ -73,7 +74,7 @@ Suggested `sled` trees:
 2. Validate schema and size limits.
 3. Persist artifact files via temp-file write + `fsync` + atomic rename.
 4. Compute each artifact digest as `sha256:<lower_hex>`.
-5. Build canonical header projection from validated payload.
+5. Build canonical header projection from validated payload (`context`, typed `items`, artefact refs, and policy).
 6. Canonicalize header projection via RFC 8785 (strict path for untrusted raw JSON).
 7. Compute `header_digest = sha256(canonical_header_bytes)`.
 8. Compute `bundle_root` from ordered digest list:

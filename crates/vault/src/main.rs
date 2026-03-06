@@ -11,7 +11,7 @@ use chrono::Utc;
 use ed25519_dalek::SigningKey;
 use flate2::read::GzDecoder;
 use proof_layer_core::{
-    ArtefactInput, BuildBundleError, CaptureInput, ProofBundle, build_bundle,
+    ArtefactInput, BuildBundleError, CaptureEvent, CaptureInput, ProofBundle, build_bundle,
     decode_private_key_pem, decode_public_key_pem, sha256_prefixed,
     validate_bundle_integrity_fields,
 };
@@ -27,6 +27,7 @@ use std::{
 };
 use tower_http::cors::{Any, CorsLayer};
 use tracing::{error, info, warn};
+use ulid::Ulid;
 
 const DEFAULT_ADDR: &str = "0.0.0.0:8080";
 const DEFAULT_MAX_PAYLOAD_BYTES: usize = 10 * 1024 * 1024;
@@ -43,8 +44,15 @@ struct AppState {
 
 #[derive(Debug, Deserialize, Serialize)]
 struct CreateBundleRequest {
-    capture: CaptureInput,
+    capture: SealableCaptureInput,
     artefacts: Vec<InlineArtefact>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(untagged)]
+enum SealableCaptureInput {
+    V10(CaptureEvent),
+    Legacy(CaptureInput),
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -223,14 +231,24 @@ async fn create_bundle(
     }
 
     let bundle_id = generate_bundle_id();
-    let bundle = build_bundle(
-        request.capture,
-        &artefacts,
-        &state.signing_key,
-        &state.signing_kid,
-        &bundle_id,
-        Utc::now(),
-    )
+    let bundle = match request.capture {
+        SealableCaptureInput::V10(capture) => build_bundle(
+            capture,
+            &artefacts,
+            &state.signing_key,
+            &state.signing_kid,
+            &bundle_id,
+            Utc::now(),
+        ),
+        SealableCaptureInput::Legacy(capture) => build_bundle(
+            capture,
+            &artefacts,
+            &state.signing_key,
+            &state.signing_kid,
+            &bundle_id,
+            Utc::now(),
+        ),
+    }
     .map_err(map_build_bundle_error)?;
 
     persist_artefacts(&state.storage_dir, &bundle_id, &artefacts)
@@ -578,10 +596,12 @@ fn persist_bundle_metadata(db: &sled::Db, bundle: &ProofBundle) -> Result<()> {
 
     let mut batch = sled::Batch::default();
     batch.insert(bundle_key(&bundle.bundle_id).into_bytes(), bundle_json);
-    batch.insert(
-        idx_request_key(&bundle.subject.request_id, &bundle.bundle_id).into_bytes(),
-        bundle.bundle_id.as_bytes(),
-    );
+    if let Some(request_id) = bundle.subject.request_id.as_deref() {
+        batch.insert(
+            idx_request_key(request_id, &bundle.bundle_id).into_bytes(),
+            bundle.bundle_id.as_bytes(),
+        );
+    }
     batch.insert(
         idx_created_at_key(&bundle.created_at, &bundle.bundle_id).into_bytes(),
         bundle.bundle_id.as_bytes(),
@@ -671,9 +691,7 @@ fn validate_package_member_name(name: &str) -> Result<()> {
 }
 
 fn generate_bundle_id() -> String {
-    let millis = Utc::now().timestamp_millis();
-    let random = rand::random::<[u8; 8]>();
-    format!("PL{:x}{}", millis, hex::encode(random)).to_uppercase()
+    Ulid::new().to_string()
 }
 
 #[derive(Debug)]
@@ -731,13 +749,13 @@ mod tests {
 
     fn sample_capture() -> CaptureInput {
         CaptureInput {
-            actor: proof_layer_core::Actor {
+            actor: proof_layer_core::schema::v01::Actor {
                 issuer: "proof-layer-local".to_string(),
                 app_id: "demo".to_string(),
                 env: "test".to_string(),
                 signing_key_id: "kid-dev-01".to_string(),
             },
-            subject: proof_layer_core::Subject {
+            subject: proof_layer_core::schema::v01::Subject {
                 request_id: "req-test-1".to_string(),
                 thread_id: Some("thr-test-1".to_string()),
                 user_ref: Some("hmac_sha256:test".to_string()),
@@ -768,6 +786,7 @@ mod tests {
             policy: proof_layer_core::Policy {
                 redactions: vec![],
                 encryption: proof_layer_core::EncryptionPolicy { enabled: false },
+                retention_class: None,
             },
         }
     }
@@ -869,7 +888,7 @@ mod tests {
         let prompt_bytes = br#"{"prompt":"hello"}"#.to_vec();
         let response_bytes = br#"{"response":"world"}"#.to_vec();
         let create_payload = CreateBundleRequest {
-            capture: sample_capture(),
+            capture: SealableCaptureInput::Legacy(sample_capture()),
             artefacts: vec![
                 InlineArtefact {
                     name: "prompt.json".to_string(),
@@ -966,7 +985,7 @@ mod tests {
         let prompt_bytes = br#"{"prompt":"hello"}"#.to_vec();
         let response_bytes = br#"{"response":"world"}"#.to_vec();
         let create_payload = CreateBundleRequest {
-            capture: sample_capture(),
+            capture: SealableCaptureInput::Legacy(sample_capture()),
             artefacts: vec![
                 InlineArtefact {
                     name: "prompt.json".to_string(),
@@ -1044,7 +1063,7 @@ mod tests {
         let prompt_bytes = br#"{"prompt":"hello"}"#.to_vec();
         let response_bytes = br#"{"response":"world"}"#.to_vec();
         let create_payload = CreateBundleRequest {
-            capture: sample_capture(),
+            capture: SealableCaptureInput::Legacy(sample_capture()),
             artefacts: vec![
                 InlineArtefact {
                     name: "prompt.json".to_string(),
@@ -1121,7 +1140,7 @@ mod tests {
         let oversized = vec![b'a'; state_limit + 1];
 
         let payload = CreateBundleRequest {
-            capture: sample_capture(),
+            capture: SealableCaptureInput::Legacy(sample_capture()),
             artefacts: vec![InlineArtefact {
                 name: "prompt.json".to_string(),
                 content_type: "application/json".to_string(),
@@ -1145,7 +1164,7 @@ mod tests {
         let state = test_state(DEFAULT_MAX_PAYLOAD_BYTES);
         let app = build_router(state, DEFAULT_MAX_PAYLOAD_BYTES);
         let payload = CreateBundleRequest {
-            capture: sample_capture(),
+            capture: SealableCaptureInput::Legacy(sample_capture()),
             artefacts: vec![
                 InlineArtefact {
                     name: "prompt.json".to_string(),

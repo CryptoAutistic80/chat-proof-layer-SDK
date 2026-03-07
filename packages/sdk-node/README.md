@@ -1,11 +1,23 @@
 # @proof-layer/sdk-node (PoC)
 
 Node SDK wrappers for creating Proof Layer bundles around model calls.
+Integrity-sensitive helpers are now backed by the local Rust NAPI module in `crates/napi`.
+
+## Build Native Bindings
+
+```bash
+npm run build:native
+```
 
 ## Quick Usage
 
 ```js
-import { ProofLayerClient, provedCompletion } from "./src/index.js";
+import {
+  ProofLayerClient,
+  hashSha256,
+  provedCompletion,
+  verifyBundle
+} from "./src/index.js";
 
 const proofClient = new ProofLayerClient({ baseUrl: "http://127.0.0.1:8080" });
 const openaiClient = {
@@ -28,4 +40,13 @@ const { completion, bundleId } = await provedCompletion(
 );
 
 console.log(bundleId, completion.id);
+console.log(hashSha256(JSON.stringify({ hello: "world" })));
+
+const summary = verifyBundle({
+  bundle: { /* proof_bundle.json */ },
+  artefacts: [{ name: "prompt.json", data: Buffer.from("{}") }],
+  publicKeyPem: "-----BEGIN PROOF LAYER ED25519 PUBLIC KEY-----\n...\n-----END PROOF LAYER ED25519 PUBLIC KEY-----\n"
+});
+
+console.log(summary.artefact_count);
 ```

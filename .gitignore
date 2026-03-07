@@ -17,6 +17,7 @@ node_modules/
 dist/
 build/
 .turbo/
+packages/sdk-node/native/
 *.tsbuildinfo
 *.js.map
 *.d.ts.map

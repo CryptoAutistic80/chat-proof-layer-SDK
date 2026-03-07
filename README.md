@@ -40,7 +40,8 @@ What it does **not** claim: model determinism or legal finality. It proves what 
 - `crates/core` (`proof-layer-core`): RFC 8785 canonicalization, hashing, Merkle commitment + inclusion proofs, Ed25519 JWS sign/verify, v1.0 evidence bundle build/verify logic, and v0.1 -> v1.0 migration helpers.
 - `crates/cli` (`proofctl`): keygen, create bundle package, verify package offline, inspect package, query vault state, and download vault-assembled evidence packs.
 - `crates/vault` (`proof-service`): Axum service with SQLite metadata storage, retention scanning, pack assembly, and local artifact storage.
-- `packages/sdk-node`: Node proof client + OpenAI/Anthropic-style wrappers + tool/OTel helpers.
+- `crates/napi` (`proof-layer-napi`): native Node bridge over the Rust core for canonicalization, hashing, Merkle root computation, JWS sign/verify, and offline bundle verification.
+- `packages/sdk-node`: Node proof client + OpenAI/Anthropic-style wrappers + tool/OTel helpers, now backed by the Rust NAPI module for integrity-sensitive operations.
 - `packages/sdk-python`: Python proof client + wrappers + decorator + callback/tool/OTel helpers.
 - `web-demo`: Vite + React single-page demo UI.
 - `examples/`: runnable Node/Python/agent-simulated example scripts.
@@ -238,6 +239,7 @@ Run Node SDK tests:
 ```bash
 cd packages/sdk-node
 npm install
+npm run build:native
 npm test
 ```
 

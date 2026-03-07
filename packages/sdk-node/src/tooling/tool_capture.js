@@ -1,9 +1,5 @@
-import { createHash, randomUUID } from "node:crypto";
-
-function sha256Prefixed(value) {
-  const bytes = Buffer.from(JSON.stringify(value), "utf8");
-  return `sha256:${createHash("sha256").update(bytes).digest("hex")}`;
-}
+import { randomUUID } from "node:crypto";
+import { hashSha256 } from "../native.js";
 
 export function captureToolCall(name, input, output) {
   return {
@@ -12,7 +8,7 @@ export function captureToolCall(name, input, output) {
     name,
     input,
     output,
-    input_commitment: sha256Prefixed(input),
-    output_commitment: sha256Prefixed(output)
+    input_commitment: hashSha256(JSON.stringify(input)),
+    output_commitment: hashSha256(JSON.stringify(output))
   };
 }

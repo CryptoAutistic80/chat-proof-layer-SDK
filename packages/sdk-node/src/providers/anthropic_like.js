@@ -1,8 +1,5 @@
-import { createHash, randomUUID } from "node:crypto";
-
-function sha256Prefixed(bytes) {
-  return `sha256:${createHash("sha256").update(bytes).digest("hex")}`;
-}
+import { randomUUID } from "node:crypto";
+import { hashSha256 } from "../native.js";
 
 function encodeJson(value) {
   return Buffer.from(JSON.stringify(value), "utf8");
@@ -58,16 +55,16 @@ export async function provedMessage(
       }
     },
     inputs: {
-      messages_commitment: sha256Prefixed(promptBytes),
+      messages_commitment: hashSha256(promptBytes),
       retrieval_commitment: captureOptions.retrievalCommitment ?? null
     },
     outputs: {
-      assistant_text_commitment: sha256Prefixed(responseBytes),
+      assistant_text_commitment: hashSha256(responseBytes),
       tool_outputs_commitment: captureOptions.toolOutputsCommitment ?? null
     },
     trace: {
       otel_genai_semconv_version: captureOptions.otelSemconvVersion ?? "1.0.0",
-      trace_commitment: sha256Prefixed(traceBytes)
+      trace_commitment: hashSha256(traceBytes)
     },
     policy: {
       redactions: captureOptions.redactions ?? [],

@@ -1,5 +1,6 @@
 from .client import ProofLayerClient
 from .decorators import prove_llm_call
+from .local_client import LocalProofLayerClient
 from .native import (
     build_bundle,
     canonicalize_json,
@@ -11,6 +12,7 @@ from .native import (
 )
 
 __all__ = [
+    "LocalProofLayerClient",
     "ProofLayerClient",
     "build_bundle",
     "canonicalize_json",

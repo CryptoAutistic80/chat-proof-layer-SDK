@@ -14,6 +14,7 @@ npm run build:native
 ```js
 import {
   buildBundle,
+  LocalProofLayerClient,
   ProofLayerClient,
   hashSha256,
   provedCompletion,
@@ -21,6 +22,10 @@ import {
 } from "./src/index.js";
 
 const proofClient = new ProofLayerClient({ baseUrl: "http://127.0.0.1:8080" });
+const localClient = new LocalProofLayerClient({
+  signingKeyPem: "-----BEGIN PROOF LAYER ED25519 PRIVATE KEY-----\n...\n-----END PROOF LAYER ED25519 PRIVATE KEY-----\n",
+  signingKeyId: "kid-dev-01"
+});
 const openaiClient = {
   chat: {
     completions: {
@@ -52,8 +57,13 @@ const localBundle = buildBundle({
   createdAt: "2026-03-02T00:00:00+00:00"
 });
 
+const locallySealed = await localClient.createBundle({
+  capture: { /* capture.json */ },
+  artefacts: [{ name: "prompt.json", contentType: "application/json", data: Buffer.from("{}") }]
+});
+
 const summary = verifyBundle({
-  bundle: localBundle,
+  bundle: locallySealed.bundle,
   artefacts: [{ name: "prompt.json", data: Buffer.from("{}") }],
   publicKeyPem: "-----BEGIN PROOF LAYER ED25519 PUBLIC KEY-----\n...\n-----END PROOF LAYER ED25519 PUBLIC KEY-----\n"
 });

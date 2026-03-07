@@ -96,6 +96,7 @@ export async function provedCompletion(
     bundleId: create.bundle_id,
     bundleRoot: create.bundle_root,
     signature: create.signature,
-    createdAt: create.created_at
+    createdAt: create.created_at,
+    bundle: create.bundle
   };
 }

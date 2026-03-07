@@ -1,7 +1,12 @@
 import unittest
+from pathlib import Path
 
 from proofsdk.decorators import prove_llm_call
+from proofsdk.local_client import LocalProofLayerClient
 from proofsdk.providers.openai_like import proved_completion
+
+REPO_ROOT = Path(__file__).resolve().parents[3]
+GOLDEN_DIR = REPO_ROOT / "fixtures" / "golden"
 
 
 class FakeProofClient:
@@ -41,6 +46,26 @@ class TestWrappers(unittest.TestCase):
         out = my_step([{"role": "user", "content": "hello"}])
         self.assertEqual(out["result"], "ok")
         self.assertEqual(out["proof"]["bundle_id"], "B-123")
+
+    def test_proved_completion_with_local_client(self):
+        signing_key_pem = (GOLDEN_DIR / "signing_key.txt").read_text(encoding="utf-8")
+        proof_client = LocalProofLayerClient(signing_key_pem=signing_key_pem, signing_key_id="kid-dev-01")
+
+        completion, proof = proved_completion(
+            lambda params: {
+                "id": "cmpl-local-1",
+                "model": params["model"],
+                "choices": [{"message": {"role": "assistant", "content": "ok"}}],
+            },
+            {"model": "gpt-4o-mini", "messages": [{"role": "user", "content": "hi"}]},
+            proof_client,
+            capture_options={"request_id": "req-local-1"},
+        )
+
+        self.assertEqual(completion["id"], "cmpl-local-1")
+        self.assertIn("bundle", proof)
+        self.assertEqual(proof["bundle"]["bundle_version"], "1.0")
+        self.assertEqual(proof["bundle"]["integrity"]["signature"]["kid"], "kid-dev-01")
 
 
 if __name__ == "__main__":

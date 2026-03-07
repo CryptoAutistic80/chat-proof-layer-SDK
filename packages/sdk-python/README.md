@@ -12,11 +12,15 @@ python3 ./scripts/build_native.py
 ## Quick Usage
 
 ```python
-from proofsdk import build_bundle, hash_sha256, verify_bundle
+from proofsdk import LocalProofLayerClient, build_bundle, hash_sha256, verify_bundle
 from proofsdk.client import ProofLayerClient
 from proofsdk.providers.openai_like import proved_completion
 
 proof_client = ProofLayerClient(base_url="http://127.0.0.1:8080")
+local_client = LocalProofLayerClient(
+    signing_key_pem="-----BEGIN PROOF LAYER ED25519 PRIVATE KEY-----\n...\n-----END PROOF LAYER ED25519 PRIVATE KEY-----\n",
+    signing_key_id="kid-dev-01",
+)
 
 completion, proof = proved_completion(
     lambda params: {
@@ -40,8 +44,13 @@ local_bundle = build_bundle(
     created_at="2026-03-02T00:00:00+00:00",
 )
 
+locally_sealed = local_client.create_bundle(
+    full_capture_dict,
+    [{"name": "prompt.json", "content_type": "application/json", "data": b"{}"}],
+)
+
 summary = verify_bundle(
-    bundle=local_bundle,
+    bundle=locally_sealed["bundle"],
     artefacts=[{"name": "prompt.json", "data": b"{}"}],
     public_key_pem="-----BEGIN PROOF LAYER ED25519 PUBLIC KEY-----\n...\n-----END PROOF LAYER ED25519 PUBLIC KEY-----\n",
 )

@@ -116,9 +116,11 @@ Current config behavior:
 
 - `packages/sdk-node` now loads a local NAPI module compiled from `crates/napi`.
 - The first native Node surface covers RFC 8785 canonicalization, SHA-256 digesting, Merkle root computation, Ed25519 JWS sign/verify, deterministic local bundle construction, and offline bundle verification.
-- The Node provider wrappers and tool helpers now call that native module for integrity-sensitive operations instead of reimplementing them in JavaScript.
+- `packages/sdk-node` now exposes both an HTTP vault client and a `LocalProofLayerClient` that seals bundles locally via the native module.
+- The Node provider wrappers and tool helpers now call that shared surface for integrity-sensitive operations instead of reimplementing them in JavaScript.
 - `packages/sdk-python` now loads a local PyO3 module compiled from `crates/pyo3` via the package build helper.
 - The first native Python surface matches Node: canonicalization, SHA-256 digesting, Merkle root computation, Ed25519 JWS sign/verify, deterministic local bundle construction, and offline bundle verification.
+- `packages/sdk-python` now exposes both an HTTP vault client and a `LocalProofLayerClient` that seals bundles locally via the native module.
 - The Python provider wrappers, decorator helpers, and golden fixture tests now route integrity-sensitive operations through that shared Rust implementation.
 - Tool capture and OTel GenAI export helpers for trace pipelines.
 - Provider adapters remain thin and provider-shaped; integrity semantics stay in Rust core/service.

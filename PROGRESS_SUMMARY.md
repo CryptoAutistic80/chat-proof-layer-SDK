@@ -61,6 +61,10 @@ Completed:
   new `crates/pyo3` PyO3 bridge over the Rust core,
   native Python exports for canonicalization/hash/Merkle root/JWS sign+verify/local bundle build/offline bundle verification,
   and `packages/sdk-python` now routes integrity-sensitive operations through that native module instead of duplicating them in Python.
+- Added the next SDK ergonomics slice:
+  `LocalProofLayerClient` implementations in both Node and Python,
+  provider-wrapper compatibility with local sealing clients,
+  and deterministic local-client tests proving the golden fixture can be built without the vault service.
 - Added the first pack export slice:
   `POST /v1/packs`,
   `GET /v1/packs/{id}`,
@@ -78,7 +82,7 @@ Still outstanding from `plan.md`:
 - JSON schema coverage is now started, with timestamp and Rekor transparency receipt coverage added, but richer export/archive schemas are still incomplete.
 - The vault now uses SQLite with legal-hold-aware retention, audit logging, file/env/runtime configuration, background retention scanning, curated pack export, and RFC 3161 bundle timestamp attachment, but PostgreSQL and redacted/Annex-complete pack assembly are not built yet.
 - The CLI now covers the main vault operational read paths, but there is still no `proofctl disclose` flow.
-- Node and Python now both have first native FFI bridges plus local bundle-build helpers, but there is still no shared native build/release pipeline for SDK artifacts and the provider wrappers still default to the vault HTTP create path rather than native local sealing.
+- Node and Python now both have native FFI bridges, local bundle-build helpers, and local sealing clients, but there is still no shared native build/release pipeline for SDK artifacts and no higher-level `ProofLayer` object yet for policy/default management across capture flows.
 - SCITT receipts and selective disclosure CLI flows remain future phases.
 - RFC 3161 verification currently checks CMS signature integrity and message-imprint binding, but TSA certificate-chain / revocation trust validation and eIDAS-qualified trust policy are still outstanding.
 - Rekor verification currently checks receipt structure, entry UUID to leaf-hash binding, Merkle inclusion proofs, and embedded RFC 3161 token binding, but not Rekor SET signature validation.

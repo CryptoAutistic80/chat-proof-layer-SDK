@@ -1,0 +1,52 @@
+[server]
+addr = "0.0.0.0:8080"
+max_payload_bytes = 10485760
+
+[signing]
+key_id = "kid-dev-01"
+algorithm = "ed25519"
+# key_path = "./keys/signing.pem"
+
+[storage]
+metadata_backend = "sqlite"
+sqlite_path = "./storage/metadata.db"
+blob_backend = "filesystem"
+blob_path = "./storage"
+
+[timestamp]
+enabled = false
+provider = "rfc3161"
+url = "http://timestamp.digicert.com"
+
+[transparency]
+enabled = false
+provider = "none"
+# rekor_url = "https://rekor.sigstore.dev"
+
+[retention]
+grace_period_days = 30
+scan_interval_hours = 24
+
+[[retention.policies]]
+retention_class = "runtime_logs"
+min_duration_days = 3650
+legal_basis = "eu_ai_act_article_12_19_26"
+active = true
+
+[[retention.policies]]
+retention_class = "risk_mgmt"
+min_duration_days = 3650
+legal_basis = "eu_ai_act_article_9"
+active = true
+
+[[retention.policies]]
+retention_class = "technical_doc"
+min_duration_days = 3650
+legal_basis = "eu_ai_act_annex_iv"
+active = true
+
+[[retention.policies]]
+retention_class = "ai_literacy"
+min_duration_days = 1095
+legal_basis = "eu_ai_act_article_4"
+active = true

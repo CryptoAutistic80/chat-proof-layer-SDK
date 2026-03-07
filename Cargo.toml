@@ -34,5 +34,6 @@ tokio = { version = "1.47.1", features = ["fs", "macros", "rt-multi-thread", "si
 tower-http = { version = "0.6.6", features = ["cors"] }
 tracing = "0.1.41"
 tracing-subscriber = { version = "0.3.20", features = ["env-filter", "fmt"] }
+toml = "0.8.23"
 ulid = { version = "1.2.1", features = ["serde"] }
 x509-certificate = "0.25.0"

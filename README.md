@@ -38,7 +38,7 @@ What it does **not** claim: model determinism or legal finality. It proves what 
 ## Workspace
 
 - `crates/core` (`proof-layer-core`): RFC 8785 canonicalization, hashing, Merkle commitment + inclusion proofs, Ed25519 JWS sign/verify, v1.0 evidence bundle build/verify logic, and v0.1 -> v1.0 migration helpers.
-- `crates/cli` (`proofctl`): keygen, create bundle package, verify package offline, inspect package, and download vault-assembled evidence packs.
+- `crates/cli` (`proofctl`): keygen, create bundle package, verify package offline, inspect package, query vault state, and download vault-assembled evidence packs.
 - `crates/vault` (`proof-service`): Axum service with SQLite metadata storage, retention scanning, pack assembly, and local artifact storage.
 - `packages/sdk-node`: Node proof client + OpenAI/Anthropic-style wrappers + tool/OTel helpers.
 - `packages/sdk-python`: Python proof client + wrappers + decorator + callback/tool/OTel helpers.
@@ -81,14 +81,28 @@ cargo run -p proofctl -- pack \
   --vault-url http://127.0.0.1:8080 \
   --system-id system-123 \
   --out ./runtime-logs.pack
+
+# Query vault bundle inventory
+cargo run -p proofctl -- vault query \
+  --vault-url http://127.0.0.1:8080 \
+  --system-id system-123 \
+  --has-receipt
+
+# Show a system summary
+cargo run -p proofctl -- vault systems \
+  --vault-url http://127.0.0.1:8080 \
+  --system-id system-123
 ```
 
 ## Run Proof Service
 
 ```bash
+# Optional: copy and edit the sample file first.
+cp ./vault.toml.example ./vault.toml
+
+# `proof-service` auto-loads `./vault.toml` when present.
+# Env vars still override file settings.
 export PROOF_SIGNING_KEY_PATH=./keys/signing.pem
-export PROOF_SIGNING_KEY_ID=kid-dev-01
-export PROOF_SERVICE_ADDR=0.0.0.0:8080
 cargo run -p proof-service
 ```
 
@@ -97,6 +111,19 @@ Or run with Docker:
 ```bash
 docker compose up --build
 ```
+
+Supported runtime config knobs:
+
+- `vault.toml` sections: `[server]`, `[signing]`, `[storage]`, `[timestamp]`, `[transparency]`, `[retention]`, and `[[retention.policies]]`
+- `PROOF_SERVICE_CONFIG_PATH=/path/to/vault.toml` to point at a non-default file
+- env overrides for `PROOF_SERVICE_ADDR`, `PROOF_SERVICE_STORAGE_DIR`, `PROOF_SERVICE_DB_PATH`, `PROOF_SIGNING_KEY_PATH`, `PROOF_SIGNING_KEY_ID`, `PROOF_SERVICE_MAX_PAYLOAD_BYTES`, `PROOF_SERVICE_RETENTION_GRACE_DAYS`, and `PROOF_SERVICE_RETENTION_SCAN_INTERVAL_HOURS`
+
+Current file-config limitations:
+
+- `signing.algorithm` must be `ed25519`
+- `storage.metadata_backend` must be `sqlite`
+- `storage.blob_backend` must be `filesystem`
+- TLS, PostgreSQL, and S3 config are parsed but fail fast as not implemented
 
 ### Service Endpoints
 
@@ -116,6 +143,8 @@ docker compose up --build
 - `PUT /v1/config/retention`
 - `PUT /v1/config/timestamp`
 - `PUT /v1/config/transparency`
+- `GET /v1/systems`
+- `GET /v1/systems/{system_id}/summary`
 - `POST /v1/packs`
 - `GET /v1/packs/{pack_id}`
 - `GET /v1/packs/{pack_id}/manifest`
@@ -250,7 +279,9 @@ npm run dev
 - `proofctl verify` now reports the bundle assurance level as `signed`, `timestamped`, or `transparency_anchored`.
 - `proofctl inspect` now supports `--show-items` and `--show-merkle`.
 - `proofctl pack` now requests pack assembly from the vault and downloads the resulting `pl-evidence-pack-v1` archive.
+- `proofctl vault status|query|retention|systems|export` now covers the main vault read/query/export flows from the plan without requiring manual `curl`.
 - The vault now persists metadata in SQLite, computes bundle expiry from seeded retention policies, derives per-item `obligation_ref` tags, exposes retention scan/status endpoints, supports legal holds, and indexes evidence items for `/v1/bundles` filtering.
+- The vault now exposes `GET /v1/systems` and `GET /v1/systems/{system_id}/summary` for system-level evidence rollups across role, item type, retention class, assurance level, and model usage.
 - `/v1/bundles` now also supports assurance-oriented filtering through `has_timestamp`, `has_receipt`, and `assurance_level=signed|timestamped|transparency_anchored`, and bundle summaries now report the computed assurance level.
 - Retention scans now soft-delete expired bundles, skip held bundles, and hard-delete previously soft-deleted bundles after the configured grace period (`PROOF_SERVICE_RETENTION_GRACE_DAYS`, default `30`).
 - The vault now keeps an append-only audit trail and exposes it via `/v1/audit-trail`; current actions include bundle create/read/verify/delete, legal hold changes, retention scans, and pack create/read/export events.
@@ -262,6 +293,7 @@ npm run dev
 - Transparency verification currently checks Rekor receipt structure, entry UUID to leaf-hash binding, the Merkle inclusion proof against the advertised Rekor root hash, and the embedded RFC 3161 token binding to `integrity.bundle_root`, but it does not yet verify Rekor signed-entry-timestamp signatures.
 - Pack assembly is now available through `/v1/packs`; packs apply an initial heuristic curation profile (`pack-rules-v1`) based on actor role, evidence item types, retention class, and derived obligation refs, then export matching bundles as embedded `bundle.pkg` files plus a manifest.
 - Pack redaction/selective disclosure is still not implemented; current exports remain full bundle packages.
+- Vault startup now supports `vault.toml` + env override configuration and an automatic background retention scan loop; PostgreSQL/S3/TLS remain future work.
 - Canonicalization and signing semantics follow `docs/architecture.md`.
 - Verification is designed to work offline with `bundle.pkg` + public key.
 - JSON Schemas: `schemas/evidence_bundle.schema.json`, `schemas/capture_event.schema.json`, `schemas/evidence_item.schema.json`, `schemas/evidence_pack.schema.json`.

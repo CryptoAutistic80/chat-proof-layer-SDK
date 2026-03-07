@@ -45,6 +45,14 @@ Completed:
   `POST /v1/verify/receipt`,
   direct-or-by-`bundle_id` assurance verification in the service,
   and assurance-aware `/v1/bundles` filtering on `has_timestamp`, `has_receipt`, and computed assurance level.
+- Added the next vault runtime slice:
+  `vault.toml` startup configuration support with env-var overrides,
+  startup sync into persisted retention/timestamp/transparency config,
+  a configurable background retention scan interval,
+  and a checked-in `vault.toml.example` wired into `docker compose`.
+- Added the next query/ops slice:
+  vault `GET /v1/systems` and `GET /v1/systems/{id}/summary` rollups,
+  plus `proofctl vault status|query|retention|systems|export` wrappers over the main vault read/export flows.
 - Added the first pack export slice:
   `POST /v1/packs`,
   `GET /v1/packs/{id}`,
@@ -60,7 +68,8 @@ Completed:
 Still outstanding from `plan.md`:
 
 - JSON schema coverage is now started, with timestamp and Rekor transparency receipt coverage added, but richer export/archive schemas are still incomplete.
-- The vault now uses SQLite with legal-hold-aware retention, audit logging, retention/timestamp/transparency configuration, curated pack export, and RFC 3161 bundle timestamp attachment, but PostgreSQL and redacted/Annex-complete pack assembly are not built yet.
+- The vault now uses SQLite with legal-hold-aware retention, audit logging, file/env/runtime configuration, background retention scanning, curated pack export, and RFC 3161 bundle timestamp attachment, but PostgreSQL and redacted/Annex-complete pack assembly are not built yet.
+- The CLI now covers the main vault operational read paths, but there is still no `proofctl disclose` flow and no native NAPI/PyO3 binding layer.
 - Node and Python SDKs are still HTTP-client based; NAPI-RS and PyO3 bindings are not built yet.
 - SCITT receipts and selective disclosure CLI flows remain future phases.
 - RFC 3161 verification currently checks CMS signature integrity and message-imprint binding, but TSA certificate-chain / revocation trust validation and eIDAS-qualified trust policy are still outstanding.

@@ -32,6 +32,7 @@ use std::{
     path::{Component, Path as FsPath, PathBuf},
     str::FromStr,
     sync::Arc,
+    time::Duration,
 };
 use tower_http::cors::{Any, CorsLayer};
 use tracing::{error, info, warn};
@@ -40,6 +41,8 @@ use ulid::Ulid;
 const DEFAULT_ADDR: &str = "0.0.0.0:8080";
 const DEFAULT_MAX_PAYLOAD_BYTES: usize = 10 * 1024 * 1024;
 const DEFAULT_RETENTION_GRACE_PERIOD_DAYS: i64 = 30;
+const DEFAULT_RETENTION_SCAN_INTERVAL_HOURS: i64 = 24;
+const DEFAULT_CONFIG_PATH: &str = "./vault.toml";
 const PACKAGE_FORMAT: &str = "pl-bundle-pkg-v1";
 const PACK_EXPORT_FORMAT: &str = "pl-evidence-pack-v1";
 const PACK_EXPORT_FILE_NAME: &str = "evidence_pack.pkg";
@@ -55,11 +58,110 @@ const DEFAULT_TRANSPARENCY_PROVIDER: &str = "none";
 #[derive(Clone)]
 struct AppState {
     db: SqlitePool,
+    addr: String,
     storage_dir: PathBuf,
     signing_key: Arc<SigningKey>,
     signing_kid: String,
+    metadata_backend: String,
+    blob_backend: String,
     max_payload_bytes: usize,
     retention_grace_period_days: i64,
+    retention_scan_interval_hours: i64,
+}
+
+#[derive(Debug, Clone)]
+struct VaultRuntimeConfig {
+    addr: SocketAddr,
+    storage_dir: PathBuf,
+    db_path: PathBuf,
+    signing_key_path: Option<PathBuf>,
+    signing_kid: String,
+    metadata_backend: String,
+    blob_backend: String,
+    max_payload_bytes: usize,
+    retention_grace_period_days: i64,
+    retention_scan_interval_hours: i64,
+    retention_policies: Vec<RetentionPolicyConfig>,
+    timestamp_config: Option<TimestampConfig>,
+    transparency_config: Option<TransparencyConfig>,
+    config_path: Option<PathBuf>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct VaultFileConfig {
+    #[serde(default)]
+    server: VaultServerFileConfig,
+    #[serde(default)]
+    signing: VaultSigningFileConfig,
+    #[serde(default)]
+    storage: VaultStorageFileConfig,
+    #[serde(default)]
+    timestamp: Option<VaultTimestampFileConfig>,
+    #[serde(default)]
+    transparency: Option<VaultTransparencyFileConfig>,
+    #[serde(default)]
+    retention: VaultRetentionFileConfig,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct VaultServerFileConfig {
+    addr: Option<String>,
+    max_payload_bytes: Option<usize>,
+    tls_cert: Option<String>,
+    tls_key: Option<String>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct VaultSigningFileConfig {
+    key_path: Option<String>,
+    key_id: Option<String>,
+    algorithm: Option<String>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct VaultStorageFileConfig {
+    metadata_backend: Option<String>,
+    sqlite_path: Option<String>,
+    blob_backend: Option<String>,
+    blob_path: Option<String>,
+    s3: Option<VaultS3FileConfig>,
+    postgresql: Option<VaultPostgresFileConfig>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct VaultS3FileConfig {
+    bucket: Option<String>,
+    region: Option<String>,
+    endpoint: Option<String>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct VaultPostgresFileConfig {
+    url: Option<String>,
+}
+
+#[derive(Debug, Default, Clone, Deserialize)]
+struct VaultTimestampFileConfig {
+    enabled: Option<bool>,
+    provider: Option<String>,
+    url: Option<String>,
+    assurance: Option<String>,
+}
+
+#[derive(Debug, Default, Clone, Deserialize)]
+struct VaultTransparencyFileConfig {
+    enabled: Option<bool>,
+    provider: Option<String>,
+    url: Option<String>,
+    rekor_url: Option<String>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct VaultRetentionFileConfig {
+    grace_period_days: Option<i64>,
+    scan_interval_hours: Option<i64>,
+    #[serde(default)]
+    policies: Vec<RetentionPolicyConfig>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -212,6 +314,46 @@ struct AuditTrailQuery {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+struct ListSystemsResponse {
+    items: Vec<SystemListEntry>,
+}
+
+#[derive(Debug, Serialize, Deserialize, FromRow)]
+struct SystemListEntry {
+    system_id: String,
+    bundle_count: i64,
+    active_bundle_count: i64,
+    deleted_bundle_count: i64,
+    first_seen_at: Option<String>,
+    latest_bundle_at: Option<String>,
+    timestamped_bundle_count: i64,
+    receipt_bundle_count: i64,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct SystemSummaryResponse {
+    system_id: String,
+    bundle_count: i64,
+    active_bundle_count: i64,
+    deleted_bundle_count: i64,
+    first_seen_at: Option<String>,
+    latest_bundle_at: Option<String>,
+    timestamped_bundle_count: i64,
+    receipt_bundle_count: i64,
+    actor_roles: Vec<SystemFacetCount>,
+    evidence_types: Vec<SystemFacetCount>,
+    retention_classes: Vec<SystemFacetCount>,
+    assurance_levels: Vec<SystemFacetCount>,
+    model_ids: Vec<SystemFacetCount>,
+}
+
+#[derive(Debug, Serialize, Deserialize, FromRow)]
+struct SystemFacetCount {
+    value: String,
+    count: i64,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
 struct ListBundlesResponse {
     page: u32,
     limit: u32,
@@ -335,6 +477,7 @@ struct VaultConfigResponse {
 
 #[derive(Debug, Serialize, Deserialize)]
 struct VaultServiceConfigView {
+    addr: String,
     max_payload_bytes: usize,
 }
 
@@ -353,6 +496,7 @@ struct VaultStorageConfigView {
 #[derive(Debug, Serialize, Deserialize)]
 struct RetentionConfigView {
     grace_period_days: i64,
+    scan_interval_hours: i64,
     policies: Vec<RetentionPolicyConfig>,
 }
 
@@ -571,50 +715,45 @@ async fn main() -> Result<()> {
         .without_time()
         .init();
 
-    let addr: SocketAddr = env::var("PROOF_SERVICE_ADDR")
-        .unwrap_or_else(|_| DEFAULT_ADDR.to_string())
-        .parse()
-        .context("failed to parse PROOF_SERVICE_ADDR")?;
-
-    let storage_dir = PathBuf::from(
-        env::var("PROOF_SERVICE_STORAGE_DIR").unwrap_or_else(|_| "./storage".to_string()),
-    );
+    let runtime_config = load_vault_runtime_config()?;
+    let addr = runtime_config.addr;
+    let storage_dir = runtime_config.storage_dir.clone();
     fs::create_dir_all(&storage_dir)
         .with_context(|| format!("failed to create storage dir {}", storage_dir.display()))?;
 
-    let db_path = env::var("PROOF_SERVICE_DB_PATH")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| storage_dir.join("metadata.db"));
-    let db = open_sqlite_pool(&db_path).await?;
+    let db = open_sqlite_pool(&runtime_config.db_path).await?;
     initialize_sqlite_schema(&db).await?;
     seed_default_retention_policies(&db).await?;
+    apply_runtime_config_to_db(&db, &runtime_config).await?;
     backfill_bundle_expiries(&db).await?;
     backfill_item_obligation_refs(&db).await?;
 
-    let signing_key = load_signing_key()?;
-    let signing_kid = env::var("PROOF_SIGNING_KEY_ID").unwrap_or_else(|_| "kid-dev-01".to_string());
-    let max_payload_bytes = env::var("PROOF_SERVICE_MAX_PAYLOAD_BYTES")
-        .ok()
-        .and_then(|v| v.parse::<usize>().ok())
-        .unwrap_or(DEFAULT_MAX_PAYLOAD_BYTES);
-    let retention_grace_period_days = env::var("PROOF_SERVICE_RETENTION_GRACE_DAYS")
-        .ok()
-        .map(|raw| parse_retention_grace_period_days(&raw))
-        .transpose()?
-        .unwrap_or(DEFAULT_RETENTION_GRACE_PERIOD_DAYS);
+    let signing_key = load_signing_key(runtime_config.signing_key_path.as_deref())?;
 
     let state = AppState {
         db,
+        addr: addr.to_string(),
         storage_dir,
         signing_key: Arc::new(signing_key),
-        signing_kid,
-        max_payload_bytes,
-        retention_grace_period_days,
+        signing_kid: runtime_config.signing_kid.clone(),
+        metadata_backend: runtime_config.metadata_backend.clone(),
+        blob_backend: runtime_config.blob_backend.clone(),
+        max_payload_bytes: runtime_config.max_payload_bytes,
+        retention_grace_period_days: runtime_config.retention_grace_period_days,
+        retention_scan_interval_hours: runtime_config.retention_scan_interval_hours,
     };
 
-    let app = build_router(state, max_payload_bytes);
+    maybe_spawn_retention_scan_task(state.clone());
+    let app = build_router(state, runtime_config.max_payload_bytes);
 
-    info!("proof-service listening on {addr}");
+    info!(
+        "proof-service listening on {addr} using config source {}",
+        runtime_config
+            .config_path
+            .as_ref()
+            .map(|path| path.display().to_string())
+            .unwrap_or_else(|| "env/defaults".to_string())
+    );
     let listener = tokio::net::TcpListener::bind(addr).await?;
     axum::serve(listener, app).await?;
     Ok(())
@@ -649,6 +788,8 @@ fn build_router(state: AppState, max_payload_bytes: usize) -> Router {
         .route("/v1/config/retention", put(update_retention_config))
         .route("/v1/config/timestamp", put(update_timestamp_config))
         .route("/v1/config/transparency", put(update_transparency_config))
+        .route("/v1/systems", get(list_systems))
+        .route("/v1/systems/{system_id}/summary", get(get_system_summary))
         .route("/v1/packs", post(create_pack))
         .route("/v1/packs/{pack_id}", get(get_pack))
         .route("/v1/packs/{pack_id}/manifest", get(get_pack_manifest))
@@ -661,6 +802,331 @@ fn build_router(state: AppState, max_payload_bytes: usize) -> Router {
         .layer(cors)
         .layer(DefaultBodyLimit::max(max_payload_bytes))
         .with_state(state)
+}
+
+fn load_vault_runtime_config() -> Result<VaultRuntimeConfig> {
+    let env_vars = env::vars().collect::<BTreeMap<_, _>>();
+    let config_path = resolve_config_path(&env_vars);
+    let file_config = match config_path.as_deref() {
+        Some(path) => load_vault_file_config(path)?,
+        None => VaultFileConfig::default(),
+    };
+    build_vault_runtime_config(file_config, config_path.as_deref(), &env_vars)
+}
+
+fn resolve_config_path(env_vars: &BTreeMap<String, String>) -> Option<PathBuf> {
+    if let Some(path) = env_vars
+        .get("PROOF_SERVICE_CONFIG_PATH")
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty())
+    {
+        return Some(PathBuf::from(path));
+    }
+
+    let default_path = PathBuf::from(DEFAULT_CONFIG_PATH);
+    default_path.exists().then_some(default_path)
+}
+
+fn load_vault_file_config(path: &FsPath) -> Result<VaultFileConfig> {
+    let contents = fs::read_to_string(path)
+        .with_context(|| format!("failed to read vault config {}", path.display()))?;
+    toml::from_str(&contents).with_context(|| format!("failed to parse {}", path.display()))
+}
+
+fn build_vault_runtime_config(
+    file_config: VaultFileConfig,
+    config_path: Option<&FsPath>,
+    env_vars: &BTreeMap<String, String>,
+) -> Result<VaultRuntimeConfig> {
+    validate_file_config_capabilities(&file_config)?;
+
+    let config_base_dir = config_path
+        .and_then(FsPath::parent)
+        .unwrap_or_else(|| FsPath::new("."));
+    let addr_raw = env_value(env_vars, "PROOF_SERVICE_ADDR")
+        .map(ToOwned::to_owned)
+        .or(file_config.server.addr.clone())
+        .unwrap_or_else(|| DEFAULT_ADDR.to_string());
+    let addr = addr_raw
+        .parse()
+        .with_context(|| format!("failed to parse service addr {addr_raw}"))?;
+
+    let max_payload_bytes = env_value(env_vars, "PROOF_SERVICE_MAX_PAYLOAD_BYTES")
+        .map(parse_max_payload_bytes)
+        .transpose()?
+        .or(file_config.server.max_payload_bytes)
+        .unwrap_or(DEFAULT_MAX_PAYLOAD_BYTES);
+
+    let metadata_backend = normalize_backend(
+        file_config.storage.metadata_backend.as_deref(),
+        "sqlite",
+        "storage.metadata_backend",
+    )?;
+    if metadata_backend != "sqlite" {
+        bail!("storage.metadata_backend={metadata_backend} is not implemented yet");
+    }
+
+    let blob_backend = normalize_backend(
+        file_config.storage.blob_backend.as_deref(),
+        "filesystem",
+        "storage.blob_backend",
+    )?;
+    if blob_backend != "filesystem" {
+        bail!("storage.blob_backend={blob_backend} is not implemented yet");
+    }
+
+    let storage_dir = env_value(env_vars, "PROOF_SERVICE_STORAGE_DIR")
+        .map(PathBuf::from)
+        .or_else(|| {
+            file_config
+                .storage
+                .blob_path
+                .as_deref()
+                .map(|value| resolve_path_from_config(config_base_dir, value))
+        })
+        .unwrap_or_else(|| PathBuf::from("./storage"));
+
+    let db_path = env_value(env_vars, "PROOF_SERVICE_DB_PATH")
+        .map(PathBuf::from)
+        .or_else(|| {
+            file_config
+                .storage
+                .sqlite_path
+                .as_deref()
+                .map(|value| resolve_path_from_config(config_base_dir, value))
+        })
+        .unwrap_or_else(|| storage_dir.join("metadata.db"));
+
+    let signing_algorithm = file_config
+        .signing
+        .algorithm
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("ed25519");
+    if !signing_algorithm.eq_ignore_ascii_case("ed25519") {
+        bail!("signing.algorithm={signing_algorithm} is not implemented yet");
+    }
+
+    let signing_key_path = env_value(env_vars, "PROOF_SIGNING_KEY_PATH")
+        .map(PathBuf::from)
+        .or_else(|| {
+            file_config
+                .signing
+                .key_path
+                .as_deref()
+                .map(|value| resolve_path_from_config(config_base_dir, value))
+        });
+    let signing_kid = env_value(env_vars, "PROOF_SIGNING_KEY_ID")
+        .map(ToOwned::to_owned)
+        .or(file_config.signing.key_id.clone())
+        .unwrap_or_else(|| "kid-dev-01".to_string());
+
+    let retention_grace_period_days = env_value(env_vars, "PROOF_SERVICE_RETENTION_GRACE_DAYS")
+        .map(parse_retention_grace_period_days)
+        .transpose()?
+        .or(file_config.retention.grace_period_days)
+        .unwrap_or(DEFAULT_RETENTION_GRACE_PERIOD_DAYS);
+    let retention_scan_interval_hours =
+        env_value(env_vars, "PROOF_SERVICE_RETENTION_SCAN_INTERVAL_HOURS")
+            .map(parse_retention_scan_interval_hours)
+            .transpose()?
+            .or(file_config.retention.scan_interval_hours)
+            .unwrap_or(DEFAULT_RETENTION_SCAN_INTERVAL_HOURS);
+
+    let retention_policies = file_config
+        .retention
+        .policies
+        .into_iter()
+        .map(|policy| {
+            validate_retention_policy_config(&policy)?;
+            Ok(policy)
+        })
+        .collect::<Result<Vec<_>>>()?;
+
+    let timestamp_config = resolve_timestamp_file_config(file_config.timestamp)?;
+    let transparency_config = resolve_transparency_file_config(file_config.transparency)?;
+
+    Ok(VaultRuntimeConfig {
+        addr,
+        storage_dir,
+        db_path,
+        signing_key_path,
+        signing_kid,
+        metadata_backend,
+        blob_backend,
+        max_payload_bytes,
+        retention_grace_period_days,
+        retention_scan_interval_hours,
+        retention_policies,
+        timestamp_config,
+        transparency_config,
+        config_path: config_path.map(FsPath::to_path_buf),
+    })
+}
+
+fn validate_file_config_capabilities(file_config: &VaultFileConfig) -> Result<()> {
+    if file_config.server.tls_cert.is_some() || file_config.server.tls_key.is_some() {
+        bail!("server.tls_cert/server.tls_key are not implemented yet");
+    }
+
+    if let Some(s3) = file_config.storage.s3.as_ref() {
+        let configured = s3.bucket.is_some() || s3.region.is_some() || s3.endpoint.is_some();
+        if configured {
+            bail!("storage.s3 is not implemented yet");
+        }
+    }
+    if let Some(postgresql) = file_config.storage.postgresql.as_ref()
+        && postgresql.url.is_some()
+    {
+        bail!("storage.postgresql is not implemented yet");
+    }
+
+    Ok(())
+}
+
+fn env_value<'a>(env_vars: &'a BTreeMap<String, String>, key: &str) -> Option<&'a str> {
+    env_vars.get(key).map(|value| value.as_str())
+}
+
+fn normalize_backend(raw: Option<&str>, default_value: &str, field: &str) -> Result<String> {
+    let value = raw
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or(default_value)
+        .to_ascii_lowercase();
+    if value.chars().any(char::is_whitespace) {
+        bail!("{field} must not contain whitespace");
+    }
+    Ok(value)
+}
+
+fn resolve_path_from_config(base_dir: &FsPath, raw: &str) -> PathBuf {
+    let path = PathBuf::from(raw);
+    if path.is_absolute() {
+        path
+    } else {
+        base_dir.join(path)
+    }
+}
+
+fn resolve_timestamp_file_config(
+    file_config: Option<VaultTimestampFileConfig>,
+) -> Result<Option<TimestampConfig>> {
+    let Some(file_config) = file_config else {
+        return Ok(None);
+    };
+
+    let mut config = default_timestamp_config();
+    if let Some(enabled) = file_config.enabled {
+        config.enabled = enabled;
+    }
+    if let Some(provider) = file_config.provider {
+        config.provider = provider;
+    }
+    if let Some(url) = file_config.url {
+        config.url = url;
+    }
+    if file_config.assurance.is_some() {
+        config.assurance = file_config.assurance;
+    }
+
+    validate_timestamp_config(config).map(Some)
+}
+
+fn resolve_transparency_file_config(
+    file_config: Option<VaultTransparencyFileConfig>,
+) -> Result<Option<TransparencyConfig>> {
+    let Some(file_config) = file_config else {
+        return Ok(None);
+    };
+
+    let mut config = default_transparency_config();
+    if let Some(enabled) = file_config.enabled {
+        config.enabled = enabled;
+    }
+    if let Some(provider) = file_config.provider {
+        config.provider = provider;
+    }
+    if let Some(url) = file_config.url.or(file_config.rekor_url) {
+        config.url = Some(url);
+    }
+
+    validate_transparency_config(config).map(Some)
+}
+
+async fn apply_runtime_config_to_db(db: &SqlitePool, config: &VaultRuntimeConfig) -> Result<()> {
+    for policy in &config.retention_policies {
+        upsert_retention_policy(db, policy).await?;
+        if policy.active {
+            refresh_active_bundle_expiries_for_class(db, &policy.retention_class).await?;
+        }
+    }
+
+    if let Some(timestamp) = config.timestamp_config.as_ref() {
+        upsert_service_config(db, SERVICE_CONFIG_KEY_TIMESTAMP, timestamp).await?;
+    }
+    if let Some(transparency) = config.transparency_config.as_ref() {
+        upsert_service_config(db, SERVICE_CONFIG_KEY_TRANSPARENCY, transparency).await?;
+    }
+
+    if !config.retention_policies.is_empty()
+        || config.timestamp_config.is_some()
+        || config.transparency_config.is_some()
+    {
+        append_audit_log(
+            db,
+            "startup_config_sync",
+            Some(AUDIT_ACTOR_SYSTEM),
+            None,
+            None,
+            serde_json::json!({
+                "config_path": config.config_path.as_ref().map(|path| path.display().to_string()),
+                "retention_classes": config
+                    .retention_policies
+                    .iter()
+                    .map(|policy| policy.retention_class.clone())
+                    .collect::<Vec<_>>(),
+                "timestamp_seeded": config.timestamp_config.is_some(),
+                "transparency_seeded": config.transparency_config.is_some(),
+            }),
+        )
+        .await?;
+    }
+
+    Ok(())
+}
+
+fn maybe_spawn_retention_scan_task(state: AppState) {
+    if state.retention_scan_interval_hours <= 0 {
+        info!("background retention scan disabled");
+        return;
+    }
+
+    let interval = Duration::from_secs(
+        u64::try_from(state.retention_scan_interval_hours)
+            .unwrap_or_default()
+            .saturating_mul(60 * 60),
+    );
+    info!(
+        "background retention scan enabled every {} hour(s)",
+        state.retention_scan_interval_hours
+    );
+
+    tokio::spawn(async move {
+        let mut ticker = tokio::time::interval(interval);
+        ticker.tick().await;
+        loop {
+            ticker.tick().await;
+            match perform_retention_scan(&state).await {
+                Ok(result) => info!(
+                    "background retention scan soft_deleted={} hard_deleted={} held_skipped={}",
+                    result.soft_deleted, result.hard_deleted, result.held_skipped
+                ),
+                Err(err) => error!("background retention scan failed: {err:#}"),
+            }
+        }
+    });
 }
 
 async fn healthz() -> impl IntoResponse {
@@ -986,6 +1452,13 @@ async fn retention_status(State(state): State<AppState>) -> Result<impl IntoResp
 }
 
 async fn retention_scan(State(state): State<AppState>) -> Result<impl IntoResponse, ApiError> {
+    let response = perform_retention_scan(&state)
+        .await
+        .map_err(ApiError::internal_anyhow)?;
+    Ok((StatusCode::OK, Json(response)))
+}
+
+async fn perform_retention_scan(state: &AppState) -> Result<RetentionScanResponse> {
     let now = Utc::now().to_rfc3339();
     let hard_delete_before =
         (Utc::now() - chrono::Duration::days(state.retention_grace_period_days)).to_rfc3339();
@@ -1004,7 +1477,7 @@ async fn retention_scan(State(state): State<AppState>) -> Result<impl IntoRespon
     .bind(&hard_delete_before)
     .fetch_one(&state.db)
     .await
-    .map_err(ApiError::internal_anyhow)?;
+    .context("failed to count legal-hold retention candidates")?;
 
     let soft_delete_result = sqlx::query(
         "UPDATE bundles
@@ -1022,10 +1495,8 @@ async fn retention_scan(State(state): State<AppState>) -> Result<impl IntoRespon
     .bind(&now)
     .execute(&state.db)
     .await
-    .map_err(ApiError::internal_anyhow)?;
-    let hard_deleted = hard_delete_bundles(&state, &hard_delete_before, &now)
-        .await
-        .map_err(ApiError::internal_anyhow)?;
+    .context("failed to soft-delete expired bundles")?;
+    let hard_deleted = hard_delete_bundles(state, &hard_delete_before, &now).await?;
     append_audit_log(
         &state.db,
         "retention_scan",
@@ -1040,18 +1511,15 @@ async fn retention_scan(State(state): State<AppState>) -> Result<impl IntoRespon
         }),
     )
     .await
-    .map_err(ApiError::internal_anyhow)?;
+    .context("failed to append retention scan audit row")?;
 
-    Ok((
-        StatusCode::OK,
-        Json(RetentionScanResponse {
-            scanned_at: now,
-            grace_period_days: state.retention_grace_period_days,
-            soft_deleted: soft_delete_result.rows_affected(),
-            hard_deleted,
-            held_skipped: held_skipped as u64,
-        }),
-    ))
+    Ok(RetentionScanResponse {
+        scanned_at: now,
+        grace_period_days: state.retention_grace_period_days,
+        soft_deleted: soft_delete_result.rows_affected(),
+        hard_deleted,
+        held_skipped: held_skipped as u64,
+    })
 }
 
 async fn list_audit_trail(
@@ -1111,6 +1579,156 @@ async fn list_audit_trail(
     ))
 }
 
+async fn list_systems(State(state): State<AppState>) -> Result<impl IntoResponse, ApiError> {
+    let items = sqlx::query_as::<_, SystemListEntry>(
+        "SELECT
+            system_id,
+            COUNT(bundle_id) AS bundle_count,
+            COALESCE(SUM(CASE WHEN deleted_at IS NULL THEN 1 ELSE 0 END), 0) AS active_bundle_count,
+            COALESCE(SUM(CASE WHEN deleted_at IS NOT NULL THEN 1 ELSE 0 END), 0) AS deleted_bundle_count,
+            MIN(created_at) AS first_seen_at,
+            MAX(created_at) AS latest_bundle_at,
+            COALESCE(SUM(CASE WHEN has_timestamp THEN 1 ELSE 0 END), 0) AS timestamped_bundle_count,
+            COALESCE(SUM(CASE WHEN has_receipt THEN 1 ELSE 0 END), 0) AS receipt_bundle_count
+         FROM bundles
+         WHERE system_id IS NOT NULL
+           AND TRIM(system_id) <> ''
+         GROUP BY system_id
+         ORDER BY latest_bundle_at DESC, system_id ASC",
+    )
+    .fetch_all(&state.db)
+    .await
+    .map_err(ApiError::internal_anyhow)?;
+
+    append_audit_log(
+        &state.db,
+        "list_systems",
+        Some(AUDIT_ACTOR_API),
+        None,
+        None,
+        serde_json::json!({
+            "system_count": items.len(),
+        }),
+    )
+    .await
+    .map_err(ApiError::internal_anyhow)?;
+
+    Ok((StatusCode::OK, Json(ListSystemsResponse { items })))
+}
+
+async fn get_system_summary(
+    State(state): State<AppState>,
+    Path(system_id): Path<String>,
+) -> Result<impl IntoResponse, ApiError> {
+    let system_id = normalize_system_id_path(&system_id).map_err(ApiError::bad_request_anyhow)?;
+    let base = load_system_summary_base(&state.db, &system_id)
+        .await
+        .map_err(ApiError::internal_anyhow)?
+        .ok_or_else(|| ApiError::not_found("system not found"))?;
+    let actor_roles = load_system_facet_counts(
+        &state.db,
+        &system_id,
+        "SELECT
+            actor_role AS value,
+            COUNT(bundle_id) AS count
+         FROM bundles
+         WHERE system_id = ?
+         GROUP BY actor_role
+         ORDER BY count DESC, value ASC",
+    )
+    .await
+    .map_err(ApiError::internal_anyhow)?;
+    let evidence_types = load_system_facet_counts(
+        &state.db,
+        &system_id,
+        "SELECT
+            i.item_type AS value,
+            COUNT(*) AS count
+         FROM bundles b
+         JOIN evidence_items i ON i.bundle_id = b.bundle_id
+         WHERE b.system_id = ?
+         GROUP BY i.item_type
+         ORDER BY count DESC, value ASC",
+    )
+    .await
+    .map_err(ApiError::internal_anyhow)?;
+    let retention_classes = load_system_facet_counts(
+        &state.db,
+        &system_id,
+        "SELECT
+            retention_class AS value,
+            COUNT(bundle_id) AS count
+         FROM bundles
+         WHERE system_id = ?
+         GROUP BY retention_class
+         ORDER BY count DESC, value ASC",
+    )
+    .await
+    .map_err(ApiError::internal_anyhow)?;
+    let assurance_levels = load_system_facet_counts(
+        &state.db,
+        &system_id,
+        "SELECT
+            CASE
+                WHEN has_receipt THEN 'transparency_anchored'
+                WHEN has_timestamp THEN 'timestamped'
+                ELSE 'signed'
+            END AS value,
+            COUNT(bundle_id) AS count
+         FROM bundles
+         WHERE system_id = ?
+         GROUP BY value
+         ORDER BY count DESC, value ASC",
+    )
+    .await
+    .map_err(ApiError::internal_anyhow)?;
+    let model_ids = load_system_facet_counts(
+        &state.db,
+        &system_id,
+        "SELECT
+            COALESCE(model_id, 'unknown') AS value,
+            COUNT(bundle_id) AS count
+         FROM bundles
+         WHERE system_id = ?
+         GROUP BY value
+         ORDER BY count DESC, value ASC",
+    )
+    .await
+    .map_err(ApiError::internal_anyhow)?;
+
+    let summary = SystemSummaryResponse {
+        system_id: base.system_id.clone(),
+        bundle_count: base.bundle_count,
+        active_bundle_count: base.active_bundle_count,
+        deleted_bundle_count: base.deleted_bundle_count,
+        first_seen_at: base.first_seen_at,
+        latest_bundle_at: base.latest_bundle_at,
+        timestamped_bundle_count: base.timestamped_bundle_count,
+        receipt_bundle_count: base.receipt_bundle_count,
+        actor_roles,
+        evidence_types,
+        retention_classes,
+        assurance_levels,
+        model_ids,
+    };
+
+    append_audit_log(
+        &state.db,
+        "get_system_summary",
+        Some(AUDIT_ACTOR_API),
+        None,
+        None,
+        serde_json::json!({
+            "system_id": summary.system_id,
+            "bundle_count": summary.bundle_count,
+        }),
+    )
+    .await
+    .map_err(ApiError::internal_anyhow)?;
+
+    Ok((StatusCode::OK, Json(summary)))
+}
+
 async fn get_config(State(state): State<AppState>) -> Result<impl IntoResponse, ApiError> {
     let response = build_vault_config_response(&state)
         .await
@@ -1124,6 +1742,7 @@ async fn get_config(State(state): State<AppState>) -> Result<impl IntoResponse, 
         serde_json::json!({
             "retention_policy_count": response.retention.policies.len(),
             "grace_period_days": response.retention.grace_period_days,
+            "scan_interval_hours": response.retention.scan_interval_hours,
             "timestamp_enabled": response.timestamp.enabled,
             "timestamp_provider": &response.timestamp.provider,
             "transparency_enabled": response.transparency.enabled,
@@ -2759,9 +3378,54 @@ async fn append_audit_log(
     Ok(())
 }
 
+async fn load_system_summary_base(
+    db: &SqlitePool,
+    system_id: &str,
+) -> Result<Option<SystemListEntry>> {
+    sqlx::query_as::<_, SystemListEntry>(
+        "SELECT
+            system_id,
+            COUNT(bundle_id) AS bundle_count,
+            COALESCE(SUM(CASE WHEN deleted_at IS NULL THEN 1 ELSE 0 END), 0) AS active_bundle_count,
+            COALESCE(SUM(CASE WHEN deleted_at IS NOT NULL THEN 1 ELSE 0 END), 0) AS deleted_bundle_count,
+            MIN(created_at) AS first_seen_at,
+            MAX(created_at) AS latest_bundle_at,
+            COALESCE(SUM(CASE WHEN has_timestamp THEN 1 ELSE 0 END), 0) AS timestamped_bundle_count,
+            COALESCE(SUM(CASE WHEN has_receipt THEN 1 ELSE 0 END), 0) AS receipt_bundle_count
+         FROM bundles
+         WHERE system_id = ?
+         GROUP BY system_id",
+    )
+    .bind(system_id)
+    .fetch_optional(db)
+    .await
+    .with_context(|| format!("failed to load system summary for {system_id}"))
+}
+
+async fn load_system_facet_counts(
+    db: &SqlitePool,
+    system_id: &str,
+    query: &str,
+) -> Result<Vec<SystemFacetCount>> {
+    sqlx::query_as::<_, SystemFacetCount>(query)
+        .bind(system_id)
+        .fetch_all(db)
+        .await
+        .with_context(|| format!("failed to load system facet counts for {system_id}"))
+}
+
+fn normalize_system_id_path(value: &str) -> Result<String> {
+    let value = value.trim();
+    if value.is_empty() {
+        bail!("system_id must not be empty");
+    }
+    Ok(value.to_string())
+}
+
 async fn build_vault_config_response(state: &AppState) -> Result<VaultConfigResponse> {
     Ok(VaultConfigResponse {
         service: VaultServiceConfigView {
+            addr: state.addr.clone(),
             max_payload_bytes: state.max_payload_bytes,
         },
         signing: VaultSigningConfigView {
@@ -2769,11 +3433,12 @@ async fn build_vault_config_response(state: &AppState) -> Result<VaultConfigResp
             algorithm: "ed25519".to_string(),
         },
         storage: VaultStorageConfigView {
-            metadata_backend: "sqlite".to_string(),
-            blob_backend: "filesystem".to_string(),
+            metadata_backend: state.metadata_backend.clone(),
+            blob_backend: state.blob_backend.clone(),
         },
         retention: RetentionConfigView {
             grace_period_days: state.retention_grace_period_days,
+            scan_interval_hours: state.retention_scan_interval_hours,
             policies: load_retention_policies(&state.db).await?,
         },
         timestamp: load_timestamp_config(&state.db).await?,
@@ -3103,6 +3768,22 @@ fn parse_retention_grace_period_days(raw: &str) -> Result<i64> {
     Ok(days)
 }
 
+fn parse_retention_scan_interval_hours(raw: &str) -> Result<i64> {
+    let hours = raw.trim().parse::<i64>().with_context(|| {
+        format!("invalid PROOF_SERVICE_RETENTION_SCAN_INTERVAL_HOURS value {raw}")
+    })?;
+    if hours < 0 {
+        bail!("PROOF_SERVICE_RETENTION_SCAN_INTERVAL_HOURS must be >= 0");
+    }
+    Ok(hours)
+}
+
+fn parse_max_payload_bytes(raw: &str) -> Result<usize> {
+    raw.trim()
+        .parse::<usize>()
+        .with_context(|| format!("invalid PROOF_SERVICE_MAX_PAYLOAD_BYTES value {raw}"))
+}
+
 fn normalize_legal_hold_reason(raw: &str) -> Result<String> {
     let reason = raw.trim();
     if reason.is_empty() {
@@ -3246,16 +3927,16 @@ async fn delete_bundle_storage(
     Ok(())
 }
 
-fn load_signing_key() -> Result<SigningKey> {
-    if let Ok(path) = env::var("PROOF_SIGNING_KEY_PATH") {
-        let contents = fs::read_to_string(&path)
-            .with_context(|| format!("failed to read PROOF_SIGNING_KEY_PATH {}", path))?;
+fn load_signing_key(signing_key_path: Option<&FsPath>) -> Result<SigningKey> {
+    if let Some(path) = signing_key_path {
+        let contents = fs::read_to_string(path)
+            .with_context(|| format!("failed to read signing key {}", path.display()))?;
         let key = decode_private_key_pem(&contents)
-            .with_context(|| format!("failed to parse private key at {}", path))?;
+            .with_context(|| format!("failed to parse private key at {}", path.display()))?;
         return Ok(key);
     }
 
-    warn!("PROOF_SIGNING_KEY_PATH not set, generating ephemeral signing key");
+    warn!("no signing key configured, generating ephemeral signing key");
     let secret = rand::random::<[u8; 32]>();
     Ok(SigningKey::from_bytes(&secret))
 }
@@ -3974,11 +4655,15 @@ mod tests {
         let signing_key = SigningKey::from_bytes(&rand::random::<[u8; 32]>());
         AppState {
             db,
+            addr: DEFAULT_ADDR.to_string(),
             storage_dir,
             signing_key: Arc::new(signing_key),
             signing_kid: "kid-dev-01".to_string(),
+            metadata_backend: "sqlite".to_string(),
+            blob_backend: "filesystem".to_string(),
             max_payload_bytes,
             retention_grace_period_days: DEFAULT_RETENTION_GRACE_PERIOD_DAYS,
+            retention_scan_interval_hours: DEFAULT_RETENTION_SCAN_INTERVAL_HOURS,
         }
     }
 
@@ -4183,6 +4868,115 @@ mod tests {
             .await
             .unwrap();
         serde_json::from_slice(&body).unwrap()
+    }
+
+    #[test]
+    fn build_vault_runtime_config_merges_file_settings_and_env_overrides() {
+        let config_dir = std::env::temp_dir().join(format!(
+            "proof-service-config-test-{}",
+            rand::random::<u64>()
+        ));
+        std::fs::create_dir_all(&config_dir).unwrap();
+        let config_path = config_dir.join("vault.toml");
+        let file_config = VaultFileConfig {
+            server: VaultServerFileConfig {
+                addr: Some("127.0.0.1:8181".to_string()),
+                max_payload_bytes: Some(2048),
+                tls_cert: None,
+                tls_key: None,
+            },
+            signing: VaultSigningFileConfig {
+                key_path: Some("./keys/signing.pem".to_string()),
+                key_id: Some("file-kid".to_string()),
+                algorithm: Some("ed25519".to_string()),
+            },
+            storage: VaultStorageFileConfig {
+                metadata_backend: Some("sqlite".to_string()),
+                sqlite_path: Some("./data/vault.db".to_string()),
+                blob_backend: Some("filesystem".to_string()),
+                blob_path: Some("./data/blobs".to_string()),
+                s3: None,
+                postgresql: None,
+            },
+            timestamp: Some(VaultTimestampFileConfig {
+                enabled: Some(true),
+                provider: Some("rfc3161".to_string()),
+                url: Some("https://tsa.example.test".to_string()),
+                assurance: Some("qualified".to_string()),
+            }),
+            transparency: Some(VaultTransparencyFileConfig {
+                enabled: Some(true),
+                provider: Some("rekor".to_string()),
+                url: None,
+                rekor_url: Some("https://rekor.example.test".to_string()),
+            }),
+            retention: VaultRetentionFileConfig {
+                grace_period_days: Some(21),
+                scan_interval_hours: Some(12),
+                policies: vec![RetentionPolicyConfig {
+                    retention_class: "runtime_logs".to_string(),
+                    min_duration_days: 3650,
+                    max_duration_days: None,
+                    legal_basis: "eu_ai_act_article_12_19_26".to_string(),
+                    active: true,
+                }],
+            },
+        };
+        let env_vars = BTreeMap::from([
+            ("PROOF_SERVICE_ADDR".to_string(), "0.0.0.0:9090".to_string()),
+            (
+                "PROOF_SERVICE_RETENTION_SCAN_INTERVAL_HOURS".to_string(),
+                "6".to_string(),
+            ),
+        ]);
+
+        let runtime =
+            build_vault_runtime_config(file_config, Some(config_path.as_path()), &env_vars)
+                .unwrap();
+
+        assert_eq!(runtime.addr, SocketAddr::from(([0, 0, 0, 0], 9090)));
+        assert_eq!(runtime.max_payload_bytes, 2048);
+        assert_eq!(runtime.signing_kid, "file-kid");
+        let expected_signing_key_path = config_dir.join("keys/signing.pem");
+        assert_eq!(
+            runtime.signing_key_path.as_ref(),
+            Some(&expected_signing_key_path)
+        );
+        assert_eq!(runtime.metadata_backend, "sqlite");
+        assert_eq!(runtime.blob_backend, "filesystem");
+        assert_eq!(runtime.storage_dir, config_dir.join("data/blobs"));
+        assert_eq!(runtime.db_path, config_dir.join("data/vault.db"));
+        assert_eq!(runtime.retention_grace_period_days, 21);
+        assert_eq!(runtime.retention_scan_interval_hours, 6);
+        assert_eq!(runtime.retention_policies.len(), 1);
+        assert_eq!(
+            runtime
+                .timestamp_config
+                .as_ref()
+                .map(|config| config.url.as_str()),
+            Some("https://tsa.example.test")
+        );
+        assert_eq!(
+            runtime
+                .transparency_config
+                .as_ref()
+                .and_then(|config| config.url.as_deref()),
+            Some("https://rekor.example.test")
+        );
+    }
+
+    #[test]
+    fn build_vault_runtime_config_rejects_unimplemented_backends() {
+        let file_config = VaultFileConfig {
+            storage: VaultStorageFileConfig {
+                metadata_backend: Some("postgresql".to_string()),
+                ..VaultStorageFileConfig::default()
+            },
+            ..VaultFileConfig::default()
+        };
+
+        let err = build_vault_runtime_config(file_config, None, &BTreeMap::new()).unwrap_err();
+        assert!(err.to_string().contains("not implemented"));
     }
 
     #[test]
@@ -4623,6 +5417,253 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn list_systems_rolls_up_bundle_and_assurance_counts() {
+        let state = test_state(DEFAULT_MAX_PAYLOAD_BYTES).await;
+        let db = state.db.clone();
+        let app = build_router(state, DEFAULT_MAX_PAYLOAD_BYTES);
+
+        let first = create_bundle_response(
+            &app,
+            &CreateBundleRequest {
+                capture: SealableCaptureInput::V10(sample_event_with_profile(
+                    "system-a",
+                    proof_layer_core::ActorRole::Provider,
+                    sample_event_with_system("system-a").items,
+                    Some("runtime_logs"),
+                )),
+                artefacts: vec![InlineArtefact {
+                    name: "prompt.json".to_string(),
+                    content_type: "application/json".to_string(),
+                    data_base64: Base64::encode_string(br#"{"prompt":"system-a-1"}"#),
+                }],
+            },
+        )
+        .await;
+        let second = create_bundle_response(
+            &app,
+            &CreateBundleRequest {
+                capture: SealableCaptureInput::V10(sample_event_with_profile(
+                    "system-a",
+                    proof_layer_core::ActorRole::Integrator,
+                    vec![EvidenceItem::PolicyDecision(
+                        proof_layer_core::schema::PolicyDecisionEvidence {
+                            policy_name: "ai_literacy".to_string(),
+                            decision: "approved".to_string(),
+                            rationale_commitment: None,
+                            metadata: serde_json::Value::Null,
+                        },
+                    )],
+                    Some("ai_literacy"),
+                )),
+                artefacts: vec![InlineArtefact {
+                    name: "prompt.json".to_string(),
+                    content_type: "application/json".to_string(),
+                    data_base64: Base64::encode_string(br#"{"prompt":"system-a-2"}"#),
+                }],
+            },
+        )
+        .await;
+        let _third = create_bundle_response(
+            &app,
+            &CreateBundleRequest {
+                capture: SealableCaptureInput::V10(sample_event_with_profile(
+                    "system-b",
+                    proof_layer_core::ActorRole::Provider,
+                    sample_event_with_system("system-b").items,
+                    Some("runtime_logs"),
+                )),
+                artefacts: vec![InlineArtefact {
+                    name: "prompt.json".to_string(),
+                    content_type: "application/json".to_string(),
+                    data_base64: Base64::encode_string(br#"{"prompt":"system-b"}"#),
+                }],
+            },
+        )
+        .await;
+
+        let mut bundle = load_active_bundle(&db, &first.bundle_id)
+            .await
+            .unwrap()
+            .unwrap();
+        bundle.timestamp = Some(build_test_timestamp_token(
+            &bundle.integrity.bundle_root,
+            Some("test-tsa"),
+        ));
+        persist_bundle_timestamp(&db, &bundle).await.unwrap();
+        let receipt = build_test_rekor_receipt(&bundle.integrity.bundle_root, Some("rekor"));
+        apply_receipt_to_bundle(&mut bundle, receipt).unwrap();
+        persist_bundle_receipt(&db, &bundle).await.unwrap();
+
+        let delete_req = Request::builder()
+            .method("DELETE")
+            .uri(format!("/v1/bundles/{}", second.bundle_id))
+            .body(Body::empty())
+            .unwrap();
+        let delete_res = app.clone().oneshot(delete_req).await.unwrap();
+        assert_eq!(delete_res.status(), StatusCode::OK);
+
+        let request = Request::builder()
+            .method("GET")
+            .uri("/v1/systems")
+            .body(Body::empty())
+            .unwrap();
+        let response = app.oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let systems: ListSystemsResponse = serde_json::from_slice(&body).unwrap();
+
+        assert_eq!(systems.items.len(), 2);
+        let system_a = systems
+            .items
+            .iter()
+            .find(|entry| entry.system_id == "system-a")
+            .unwrap();
+        assert_eq!(system_a.bundle_count, 2);
+        assert_eq!(system_a.active_bundle_count, 1);
+        assert_eq!(system_a.deleted_bundle_count, 1);
+        assert_eq!(system_a.timestamped_bundle_count, 1);
+        assert_eq!(system_a.receipt_bundle_count, 1);
+        assert!(system_a.latest_bundle_at.is_some());
+    }
+
+    #[tokio::test]
+    async fn get_system_summary_reports_role_item_and_retention_breakdowns() {
+        let state = test_state(DEFAULT_MAX_PAYLOAD_BYTES).await;
+        let db = state.db.clone();
+        let app = build_router(state, DEFAULT_MAX_PAYLOAD_BYTES);
+
+        let provider_bundle = create_bundle_response(
+            &app,
+            &CreateBundleRequest {
+                capture: SealableCaptureInput::V10(sample_event_with_profile(
+                    "system-summary",
+                    proof_layer_core::ActorRole::Provider,
+                    sample_event_with_system("system-summary").items,
+                    Some("runtime_logs"),
+                )),
+                artefacts: vec![InlineArtefact {
+                    name: "prompt.json".to_string(),
+                    content_type: "application/json".to_string(),
+                    data_base64: Base64::encode_string(br#"{"prompt":"provider"}"#),
+                }],
+            },
+        )
+        .await;
+        let _integrator_bundle = create_bundle_response(
+            &app,
+            &CreateBundleRequest {
+                capture: SealableCaptureInput::V10(sample_event_with_profile(
+                    "system-summary",
+                    proof_layer_core::ActorRole::Integrator,
+                    vec![EvidenceItem::PolicyDecision(
+                        proof_layer_core::schema::PolicyDecisionEvidence {
+                            policy_name: "literacy".to_string(),
+                            decision: "approved".to_string(),
+                            rationale_commitment: None,
+                            metadata: serde_json::json!({"source": "training"}),
+                        },
+                    )],
+                    Some("ai_literacy"),
+                )),
+                artefacts: vec![InlineArtefact {
+                    name: "prompt.json".to_string(),
+                    content_type: "application/json".to_string(),
+                    data_base64: Base64::encode_string(br#"{"prompt":"integrator"}"#),
+                }],
+            },
+        )
+        .await;
+
+        let mut bundle = load_active_bundle(&db, &provider_bundle.bundle_id)
+            .await
+            .unwrap()
+            .unwrap();
+        bundle.timestamp = Some(build_test_timestamp_token(
+            &bundle.integrity.bundle_root,
+            Some("test-tsa"),
+        ));
+        persist_bundle_timestamp(&db, &bundle).await.unwrap();
+        let receipt = build_test_rekor_receipt(&bundle.integrity.bundle_root, Some("rekor"));
+        apply_receipt_to_bundle(&mut bundle, receipt).unwrap();
+        persist_bundle_receipt(&db, &bundle).await.unwrap();
+
+        let request = Request::builder()
+            .method("GET")
+            .uri("/v1/systems/system-summary/summary")
+            .body(Body::empty())
+            .unwrap();
+        let response = app.oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let summary: SystemSummaryResponse = serde_json::from_slice(&body).unwrap();
+
+        assert_eq!(summary.system_id, "system-summary");
+        assert_eq!(summary.bundle_count, 2);
+        assert_eq!(summary.active_bundle_count, 2);
+        assert_eq!(summary.deleted_bundle_count, 0);
+        assert_eq!(summary.timestamped_bundle_count, 1);
+        assert_eq!(summary.receipt_bundle_count, 1);
+        assert!(
+            summary
+                .actor_roles
+                .iter()
+                .any(|entry| entry.value == "provider" && entry.count == 1)
+        );
+        assert!(
+            summary
+                .actor_roles
+                .iter()
+                .any(|entry| entry.value == "integrator" && entry.count == 1)
+        );
+        assert!(
+            summary
+                .evidence_types
+                .iter()
+                .any(|entry| entry.value == "llm_interaction" && entry.count == 1)
+        );
+        assert!(
+            summary
+                .evidence_types
+                .iter()
+                .any(|entry| entry.value == "policy_decision" && entry.count == 1)
+        );
+        assert!(
+            summary
+                .retention_classes
+                .iter()
+                .any(|entry| entry.value == "runtime_logs" && entry.count == 1)
+        );
+        assert!(
+            summary
+                .retention_classes
+                .iter()
+                .any(|entry| entry.value == "ai_literacy" && entry.count == 1)
+        );
+        assert!(
+            summary
+                .assurance_levels
+                .iter()
+                .any(|entry| entry.value == "transparency_anchored" && entry.count == 1)
+        );
+        assert!(
+            summary
+                .assurance_levels
+                .iter()
+                .any(|entry| entry.value == "signed" && entry.count == 1)
+        );
+        assert!(
+            summary
+                .model_ids
+                .iter()
+                .any(|entry| entry.value == "anthropic:claude-sonnet-4-6")
+        );
+    }
+
+    #[tokio::test]
     async fn retention_status_reports_seeded_policy_counts() {
         let state = test_state(DEFAULT_MAX_PAYLOAD_BYTES).await;
         let app = build_router(state, DEFAULT_MAX_PAYLOAD_BYTES);
@@ -5032,6 +6073,7 @@ mod tests {
             .unwrap();
         let config: VaultConfigResponse = serde_json::from_slice(&body).unwrap();
 
+        assert_eq!(config.service.addr, DEFAULT_ADDR);
         assert_eq!(config.service.max_payload_bytes, DEFAULT_MAX_PAYLOAD_BYTES);
         assert_eq!(config.signing.key_id, "kid-dev-01");
         assert_eq!(config.signing.algorithm, "ed25519");
@@ -5040,6 +6082,10 @@ mod tests {
         assert_eq!(
             config.retention.grace_period_days,
             DEFAULT_RETENTION_GRACE_PERIOD_DAYS
+        );
+        assert_eq!(
+            config.retention.scan_interval_hours,
+            DEFAULT_RETENTION_SCAN_INTERVAL_HOURS
         );
         assert!(
             config
@@ -5056,6 +6102,73 @@ mod tests {
         assert_eq!(config.transparency.provider, DEFAULT_TRANSPARENCY_PROVIDER);
         assert_eq!(config.transparency.url, None);
         assert!(config.audit.enabled);
+    }
+
+    #[tokio::test]
+    async fn apply_runtime_config_to_db_seeds_retention_and_assurance_settings() {
+        let state = test_state(DEFAULT_MAX_PAYLOAD_BYTES).await;
+        let runtime_config = VaultRuntimeConfig {
+            addr: SocketAddr::from(([127, 0, 0, 1], 8080)),
+            storage_dir: state.storage_dir.clone(),
+            db_path: state.storage_dir.join("metadata.db"),
+            signing_key_path: None,
+            signing_kid: "kid-runtime".to_string(),
+            metadata_backend: "sqlite".to_string(),
+            blob_backend: "filesystem".to_string(),
+            max_payload_bytes: DEFAULT_MAX_PAYLOAD_BYTES,
+            retention_grace_period_days: 45,
+            retention_scan_interval_hours: 8,
+            retention_policies: vec![RetentionPolicyConfig {
+                retention_class: "runtime_logs".to_string(),
+                min_duration_days: 4000,
+                max_duration_days: Some(5000),
+                legal_basis: "custom_runtime_policy".to_string(),
+                active: true,
+            }],
+            timestamp_config: Some(TimestampConfig {
+                enabled: true,
+                provider: "rfc3161".to_string(),
+                url: "https://tsa.example.test".to_string(),
+                assurance: Some("qualified".to_string()),
+            }),
+            transparency_config: Some(TransparencyConfig {
+                enabled: true,
+                provider: "rekor".to_string(),
+                url: Some("https://rekor.example.test".to_string()),
+            }),
+            config_path: Some(state.storage_dir.join("vault.toml")),
+        };
+
+        apply_runtime_config_to_db(&state.db, &runtime_config)
+            .await
+            .unwrap();
+
+        let policies = load_retention_policies(&state.db).await.unwrap();
+        let runtime_logs = policies
+            .iter()
+            .find(|policy| policy.retention_class == "runtime_logs")
+            .unwrap();
+        assert_eq!(runtime_logs.min_duration_days, 4000);
+        assert_eq!(runtime_logs.max_duration_days, Some(5000));
+        assert_eq!(runtime_logs.legal_basis, "custom_runtime_policy");
+
+        let timestamp = load_timestamp_config(&state.db).await.unwrap();
+        assert!(timestamp.enabled);
+        assert_eq!(timestamp.url, "https://tsa.example.test");
+
+        let transparency = load_transparency_config(&state.db).await.unwrap();
+        assert!(transparency.enabled);
+        assert_eq!(
+            transparency.url.as_deref(),
+            Some("https://rekor.example.test")
+        );
+
+        let audit_actions: Vec<String> =
+            sqlx::query_scalar("SELECT action FROM audit_log ORDER BY id ASC")
+                .fetch_all(&state.db)
+                .await
+                .unwrap();
+        assert!(audit_actions.contains(&"startup_config_sync".to_string()));
     }
 
     #[tokio::test]

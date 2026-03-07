@@ -12,8 +12,11 @@ use proof_layer_core::{
     decode_public_key_pem, encode_private_key_pem, encode_public_key_pem, sha256_prefixed,
     timestamp_digest, validate_bundle_integrity_fields, verify_receipt, verify_timestamp,
 };
-use reqwest::blocking::{Client, Response};
-use serde::{Deserialize, Serialize};
+use reqwest::{
+    Url,
+    blocking::{Client, Response},
+};
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::{
     collections::{BTreeMap, HashSet},
     fs,
@@ -106,6 +109,80 @@ enum Commands {
         #[arg(long)]
         to: Option<String>,
     },
+    /// Query and administer a running vault service.
+    Vault {
+        #[command(subcommand)]
+        command: VaultCommands,
+    },
+}
+
+#[derive(Subcommand)]
+enum VaultCommands {
+    /// Check vault readiness and summarize current configuration and inventory.
+    Status {
+        #[arg(long)]
+        vault_url: String,
+        #[arg(long, default_value = "human")]
+        format: OutputFormat,
+    },
+    /// Query stored bundles via the vault API.
+    Query {
+        #[arg(long)]
+        vault_url: String,
+        #[arg(long)]
+        system_id: Option<String>,
+        #[arg(long)]
+        role: Option<ActorRoleArg>,
+        #[arg(long = "type")]
+        item_type: Option<EvidenceTypeArg>,
+        #[arg(long)]
+        has_timestamp: bool,
+        #[arg(long)]
+        has_receipt: bool,
+        #[arg(long)]
+        assurance_level: Option<AssuranceLevelArg>,
+        #[arg(long)]
+        from: Option<String>,
+        #[arg(long)]
+        to: Option<String>,
+        #[arg(long, default_value_t = 1)]
+        page: u32,
+        #[arg(long, default_value_t = 50)]
+        limit: u32,
+        #[arg(long, default_value = "human")]
+        format: OutputFormat,
+    },
+    /// Show the retention policy report exposed by the vault.
+    Retention {
+        #[arg(long)]
+        vault_url: String,
+        #[arg(long, default_value = "human")]
+        format: OutputFormat,
+    },
+    /// List known systems or fetch a single system evidence summary.
+    Systems {
+        #[arg(long)]
+        vault_url: String,
+        #[arg(long)]
+        system_id: Option<String>,
+        #[arg(long, default_value = "human")]
+        format: OutputFormat,
+    },
+    /// Assemble and download an evidence pack via the vault.
+    Export {
+        #[arg(long = "type")]
+        pack_type: PackTypeArg,
+        #[arg(long)]
+        vault_url: String,
+        #[arg(long)]
+        out: PathBuf,
+        #[arg(long)]
+        system_id: Option<String>,
+        #[arg(long)]
+        from: Option<String>,
+        #[arg(long)]
+        to: Option<String>,
+    },
 }
 
 #[derive(Clone, Debug)]
@@ -144,6 +221,22 @@ enum PackTypeArg {
     AiLiteracy,
     SystemicRisk,
     IncidentResponse,
+}
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq, ValueEnum)]
+#[value(rename_all = "snake_case")]
+enum ActorRoleArg {
+    Provider,
+    Deployer,
+    Integrator,
+}
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq, ValueEnum)]
+#[value(rename_all = "snake_case")]
+enum AssuranceLevelArg {
+    Signed,
+    Timestamped,
+    TransparencyAnchored,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -208,6 +301,21 @@ struct CreateCommandInput<'a> {
     overrides: &'a CreateOverrides,
     timestamp_url: Option<&'a str>,
     transparency_log: Option<&'a str>,
+}
+
+struct VaultQueryCommandInput<'a> {
+    vault_url: &'a str,
+    system_id: Option<&'a str>,
+    role: Option<ActorRoleArg>,
+    item_type: Option<EvidenceTypeArg>,
+    has_timestamp: bool,
+    has_receipt: bool,
+    assurance_level: Option<AssuranceLevelArg>,
+    from: Option<&'a str>,
+    to: Option<&'a str>,
+    page: u32,
+    limit: u32,
+    format: OutputFormat,
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -283,6 +391,180 @@ struct ErrorResponse {
     error: String,
 }
 
+#[derive(Debug, Deserialize, Serialize)]
+struct VaultBundleListResponse {
+    page: u32,
+    limit: u32,
+    items: Vec<VaultBundleSummary>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct VaultBundleSummary {
+    bundle_id: String,
+    bundle_version: String,
+    created_at: String,
+    actor_role: String,
+    system_id: Option<String>,
+    model_id: Option<String>,
+    bundle_root: String,
+    signature_alg: String,
+    retention_class: String,
+    expires_at: Option<String>,
+    has_legal_hold: bool,
+    has_timestamp: bool,
+    has_receipt: bool,
+    assurance_level: String,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct VaultRetentionStatusResponse {
+    scanned_at: String,
+    grace_period_days: i64,
+    policies: Vec<VaultRetentionStatusItem>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct VaultRetentionStatusItem {
+    retention_class: String,
+    min_duration_days: i64,
+    max_duration_days: Option<i64>,
+    legal_basis: String,
+    active: bool,
+    total_bundles: i64,
+    active_bundles: i64,
+    deleted_bundles: i64,
+    held_bundles: i64,
+    expired_active_bundles: i64,
+    hard_delete_ready_bundles: i64,
+    next_expiry: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct VaultConfigResponse {
+    service: VaultServiceConfigView,
+    signing: VaultSigningConfigView,
+    storage: VaultStorageConfigView,
+    retention: VaultRetentionConfigView,
+    timestamp: VaultTimestampConfig,
+    transparency: VaultTransparencyConfig,
+    audit: VaultAuditConfigView,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct VaultServiceConfigView {
+    addr: String,
+    max_payload_bytes: usize,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct VaultSigningConfigView {
+    key_id: String,
+    algorithm: String,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct VaultStorageConfigView {
+    metadata_backend: String,
+    blob_backend: String,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct VaultRetentionConfigView {
+    grace_period_days: i64,
+    scan_interval_hours: i64,
+    policies: Vec<VaultRetentionPolicyConfig>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct VaultRetentionPolicyConfig {
+    retention_class: String,
+    min_duration_days: i64,
+    max_duration_days: Option<i64>,
+    legal_basis: String,
+    active: bool,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct VaultTimestampConfig {
+    enabled: bool,
+    provider: String,
+    url: String,
+    assurance: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct VaultTransparencyConfig {
+    enabled: bool,
+    provider: String,
+    url: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct VaultAuditConfigView {
+    enabled: bool,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct VaultSystemsResponse {
+    items: Vec<VaultSystemListEntry>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct VaultSystemListEntry {
+    system_id: String,
+    bundle_count: i64,
+    active_bundle_count: i64,
+    deleted_bundle_count: i64,
+    first_seen_at: Option<String>,
+    latest_bundle_at: Option<String>,
+    timestamped_bundle_count: i64,
+    receipt_bundle_count: i64,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct VaultSystemSummaryResponse {
+    system_id: String,
+    bundle_count: i64,
+    active_bundle_count: i64,
+    deleted_bundle_count: i64,
+    first_seen_at: Option<String>,
+    latest_bundle_at: Option<String>,
+    timestamped_bundle_count: i64,
+    receipt_bundle_count: i64,
+    actor_roles: Vec<VaultFacetCount>,
+    evidence_types: Vec<VaultFacetCount>,
+    retention_classes: Vec<VaultFacetCount>,
+    assurance_levels: Vec<VaultFacetCount>,
+    model_ids: Vec<VaultFacetCount>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct VaultFacetCount {
+    value: String,
+    count: i64,
+}
+
+#[derive(Debug, Serialize)]
+struct VaultStatusOutput {
+    ready: bool,
+    service_addr: String,
+    max_payload_bytes: usize,
+    signing_key_id: String,
+    metadata_backend: String,
+    blob_backend: String,
+    bundle_total: i64,
+    bundle_active: i64,
+    bundle_deleted: i64,
+    bundle_held: i64,
+    system_count: usize,
+    retention_policy_count: usize,
+    scan_interval_hours: i64,
+    timestamp_enabled: bool,
+    timestamp_provider: String,
+    transparency_enabled: bool,
+    transparency_provider: String,
+}
+
 impl EvidenceTypeArg {
     fn matches_item(self, item: &EvidenceItem) -> bool {
         matches!(
@@ -323,6 +605,26 @@ impl PackTypeArg {
             Self::AiLiteracy => "ai_literacy",
             Self::SystemicRisk => "systemic_risk",
             Self::IncidentResponse => "incident_response",
+        }
+    }
+}
+
+impl ActorRoleArg {
+    fn as_api_value(self) -> &'static str {
+        match self {
+            Self::Provider => "provider",
+            Self::Deployer => "deployer",
+            Self::Integrator => "integrator",
+        }
+    }
+}
+
+impl AssuranceLevelArg {
+    fn as_api_value(self) -> &'static str {
+        match self {
+            Self::Signed => "signed",
+            Self::Timestamped => "timestamped",
+            Self::TransparencyAnchored => "transparency_anchored",
         }
     }
 }
@@ -394,6 +696,59 @@ fn main() -> Result<()> {
             from.as_deref(),
             to.as_deref(),
         ),
+        Commands::Vault { command } => match command {
+            VaultCommands::Status { vault_url, format } => cmd_vault_status(&vault_url, format),
+            VaultCommands::Query {
+                vault_url,
+                system_id,
+                role,
+                item_type,
+                has_timestamp,
+                has_receipt,
+                assurance_level,
+                from,
+                to,
+                page,
+                limit,
+                format,
+            } => cmd_vault_query(VaultQueryCommandInput {
+                vault_url: &vault_url,
+                system_id: system_id.as_deref(),
+                role,
+                item_type,
+                has_timestamp,
+                has_receipt,
+                assurance_level,
+                from: from.as_deref(),
+                to: to.as_deref(),
+                page,
+                limit,
+                format,
+            }),
+            VaultCommands::Retention { vault_url, format } => {
+                cmd_vault_retention(&vault_url, format)
+            }
+            VaultCommands::Systems {
+                vault_url,
+                system_id,
+                format,
+            } => cmd_vault_systems(&vault_url, system_id.as_deref(), format),
+            VaultCommands::Export {
+                pack_type,
+                vault_url,
+                out,
+                system_id,
+                from,
+                to,
+            } => cmd_pack(
+                pack_type,
+                &vault_url,
+                &out,
+                system_id.as_deref(),
+                from.as_deref(),
+                to.as_deref(),
+            ),
+        },
     }
 }
 
@@ -774,9 +1129,7 @@ fn cmd_pack(
         }
     }
 
-    let client = Client::builder()
-        .build()
-        .context("failed to build HTTP client")?;
+    let client = build_http_client()?;
     let create_url = join_vault_url(vault_url, "/v1/packs");
     let create_response = client
         .post(&create_url)
@@ -830,6 +1183,271 @@ fn cmd_pack(
     info!("bundle_ids={}", pack.bundle_ids.join(","));
 
     Ok(())
+}
+
+fn cmd_vault_status(vault_url: &str, format: OutputFormat) -> Result<()> {
+    let client = build_http_client()?;
+    require_vault_ready(&client, vault_url)?;
+    let config: VaultConfigResponse = get_json(
+        &client,
+        build_vault_path_url(vault_url, &["v1", "config"])?,
+        "vault config",
+    )?;
+    let retention: VaultRetentionStatusResponse = get_json(
+        &client,
+        build_vault_path_url(vault_url, &["v1", "retention", "status"])?,
+        "vault retention status",
+    )?;
+    let systems: VaultSystemsResponse = get_json(
+        &client,
+        build_vault_path_url(vault_url, &["v1", "systems"])?,
+        "vault systems",
+    )?;
+
+    let bundle_total = retention
+        .policies
+        .iter()
+        .map(|policy| policy.total_bundles)
+        .sum::<i64>();
+    let bundle_active = retention
+        .policies
+        .iter()
+        .map(|policy| policy.active_bundles)
+        .sum::<i64>();
+    let bundle_deleted = retention
+        .policies
+        .iter()
+        .map(|policy| policy.deleted_bundles)
+        .sum::<i64>();
+    let bundle_held = retention
+        .policies
+        .iter()
+        .map(|policy| policy.held_bundles)
+        .sum::<i64>();
+    let output = VaultStatusOutput {
+        ready: true,
+        service_addr: config.service.addr.clone(),
+        max_payload_bytes: config.service.max_payload_bytes,
+        signing_key_id: config.signing.key_id.clone(),
+        metadata_backend: config.storage.metadata_backend.clone(),
+        blob_backend: config.storage.blob_backend.clone(),
+        bundle_total,
+        bundle_active,
+        bundle_deleted,
+        bundle_held,
+        system_count: systems.items.len(),
+        retention_policy_count: config.retention.policies.len(),
+        scan_interval_hours: config.retention.scan_interval_hours,
+        timestamp_enabled: config.timestamp.enabled,
+        timestamp_provider: config.timestamp.provider.clone(),
+        transparency_enabled: config.transparency.enabled,
+        transparency_provider: config.transparency.provider.clone(),
+    };
+
+    match format {
+        OutputFormat::Human => print_vault_status_human(&output, &config),
+        OutputFormat::Json => println!("{}", serde_json::to_string_pretty(&output)?),
+    }
+
+    Ok(())
+}
+
+fn cmd_vault_query(args: VaultQueryCommandInput<'_>) -> Result<()> {
+    let client = build_http_client()?;
+    let query_url = build_vault_bundles_query_url(&args)?;
+    let response: VaultBundleListResponse = get_json(&client, query_url, "vault bundle query")?;
+
+    match args.format {
+        OutputFormat::Human => print_vault_bundle_query_human(&response),
+        OutputFormat::Json => println!("{}", serde_json::to_string_pretty(&response)?),
+    }
+
+    Ok(())
+}
+
+fn cmd_vault_retention(vault_url: &str, format: OutputFormat) -> Result<()> {
+    let client = build_http_client()?;
+    let response: VaultRetentionStatusResponse = get_json(
+        &client,
+        build_vault_path_url(vault_url, &["v1", "retention", "status"])?,
+        "vault retention status",
+    )?;
+
+    match format {
+        OutputFormat::Human => print_vault_retention_human(&response),
+        OutputFormat::Json => println!("{}", serde_json::to_string_pretty(&response)?),
+    }
+
+    Ok(())
+}
+
+fn cmd_vault_systems(vault_url: &str, system_id: Option<&str>, format: OutputFormat) -> Result<()> {
+    let client = build_http_client()?;
+
+    if let Some(system_id) = system_id {
+        let system_id = normalize_optional_cli_text("system_id", Some(system_id))?
+            .expect("system_id was just provided");
+        let response: VaultSystemSummaryResponse = get_json(
+            &client,
+            build_vault_path_url(vault_url, &["v1", "systems", &system_id, "summary"])?,
+            "vault system summary",
+        )?;
+        match format {
+            OutputFormat::Human => print_vault_system_summary_human(&response),
+            OutputFormat::Json => println!("{}", serde_json::to_string_pretty(&response)?),
+        }
+        return Ok(());
+    }
+
+    let response: VaultSystemsResponse = get_json(
+        &client,
+        build_vault_path_url(vault_url, &["v1", "systems"])?,
+        "vault systems",
+    )?;
+    match format {
+        OutputFormat::Human => print_vault_systems_human(&response),
+        OutputFormat::Json => println!("{}", serde_json::to_string_pretty(&response)?),
+    }
+    Ok(())
+}
+
+fn print_vault_status_human(status: &VaultStatusOutput, config: &VaultConfigResponse) {
+    println!("ready: {}", if status.ready { "yes" } else { "no" });
+    println!("service.addr: {}", status.service_addr);
+    println!("service.max_payload_bytes: {}", status.max_payload_bytes);
+    println!("signing.key_id: {}", status.signing_key_id);
+    println!(
+        "storage: metadata={} blobs={}",
+        status.metadata_backend, status.blob_backend
+    );
+    println!(
+        "bundles: total={} active={} deleted={} held={}",
+        status.bundle_total, status.bundle_active, status.bundle_deleted, status.bundle_held
+    );
+    println!("systems: {}", status.system_count);
+    println!(
+        "retention: policies={} grace_days={} scan_interval_hours={}",
+        status.retention_policy_count,
+        config.retention.grace_period_days,
+        status.scan_interval_hours
+    );
+    println!(
+        "timestamp: enabled={} provider={}",
+        status.timestamp_enabled, status.timestamp_provider
+    );
+    println!(
+        "transparency: enabled={} provider={}",
+        status.transparency_enabled, status.transparency_provider
+    );
+}
+
+fn print_vault_bundle_query_human(response: &VaultBundleListResponse) {
+    println!("page: {} limit: {}", response.page, response.limit);
+    if response.items.is_empty() {
+        println!("no bundles matched");
+        return;
+    }
+
+    for item in &response.items {
+        println!(
+            "{} {} system={} role={} assurance={} retention={} hold={}",
+            item.bundle_id,
+            item.created_at,
+            item.system_id.as_deref().unwrap_or("n/a"),
+            item.actor_role,
+            item.assurance_level,
+            item.retention_class,
+            if item.has_legal_hold { "yes" } else { "no" }
+        );
+    }
+}
+
+fn print_vault_retention_human(response: &VaultRetentionStatusResponse) {
+    println!(
+        "scanned_at: {} grace_period_days: {}",
+        response.scanned_at, response.grace_period_days
+    );
+    for policy in &response.policies {
+        println!(
+            "{} active={} min_days={} bundles(total={}, active={}, deleted={}, held={}) next_expiry={}",
+            policy.retention_class,
+            policy.active,
+            policy.min_duration_days,
+            policy.total_bundles,
+            policy.active_bundles,
+            policy.deleted_bundles,
+            policy.held_bundles,
+            policy.next_expiry.as_deref().unwrap_or("n/a")
+        );
+    }
+}
+
+fn print_vault_systems_human(response: &VaultSystemsResponse) {
+    if response.items.is_empty() {
+        println!("no systems found");
+        return;
+    }
+
+    for item in &response.items {
+        println!(
+            "{} bundles={} active={} deleted={} timestamped={} anchored={} latest={}",
+            item.system_id,
+            item.bundle_count,
+            item.active_bundle_count,
+            item.deleted_bundle_count,
+            item.timestamped_bundle_count,
+            item.receipt_bundle_count,
+            item.latest_bundle_at.as_deref().unwrap_or("n/a")
+        );
+    }
+}
+
+fn print_vault_system_summary_human(response: &VaultSystemSummaryResponse) {
+    println!("system_id: {}", response.system_id);
+    println!(
+        "bundles: total={} active={} deleted={} timestamped={} anchored={}",
+        response.bundle_count,
+        response.active_bundle_count,
+        response.deleted_bundle_count,
+        response.timestamped_bundle_count,
+        response.receipt_bundle_count
+    );
+    println!(
+        "first_seen_at: {}",
+        response.first_seen_at.as_deref().unwrap_or("n/a")
+    );
+    println!(
+        "latest_bundle_at: {}",
+        response.latest_bundle_at.as_deref().unwrap_or("n/a")
+    );
+    println!(
+        "actor_roles: {}",
+        format_facet_counts(&response.actor_roles)
+    );
+    println!(
+        "evidence_types: {}",
+        format_facet_counts(&response.evidence_types)
+    );
+    println!(
+        "retention_classes: {}",
+        format_facet_counts(&response.retention_classes)
+    );
+    println!(
+        "assurance_levels: {}",
+        format_facet_counts(&response.assurance_levels)
+    );
+    println!("model_ids: {}", format_facet_counts(&response.model_ids));
+}
+
+fn format_facet_counts(values: &[VaultFacetCount]) -> String {
+    if values.is_empty() {
+        return "none".to_string();
+    }
+    values
+        .iter()
+        .map(|entry| format!("{}({})", entry.value, entry.count))
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 fn materialize_capture_event(capture: SealableCaptureInput) -> CaptureEvent {
@@ -1410,6 +2028,81 @@ fn normalize_optional_cli_datetime(label: &str, value: Option<&str>) -> Result<O
     }
 }
 
+fn build_http_client() -> Result<Client> {
+    Client::builder()
+        .build()
+        .context("failed to build HTTP client")
+}
+
+fn require_vault_ready(client: &Client, vault_url: &str) -> Result<()> {
+    let response = client
+        .get(join_vault_url(vault_url, "/readyz"))
+        .send()
+        .with_context(|| format!("failed to call {}/readyz", vault_url.trim_end_matches('/')))?;
+    ensure_success(response, "vault readiness check").map(|_| ())
+}
+
+fn get_json<T: DeserializeOwned>(client: &Client, url: String, action: &str) -> Result<T> {
+    let response = client
+        .get(&url)
+        .send()
+        .with_context(|| format!("failed to call {url}"))?;
+    let response = ensure_success(response, action)?;
+    response
+        .json()
+        .with_context(|| format!("failed to decode {action} response"))
+}
+
+fn build_vault_path_url(vault_url: &str, segments: &[&str]) -> Result<String> {
+    let mut url = Url::parse(&format!("{}/", vault_url.trim_end_matches('/')))
+        .with_context(|| format!("invalid vault_url: {vault_url}"))?;
+    {
+        let mut path_segments = url
+            .path_segments_mut()
+            .map_err(|_| anyhow!("vault_url must be a base URL"))?;
+        path_segments.clear();
+        for segment in segments {
+            path_segments.push(segment);
+        }
+    }
+    Ok(url.to_string())
+}
+
+fn build_vault_bundles_query_url(args: &VaultQueryCommandInput<'_>) -> Result<String> {
+    let mut url = Url::parse(&build_vault_path_url(args.vault_url, &["v1", "bundles"])?)
+        .context("failed to construct vault bundle query URL")?;
+    {
+        let mut query = url.query_pairs_mut();
+        if let Some(system_id) = normalize_optional_cli_text("system_id", args.system_id)? {
+            query.append_pair("system_id", &system_id);
+        }
+        if let Some(role) = args.role {
+            query.append_pair("role", role.as_api_value());
+        }
+        if let Some(item_type) = args.item_type {
+            query.append_pair("type", item_type.as_str());
+        }
+        if args.has_timestamp {
+            query.append_pair("has_timestamp", "true");
+        }
+        if args.has_receipt {
+            query.append_pair("has_receipt", "true");
+        }
+        if let Some(assurance_level) = args.assurance_level {
+            query.append_pair("assurance_level", assurance_level.as_api_value());
+        }
+        if let Some(from) = normalize_optional_cli_datetime("from", args.from)? {
+            query.append_pair("from", &from);
+        }
+        if let Some(to) = normalize_optional_cli_datetime("to", args.to)? {
+            query.append_pair("to", &to);
+        }
+        query.append_pair("page", &args.page.max(1).to_string());
+        query.append_pair("limit", &args.limit.clamp(1, 100).to_string());
+    }
+    Ok(url.to_string())
+}
+
 fn join_vault_url(base: &str, path: &str) -> String {
     format!("{}{}", base.trim_end_matches('/'), path)
 }
@@ -1788,6 +2481,44 @@ mod tests {
     fn join_vault_url_strips_trailing_slash() {
         let joined = join_vault_url("http://127.0.0.1:8080/", "/v1/packs");
         assert_eq!(joined, "http://127.0.0.1:8080/v1/packs");
+    }
+
+    #[test]
+    fn build_vault_bundles_query_url_encodes_filters() {
+        let url = build_vault_bundles_query_url(&VaultQueryCommandInput {
+            vault_url: "http://127.0.0.1:8080/",
+            system_id: Some("system-123"),
+            role: Some(ActorRoleArg::Provider),
+            item_type: Some(EvidenceTypeArg::LlmInteraction),
+            has_timestamp: true,
+            has_receipt: false,
+            assurance_level: Some(AssuranceLevelArg::Timestamped),
+            from: Some("2026-03-01T00:00:00Z"),
+            to: Some("2026-03-06T00:00:00Z"),
+            page: 2,
+            limit: 25,
+            format: OutputFormat::Human,
+        })
+        .unwrap();
+
+        assert!(url.starts_with("http://127.0.0.1:8080/v1/bundles?"));
+        assert!(url.contains("system_id=system-123"));
+        assert!(url.contains("role=provider"));
+        assert!(url.contains("type=llm_interaction"));
+        assert!(url.contains("has_timestamp=true"));
+        assert!(url.contains("assurance_level=timestamped"));
+        assert!(url.contains("page=2"));
+        assert!(url.contains("limit=25"));
+    }
+
+    #[test]
+    fn build_vault_path_url_encodes_path_segments() {
+        let url = build_vault_path_url(
+            "http://127.0.0.1:8080",
+            &["v1", "systems", "a/b", "summary"],
+        )
+        .unwrap();
+        assert_eq!(url, "http://127.0.0.1:8080/v1/systems/a%2Fb/summary");
     }
 
     #[test]

@@ -2892,9 +2892,11 @@ fn pack_profile(pack_type: &str) -> Result<PackProfile> {
                 "policy_decision",
                 "technical_doc",
                 "risk_assessment",
+                "model_evaluation",
+                "training_provenance",
             ],
             retention_classes: &["technical_doc", "risk_mgmt"],
-            obligation_refs: &["art11_annex_iv", "art9", "art12_19_26"],
+            obligation_refs: &["art11_annex_iv", "art9", "art12_19_26", "art53_annex_xi"],
         }),
         "annex_xii" => Ok(PackProfile {
             pack_type: "annex_xii",
@@ -2943,9 +2945,18 @@ fn pack_profile(pack_type: &str) -> Result<PackProfile> {
                 "llm_interaction",
                 "technical_doc",
                 "policy_decision",
+                "model_evaluation",
+                "adversarial_test",
+                "incident_report",
             ],
             retention_classes: &["risk_mgmt", "technical_doc"],
-            obligation_refs: &["art9", "art11_annex_iv"],
+            obligation_refs: &[
+                "art9",
+                "art11_annex_iv",
+                "art53_annex_xi",
+                "art55",
+                "art55_73",
+            ],
         }),
         "incident_response" => Ok(PackProfile {
             pack_type: "incident_response",
@@ -3173,6 +3184,9 @@ fn evidence_item_obligation_ref(bundle: &ProofBundle, item: &EvidenceItem) -> Op
         EvidenceItem::RiskAssessment(_) => Some("art9"),
         EvidenceItem::DataGovernance(_) => Some("art10"),
         EvidenceItem::HumanOversight(_) => Some("art14"),
+        EvidenceItem::ModelEvaluation(_) => Some("art53_annex_xi"),
+        EvidenceItem::AdversarialTest(_) => Some("art55"),
+        EvidenceItem::TrainingProvenance(_) => Some("art53_annex_xi"),
         EvidenceItem::LiteracyAttestation(_) => Some("art4"),
         EvidenceItem::IncidentReport(_) => Some("art55_73"),
         EvidenceItem::LlmInteraction(_)
@@ -4155,6 +4169,9 @@ fn evidence_item_type(item: &EvidenceItem) -> &'static str {
         EvidenceItem::RiskAssessment(_) => "risk_assessment",
         EvidenceItem::DataGovernance(_) => "data_governance",
         EvidenceItem::TechnicalDoc(_) => "technical_doc",
+        EvidenceItem::ModelEvaluation(_) => "model_evaluation",
+        EvidenceItem::AdversarialTest(_) => "adversarial_test",
+        EvidenceItem::TrainingProvenance(_) => "training_provenance",
         EvidenceItem::LiteracyAttestation(_) => "literacy_attestation",
         EvidenceItem::IncidentReport(_) => "incident_report",
     }
@@ -7108,22 +7125,24 @@ mod tests {
                 capture: SealableCaptureInput::V10(sample_event_with_profile(
                     "system-z",
                     proof_layer_core::ActorRole::Provider,
-                    vec![EvidenceItem::TechnicalDoc(
-                        proof_layer_core::schema::TechnicalDocEvidence {
-                            document_ref: "provider-doc".to_string(),
-                            section: Some("model-card".to_string()),
-                            commitment: Some(
+                    vec![EvidenceItem::TrainingProvenance(
+                        proof_layer_core::schema::TrainingProvenanceEvidence {
+                            dataset_ref: "dataset://foundation/pretrain-v3".to_string(),
+                            stage: "pretraining".to_string(),
+                            lineage_ref: Some("lineage://snapshot/provider".to_string()),
+                            record_commitment: Some(
                                 "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
                                     .to_string(),
                             ),
+                            metadata: serde_json::json!({"source": "registry"}),
                         },
                     )],
                     Some("technical_doc"),
                 )),
                 artefacts: vec![InlineArtefact {
-                    name: "provider-doc.json".to_string(),
+                    name: "provider-training-provenance.json".to_string(),
                     content_type: "application/json".to_string(),
-                    data_base64: Base64::encode_string(br#"{"doc":"provider"}"#),
+                    data_base64: Base64::encode_string(br#"{"dataset":"provider"}"#),
                 }],
             },
         )
@@ -7135,22 +7154,24 @@ mod tests {
                 capture: SealableCaptureInput::V10(sample_event_with_profile(
                     "system-z",
                     proof_layer_core::ActorRole::Integrator,
-                    vec![EvidenceItem::TechnicalDoc(
-                        proof_layer_core::schema::TechnicalDocEvidence {
-                            document_ref: "integrator-doc".to_string(),
-                            section: Some("integration-guide".to_string()),
-                            commitment: Some(
+                    vec![EvidenceItem::TrainingProvenance(
+                        proof_layer_core::schema::TrainingProvenanceEvidence {
+                            dataset_ref: "dataset://foundation/pretrain-v3".to_string(),
+                            stage: "fine_tuning".to_string(),
+                            lineage_ref: Some("lineage://snapshot/integrator".to_string()),
+                            record_commitment: Some(
                                 "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
                                     .to_string(),
                             ),
+                            metadata: serde_json::json!({"source": "integrator-registry"}),
                         },
                     )],
                     Some("technical_doc"),
                 )),
                 artefacts: vec![InlineArtefact {
-                    name: "integrator-doc.json".to_string(),
+                    name: "integrator-training-provenance.json".to_string(),
                     content_type: "application/json".to_string(),
-                    data_base64: Base64::encode_string(br#"{"doc":"integrator"}"#),
+                    data_base64: Base64::encode_string(br#"{"dataset":"integrator"}"#),
                 }],
             },
         )
@@ -7194,7 +7215,8 @@ mod tests {
 
         assert_eq!(manifest.bundles.len(), 1);
         assert_eq!(manifest.bundles[0].actor_role, "provider");
-        assert_eq!(manifest.bundles[0].obligation_refs, vec!["art11_annex_iv"]);
+        assert_eq!(manifest.bundles[0].item_types, vec!["training_provenance"]);
+        assert_eq!(manifest.bundles[0].obligation_refs, vec!["art53_annex_xi"]);
         assert!(
             manifest.bundles[0]
                 .matched_rules
@@ -7203,7 +7225,134 @@ mod tests {
         assert!(
             manifest.bundles[0]
                 .matched_rules
-                .contains(&"item_type:technical_doc".to_string())
+                .contains(&"item_type:training_provenance".to_string())
+        );
+        assert!(
+            manifest.bundles[0]
+                .matched_rules
+                .contains(&"obligation_ref:art53_annex_xi".to_string())
+        );
+    }
+
+    #[tokio::test]
+    async fn systemic_risk_pack_curates_adversarial_tests_for_provider_role() {
+        let state = test_state(DEFAULT_MAX_PAYLOAD_BYTES).await;
+        let app = build_router(state, DEFAULT_MAX_PAYLOAD_BYTES);
+
+        let provider_bundle = create_bundle_response(
+            &app,
+            &CreateBundleRequest {
+                capture: SealableCaptureInput::V10(sample_event_with_profile(
+                    "system-risk",
+                    proof_layer_core::ActorRole::Provider,
+                    vec![EvidenceItem::AdversarialTest(
+                        proof_layer_core::schema::AdversarialTestEvidence {
+                            test_id: "adv-77".to_string(),
+                            focus: "prompt-injection".to_string(),
+                            status: "open".to_string(),
+                            finding_severity: Some("high".to_string()),
+                            report_commitment: Some(
+                                "sha256:cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
+                                    .to_string(),
+                            ),
+                            metadata: serde_json::json!({"suite": "red-team"}),
+                        },
+                    )],
+                    Some("risk_mgmt"),
+                )),
+                artefacts: vec![InlineArtefact {
+                    name: "provider-adversarial-test.json".to_string(),
+                    content_type: "application/json".to_string(),
+                    data_base64: Base64::encode_string(br#"{"test":"provider"}"#),
+                }],
+            },
+        )
+        .await;
+
+        create_bundle_response(
+            &app,
+            &CreateBundleRequest {
+                capture: SealableCaptureInput::V10(sample_event_with_profile(
+                    "system-risk",
+                    proof_layer_core::ActorRole::Integrator,
+                    vec![EvidenceItem::AdversarialTest(
+                        proof_layer_core::schema::AdversarialTestEvidence {
+                            test_id: "adv-88".to_string(),
+                            focus: "data-exfiltration".to_string(),
+                            status: "open".to_string(),
+                            finding_severity: Some("medium".to_string()),
+                            report_commitment: Some(
+                                "sha256:dededededededededededededededededededededededededededededededede"
+                                    .to_string(),
+                            ),
+                            metadata: serde_json::json!({"suite": "partner-red-team"}),
+                        },
+                    )],
+                    Some("risk_mgmt"),
+                )),
+                artefacts: vec![InlineArtefact {
+                    name: "integrator-adversarial-test.json".to_string(),
+                    content_type: "application/json".to_string(),
+                    data_base64: Base64::encode_string(br#"{"test":"integrator"}"#),
+                }],
+            },
+        )
+        .await;
+
+        let pack_req = Request::builder()
+            .method("POST")
+            .uri("/v1/packs")
+            .header("content-type", "application/json")
+            .body(Body::from(
+                serde_json::to_vec(&CreatePackRequest {
+                    pack_type: "systemic_risk".to_string(),
+                    system_id: Some("system-risk".to_string()),
+                    from: None,
+                    to: None,
+                })
+                .unwrap(),
+            ))
+            .unwrap();
+        let pack_res = app.clone().oneshot(pack_req).await.unwrap();
+        assert_eq!(pack_res.status(), StatusCode::CREATED);
+        let body = axum::body::to_bytes(pack_res.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let pack: PackSummaryResponse = serde_json::from_slice(&body).unwrap();
+
+        assert_eq!(pack.bundle_count, 1);
+        assert_eq!(pack.bundle_ids, vec![provider_bundle.bundle_id]);
+
+        let manifest_req = Request::builder()
+            .method("GET")
+            .uri(format!("/v1/packs/{}/manifest", pack.pack_id))
+            .body(Body::empty())
+            .unwrap();
+        let manifest_res = app.oneshot(manifest_req).await.unwrap();
+        assert_eq!(manifest_res.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(manifest_res.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let manifest: PackManifest = serde_json::from_slice(&body).unwrap();
+
+        assert_eq!(manifest.bundles.len(), 1);
+        assert_eq!(manifest.bundles[0].actor_role, "provider");
+        assert_eq!(manifest.bundles[0].item_types, vec!["adversarial_test"]);
+        assert_eq!(manifest.bundles[0].obligation_refs, vec!["art55"]);
+        assert!(
+            manifest.bundles[0]
+                .matched_rules
+                .contains(&"actor_role:provider".to_string())
+        );
+        assert!(
+            manifest.bundles[0]
+                .matched_rules
+                .contains(&"item_type:adversarial_test".to_string())
+        );
+        assert!(
+            manifest.bundles[0]
+                .matched_rules
+                .contains(&"obligation_ref:art55".to_string())
         );
     }
 }

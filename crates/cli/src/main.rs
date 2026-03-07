@@ -208,6 +208,9 @@ enum EvidenceTypeArg {
     RiskAssessment,
     DataGovernance,
     TechnicalDoc,
+    ModelEvaluation,
+    AdversarialTest,
+    TrainingProvenance,
     LiteracyAttestation,
     IncidentReport,
 }
@@ -579,6 +582,12 @@ impl EvidenceTypeArg {
                 | (Self::RiskAssessment, EvidenceItem::RiskAssessment(_))
                 | (Self::DataGovernance, EvidenceItem::DataGovernance(_))
                 | (Self::TechnicalDoc, EvidenceItem::TechnicalDoc(_))
+                | (Self::ModelEvaluation, EvidenceItem::ModelEvaluation(_))
+                | (Self::AdversarialTest, EvidenceItem::AdversarialTest(_))
+                | (
+                    Self::TrainingProvenance,
+                    EvidenceItem::TrainingProvenance(_)
+                )
                 | (
                     Self::LiteracyAttestation,
                     EvidenceItem::LiteracyAttestation(_)
@@ -597,6 +606,9 @@ impl EvidenceTypeArg {
             Self::RiskAssessment => "risk_assessment",
             Self::DataGovernance => "data_governance",
             Self::TechnicalDoc => "technical_doc",
+            Self::ModelEvaluation => "model_evaluation",
+            Self::AdversarialTest => "adversarial_test",
+            Self::TrainingProvenance => "training_provenance",
             Self::LiteracyAttestation => "literacy_attestation",
             Self::IncidentReport => "incident_report",
         }
@@ -1573,6 +1585,18 @@ fn describe_evidence_item(item: &EvidenceItem) -> String {
         EvidenceItem::TechnicalDoc(data) => {
             format!("technical_doc document_ref={}", data.document_ref)
         }
+        EvidenceItem::ModelEvaluation(data) => format!(
+            "model_evaluation evaluation_id={} benchmark={} status={}",
+            data.evaluation_id, data.benchmark, data.status
+        ),
+        EvidenceItem::AdversarialTest(data) => format!(
+            "adversarial_test test_id={} focus={} status={}",
+            data.test_id, data.focus, data.status
+        ),
+        EvidenceItem::TrainingProvenance(data) => format!(
+            "training_provenance dataset_ref={} stage={}",
+            data.dataset_ref, data.stage
+        ),
         EvidenceItem::LiteracyAttestation(data) => format!(
             "literacy_attestation role={} status={}",
             data.attested_role, data.status

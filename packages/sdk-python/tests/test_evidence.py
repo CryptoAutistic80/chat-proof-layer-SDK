@@ -1,15 +1,18 @@
 import unittest
 
 from proofsdk import (
+    create_adversarial_test_request,
     create_data_governance_request,
     create_human_oversight_request,
     create_incident_report_request,
     create_literacy_attestation_request,
     create_llm_interaction_request,
+    create_model_evaluation_request,
     create_policy_decision_request,
     create_retrieval_request,
     create_risk_assessment_request,
     create_technical_doc_request,
+    create_training_provenance_request,
     create_tool_call_request,
 )
 
@@ -189,6 +192,65 @@ class TestEvidenceBuilders(unittest.TestCase):
         )
         self.assertEqual(request["artefacts"][0]["name"], "incident_report.json")
         self.assertEqual(request["artefacts"][1]["name"], "incident_report_record.txt")
+
+    def test_model_evaluation_request_emits_gpai_evidence(self):
+        request = create_model_evaluation_request(
+            key_id="kid-dev-01",
+            system_id="system-gpai-1",
+            evaluation_id="eval-1",
+            benchmark="mmlu-pro",
+            status="completed",
+            summary="baseline complete",
+            report={"score": "0.84"},
+            metadata={"suite": "foundation-evals"},
+        )
+
+        self.assertEqual(request["capture"]["items"][0]["type"], "model_evaluation")
+        self.assertEqual(request["capture"]["items"][0]["data"]["benchmark"], "mmlu-pro")
+        self.assertTrue(
+            request["capture"]["items"][0]["data"]["report_commitment"].startswith("sha256:")
+        )
+        self.assertEqual(request["artefacts"][0]["name"], "model_evaluation.json")
+        self.assertEqual(request["artefacts"][1]["name"], "model_evaluation_report.json")
+
+    def test_adversarial_test_request_emits_systemic_risk_evidence(self):
+        request = create_adversarial_test_request(
+            key_id="kid-dev-01",
+            system_id="system-gpai-2",
+            test_id="adv-1",
+            focus="prompt-injection",
+            status="open",
+            finding_severity="high",
+            report="exploit transcript",
+            metadata={"suite": "red-team"},
+        )
+
+        self.assertEqual(request["capture"]["items"][0]["type"], "adversarial_test")
+        self.assertEqual(request["capture"]["items"][0]["data"]["focus"], "prompt-injection")
+        self.assertTrue(
+            request["capture"]["items"][0]["data"]["report_commitment"].startswith("sha256:")
+        )
+        self.assertEqual(request["artefacts"][0]["name"], "adversarial_test.json")
+        self.assertEqual(request["artefacts"][1]["name"], "adversarial_test_report.txt")
+
+    def test_training_provenance_request_emits_provenance_evidence(self):
+        request = create_training_provenance_request(
+            key_id="kid-dev-01",
+            system_id="system-gpai-3",
+            dataset_ref="dataset://foundation/pretrain-v3",
+            stage="pretraining",
+            lineage_ref="lineage://snapshot/2026-03-01",
+            record={"manifests": 12},
+            metadata={"source": "registry"},
+        )
+
+        self.assertEqual(request["capture"]["items"][0]["type"], "training_provenance")
+        self.assertEqual(request["capture"]["items"][0]["data"]["stage"], "pretraining")
+        self.assertTrue(
+            request["capture"]["items"][0]["data"]["record_commitment"].startswith("sha256:")
+        )
+        self.assertEqual(request["artefacts"][0]["name"], "training_provenance.json")
+        self.assertEqual(request["artefacts"][1]["name"], "training_provenance_record.json")
 
 
 if __name__ == "__main__":

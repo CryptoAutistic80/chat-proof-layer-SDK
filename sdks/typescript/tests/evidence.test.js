@@ -1,15 +1,18 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  createAdversarialTestRequest,
   createDataGovernanceRequest,
   createHumanOversightRequest,
   createIncidentReportRequest,
   createLiteracyAttestationRequest,
   createLlmInteractionRequest,
+  createModelEvaluationRequest,
   createPolicyDecisionRequest,
   createRetrievalRequest,
   createRiskAssessmentRequest,
   createTechnicalDocRequest,
+  createTrainingProvenanceRequest,
   createToolCallRequest
 } from "../dist/index.js";
 
@@ -186,4 +189,60 @@ test("createIncidentReportRequest emits incident evidence with report commitment
   assert.ok(request.capture.items[0].data.report_commitment.startsWith("sha256:"));
   assert.equal(request.artefacts[0].name, "incident_report.json");
   assert.equal(request.artefacts[1].name, "incident_report_record.txt");
+});
+
+test("createModelEvaluationRequest emits GPAI evaluation evidence", () => {
+  const request = createModelEvaluationRequest({
+    keyId: "kid-dev-01",
+    systemId: "system-gpai-1",
+    evaluationId: "eval-1",
+    benchmark: "mmlu-pro",
+    status: "completed",
+    summary: "baseline complete",
+    report: { score: "0.84" },
+    metadata: { suite: "foundation-evals" }
+  });
+
+  assert.equal(request.capture.items[0].type, "model_evaluation");
+  assert.equal(request.capture.items[0].data.benchmark, "mmlu-pro");
+  assert.ok(request.capture.items[0].data.report_commitment.startsWith("sha256:"));
+  assert.equal(request.artefacts[0].name, "model_evaluation.json");
+  assert.equal(request.artefacts[1].name, "model_evaluation_report.json");
+});
+
+test("createAdversarialTestRequest emits systemic-risk evidence", () => {
+  const request = createAdversarialTestRequest({
+    keyId: "kid-dev-01",
+    systemId: "system-gpai-2",
+    testId: "adv-1",
+    focus: "prompt-injection",
+    status: "open",
+    findingSeverity: "high",
+    report: "exploit transcript",
+    metadata: { suite: "red-team" }
+  });
+
+  assert.equal(request.capture.items[0].type, "adversarial_test");
+  assert.equal(request.capture.items[0].data.focus, "prompt-injection");
+  assert.ok(request.capture.items[0].data.report_commitment.startsWith("sha256:"));
+  assert.equal(request.artefacts[0].name, "adversarial_test.json");
+  assert.equal(request.artefacts[1].name, "adversarial_test_report.txt");
+});
+
+test("createTrainingProvenanceRequest emits provenance evidence", () => {
+  const request = createTrainingProvenanceRequest({
+    keyId: "kid-dev-01",
+    systemId: "system-gpai-3",
+    datasetRef: "dataset://foundation/pretrain-v3",
+    stage: "pretraining",
+    lineageRef: "lineage://snapshot/2026-03-01",
+    record: { manifests: 12 },
+    metadata: { source: "registry" }
+  });
+
+  assert.equal(request.capture.items[0].type, "training_provenance");
+  assert.equal(request.capture.items[0].data.stage, "pretraining");
+  assert.ok(request.capture.items[0].data.record_commitment.startsWith("sha256:"));
+  assert.equal(request.artefacts[0].name, "training_provenance.json");
+  assert.equal(request.artefacts[1].name, "training_provenance_record.json");
 });

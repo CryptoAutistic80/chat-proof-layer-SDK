@@ -5,15 +5,18 @@ from typing import Any, Callable
 
 from proofsdk.client import ProofLayerClient
 from proofsdk.evidence import (
+    create_adversarial_test_request,
     create_data_governance_request,
     create_human_oversight_request,
     create_incident_report_request,
     create_literacy_attestation_request,
     create_llm_interaction_request,
+    create_model_evaluation_request,
     create_policy_decision_request,
     create_retrieval_request,
     create_risk_assessment_request,
     create_technical_doc_request,
+    create_training_provenance_request,
     create_tool_call_request,
 )
 from proofsdk.local_client import LocalProofLayerClient
@@ -291,6 +294,54 @@ class ProofLayer:
         params, bundle_id, created_at = self._split_local_options(kwargs)
         return self._submit_capture(
             create_incident_report_request(
+                key_id=self.key_id,
+                role=self.role,
+                issuer=self.issuer,
+                app_id=self.app_id,
+                env=self.env,
+                system_id=params.pop("system_id", None) or self.system_id,
+                **params,
+            ),
+            bundle_id=bundle_id,
+            created_at=created_at,
+        )
+
+    def capture_model_evaluation(self, **kwargs: Any) -> dict[str, Any]:
+        params, bundle_id, created_at = self._split_local_options(kwargs)
+        return self._submit_capture(
+            create_model_evaluation_request(
+                key_id=self.key_id,
+                role=self.role,
+                issuer=self.issuer,
+                app_id=self.app_id,
+                env=self.env,
+                system_id=params.pop("system_id", None) or self.system_id,
+                **params,
+            ),
+            bundle_id=bundle_id,
+            created_at=created_at,
+        )
+
+    def capture_adversarial_test(self, **kwargs: Any) -> dict[str, Any]:
+        params, bundle_id, created_at = self._split_local_options(kwargs)
+        return self._submit_capture(
+            create_adversarial_test_request(
+                key_id=self.key_id,
+                role=self.role,
+                issuer=self.issuer,
+                app_id=self.app_id,
+                env=self.env,
+                system_id=params.pop("system_id", None) or self.system_id,
+                **params,
+            ),
+            bundle_id=bundle_id,
+            created_at=created_at,
+        )
+
+    def capture_training_provenance(self, **kwargs: Any) -> dict[str, Any]:
+        params, bundle_id, created_at = self._split_local_options(kwargs)
+        return self._submit_capture(
+            create_training_provenance_request(
                 key_id=self.key_id,
                 role=self.role,
                 issuer=self.issuer,

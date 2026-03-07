@@ -1,15 +1,18 @@
 from .client import ProofLayerClient
 from .decorators import prove_llm_call
 from .evidence import (
+    create_adversarial_test_request,
     create_data_governance_request,
     create_human_oversight_request,
     create_incident_report_request,
     create_literacy_attestation_request,
     create_llm_interaction_request,
+    create_model_evaluation_request,
     create_policy_decision_request,
     create_retrieval_request,
     create_risk_assessment_request,
     create_technical_doc_request,
+    create_training_provenance_request,
     create_tool_call_request,
 )
 from .local_client import LocalProofLayerClient
@@ -31,15 +34,18 @@ __all__ = [
     "build_bundle",
     "canonicalize_json",
     "compute_merkle_root",
+    "create_adversarial_test_request",
     "create_data_governance_request",
     "create_human_oversight_request",
     "create_incident_report_request",
     "create_literacy_attestation_request",
     "create_llm_interaction_request",
+    "create_model_evaluation_request",
     "create_policy_decision_request",
     "create_retrieval_request",
     "create_risk_assessment_request",
     "create_technical_doc_request",
+    "create_training_provenance_request",
     "create_tool_call_request",
     "hash_sha256",
     "prove_llm_call",

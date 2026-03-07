@@ -1,19 +1,23 @@
 import { readFileSync } from "node:fs";
 import {
+  createAdversarialTestRequest,
   createDataGovernanceRequest,
   createHumanOversightRequest,
   createIncidentReportRequest,
   createLiteracyAttestationRequest,
   createLlmInteractionRequest,
+  createModelEvaluationRequest,
   createPolicyDecisionRequest,
   createRetrievalRequest,
   createRiskAssessmentRequest,
   createTechnicalDocRequest,
+  createTrainingProvenanceRequest,
   createToolCallRequest
 } from "./evidence.js";
 import { LocalProofLayerClient } from "./local_client.js";
 import { ProofLayerClient } from "./client.js";
 import type {
+  AdversarialTestRequestOptions,
   BundleCreateClient,
   CreateBundleRequest,
   CreateBundleResponse,
@@ -21,6 +25,7 @@ import type {
   HumanOversightRequestOptions,
   IncidentReportRequestOptions,
   LiteracyAttestationRequestOptions,
+  ModelEvaluationRequestOptions,
   PolicyDecisionRequestOptions,
   ProofLayerCaptureOptions,
   ProofLayerOptions,
@@ -28,6 +33,7 @@ import type {
   RetrievalRequestOptions,
   RiskAssessmentRequestOptions,
   TechnicalDocRequestOptions,
+  TrainingProvenanceRequestOptions,
   ToolCallRequestOptions,
   VerifyBundleRequest,
   VerifyBundleSummary
@@ -298,6 +304,60 @@ export class ProofLayer implements BundleCreateClient {
   ): Promise<ProofLayerResult> {
     return this.#submitCapture(
       createIncidentReportRequest({
+        keyId: this.keyId,
+        role: this.role,
+        issuer: this.issuer,
+        appId: this.appId,
+        env: this.env,
+        systemId: options.systemId ?? this.systemId,
+        ...options
+      }),
+      options
+    );
+  }
+
+  async captureModelEvaluation(
+    options: Omit<ModelEvaluationRequestOptions, "keyId" | "role" | "issuer" | "appId" | "env">
+  ): Promise<ProofLayerResult> {
+    return this.#submitCapture(
+      createModelEvaluationRequest({
+        keyId: this.keyId,
+        role: this.role,
+        issuer: this.issuer,
+        appId: this.appId,
+        env: this.env,
+        systemId: options.systemId ?? this.systemId,
+        ...options
+      }),
+      options
+    );
+  }
+
+  async captureAdversarialTest(
+    options: Omit<AdversarialTestRequestOptions, "keyId" | "role" | "issuer" | "appId" | "env">
+  ): Promise<ProofLayerResult> {
+    return this.#submitCapture(
+      createAdversarialTestRequest({
+        keyId: this.keyId,
+        role: this.role,
+        issuer: this.issuer,
+        appId: this.appId,
+        env: this.env,
+        systemId: options.systemId ?? this.systemId,
+        ...options
+      }),
+      options
+    );
+  }
+
+  async captureTrainingProvenance(
+    options: Omit<
+      TrainingProvenanceRequestOptions,
+      "keyId" | "role" | "issuer" | "appId" | "env"
+    >
+  ): Promise<ProofLayerResult> {
+    return this.#submitCapture(
+      createTrainingProvenanceRequest({
         keyId: this.keyId,
         role: this.role,
         issuer: this.issuer,

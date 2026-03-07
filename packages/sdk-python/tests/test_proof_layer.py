@@ -113,6 +113,71 @@ class TestProofLayer(unittest.TestCase):
             result["bundle"]["items"][0]["data"]["report_commitment"].startswith("sha256:")
         )
 
+    def test_capture_model_evaluation_seals_evaluation_evidence(self):
+        signing_key_pem = (GOLDEN_DIR / "signing_key.txt").read_text(encoding="utf-8")
+        proof_layer = ProofLayer(
+            signing_key_pem=signing_key_pem,
+            key_id="kid-dev-01",
+            system_id="system-gpai-42",
+        )
+
+        result = proof_layer.capture_model_evaluation(
+            evaluation_id="eval-42",
+            benchmark="mmlu-pro",
+            status="completed",
+            summary="baseline complete",
+            report={"score": "0.84"},
+        )
+
+        self.assertEqual(result["bundle"]["items"][0]["type"], "model_evaluation")
+        self.assertEqual(result["bundle"]["subject"]["system_id"], "system-gpai-42")
+        self.assertTrue(
+            result["bundle"]["items"][0]["data"]["report_commitment"].startswith("sha256:")
+        )
+
+    def test_capture_adversarial_test_seals_systemic_risk_evidence(self):
+        signing_key_pem = (GOLDEN_DIR / "signing_key.txt").read_text(encoding="utf-8")
+        proof_layer = ProofLayer(
+            signing_key_pem=signing_key_pem,
+            key_id="kid-dev-01",
+            system_id="system-gpai-43",
+        )
+
+        result = proof_layer.capture_adversarial_test(
+            test_id="adv-42",
+            focus="prompt-injection",
+            status="open",
+            finding_severity="high",
+            report="exploit transcript",
+        )
+
+        self.assertEqual(result["bundle"]["items"][0]["type"], "adversarial_test")
+        self.assertEqual(result["bundle"]["subject"]["system_id"], "system-gpai-43")
+        self.assertTrue(
+            result["bundle"]["items"][0]["data"]["report_commitment"].startswith("sha256:")
+        )
+
+    def test_capture_training_provenance_seals_provenance_evidence(self):
+        signing_key_pem = (GOLDEN_DIR / "signing_key.txt").read_text(encoding="utf-8")
+        proof_layer = ProofLayer(
+            signing_key_pem=signing_key_pem,
+            key_id="kid-dev-01",
+            system_id="system-gpai-44",
+        )
+
+        result = proof_layer.capture_training_provenance(
+            dataset_ref="dataset://foundation/pretrain-v3",
+            stage="pretraining",
+            lineage_ref="lineage://snapshot/2026-03-01",
+            record={"manifests": 12},
+        )
+
+        self.assertEqual(result["bundle"]["items"][0]["type"], "training_provenance")
+        self.assertEqual(result["bundle"]["subject"]["system_id"], "system-gpai-44")
+        self.assertTrue(
+            result["bundle"]["items"][0]["data"]["record_commitment"].startswith("sha256:")
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

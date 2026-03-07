@@ -1,6 +1,7 @@
 import { Buffer } from "node:buffer";
 import { hashSha256 } from "./native.js";
 import type {
+  AdversarialTestRequestOptions,
   BinaryLike,
   CreateBundleRequest,
   DataGovernanceRequestOptions,
@@ -10,11 +11,13 @@ import type {
   JsonValue,
   LiteracyAttestationRequestOptions,
   LlmInteractionRequestOptions,
+  ModelEvaluationRequestOptions,
   PolicyDecisionRequestOptions,
   ProofArtefactInput,
   RetrievalRequestOptions,
   RiskAssessmentRequestOptions,
   TechnicalDocRequestOptions,
+  TrainingProvenanceRequestOptions,
   ToolCallRequestOptions
 } from "./types.js";
 
@@ -508,6 +511,157 @@ export function createTechnicalDocRequest(
           commitment:
             options.commitment ??
             (options.document !== undefined ? hashSha256(options.document) : null)
+        }
+      }
+    ],
+    redactions: options.redactions,
+    encryptionEnabled: options.encryptionEnabled,
+    retentionClass: options.retentionClass,
+    artefacts
+  });
+}
+
+export function createModelEvaluationRequest(
+  options: ModelEvaluationRequestOptions
+): CreateBundleRequest {
+  const artefacts = options.artefacts ? [...options.artefacts] : [];
+  if (artefacts.length === 0) {
+    artefacts.push(
+      jsonArtefact("model_evaluation.json", {
+        evaluation_id: options.evaluationId,
+        benchmark: options.benchmark,
+        status: options.status,
+        summary: options.summary ?? null,
+        metadata: options.metadata ?? null
+      })
+    );
+    if (options.report !== undefined) {
+      artefacts.push(namedDataArtefact("model_evaluation_report", options.report));
+    }
+  }
+
+  return createCaptureRequest({
+    keyId: options.keyId,
+    role: options.role,
+    issuer: options.issuer,
+    appId: options.appId,
+    env: options.env,
+    requestId: options.requestId,
+    threadId: options.threadId,
+    userRef: options.userRef,
+    systemId: options.systemId,
+    deploymentId: options.deploymentId,
+    version: options.version,
+    items: [
+      {
+        type: "model_evaluation",
+        data: {
+          evaluation_id: options.evaluationId,
+          benchmark: options.benchmark,
+          status: options.status,
+          summary: options.summary ?? null,
+          report_commitment: options.report !== undefined ? hashSha256(options.report) : null,
+          metadata: options.metadata ?? null
+        }
+      }
+    ],
+    redactions: options.redactions,
+    encryptionEnabled: options.encryptionEnabled,
+    retentionClass: options.retentionClass,
+    artefacts
+  });
+}
+
+export function createAdversarialTestRequest(
+  options: AdversarialTestRequestOptions
+): CreateBundleRequest {
+  const artefacts = options.artefacts ? [...options.artefacts] : [];
+  if (artefacts.length === 0) {
+    artefacts.push(
+      jsonArtefact("adversarial_test.json", {
+        test_id: options.testId,
+        focus: options.focus,
+        status: options.status,
+        finding_severity: options.findingSeverity ?? null,
+        metadata: options.metadata ?? null
+      })
+    );
+    if (options.report !== undefined) {
+      artefacts.push(namedDataArtefact("adversarial_test_report", options.report));
+    }
+  }
+
+  return createCaptureRequest({
+    keyId: options.keyId,
+    role: options.role,
+    issuer: options.issuer,
+    appId: options.appId,
+    env: options.env,
+    requestId: options.requestId,
+    threadId: options.threadId,
+    userRef: options.userRef,
+    systemId: options.systemId,
+    deploymentId: options.deploymentId,
+    version: options.version,
+    items: [
+      {
+        type: "adversarial_test",
+        data: {
+          test_id: options.testId,
+          focus: options.focus,
+          status: options.status,
+          finding_severity: options.findingSeverity ?? null,
+          report_commitment: options.report !== undefined ? hashSha256(options.report) : null,
+          metadata: options.metadata ?? null
+        }
+      }
+    ],
+    redactions: options.redactions,
+    encryptionEnabled: options.encryptionEnabled,
+    retentionClass: options.retentionClass,
+    artefacts
+  });
+}
+
+export function createTrainingProvenanceRequest(
+  options: TrainingProvenanceRequestOptions
+): CreateBundleRequest {
+  const artefacts = options.artefacts ? [...options.artefacts] : [];
+  if (artefacts.length === 0) {
+    artefacts.push(
+      jsonArtefact("training_provenance.json", {
+        dataset_ref: options.datasetRef,
+        stage: options.stage,
+        lineage_ref: options.lineageRef ?? null,
+        metadata: options.metadata ?? null
+      })
+    );
+    if (options.record !== undefined) {
+      artefacts.push(namedDataArtefact("training_provenance_record", options.record));
+    }
+  }
+
+  return createCaptureRequest({
+    keyId: options.keyId,
+    role: options.role,
+    issuer: options.issuer,
+    appId: options.appId,
+    env: options.env,
+    requestId: options.requestId,
+    threadId: options.threadId,
+    userRef: options.userRef,
+    systemId: options.systemId,
+    deploymentId: options.deploymentId,
+    version: options.version,
+    items: [
+      {
+        type: "training_provenance",
+        data: {
+          dataset_ref: options.datasetRef,
+          stage: options.stage,
+          lineage_ref: options.lineageRef ?? null,
+          record_commitment: options.record !== undefined ? hashSha256(options.record) : null,
+          metadata: options.metadata ?? null
         }
       }
     ],

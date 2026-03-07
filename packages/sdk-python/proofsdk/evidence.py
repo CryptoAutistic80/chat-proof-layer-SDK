@@ -774,3 +774,219 @@ def create_incident_report_request(
         retention_class=retention_class,
         artefacts=artefacts,
     )
+
+
+def create_model_evaluation_request(
+    *,
+    key_id: str,
+    evaluation_id: str,
+    benchmark: str,
+    status: str,
+    summary: str | None = None,
+    report: Any = None,
+    metadata: Any = None,
+    role: str = "provider",
+    issuer: str = "proof-layer-python",
+    app_id: str = "python-sdk",
+    env: str = "dev",
+    request_id: str | None = None,
+    thread_id: str | None = None,
+    user_ref: str | None = None,
+    system_id: str | None = None,
+    deployment_id: str | None = None,
+    version: str | None = None,
+    redactions: list[str] | None = None,
+    encryption_enabled: bool = False,
+    retention_class: str | None = None,
+    artefacts: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    artefacts = list(artefacts or [])
+    if not artefacts:
+        artefacts.append(
+            _json_artefact(
+                "model_evaluation.json",
+                {
+                    "evaluation_id": evaluation_id,
+                    "benchmark": benchmark,
+                    "status": status,
+                    "summary": summary,
+                    "metadata": metadata,
+                },
+            )
+        )
+        if report is not None:
+            artefacts.append(_named_data_artefact("model_evaluation_report", report))
+
+    return _create_capture_request(
+        key_id=key_id,
+        role=role,
+        issuer=issuer,
+        app_id=app_id,
+        env=env,
+        request_id=request_id,
+        thread_id=thread_id,
+        user_ref=user_ref,
+        system_id=system_id,
+        deployment_id=deployment_id,
+        version=version,
+        items=[
+            {
+                "type": "model_evaluation",
+                "data": {
+                    "evaluation_id": evaluation_id,
+                    "benchmark": benchmark,
+                    "status": status,
+                    "summary": summary,
+                    "report_commitment": hash_sha256(report) if report is not None else None,
+                    "metadata": metadata,
+                },
+            }
+        ],
+        redactions=redactions,
+        encryption_enabled=encryption_enabled,
+        retention_class=retention_class,
+        artefacts=artefacts,
+    )
+
+
+def create_adversarial_test_request(
+    *,
+    key_id: str,
+    test_id: str,
+    focus: str,
+    status: str,
+    finding_severity: str | None = None,
+    report: Any = None,
+    metadata: Any = None,
+    role: str = "provider",
+    issuer: str = "proof-layer-python",
+    app_id: str = "python-sdk",
+    env: str = "dev",
+    request_id: str | None = None,
+    thread_id: str | None = None,
+    user_ref: str | None = None,
+    system_id: str | None = None,
+    deployment_id: str | None = None,
+    version: str | None = None,
+    redactions: list[str] | None = None,
+    encryption_enabled: bool = False,
+    retention_class: str | None = None,
+    artefacts: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    artefacts = list(artefacts or [])
+    if not artefacts:
+        artefacts.append(
+            _json_artefact(
+                "adversarial_test.json",
+                {
+                    "test_id": test_id,
+                    "focus": focus,
+                    "status": status,
+                    "finding_severity": finding_severity,
+                    "metadata": metadata,
+                },
+            )
+        )
+        if report is not None:
+            artefacts.append(_named_data_artefact("adversarial_test_report", report))
+
+    return _create_capture_request(
+        key_id=key_id,
+        role=role,
+        issuer=issuer,
+        app_id=app_id,
+        env=env,
+        request_id=request_id,
+        thread_id=thread_id,
+        user_ref=user_ref,
+        system_id=system_id,
+        deployment_id=deployment_id,
+        version=version,
+        items=[
+            {
+                "type": "adversarial_test",
+                "data": {
+                    "test_id": test_id,
+                    "focus": focus,
+                    "status": status,
+                    "finding_severity": finding_severity,
+                    "report_commitment": hash_sha256(report) if report is not None else None,
+                    "metadata": metadata,
+                },
+            }
+        ],
+        redactions=redactions,
+        encryption_enabled=encryption_enabled,
+        retention_class=retention_class,
+        artefacts=artefacts,
+    )
+
+
+def create_training_provenance_request(
+    *,
+    key_id: str,
+    dataset_ref: str,
+    stage: str,
+    lineage_ref: str | None = None,
+    record: Any = None,
+    metadata: Any = None,
+    role: str = "provider",
+    issuer: str = "proof-layer-python",
+    app_id: str = "python-sdk",
+    env: str = "dev",
+    request_id: str | None = None,
+    thread_id: str | None = None,
+    user_ref: str | None = None,
+    system_id: str | None = None,
+    deployment_id: str | None = None,
+    version: str | None = None,
+    redactions: list[str] | None = None,
+    encryption_enabled: bool = False,
+    retention_class: str | None = None,
+    artefacts: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    artefacts = list(artefacts or [])
+    if not artefacts:
+        artefacts.append(
+            _json_artefact(
+                "training_provenance.json",
+                {
+                    "dataset_ref": dataset_ref,
+                    "stage": stage,
+                    "lineage_ref": lineage_ref,
+                    "metadata": metadata,
+                },
+            )
+        )
+        if record is not None:
+            artefacts.append(_named_data_artefact("training_provenance_record", record))
+
+    return _create_capture_request(
+        key_id=key_id,
+        role=role,
+        issuer=issuer,
+        app_id=app_id,
+        env=env,
+        request_id=request_id,
+        thread_id=thread_id,
+        user_ref=user_ref,
+        system_id=system_id,
+        deployment_id=deployment_id,
+        version=version,
+        items=[
+            {
+                "type": "training_provenance",
+                "data": {
+                    "dataset_ref": dataset_ref,
+                    "stage": stage,
+                    "lineage_ref": lineage_ref,
+                    "record_commitment": hash_sha256(record) if record is not None else None,
+                    "metadata": metadata,
+                },
+            }
+        ],
+        redactions=redactions,
+        encryption_enabled=encryption_enabled,
+        retention_class=retention_class,
+        artefacts=artefacts,
+    )

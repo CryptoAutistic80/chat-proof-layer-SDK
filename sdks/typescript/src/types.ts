@@ -271,6 +271,32 @@ export interface IncidentReportRequestOptions extends LifecycleCaptureOptions {
   metadata?: JsonValue;
 }
 
+export interface ModelEvaluationRequestOptions extends LifecycleCaptureOptions {
+  evaluationId: string;
+  benchmark: string;
+  status: string;
+  summary?: string;
+  report?: BinaryLike;
+  metadata?: JsonValue;
+}
+
+export interface AdversarialTestRequestOptions extends LifecycleCaptureOptions {
+  testId: string;
+  focus: string;
+  status: string;
+  findingSeverity?: string;
+  report?: BinaryLike;
+  metadata?: JsonValue;
+}
+
+export interface TrainingProvenanceRequestOptions extends LifecycleCaptureOptions {
+  datasetRef: string;
+  stage: string;
+  lineageRef?: string;
+  record?: BinaryLike;
+  metadata?: JsonValue;
+}
+
 export interface ProofLayerOptions {
   vaultUrl?: string;
   apiKey?: string;

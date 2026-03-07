@@ -83,6 +83,130 @@
       "additionalProperties": false,
       "properties": {
         "type": {
+          "const": "model_evaluation"
+        },
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "evaluation_id",
+            "benchmark",
+            "status"
+          ],
+          "properties": {
+            "evaluation_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "benchmark": {
+              "type": "string",
+              "minLength": 1
+            },
+            "status": {
+              "type": "string",
+              "minLength": 1
+            },
+            "summary": {
+              "type": "string"
+            },
+            "report_commitment": {
+              "$ref": "#/$defs/sha256Digest"
+            },
+            "metadata": true
+          }
+        }
+      },
+      "required": [
+        "type",
+        "data"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "adversarial_test"
+        },
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "test_id",
+            "focus",
+            "status"
+          ],
+          "properties": {
+            "test_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "focus": {
+              "type": "string",
+              "minLength": 1
+            },
+            "status": {
+              "type": "string",
+              "minLength": 1
+            },
+            "finding_severity": {
+              "type": "string"
+            },
+            "report_commitment": {
+              "$ref": "#/$defs/sha256Digest"
+            },
+            "metadata": true
+          }
+        }
+      },
+      "required": [
+        "type",
+        "data"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "training_provenance"
+        },
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "dataset_ref",
+            "stage"
+          ],
+          "properties": {
+            "dataset_ref": {
+              "type": "string",
+              "minLength": 1
+            },
+            "stage": {
+              "type": "string",
+              "minLength": 1
+            },
+            "lineage_ref": {
+              "type": "string"
+            },
+            "record_commitment": {
+              "$ref": "#/$defs/sha256Digest"
+            },
+            "metadata": true
+          }
+        }
+      },
+      "required": [
+        "type",
+        "data"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "type": {
           "const": "tool_call"
         },
         "data": {

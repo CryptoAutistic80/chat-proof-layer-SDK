@@ -189,3 +189,65 @@ test("ProofLayer.captureIncidentReport seals incident evidence locally", async (
   assert.equal(result.bundle?.subject.system_id, "system-incident-42");
   assert.ok(result.bundle?.items[0].data.report_commitment.startsWith("sha256:"));
 });
+
+test("ProofLayer.captureModelEvaluation seals evaluation evidence locally", async () => {
+  const signingKeyPem = await readFile(path.join(goldenDir, "signing_key.txt"), "utf8");
+  const proofLayer = new ProofLayer({
+    signingKeyPem,
+    keyId: "kid-dev-01",
+    systemId: "system-gpai-42"
+  });
+
+  const result = await proofLayer.captureModelEvaluation({
+    evaluationId: "eval-42",
+    benchmark: "mmlu-pro",
+    status: "completed",
+    summary: "baseline complete",
+    report: { score: "0.84" }
+  });
+
+  assert.equal(result.bundle?.items[0].type, "model_evaluation");
+  assert.equal(result.bundle?.subject.system_id, "system-gpai-42");
+  assert.ok(result.bundle?.items[0].data.report_commitment.startsWith("sha256:"));
+});
+
+test("ProofLayer.captureAdversarialTest seals adversarial evidence locally", async () => {
+  const signingKeyPem = await readFile(path.join(goldenDir, "signing_key.txt"), "utf8");
+  const proofLayer = new ProofLayer({
+    signingKeyPem,
+    keyId: "kid-dev-01",
+    systemId: "system-gpai-43"
+  });
+
+  const result = await proofLayer.captureAdversarialTest({
+    testId: "adv-42",
+    focus: "prompt-injection",
+    status: "open",
+    findingSeverity: "high",
+    report: "exploit transcript"
+  });
+
+  assert.equal(result.bundle?.items[0].type, "adversarial_test");
+  assert.equal(result.bundle?.subject.system_id, "system-gpai-43");
+  assert.ok(result.bundle?.items[0].data.report_commitment.startsWith("sha256:"));
+});
+
+test("ProofLayer.captureTrainingProvenance seals provenance evidence locally", async () => {
+  const signingKeyPem = await readFile(path.join(goldenDir, "signing_key.txt"), "utf8");
+  const proofLayer = new ProofLayer({
+    signingKeyPem,
+    keyId: "kid-dev-01",
+    systemId: "system-gpai-44"
+  });
+
+  const result = await proofLayer.captureTrainingProvenance({
+    datasetRef: "dataset://foundation/pretrain-v3",
+    stage: "pretraining",
+    lineageRef: "lineage://snapshot/2026-03-01",
+    record: { manifests: 12 }
+  });
+
+  assert.equal(result.bundle?.items[0].type, "training_provenance");
+  assert.equal(result.bundle?.subject.system_id, "system-gpai-44");
+  assert.ok(result.bundle?.items[0].data.record_commitment.startsWith("sha256:"));
+});

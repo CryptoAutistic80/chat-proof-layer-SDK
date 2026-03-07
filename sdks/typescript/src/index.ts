@@ -2,15 +2,18 @@ export { ProofLayerClient, _internals } from "./client.js";
 export { LocalProofLayerClient } from "./local_client.js";
 export { ProofLayer } from "./proof_layer.js";
 export {
+  createAdversarialTestRequest,
   createDataGovernanceRequest,
   createHumanOversightRequest,
   createIncidentReportRequest,
   createLiteracyAttestationRequest,
   createLlmInteractionRequest,
+  createModelEvaluationRequest,
   createPolicyDecisionRequest,
   createRetrievalRequest,
   createRiskAssessmentRequest,
   createTechnicalDocRequest,
+  createTrainingProvenanceRequest,
   createToolCallRequest,
   defaultLlmInteractionArtefacts
 } from "./evidence.js";
@@ -35,6 +38,7 @@ export {
   verifyBundleRoot
 } from "./native.js";
 export type {
+  AdversarialTestRequestOptions,
   BinaryLike,
   BundleCreateClient,
   CreateBundleRequest,
@@ -67,7 +71,9 @@ export type {
   ProviderCaptureOptions,
   RetrievalRequestOptions,
   RiskAssessmentRequestOptions,
+  ModelEvaluationRequestOptions,
   TechnicalDocRequestOptions,
+  TrainingProvenanceRequestOptions,
   ToolEvent,
   ToolCallRequestOptions,
   VerifyBundleRequest,

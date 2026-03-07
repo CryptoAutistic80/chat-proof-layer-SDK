@@ -7,7 +7,7 @@ This document defines the PoC architecture for:
 - Phase 1: Rust core cryptography and canonicalization
 - Phase 2: Axum proof service with SQLite persistence
 - Phase 5: `proofctl` offline create/verify/inspect workflows plus vault-backed pack export
-- Phase 9: Node native bindings over the Rust core
+- Phase 9: Node and Python native bindings over the Rust core
 
 The goal is cryptographically verifiable evidence artifacts for AI interactions, not legal proof claims.
 
@@ -115,9 +115,11 @@ Current config behavior:
 ### `packages/sdk-node` and `packages/sdk-python`
 
 - `packages/sdk-node` now loads a local NAPI module compiled from `crates/napi`.
-- The first native Node surface covers RFC 8785 canonicalization, SHA-256 digesting, Merkle root computation, Ed25519 JWS sign/verify, and offline bundle verification.
+- The first native Node surface covers RFC 8785 canonicalization, SHA-256 digesting, Merkle root computation, Ed25519 JWS sign/verify, deterministic local bundle construction, and offline bundle verification.
 - The Node provider wrappers and tool helpers now call that native module for integrity-sensitive operations instead of reimplementing them in JavaScript.
-- `packages/sdk-python` remains an HTTP/client-wrapper layer for now; PyO3 is still a later phase.
+- `packages/sdk-python` now loads a local PyO3 module compiled from `crates/pyo3` via the package build helper.
+- The first native Python surface matches Node: canonicalization, SHA-256 digesting, Merkle root computation, Ed25519 JWS sign/verify, deterministic local bundle construction, and offline bundle verification.
+- The Python provider wrappers, decorator helpers, and golden fixture tests now route integrity-sensitive operations through that shared Rust implementation.
 - Tool capture and OTel GenAI export helpers for trace pipelines.
 - Provider adapters remain thin and provider-shaped; integrity semantics stay in Rust core/service.
 

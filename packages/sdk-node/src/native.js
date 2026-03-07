@@ -74,6 +74,20 @@ export function verifyBundleRoot(jws, bundleRoot, publicKeyPem) {
   return native.verifyBundleRoot(jws, bundleRoot, publicKeyPem);
 }
 
+export function buildBundle({ capture, artefacts, keyPem, kid, bundleId, createdAt }) {
+  const captureJson = typeof capture === "string" ? capture : JSON.stringify(capture);
+  const artefactsJson = JSON.stringify(
+    normalizeArtefacts(artefacts).map((artefact, index) => ({
+      ...artefact,
+      content_type:
+        Array.isArray(artefacts) && artefacts[index]?.contentType
+          ? artefacts[index].contentType
+          : "application/octet-stream"
+    }))
+  );
+  return JSON.parse(native.buildBundle(captureJson, artefactsJson, keyPem, kid, bundleId, createdAt));
+}
+
 export function verifyBundle({ bundle, artefacts, publicKeyPem }) {
   const bundleJson = typeof bundle === "string" ? bundle : JSON.stringify(bundle);
   const artefactsJson = JSON.stringify(normalizeArtefacts(artefacts));

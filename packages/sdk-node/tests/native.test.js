@@ -4,6 +4,7 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
+  buildBundle,
   hashSha256,
   signBundleRoot,
   verifyBundle,
@@ -36,4 +37,35 @@ test("native verifyBundle performs offline verification against the golden fixtu
 
   const summary = verifyBundle({ bundle, artefacts, publicKeyPem });
   assert.deepEqual(summary, { artefact_count: artefacts.length });
+});
+
+test("native buildBundle reproduces the deterministic golden bundle", async () => {
+  const capture = JSON.parse(await readFile(path.join(goldenDir, "capture.json"), "utf8"));
+  const expectedBundle = JSON.parse(
+    await readFile(path.join(goldenDir, "fixed_bundle", "proof_bundle.json"), "utf8")
+  );
+  const signingKeyPem = await readFile(path.join(goldenDir, "signing_key.txt"), "utf8");
+  const artefacts = [
+    {
+      name: "prompt.json",
+      contentType: "application/json",
+      data: await readFile(path.join(goldenDir, "prompt.json"))
+    },
+    {
+      name: "response.json",
+      contentType: "application/json",
+      data: await readFile(path.join(goldenDir, "response.json"))
+    }
+  ];
+
+  const bundle = buildBundle({
+    capture,
+    artefacts,
+    keyPem: signingKeyPem,
+    kid: "kid-dev-01",
+    bundleId: expectedBundle.bundle_id,
+    createdAt: expectedBundle.created_at
+  });
+
+  assert.deepEqual(bundle, expectedBundle);
 });

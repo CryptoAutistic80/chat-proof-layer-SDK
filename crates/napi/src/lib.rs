@@ -1,10 +1,11 @@
 use base64ct::{Base64, Encoding};
+use chrono::{DateTime, Utc};
 use napi::{Error, Result, bindgen_prelude::Buffer};
 use napi_derive::napi;
 use proof_layer_core::{
-    ProofBundle, canonicalize_json_strict, compute_commitment, decode_private_key_pem,
-    decode_public_key_pem, sha256_prefixed, sign_bundle_root, validate_bundle_integrity_fields,
-    verify_bundle_root,
+    ArtefactInput, BundleBuildInput, CaptureEvent, LegacyCaptureInput, ProofBundle, build_bundle,
+    canonicalize_json_strict, compute_commitment, decode_private_key_pem, decode_public_key_pem,
+    sha256_prefixed, sign_bundle_root, validate_bundle_integrity_fields, verify_bundle_root,
 };
 use serde::Deserialize;
 use std::collections::BTreeMap;
@@ -12,6 +13,14 @@ use std::collections::BTreeMap;
 #[derive(Debug, Deserialize)]
 struct VerifyArtefact {
     name: String,
+    data_base64: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct BuildArtefact {
+    name: String,
+    #[serde(default)]
+    content_type: Option<String>,
     data_base64: String,
 }
 
@@ -91,4 +100,57 @@ pub fn verify_bundle_native(
         "artefact_count": summary.artefact_count,
     }))
     .map_err(|err| napi_error(err.to_string()))
+}
+
+#[napi(js_name = "buildBundle")]
+pub fn build_bundle_native(
+    capture_json: String,
+    artefacts_json: String,
+    key_pem: String,
+    kid: String,
+    bundle_id: String,
+    created_at: String,
+) -> Result<String> {
+    let capture = serde_json::from_str::<CaptureEvent>(&capture_json)
+        .map(BundleBuildInput::from)
+        .or_else(|_| {
+            serde_json::from_str::<LegacyCaptureInput>(&capture_json).map(BundleBuildInput::from)
+        })
+        .map_err(|err| napi_error(err.to_string()))?;
+
+    let artefacts: Vec<BuildArtefact> =
+        serde_json::from_str(&artefacts_json).map_err(|err| napi_error(err.to_string()))?;
+    let artefact_inputs = artefacts
+        .into_iter()
+        .map(|artefact| {
+            let bytes = Base64::decode_vec(&artefact.data_base64).map_err(|err| {
+                napi_error(format!("invalid base64 for {}: {err}", artefact.name))
+            })?;
+            Ok(ArtefactInput {
+                name: artefact.name,
+                content_type: artefact
+                    .content_type
+                    .unwrap_or_else(|| "application/octet-stream".to_string()),
+                bytes,
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
+
+    let signing_key =
+        decode_private_key_pem(&key_pem).map_err(|err| napi_error(err.to_string()))?;
+    let created_at = DateTime::parse_from_rfc3339(&created_at)
+        .map(|value| value.with_timezone(&Utc))
+        .map_err(|err| napi_error(err.to_string()))?;
+
+    let bundle = build_bundle(
+        capture,
+        &artefact_inputs,
+        &signing_key,
+        &kid,
+        &bundle_id,
+        created_at,
+    )
+    .map_err(|err| napi_error(err.to_string()))?;
+
+    serde_json::to_string(&bundle).map_err(|err| napi_error(err.to_string()))
 }

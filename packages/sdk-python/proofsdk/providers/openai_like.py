@@ -1,13 +1,10 @@
 from __future__ import annotations
 
-import hashlib
 import json
 import uuid
 from typing import Any, Callable
 
-
-def _sha256_prefixed(data: bytes) -> str:
-    return "sha256:" + hashlib.sha256(data).hexdigest()
+from proofsdk.native import hash_sha256
 
 
 def proved_completion(
@@ -50,16 +47,16 @@ def proved_completion(
             ),
         },
         "inputs": {
-            "messages_commitment": _sha256_prefixed(prompt_bytes),
+            "messages_commitment": hash_sha256(prompt_bytes),
             "retrieval_commitment": capture_options.get("retrieval_commitment"),
         },
         "outputs": {
-            "assistant_text_commitment": _sha256_prefixed(response_bytes),
+            "assistant_text_commitment": hash_sha256(response_bytes),
             "tool_outputs_commitment": capture_options.get("tool_outputs_commitment"),
         },
         "trace": {
             "otel_genai_semconv_version": capture_options.get("otel_semconv_version", "1.0.0"),
-            "trace_commitment": _sha256_prefixed(trace_bytes),
+            "trace_commitment": hash_sha256(trace_bytes),
         },
         "policy": {
             "redactions": capture_options.get("redactions", []),

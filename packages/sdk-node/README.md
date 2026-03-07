@@ -13,6 +13,7 @@ npm run build:native
 
 ```js
 import {
+  buildBundle,
   ProofLayerClient,
   hashSha256,
   provedCompletion,
@@ -42,8 +43,17 @@ const { completion, bundleId } = await provedCompletion(
 console.log(bundleId, completion.id);
 console.log(hashSha256(JSON.stringify({ hello: "world" })));
 
+const localBundle = buildBundle({
+  capture: { /* capture.json */ },
+  artefacts: [{ name: "prompt.json", contentType: "application/json", data: Buffer.from("{}") }],
+  keyPem: "-----BEGIN PROOF LAYER ED25519 PRIVATE KEY-----\n...\n-----END PROOF LAYER ED25519 PRIVATE KEY-----\n",
+  kid: "kid-dev-01",
+  bundleId: "PLFIXEDGOLDEN000000000000000001",
+  createdAt: "2026-03-02T00:00:00+00:00"
+});
+
 const summary = verifyBundle({
-  bundle: { /* proof_bundle.json */ },
+  bundle: localBundle,
   artefacts: [{ name: "prompt.json", data: Buffer.from("{}") }],
   publicKeyPem: "-----BEGIN PROOF LAYER ED25519 PUBLIC KEY-----\n...\n-----END PROOF LAYER ED25519 PUBLIC KEY-----\n"
 });

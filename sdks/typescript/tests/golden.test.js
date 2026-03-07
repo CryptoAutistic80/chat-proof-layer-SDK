@@ -8,7 +8,7 @@ import {
   computeMerkleRoot,
   hashSha256,
   verifyBundleRoot
-} from "../src/native.js";
+} from "../dist/index.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, "../../..");

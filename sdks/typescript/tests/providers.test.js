@@ -3,8 +3,9 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { LocalProofLayerClient } from "../src/index.js";
-import { provedCompletion } from "../src/providers/openai_like.js";
+import { LocalProofLayerClient, provedCompletion } from "../dist/index.js";
+import { withProofLayer as withGenericProofLayer } from "../dist/providers/generic.js";
+import { ProofLayer } from "../dist/index.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, "../../..");
@@ -46,8 +47,10 @@ test("provedCompletion wraps provider call and creates bundle", async () => {
   assert.equal(out.bundleId, "B-123");
   assert.equal(out.completion.id, "cmpl-1");
   assert.equal(captured.artefacts.length, 2);
-  assert.ok(captured.capture.inputs.messages_commitment.startsWith("sha256:"));
-  assert.ok(captured.capture.outputs.assistant_text_commitment.startsWith("sha256:"));
+  assert.equal(captured.capture.context.provider, "openai");
+  assert.equal(captured.capture.items[0].type, "llm_interaction");
+  assert.ok(captured.capture.items[0].data.input_commitment.startsWith("sha256:"));
+  assert.ok(captured.capture.items[0].data.output_commitment.startsWith("sha256:"));
 });
 
 test("provedCompletion works with LocalProofLayerClient", async () => {
@@ -74,4 +77,36 @@ test("provedCompletion works with LocalProofLayerClient", async () => {
   assert.equal(out.bundleId, "pl-local-provider-test");
   assert.equal(out.bundle?.bundle_version, "1.0");
   assert.equal(out.bundle?.integrity.signature.kid, "kid-dev-01");
+});
+
+test("generic provider wrapper attaches proof metadata", async () => {
+  const signingKeyPem = await readFile(path.join(goldenDir, "signing_key.txt"), "utf8");
+  const proofLayer = new ProofLayer({
+    signingKeyPem,
+    keyId: "kid-dev-01",
+    systemId: "system-generic-1"
+  });
+
+  const wrapped = withGenericProofLayer(
+    async (params) => ({
+      id: "generic-1",
+      model: params.model,
+      output_text: "ok",
+      usage: { input_tokens: 2, output_tokens: 1 }
+    }),
+    proofLayer,
+    {
+      provider: "custom-provider",
+      buildTrace: (_params, result) => ({ usage: result.usage, provider: "custom-provider" })
+    }
+  );
+
+  const result = await wrapped({
+    model: "custom-model-1",
+    messages: [{ role: "user", content: "hello" }]
+  });
+
+  assert.equal(result.id, "generic-1");
+  assert.equal(result.proofLayer.bundle?.subject.system_id, "system-generic-1");
+  assert.equal(result.proofLayer.bundle?.context.provider, "custom-provider");
 });

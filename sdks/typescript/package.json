@@ -1,0 +1,75 @@
+{
+  "name": "@proof-layer/sdk",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./client": {
+      "types": "./dist/client.d.ts",
+      "import": "./dist/client.js"
+    },
+    "./proof-layer": {
+      "types": "./dist/proof_layer.d.ts",
+      "import": "./dist/proof_layer.js"
+    },
+    "./local-client": {
+      "types": "./dist/local_client.d.ts",
+      "import": "./dist/local_client.js"
+    },
+    "./native": {
+      "types": "./dist/native.d.ts",
+      "import": "./dist/native.js"
+    },
+    "./evidence": {
+      "types": "./dist/evidence.d.ts",
+      "import": "./dist/evidence.js"
+    },
+    "./providers": {
+      "types": "./dist/providers/index.d.ts",
+      "import": "./dist/providers/index.js"
+    },
+    "./providers/openai": {
+      "types": "./dist/providers/openai.d.ts",
+      "import": "./dist/providers/openai.js"
+    },
+    "./providers/anthropic": {
+      "types": "./dist/providers/anthropic.d.ts",
+      "import": "./dist/providers/anthropic.js"
+    },
+    "./providers/generic": {
+      "types": "./dist/providers/generic.d.ts",
+      "import": "./dist/providers/generic.js"
+    },
+    "./providers/vercel-ai": {
+      "types": "./dist/providers/vercel_ai.d.ts",
+      "import": "./dist/providers/vercel_ai.js"
+    },
+    "./otel": {
+      "types": "./dist/otel/index.d.ts",
+      "import": "./dist/otel/index.js"
+    },
+    "./errors": {
+      "types": "./dist/utils/errors.d.ts",
+      "import": "./dist/utils/errors.js"
+    }
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build:native": "node ./scripts/build-native.mjs",
+    "build": "npm run build:native && tsc -p tsconfig.json",
+    "pretest": "npm run build",
+    "test": "node --test"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.30",
+    "typescript": "^5.8.3"
+  }
+}

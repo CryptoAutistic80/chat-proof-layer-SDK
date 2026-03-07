@@ -1,6 +1,19 @@
 import { Buffer } from "node:buffer";
+import type {
+  BinaryLike,
+  CreateBundleRequest,
+  CreateBundleResponse,
+  FetchLike,
+  HttpClientOptions,
+  InlineArtefactRequest,
+  JsonObject,
+  VerifyBundleRequest,
+  VerifyBundleSummary,
+  VerifyPackageRequest
+} from "./types.js";
+import { ProofLayerHttpError } from "./utils/errors.js";
 
-function toBase64(data) {
+function toBase64(data: BinaryLike): string {
   if (data instanceof Uint8Array) {
     return Buffer.from(data).toString("base64");
   }
@@ -10,12 +23,16 @@ function toBase64(data) {
   return Buffer.from(JSON.stringify(data), "utf8").toString("base64");
 }
 
-function fromBase64(base64) {
+function fromBase64(base64: string): Uint8Array {
   return new Uint8Array(Buffer.from(base64, "base64"));
 }
 
 export class ProofLayerClient {
-  constructor({ baseUrl, apiKey, fetchImpl } = {}) {
+  readonly baseUrl: string;
+  readonly apiKey?: string;
+  readonly fetchImpl: FetchLike;
+
+  constructor({ baseUrl, apiKey, fetchImpl }: HttpClientOptions) {
     if (!baseUrl) {
       throw new Error("baseUrl is required");
     }
@@ -27,31 +44,38 @@ export class ProofLayerClient {
     }
   }
 
-  async createBundle({ capture, artefacts }) {
+  async createBundle({ capture, artefacts }: CreateBundleRequest): Promise<CreateBundleResponse> {
     const payload = {
       capture,
-      artefacts: artefacts.map((a) => ({
-        name: a.name,
-        content_type: a.contentType ?? "application/octet-stream",
-        data_base64: toBase64(a.data)
+      artefacts: artefacts.map<InlineArtefactRequest>((artefact) => ({
+        name: artefact.name,
+        content_type: artefact.contentType ?? "application/octet-stream",
+        data_base64: toBase64(artefact.data)
       }))
     };
     return this.#post("/v1/bundles", payload);
   }
 
-  async verifyBundle({ bundle, artefacts, publicKeyPem }) {
+  async verifyBundle({
+    bundle,
+    artefacts,
+    publicKeyPem
+  }: VerifyBundleRequest): Promise<VerifyBundleSummary> {
     const payload = {
       bundle,
-      artefacts: artefacts.map((a) => ({
-        name: a.name,
-        data_base64: toBase64(a.data)
+      artefacts: artefacts.map(({ name, data }) => ({
+        name,
+        data_base64: toBase64(data)
       })),
       public_key_pem: publicKeyPem
     };
     return this.#post("/v1/verify", payload);
   }
 
-  async verifyPackage({ bundlePackage, publicKeyPem }) {
+  async verifyPackage({
+    bundlePackage,
+    publicKeyPem
+  }: VerifyPackageRequest): Promise<VerifyBundleSummary> {
     const payload = {
       bundle_pkg_base64: toBase64(bundlePackage),
       public_key_pem: publicKeyPem
@@ -59,11 +83,11 @@ export class ProofLayerClient {
     return this.#post("/v1/verify", payload);
   }
 
-  async getBundle(bundleId) {
+  async getBundle(bundleId: string): Promise<JsonObject> {
     return this.#get(`/v1/bundles/${encodeURIComponent(bundleId)}`);
   }
 
-  async getArtefact(bundleId, name) {
+  async getArtefact(bundleId: string, name: string): Promise<Uint8Array> {
     const res = await this.fetchImpl(
       `${this.baseUrl}/v1/bundles/${encodeURIComponent(bundleId)}/artefacts/${encodeURIComponent(name)}`,
       { method: "GET", headers: this.#headers() }
@@ -75,7 +99,7 @@ export class ProofLayerClient {
     return new Uint8Array(arrayBuffer);
   }
 
-  async #get(path) {
+  async #get(path: string): Promise<JsonObject> {
     const res = await this.fetchImpl(`${this.baseUrl}${path}`, {
       method: "GET",
       headers: this.#headers()
@@ -83,7 +107,7 @@ export class ProofLayerClient {
     return this.#jsonOrThrow(res, `GET ${path}`);
   }
 
-  async #post(path, payload) {
+  async #post(path: string, payload: JsonObject): Promise<any> {
     const res = await this.fetchImpl(`${this.baseUrl}${path}`, {
       method: "POST",
       headers: {
@@ -95,22 +119,21 @@ export class ProofLayerClient {
     return this.#jsonOrThrow(res, `POST ${path}`);
   }
 
-  async #jsonOrThrow(response, op) {
+  async #jsonOrThrow(response: Response, op: string): Promise<any> {
     const text = await response.text();
-    let parsed;
+    let parsed: any;
     try {
       parsed = text ? JSON.parse(text) : {};
     } catch {
       parsed = { raw: text };
     }
     if (!response.ok) {
-      const msg = parsed?.error ?? parsed?.message ?? JSON.stringify(parsed);
-      throw new Error(`${op} failed (${response.status}): ${msg}`);
+      throw new ProofLayerHttpError(op, response.status, parsed);
     }
     return parsed;
   }
 
-  #headers() {
+  #headers(): Record<string, string> {
     if (!this.apiKey) {
       return {};
     }

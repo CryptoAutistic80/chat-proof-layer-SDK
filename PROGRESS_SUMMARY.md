@@ -53,10 +53,10 @@ Completed:
 - Added the next query/ops slice:
   vault `GET /v1/systems` and `GET /v1/systems/{id}/summary` rollups,
   plus `proofctl vault status|query|retention|systems|export` wrappers over the main vault read/export flows.
-- Added the first native Node SDK slice:
+- Added the first native TypeScript SDK slice:
   new `crates/napi` NAPI-RS bridge over the Rust core,
-  native Node exports for canonicalization/hash/Merkle root/JWS sign+verify/local bundle build/offline bundle verification,
-  and `packages/sdk-node` now routes integrity-sensitive operations through that native module instead of duplicating them in JavaScript.
+  native npm exports for canonicalization/hash/Merkle root/JWS sign+verify/local bundle build/offline bundle verification,
+  and the TypeScript SDK now routes integrity-sensitive operations through that native module instead of duplicating them in JavaScript.
 - Added the first native Python SDK slice:
   new `crates/pyo3` PyO3 bridge over the Rust core,
   native Python exports for canonicalization/hash/Merkle root/JWS sign+verify/local bundle build/offline bundle verification,
@@ -65,6 +65,26 @@ Completed:
   `LocalProofLayerClient` implementations in both Node and Python,
   provider-wrapper compatibility with local sealing clients,
   and deterministic local-client tests proving the golden fixture can be built without the vault service.
+- Corrected the npm package shape to be TypeScript-first:
+  package name now `@proof-layer/sdk`,
+  typed `src/*.ts` sources plus `tsconfig.json`,
+  compiled `dist/` output for tests/package exports,
+  and Node test coverage now runs against the built TypeScript output rather than source `.js` files.
+- Added the first higher-level TypeScript SDK facade:
+  `ProofLayer` with local-or-vault transport selection,
+  `capture(...)` for local/remote `llm_interaction` sealing,
+  provider-specific `withProofLayer(...)` helpers,
+  and the repo layout now matches the plan at `sdks/typescript/` instead of the old `packages/sdk-node/` path.
+- Added the next TypeScript SDK surface-hardening slice:
+  shared `evidence.ts` helpers for v1 `llm_interaction` capture assembly,
+  normalized provider wrappers so they emit the same v1 capture shape as `ProofLayer.capture(...)`,
+  generic and Vercel-AI-style wrappers plus provider index exports,
+  and `@proof-layer/sdk/otel` with `ProofLayerExporter` and typed OTel helper exports.
+- Added the next TypeScript lifecycle slice:
+  typed `evidence.ts` builders for `risk_assessment`, `data_governance`, and `technical_doc`,
+  matching `ProofLayer.captureRiskAssessment(...)`, `captureDataGovernance(...)`, and `captureTechnicalDoc(...)` convenience methods,
+  default evidence artefact generation for those lifecycle items,
+  and test coverage proving those bundles seal locally through the Rust-native path.
 - Added the first pack export slice:
   `POST /v1/packs`,
   `GET /v1/packs/{id}`,
@@ -82,7 +102,7 @@ Still outstanding from `plan.md`:
 - JSON schema coverage is now started, with timestamp and Rekor transparency receipt coverage added, but richer export/archive schemas are still incomplete.
 - The vault now uses SQLite with legal-hold-aware retention, audit logging, file/env/runtime configuration, background retention scanning, curated pack export, and RFC 3161 bundle timestamp attachment, but PostgreSQL and redacted/Annex-complete pack assembly are not built yet.
 - The CLI now covers the main vault operational read paths, but there is still no `proofctl disclose` flow.
-- Node and Python now both have native FFI bridges, local bundle-build helpers, and local sealing clients, but there is still no shared native build/release pipeline for SDK artifacts and no higher-level `ProofLayer` object yet for policy/default management across capture flows.
+- TypeScript and Python now both have native FFI bridges and local sealing paths, but there is still no shared native build/release pipeline for SDK artifacts and Python still lacks the equivalent higher-level `ProofLayer` facade/API.
 - SCITT receipts and selective disclosure CLI flows remain future phases.
 - RFC 3161 verification currently checks CMS signature integrity and message-imprint binding, but TSA certificate-chain / revocation trust validation and eIDAS-qualified trust policy are still outstanding.
 - Rekor verification currently checks receipt structure, entry UUID to leaf-hash binding, Merkle inclusion proofs, and embedded RFC 3161 token binding, but not Rekor SET signature validation.

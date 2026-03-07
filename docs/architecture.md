@@ -7,7 +7,7 @@ This document defines the PoC architecture for:
 - Phase 1: Rust core cryptography and canonicalization
 - Phase 2: Axum proof service with SQLite persistence
 - Phase 5: `proofctl` offline create/verify/inspect workflows plus vault-backed pack export
-- Phase 9: Node and Python native bindings over the Rust core
+- Phase 9: TypeScript and Python native bindings over the Rust core
 
 The goal is cryptographically verifiable evidence artifacts for AI interactions, not legal proof claims.
 
@@ -15,7 +15,7 @@ The goal is cryptographically verifiable evidence artifacts for AI interactions,
 
 The system has four main layers:
 
-1. Provider adapters (Node/Python SDKs) capture request/response/tool events.
+1. Provider adapters (TypeScript/Python SDKs) capture request/response/tool events.
 2. Proof service (Axum) validates capture payloads, stores artifacts, constructs proof bundles, and assembles export packs.
 3. Rust core implements canonicalization, hashing, Merkle commitment, signing, and verification.
 4. `proofctl` performs offline package creation, inspection, verification, and pack download.
@@ -112,12 +112,17 @@ Current config behavior:
 - The retention engine now supports both manual `POST /v1/retention/scan` and an automatic background scan interval configured via file/env.
 - `GET /v1/systems` summarizes bundle counts per `system_id`, and `GET /v1/systems/{id}/summary` expands that into role/item/retention/assurance/model breakdowns for operator-facing inventory views.
 
-### `packages/sdk-node` and `packages/sdk-python`
+### `sdks/typescript` and `packages/sdk-python`
 
-- `packages/sdk-node` now loads a local NAPI module compiled from `crates/napi`.
-- The first native Node surface covers RFC 8785 canonicalization, SHA-256 digesting, Merkle root computation, Ed25519 JWS sign/verify, deterministic local bundle construction, and offline bundle verification.
-- `packages/sdk-node` now exposes both an HTTP vault client and a `LocalProofLayerClient` that seals bundles locally via the native module.
-- The Node provider wrappers and tool helpers now call that shared surface for integrity-sensitive operations instead of reimplementing them in JavaScript.
+- `sdks/typescript` is the current TypeScript npm SDK package (`@proof-layer/sdk`).
+- Its runtime loads a local NAPI module compiled from `crates/napi`.
+- The first native TypeScript surface covers RFC 8785 canonicalization, SHA-256 digesting, Merkle root computation, Ed25519 JWS sign/verify, deterministic local bundle construction, and offline bundle verification.
+- The package now has a shared `evidence.ts` surface for v1 `llm_interaction` capture assembly, so wrappers and direct callers seal the same bundle shape.
+- The package now exposes both an HTTP vault client and a `LocalProofLayerClient` that seals bundles locally via the native module.
+- The package now also exposes first-class lifecycle helpers for the Rust-core item types already implemented: `captureRiskAssessment(...)`, `captureDataGovernance(...)`, and `captureTechnicalDoc(...)`.
+- The package also now exposes a higher-level `ProofLayer` facade plus provider-specific `withProofLayer(...)` wrappers for OpenAI-like, Anthropic-like, generic async clients, and Vercel-AI-style functions.
+- The TypeScript SDK now exposes `ProofLayerExporter` and OTel helpers under `@proof-layer/sdk/otel`.
+- The TypeScript provider wrappers and tool helpers now call that shared surface for integrity-sensitive operations instead of reimplementing them in JavaScript.
 - `packages/sdk-python` now loads a local PyO3 module compiled from `crates/pyo3` via the package build helper.
 - The first native Python surface matches Node: canonicalization, SHA-256 digesting, Merkle root computation, Ed25519 JWS sign/verify, deterministic local bundle construction, and offline bundle verification.
 - `packages/sdk-python` now exposes both an HTTP vault client and a `LocalProofLayerClient` that seals bundles locally via the native module.

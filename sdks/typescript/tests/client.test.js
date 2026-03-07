@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { ProofLayerClient } from "../src/client.js";
+import { ProofLayerClient } from "../dist/index.js";
 
 test("createBundle posts normalized payload", async () => {
   let captured;

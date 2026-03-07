@@ -1,21 +1,34 @@
 import { randomUUID } from "node:crypto";
 import { buildBundle, verifyBundle } from "./native.js";
+import type {
+  CreateBundleResponse,
+  LocalBuildOptions,
+  LocalClientOptions,
+  LocalCreateBundleRequest,
+  VerifyBundleRequest,
+  VerifyBundleSummary
+} from "./types.js";
 
-function defaultBundleId() {
+function defaultBundleId(): string {
   return `pl-local-${randomUUID()}`;
 }
 
-function defaultCreatedAt() {
+function defaultCreatedAt(): string {
   return new Date().toISOString();
 }
 
 export class LocalProofLayerClient {
+  readonly signingKeyPem: string;
+  readonly signingKeyId: string;
+  readonly bundleIdFactory: () => string;
+  readonly createdAtFactory: () => string;
+
   constructor({
     signingKeyPem,
     signingKeyId = "kid-dev-01",
     bundleIdFactory = defaultBundleId,
     createdAtFactory = defaultCreatedAt
-  } = {}) {
+  }: LocalClientOptions) {
     if (!signingKeyPem) {
       throw new Error("signingKeyPem is required");
     }
@@ -25,7 +38,14 @@ export class LocalProofLayerClient {
     this.createdAtFactory = createdAtFactory;
   }
 
-  async createBundle({ capture, artefacts, bundleId, createdAt, signingKeyPem, signingKeyId }) {
+  async createBundle({
+    capture,
+    artefacts,
+    bundleId,
+    createdAt,
+    signingKeyPem,
+    signingKeyId
+  }: LocalCreateBundleRequest): Promise<CreateBundleResponse> {
     const bundle = buildBundle({
       capture,
       artefacts,
@@ -33,7 +53,7 @@ export class LocalProofLayerClient {
       kid: signingKeyId ?? this.signingKeyId,
       bundleId: bundleId ?? this.bundleIdFactory(),
       createdAt: createdAt ?? this.createdAtFactory()
-    });
+    } satisfies LocalBuildOptions);
 
     return {
       bundle_id: bundle.bundle_id,
@@ -44,7 +64,11 @@ export class LocalProofLayerClient {
     };
   }
 
-  async verifyBundle({ bundle, artefacts, publicKeyPem }) {
+  async verifyBundle({
+    bundle,
+    artefacts,
+    publicKeyPem
+  }: VerifyBundleRequest): Promise<VerifyBundleSummary> {
     return verifyBundle({ bundle, artefacts, publicKeyPem });
   }
 }

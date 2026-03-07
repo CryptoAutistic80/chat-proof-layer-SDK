@@ -40,12 +40,12 @@ What it does **not** claim: model determinism or legal finality. It proves what 
 - `crates/core` (`proof-layer-core`): RFC 8785 canonicalization, hashing, Merkle commitment + inclusion proofs, Ed25519 JWS sign/verify, v1.0 evidence bundle build/verify logic, and v0.1 -> v1.0 migration helpers.
 - `crates/cli` (`proofctl`): keygen, create bundle package, verify package offline, inspect package, query vault state, and download vault-assembled evidence packs.
 - `crates/vault` (`proof-service`): Axum service with SQLite metadata storage, retention scanning, pack assembly, and local artifact storage.
-- `crates/napi` (`proof-layer-napi`): native Node bridge over the Rust core for canonicalization, hashing, Merkle root computation, JWS sign/verify, and offline bundle verification.
+- `crates/napi` (`proof-layer-napi`): native TypeScript/Node bridge over the Rust core for canonicalization, hashing, Merkle root computation, JWS sign/verify, and offline bundle verification.
 - `crates/pyo3` (`proof-layer-pyo3`): native Python bridge over the Rust core for the same canonicalization, hashing, Merkle root, JWS sign/verify, and offline bundle verification surface.
-- `packages/sdk-node`: Node vault client, local sealing client, OpenAI/Anthropic-style wrappers, and tool/OTel helpers, backed by the Rust NAPI module for integrity-sensitive operations.
+- `sdks/typescript`: the TypeScript npm SDK package (`@proof-layer/sdk`), with shared v1 evidence helpers, `ProofLayer`, vault/local sealing clients, lifecycle capture helpers (`risk_assessment`, `data_governance`, `technical_doc`), provider wrappers, generic/Vercel AI adapters, and tool/OTel helpers over the Rust NAPI module.
 - `packages/sdk-python`: Python vault client, local sealing client, wrappers, decorator, and callback/tool/OTel helpers, backed by the Rust PyO3 module for integrity-sensitive operations.
 - `web-demo`: Vite + React single-page demo UI.
-- `examples/`: runnable Node/Python/agent-simulated example scripts.
+- `examples/`: runnable TypeScript/Python/agent-simulated example scripts.
 
 ## Quick Start
 
@@ -235,12 +235,11 @@ Current file-config limitations:
 
 ## SDK And Demo
 
-Run Node SDK tests:
+Run TypeScript SDK tests:
 
 ```bash
-cd packages/sdk-node
+cd sdks/typescript
 npm install
-npm run build:native
 npm test
 ```
 
@@ -255,7 +254,7 @@ python -m unittest discover -s tests -v
 Run examples (with proof-service running):
 
 ```bash
-node examples/node-basic/run.mjs
+node examples/typescript/run.mjs
 python3 examples/python-basic/run.py
 python3 examples/agent-simulated/run.py
 ```

@@ -3,8 +3,10 @@ import { hashSha256 } from "./native.js";
 import type {
   AdversarialTestRequestOptions,
   BinaryLike,
+  ConformityAssessmentRequestOptions,
   CreateBundleRequest,
   DataGovernanceRequestOptions,
+  DeclarationRequestOptions,
   HumanOversightRequestOptions,
   IncidentReportRequestOptions,
   JsonObject,
@@ -14,6 +16,7 @@ import type {
   ModelEvaluationRequestOptions,
   PolicyDecisionRequestOptions,
   ProofArtefactInput,
+  RegistrationRequestOptions,
   RetrievalRequestOptions,
   RiskAssessmentRequestOptions,
   TechnicalDocRequestOptions,
@@ -187,7 +190,7 @@ export function createLlmInteractionRequest(
     ],
     redactions: options.redactions,
     encryptionEnabled: options.encryptionEnabled,
-    retentionClass: options.retentionClass,
+    retentionClass: options.retentionClass ?? "gpai_documentation",
     artefacts: options.artefacts ?? defaultLlmInteractionArtefacts(options.input, options.output)
   });
 }
@@ -567,7 +570,7 @@ export function createModelEvaluationRequest(
     ],
     redactions: options.redactions,
     encryptionEnabled: options.encryptionEnabled,
-    retentionClass: options.retentionClass,
+    retentionClass: options.retentionClass ?? "gpai_documentation",
     artefacts
   });
 }
@@ -618,7 +621,7 @@ export function createAdversarialTestRequest(
     ],
     redactions: options.redactions,
     encryptionEnabled: options.encryptionEnabled,
-    retentionClass: options.retentionClass,
+    retentionClass: options.retentionClass ?? "gpai_documentation",
     artefacts
   });
 }
@@ -661,6 +664,155 @@ export function createTrainingProvenanceRequest(
           stage: options.stage,
           lineage_ref: options.lineageRef ?? null,
           record_commitment: options.record !== undefined ? hashSha256(options.record) : null,
+          metadata: options.metadata ?? null
+        }
+      }
+    ],
+    redactions: options.redactions,
+    encryptionEnabled: options.encryptionEnabled,
+    retentionClass: options.retentionClass ?? "gpai_documentation",
+    artefacts
+  });
+}
+
+export function createConformityAssessmentRequest(
+  options: ConformityAssessmentRequestOptions
+): CreateBundleRequest {
+  const artefacts = options.artefacts ? [...options.artefacts] : [];
+  if (artefacts.length === 0) {
+    artefacts.push(
+      jsonArtefact("conformity_assessment.json", {
+        assessment_id: options.assessmentId,
+        procedure: options.procedure,
+        status: options.status,
+        metadata: options.metadata ?? null
+      })
+    );
+    if (options.report !== undefined) {
+      artefacts.push(namedDataArtefact("conformity_assessment_report", options.report));
+    }
+  }
+
+  return createCaptureRequest({
+    keyId: options.keyId,
+    role: options.role,
+    issuer: options.issuer,
+    appId: options.appId,
+    env: options.env,
+    requestId: options.requestId,
+    threadId: options.threadId,
+    userRef: options.userRef,
+    systemId: options.systemId,
+    deploymentId: options.deploymentId,
+    version: options.version,
+    items: [
+      {
+        type: "conformity_assessment",
+        data: {
+          assessment_id: options.assessmentId,
+          procedure: options.procedure,
+          status: options.status,
+          report_commitment: options.report !== undefined ? hashSha256(options.report) : null,
+          metadata: options.metadata ?? null
+        }
+      }
+    ],
+    redactions: options.redactions,
+    encryptionEnabled: options.encryptionEnabled,
+    retentionClass: options.retentionClass,
+    artefacts
+  });
+}
+
+export function createDeclarationRequest(
+  options: DeclarationRequestOptions
+): CreateBundleRequest {
+  const artefacts = options.artefacts ? [...options.artefacts] : [];
+  if (artefacts.length === 0) {
+    artefacts.push(
+      jsonArtefact("declaration.json", {
+        declaration_id: options.declarationId,
+        jurisdiction: options.jurisdiction,
+        status: options.status,
+        metadata: options.metadata ?? null
+      })
+    );
+    if (options.document !== undefined) {
+      artefacts.push(namedDataArtefact("declaration_document", options.document));
+    }
+  }
+
+  return createCaptureRequest({
+    keyId: options.keyId,
+    role: options.role,
+    issuer: options.issuer,
+    appId: options.appId,
+    env: options.env,
+    requestId: options.requestId,
+    threadId: options.threadId,
+    userRef: options.userRef,
+    systemId: options.systemId,
+    deploymentId: options.deploymentId,
+    version: options.version,
+    items: [
+      {
+        type: "declaration",
+        data: {
+          declaration_id: options.declarationId,
+          jurisdiction: options.jurisdiction,
+          status: options.status,
+          document_commitment:
+            options.document !== undefined ? hashSha256(options.document) : null,
+          metadata: options.metadata ?? null
+        }
+      }
+    ],
+    redactions: options.redactions,
+    encryptionEnabled: options.encryptionEnabled,
+    retentionClass: options.retentionClass,
+    artefacts
+  });
+}
+
+export function createRegistrationRequest(
+  options: RegistrationRequestOptions
+): CreateBundleRequest {
+  const artefacts = options.artefacts ? [...options.artefacts] : [];
+  if (artefacts.length === 0) {
+    artefacts.push(
+      jsonArtefact("registration.json", {
+        registration_id: options.registrationId,
+        authority: options.authority,
+        status: options.status,
+        metadata: options.metadata ?? null
+      })
+    );
+    if (options.receipt !== undefined) {
+      artefacts.push(namedDataArtefact("registration_receipt", options.receipt));
+    }
+  }
+
+  return createCaptureRequest({
+    keyId: options.keyId,
+    role: options.role,
+    issuer: options.issuer,
+    appId: options.appId,
+    env: options.env,
+    requestId: options.requestId,
+    threadId: options.threadId,
+    userRef: options.userRef,
+    systemId: options.systemId,
+    deploymentId: options.deploymentId,
+    version: options.version,
+    items: [
+      {
+        type: "registration",
+        data: {
+          registration_id: options.registrationId,
+          authority: options.authority,
+          status: options.status,
+          receipt_commitment:
+            options.receipt !== undefined ? hashSha256(options.receipt) : null,
           metadata: options.metadata ?? null
         }
       }

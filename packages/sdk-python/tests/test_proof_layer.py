@@ -178,6 +178,72 @@ class TestProofLayer(unittest.TestCase):
             result["bundle"]["items"][0]["data"]["record_commitment"].startswith("sha256:")
         )
 
+    def test_capture_conformity_assessment_seals_conformity_evidence(self):
+        signing_key_pem = (GOLDEN_DIR / "signing_key.txt").read_text(encoding="utf-8")
+        proof_layer = ProofLayer(
+            signing_key_pem=signing_key_pem,
+            key_id="kid-dev-01",
+            system_id="system-conf-42",
+        )
+
+        result = proof_layer.capture_conformity_assessment(
+            assessment_id="ca-42",
+            procedure="annex_vii",
+            status="completed",
+            report={"outcome": "pass"},
+            retention_class="technical_doc",
+        )
+
+        self.assertEqual(result["bundle"]["items"][0]["type"], "conformity_assessment")
+        self.assertEqual(result["bundle"]["subject"]["system_id"], "system-conf-42")
+        self.assertTrue(
+            result["bundle"]["items"][0]["data"]["report_commitment"].startswith("sha256:")
+        )
+
+    def test_capture_declaration_seals_declaration_evidence(self):
+        signing_key_pem = (GOLDEN_DIR / "signing_key.txt").read_text(encoding="utf-8")
+        proof_layer = ProofLayer(
+            signing_key_pem=signing_key_pem,
+            key_id="kid-dev-01",
+            system_id="system-conf-43",
+        )
+
+        result = proof_layer.capture_declaration(
+            declaration_id="decl-42",
+            jurisdiction="eu",
+            status="issued",
+            document="eu declaration body",
+            retention_class="technical_doc",
+        )
+
+        self.assertEqual(result["bundle"]["items"][0]["type"], "declaration")
+        self.assertEqual(result["bundle"]["subject"]["system_id"], "system-conf-43")
+        self.assertTrue(
+            result["bundle"]["items"][0]["data"]["document_commitment"].startswith("sha256:")
+        )
+
+    def test_capture_registration_seals_registration_evidence(self):
+        signing_key_pem = (GOLDEN_DIR / "signing_key.txt").read_text(encoding="utf-8")
+        proof_layer = ProofLayer(
+            signing_key_pem=signing_key_pem,
+            key_id="kid-dev-01",
+            system_id="system-conf-44",
+        )
+
+        result = proof_layer.capture_registration(
+            registration_id="reg-42",
+            authority="eu_database",
+            status="accepted",
+            receipt={"receipt_id": "rcpt-42"},
+            retention_class="technical_doc",
+        )
+
+        self.assertEqual(result["bundle"]["items"][0]["type"], "registration")
+        self.assertEqual(result["bundle"]["subject"]["system_id"], "system-conf-44")
+        self.assertTrue(
+            result["bundle"]["items"][0]["data"]["receipt_commitment"].startswith("sha256:")
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

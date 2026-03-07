@@ -388,6 +388,8 @@ struct RetentionStatusResponse {
 #[derive(Debug, Serialize, Deserialize)]
 struct RetentionStatusItem {
     retention_class: String,
+    #[serde(default)]
+    expiry_mode: RetentionExpiryMode,
     min_duration_days: i64,
     max_duration_days: Option<i64>,
     legal_basis: String,
@@ -503,11 +505,21 @@ struct RetentionConfigView {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct RetentionPolicyConfig {
     retention_class: String,
+    #[serde(default)]
+    expiry_mode: RetentionExpiryMode,
     min_duration_days: i64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     max_duration_days: Option<i64>,
     legal_basis: String,
     active: bool,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+enum RetentionExpiryMode {
+    #[default]
+    FixedDays,
+    UntilWithdrawn,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -677,6 +689,7 @@ struct StoredAuditLogRow {
 #[derive(Debug, Clone, FromRow)]
 struct StoredRetentionPolicyRow {
     retention_class: String,
+    expiry_mode: String,
     min_duration_days: i64,
     max_duration_days: Option<i64>,
     legal_basis: String,
@@ -1357,17 +1370,18 @@ async fn retention_status(State(state): State<AppState>) -> Result<impl IntoResp
     let rows = sqlx::query(
         "SELECT
             p.retention_class,
+            p.expiry_mode,
             p.min_duration_days,
             p.max_duration_days,
             p.legal_basis,
             p.active,
             COUNT(b.bundle_id) AS total_bundles,
-            COALESCE(SUM(CASE WHEN b.deleted_at IS NULL THEN 1 ELSE 0 END), 0) AS active_bundles,
-            COALESCE(SUM(CASE WHEN b.deleted_at IS NOT NULL THEN 1 ELSE 0 END), 0) AS deleted_bundles,
-            COALESCE(SUM(CASE WHEN b.legal_hold_reason IS NOT NULL AND (b.legal_hold_until IS NULL OR b.legal_hold_until > ?) THEN 1 ELSE 0 END), 0) AS held_bundles,
-            COALESCE(SUM(CASE WHEN b.deleted_at IS NULL AND b.expires_at IS NOT NULL AND b.expires_at <= ? AND NOT (b.legal_hold_reason IS NOT NULL AND (b.legal_hold_until IS NULL OR b.legal_hold_until > ?)) THEN 1 ELSE 0 END), 0) AS expired_active_bundles,
-            COALESCE(SUM(CASE WHEN b.deleted_at IS NOT NULL AND b.deleted_at <= ? AND NOT (b.legal_hold_reason IS NOT NULL AND (b.legal_hold_until IS NULL OR b.legal_hold_until > ?)) THEN 1 ELSE 0 END), 0) AS hard_delete_ready_bundles,
-            MIN(CASE WHEN b.deleted_at IS NULL THEN b.expires_at END) AS next_expiry
+            COALESCE(SUM(CASE WHEN b.bundle_id IS NOT NULL AND b.deleted_at IS NULL THEN 1 ELSE 0 END), 0) AS active_bundles,
+            COALESCE(SUM(CASE WHEN b.bundle_id IS NOT NULL AND b.deleted_at IS NOT NULL THEN 1 ELSE 0 END), 0) AS deleted_bundles,
+            COALESCE(SUM(CASE WHEN b.bundle_id IS NOT NULL AND b.legal_hold_reason IS NOT NULL AND (b.legal_hold_until IS NULL OR b.legal_hold_until > ?) THEN 1 ELSE 0 END), 0) AS held_bundles,
+            COALESCE(SUM(CASE WHEN b.bundle_id IS NOT NULL AND b.deleted_at IS NULL AND b.expires_at IS NOT NULL AND b.expires_at <= ? AND NOT (b.legal_hold_reason IS NOT NULL AND (b.legal_hold_until IS NULL OR b.legal_hold_until > ?)) THEN 1 ELSE 0 END), 0) AS expired_active_bundles,
+            COALESCE(SUM(CASE WHEN b.bundle_id IS NOT NULL AND b.deleted_at IS NOT NULL AND b.deleted_at <= ? AND NOT (b.legal_hold_reason IS NOT NULL AND (b.legal_hold_until IS NULL OR b.legal_hold_until > ?)) THEN 1 ELSE 0 END), 0) AS hard_delete_ready_bundles,
+            MIN(CASE WHEN b.bundle_id IS NOT NULL AND b.deleted_at IS NULL THEN b.expires_at END) AS next_expiry
          FROM retention_policies p
          LEFT JOIN bundles b ON b.retention_class = p.retention_class
          GROUP BY
@@ -1393,6 +1407,11 @@ async fn retention_status(State(state): State<AppState>) -> Result<impl IntoResp
             retention_class: row
                 .try_get("retention_class")
                 .map_err(ApiError::internal_anyhow)?,
+            expiry_mode: parse_retention_expiry_mode(
+                &row.try_get::<String, _>("expiry_mode")
+                    .map_err(ApiError::internal_anyhow)?,
+            )
+            .map_err(ApiError::internal_anyhow)?,
             min_duration_days: row
                 .try_get("min_duration_days")
                 .map_err(ApiError::internal_anyhow)?,
@@ -2823,7 +2842,7 @@ fn normalize_pack_type(raw: &str) -> Result<String> {
 
     match normalized.as_str() {
         "annex_iv" | "annex_xi" | "annex_xii" | "runtime_logs" | "risk_mgmt" | "ai_literacy"
-        | "systemic_risk" | "incident_response" => Ok(normalized),
+        | "systemic_risk" | "incident_response" | "conformity" => Ok(normalized),
         _ => bail!("unsupported pack_type {}", raw.trim()),
     }
 }
@@ -2895,7 +2914,7 @@ fn pack_profile(pack_type: &str) -> Result<PackProfile> {
                 "model_evaluation",
                 "training_provenance",
             ],
-            retention_classes: &["technical_doc", "risk_mgmt"],
+            retention_classes: &["technical_doc", "risk_mgmt", "gpai_documentation"],
             obligation_refs: &["art11_annex_iv", "art9", "art12_19_26", "art53_annex_xi"],
         }),
         "annex_xii" => Ok(PackProfile {
@@ -2949,7 +2968,7 @@ fn pack_profile(pack_type: &str) -> Result<PackProfile> {
                 "adversarial_test",
                 "incident_report",
             ],
-            retention_classes: &["risk_mgmt", "technical_doc"],
+            retention_classes: &["risk_mgmt", "technical_doc", "gpai_documentation"],
             obligation_refs: &[
                 "art9",
                 "art11_annex_iv",
@@ -2970,6 +2989,13 @@ fn pack_profile(pack_type: &str) -> Result<PackProfile> {
             ],
             retention_classes: &["risk_mgmt", "technical_doc"],
             obligation_refs: &["art9", "art11_annex_iv", "art14", "art55_73"],
+        }),
+        "conformity" => Ok(PackProfile {
+            pack_type: "conformity",
+            allowed_roles: &["provider"],
+            item_types: &["conformity_assessment", "declaration", "registration"],
+            retention_classes: &["technical_doc"],
+            obligation_refs: &["art43_annex_vi_vii", "art47_annex_v", "art49_71"],
         }),
         _ => bail!("unsupported pack_type {pack_type}"),
     }
@@ -3187,6 +3213,9 @@ fn evidence_item_obligation_ref(bundle: &ProofBundle, item: &EvidenceItem) -> Op
         EvidenceItem::ModelEvaluation(_) => Some("art53_annex_xi"),
         EvidenceItem::AdversarialTest(_) => Some("art55"),
         EvidenceItem::TrainingProvenance(_) => Some("art53_annex_xi"),
+        EvidenceItem::ConformityAssessment(_) => Some("art43_annex_vi_vii"),
+        EvidenceItem::Declaration(_) => Some("art47_annex_v"),
+        EvidenceItem::Registration(_) => Some("art49_71"),
         EvidenceItem::LiteracyAttestation(_) => Some("art4"),
         EvidenceItem::IncidentReport(_) => Some("art55_73"),
         EvidenceItem::LlmInteraction(_)
@@ -3500,6 +3529,11 @@ fn validate_retention_policy_config(policy: &RetentionPolicyConfig) -> Result<()
     {
         bail!("max_duration_days must be >= min_duration_days");
     }
+    if policy.expiry_mode == RetentionExpiryMode::UntilWithdrawn
+        && policy.max_duration_days.is_some()
+    {
+        bail!("until_withdrawn retention policies must not set max_duration_days");
+    }
     Ok(())
 }
 
@@ -3663,6 +3697,7 @@ async fn load_retention_policies(db: &SqlitePool) -> Result<Vec<RetentionPolicyC
     let rows = sqlx::query_as::<_, StoredRetentionPolicyRow>(
         "SELECT
             retention_class,
+            expiry_mode,
             min_duration_days,
             max_duration_days,
             legal_basis,
@@ -3674,16 +3709,19 @@ async fn load_retention_policies(db: &SqlitePool) -> Result<Vec<RetentionPolicyC
     .await
     .context("failed to load retention policies")?;
 
-    Ok(rows
+    rows
         .into_iter()
-        .map(|row| RetentionPolicyConfig {
-            retention_class: row.retention_class,
-            min_duration_days: row.min_duration_days,
-            max_duration_days: row.max_duration_days,
-            legal_basis: row.legal_basis,
-            active: row.active,
+        .map(|row| {
+            Ok(RetentionPolicyConfig {
+                retention_class: row.retention_class,
+                expiry_mode: parse_retention_expiry_mode(&row.expiry_mode)?,
+                min_duration_days: row.min_duration_days,
+                max_duration_days: row.max_duration_days,
+                legal_basis: row.legal_basis,
+                active: row.active,
+            })
         })
-        .collect())
+        .collect::<Result<Vec<_>>>()
 }
 
 async fn load_active_bundle(db: &SqlitePool, bundle_id: &str) -> Result<Option<ProofBundle>> {
@@ -3707,18 +3745,21 @@ async fn upsert_retention_policy(db: &SqlitePool, policy: &RetentionPolicyConfig
     sqlx::query(
         "INSERT INTO retention_policies (
             retention_class,
+            expiry_mode,
             min_duration_days,
             max_duration_days,
             legal_basis,
             active
-        ) VALUES (?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?)
         ON CONFLICT(retention_class) DO UPDATE SET
+            expiry_mode = excluded.expiry_mode,
             min_duration_days = excluded.min_duration_days,
             max_duration_days = excluded.max_duration_days,
             legal_basis = excluded.legal_basis,
             active = excluded.active",
     )
     .bind(policy.retention_class.trim())
+    .bind(retention_expiry_mode_value(policy.expiry_mode))
     .bind(policy.min_duration_days)
     .bind(policy.max_duration_days)
     .bind(policy.legal_basis.trim())
@@ -4172,8 +4213,26 @@ fn evidence_item_type(item: &EvidenceItem) -> &'static str {
         EvidenceItem::ModelEvaluation(_) => "model_evaluation",
         EvidenceItem::AdversarialTest(_) => "adversarial_test",
         EvidenceItem::TrainingProvenance(_) => "training_provenance",
+        EvidenceItem::ConformityAssessment(_) => "conformity_assessment",
+        EvidenceItem::Declaration(_) => "declaration",
+        EvidenceItem::Registration(_) => "registration",
         EvidenceItem::LiteracyAttestation(_) => "literacy_attestation",
         EvidenceItem::IncidentReport(_) => "incident_report",
+    }
+}
+
+fn retention_expiry_mode_value(mode: RetentionExpiryMode) -> &'static str {
+    match mode {
+        RetentionExpiryMode::FixedDays => "fixed_days",
+        RetentionExpiryMode::UntilWithdrawn => "until_withdrawn",
+    }
+}
+
+fn parse_retention_expiry_mode(value: &str) -> Result<RetentionExpiryMode> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "fixed_days" => Ok(RetentionExpiryMode::FixedDays),
+        "until_withdrawn" => Ok(RetentionExpiryMode::UntilWithdrawn),
+        other => bail!("unsupported retention expiry_mode {other}"),
     }
 }
 
@@ -4183,7 +4242,7 @@ async fn resolve_expires_at(
     created_at: &str,
 ) -> Result<Option<String>> {
     let row = sqlx::query(
-        "SELECT min_duration_days
+        "SELECT min_duration_days, expiry_mode
          FROM retention_policies
          WHERE retention_class = ? AND active = TRUE",
     )
@@ -4195,6 +4254,12 @@ async fn resolve_expires_at(
     let min_duration_days: i64 = row.try_get("min_duration_days").with_context(|| {
         format!("retention policy {retention_class} is missing min_duration_days")
     })?;
+    let expiry_mode_raw: String = row
+        .try_get("expiry_mode")
+        .with_context(|| format!("retention policy {retention_class} is missing expiry_mode"))?;
+    if parse_retention_expiry_mode(&expiry_mode_raw)? == RetentionExpiryMode::UntilWithdrawn {
+        return Ok(None);
+    }
 
     let created_at = chrono::DateTime::parse_from_rfc3339(created_at)
         .with_context(|| format!("bundle created_at must be RFC3339, got {created_at}"))?
@@ -4362,6 +4427,7 @@ async fn initialize_sqlite_schema(db: &SqlitePool) -> Result<()> {
         "CREATE INDEX IF NOT EXISTS idx_packs_system ON packs(system_id, created_at)",
         "CREATE TABLE IF NOT EXISTS retention_policies (
             retention_class TEXT PRIMARY KEY,
+            expiry_mode TEXT NOT NULL DEFAULT 'fixed_days',
             min_duration_days INTEGER NOT NULL,
             max_duration_days INTEGER,
             legal_basis TEXT NOT NULL,
@@ -4385,6 +4451,13 @@ async fn initialize_sqlite_schema(db: &SqlitePool) -> Result<()> {
     ensure_sqlite_column(db, "bundles", "legal_hold_reason", "TEXT").await?;
     ensure_sqlite_column(db, "bundles", "legal_hold_until", "TEXT").await?;
     ensure_sqlite_column(db, "bundles", "legal_hold_placed_at", "TEXT").await?;
+    ensure_sqlite_column(
+        db,
+        "retention_policies",
+        "expiry_mode",
+        "TEXT NOT NULL DEFAULT 'fixed_days'",
+    )
+    .await?;
 
     Ok(())
 }
@@ -4419,26 +4492,67 @@ async fn ensure_sqlite_column(
 }
 
 async fn seed_default_retention_policies(db: &SqlitePool) -> Result<()> {
-    let defaults: [(&str, i64, Option<i64>, &str); 5] = [
-        ("unspecified", 365_i64, None, "operational_default"),
-        ("runtime_logs", 3650_i64, None, "eu_ai_act_article_12_19_26"),
-        ("risk_mgmt", 3650_i64, None, "eu_ai_act_article_9"),
-        ("technical_doc", 3650_i64, None, "eu_ai_act_annex_iv"),
-        ("ai_literacy", 1095_i64, None, "eu_ai_act_article_4"),
+    let defaults: [(&str, RetentionExpiryMode, i64, Option<i64>, &str); 6] = [
+        (
+            "unspecified",
+            RetentionExpiryMode::FixedDays,
+            365_i64,
+            None,
+            "operational_default",
+        ),
+        (
+            "runtime_logs",
+            RetentionExpiryMode::FixedDays,
+            3650_i64,
+            None,
+            "eu_ai_act_article_12_19_26",
+        ),
+        (
+            "risk_mgmt",
+            RetentionExpiryMode::FixedDays,
+            3650_i64,
+            None,
+            "eu_ai_act_article_9",
+        ),
+        (
+            "technical_doc",
+            RetentionExpiryMode::FixedDays,
+            3650_i64,
+            None,
+            "eu_ai_act_annex_iv",
+        ),
+        (
+            "gpai_documentation",
+            RetentionExpiryMode::UntilWithdrawn,
+            0_i64,
+            None,
+            "eu_ai_act_article_53_until_withdrawn",
+        ),
+        (
+            "ai_literacy",
+            RetentionExpiryMode::FixedDays,
+            1095_i64,
+            None,
+            "eu_ai_act_article_4",
+        ),
     ];
 
-    for (retention_class, min_duration_days, max_duration_days, legal_basis) in defaults {
+    for (retention_class, expiry_mode, min_duration_days, max_duration_days, legal_basis) in
+        defaults
+    {
         sqlx::query(
             "INSERT INTO retention_policies (
                 retention_class,
+                expiry_mode,
                 min_duration_days,
                 max_duration_days,
                 legal_basis,
                 active
-            ) VALUES (?, ?, ?, ?, TRUE)
+            ) VALUES (?, ?, ?, ?, ?, TRUE)
             ON CONFLICT(retention_class) DO NOTHING",
         )
         .bind(retention_class)
+        .bind(retention_expiry_mode_value(expiry_mode))
         .bind(min_duration_days)
         .bind(max_duration_days)
         .bind(legal_basis)
@@ -4937,6 +5051,7 @@ mod tests {
                 scan_interval_hours: Some(12),
                 policies: vec![RetentionPolicyConfig {
                     retention_class: "runtime_logs".to_string(),
+                    expiry_mode: RetentionExpiryMode::FixedDays,
                     min_duration_days: 3650,
                     max_duration_days: None,
                     legal_basis: "eu_ai_act_article_12_19_26".to_string(),
@@ -5734,6 +5849,60 @@ mod tests {
         assert_eq!(unspecified.held_bundles, 0);
         assert_eq!(unspecified.hard_delete_ready_bundles, 0);
         assert!(unspecified.next_expiry.is_some());
+
+        let gpai = response
+            .policies
+            .iter()
+            .find(|policy| policy.retention_class == "gpai_documentation")
+            .unwrap();
+        assert_eq!(gpai.expiry_mode, RetentionExpiryMode::UntilWithdrawn);
+        assert_eq!(gpai.active_bundles, 0);
+        assert!(gpai.next_expiry.is_none());
+    }
+
+    #[tokio::test]
+    async fn gpai_documentation_bundles_do_not_get_expiry_dates() {
+        let state = test_state(DEFAULT_MAX_PAYLOAD_BYTES).await;
+        let db = state.db.clone();
+        let app = build_router(state, DEFAULT_MAX_PAYLOAD_BYTES);
+
+        let created = create_bundle_response(
+            &app,
+            &CreateBundleRequest {
+                capture: SealableCaptureInput::V10(sample_event_with_profile(
+                    "system-gpai-retention",
+                    proof_layer_core::ActorRole::Provider,
+                    vec![EvidenceItem::ModelEvaluation(
+                        proof_layer_core::schema::ModelEvaluationEvidence {
+                            evaluation_id: "eval-gpai-retention".to_string(),
+                            benchmark: "mmlu-pro".to_string(),
+                            status: "completed".to_string(),
+                            summary: Some("retention semantics test".to_string()),
+                            report_commitment: Some(
+                                "sha256:abababababababababababababababababababababababababababababababab"
+                                    .to_string(),
+                            ),
+                            metadata: serde_json::json!({"suite": "gpai-retention"}),
+                        },
+                    )],
+                    Some("gpai_documentation"),
+                )),
+                artefacts: vec![InlineArtefact {
+                    name: "model_evaluation.json".to_string(),
+                    content_type: "application/json".to_string(),
+                    data_base64: Base64::encode_string(br#"{"evaluation_id":"eval-1"}"#),
+                }],
+            },
+        )
+        .await;
+
+        let expires_at: Option<String> =
+            sqlx::query_scalar("SELECT expires_at FROM bundles WHERE bundle_id = ?")
+                .bind(&created.bundle_id)
+                .fetch_one(&db)
+                .await
+                .unwrap();
+        assert_eq!(expires_at, None);
     }
 
     #[tokio::test]
@@ -6118,6 +6287,13 @@ mod tests {
                 .iter()
                 .any(|policy| policy.retention_class == "unspecified")
         );
+        let gpai = config
+            .retention
+            .policies
+            .iter()
+            .find(|policy| policy.retention_class == "gpai_documentation")
+            .unwrap();
+        assert_eq!(gpai.expiry_mode, RetentionExpiryMode::UntilWithdrawn);
         assert!(!config.timestamp.enabled);
         assert_eq!(config.timestamp.provider, DEFAULT_TIMESTAMP_PROVIDER);
         assert_eq!(config.timestamp.url, DEFAULT_TIMESTAMP_URL);
@@ -6144,6 +6320,7 @@ mod tests {
             retention_scan_interval_hours: 8,
             retention_policies: vec![RetentionPolicyConfig {
                 retention_class: "runtime_logs".to_string(),
+                expiry_mode: RetentionExpiryMode::FixedDays,
                 min_duration_days: 4000,
                 max_duration_days: Some(5000),
                 legal_basis: "custom_runtime_policy".to_string(),
@@ -6172,6 +6349,7 @@ mod tests {
             .iter()
             .find(|policy| policy.retention_class == "runtime_logs")
             .unwrap();
+        assert_eq!(runtime_logs.expiry_mode, RetentionExpiryMode::FixedDays);
         assert_eq!(runtime_logs.min_duration_days, 4000);
         assert_eq!(runtime_logs.max_duration_days, Some(5000));
         assert_eq!(runtime_logs.legal_basis, "custom_runtime_policy");
@@ -6487,6 +6665,7 @@ mod tests {
                 serde_json::to_vec(&UpdateRetentionConfigRequest {
                     policies: vec![RetentionPolicyConfig {
                         retention_class: "custom_short".to_string(),
+                        expiry_mode: RetentionExpiryMode::FixedDays,
                         min_duration_days: 10,
                         max_duration_days: Some(30),
                         legal_basis: "test_policy".to_string(),
@@ -6543,6 +6722,7 @@ mod tests {
                 serde_json::to_vec(&UpdateRetentionConfigRequest {
                     policies: vec![RetentionPolicyConfig {
                         retention_class: "custom_short".to_string(),
+                        expiry_mode: RetentionExpiryMode::FixedDays,
                         min_duration_days: 20,
                         max_duration_days: Some(40),
                         legal_basis: "test_policy_v2".to_string(),
@@ -6595,6 +6775,7 @@ mod tests {
                 serde_json::to_vec(&UpdateRetentionConfigRequest {
                     policies: vec![RetentionPolicyConfig {
                         retention_class: "custom_short".to_string(),
+                        expiry_mode: RetentionExpiryMode::FixedDays,
                         min_duration_days: 20,
                         max_duration_days: Some(40),
                         legal_basis: "test_policy_v2".to_string(),
@@ -7353,6 +7534,126 @@ mod tests {
             manifest.bundles[0]
                 .matched_rules
                 .contains(&"obligation_ref:art55".to_string())
+        );
+    }
+
+    #[tokio::test]
+    async fn conformity_pack_curates_provider_declarations() {
+        let state = test_state(DEFAULT_MAX_PAYLOAD_BYTES).await;
+        let app = build_router(state, DEFAULT_MAX_PAYLOAD_BYTES);
+
+        let provider_bundle = create_bundle_response(
+            &app,
+            &CreateBundleRequest {
+                capture: SealableCaptureInput::V10(sample_event_with_profile(
+                    "system-conformity",
+                    proof_layer_core::ActorRole::Provider,
+                    vec![EvidenceItem::Declaration(
+                        proof_layer_core::schema::DeclarationEvidence {
+                            declaration_id: "decl-77".to_string(),
+                            jurisdiction: "eu".to_string(),
+                            status: "issued".to_string(),
+                            document_commitment: Some(
+                                "sha256:efefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefef"
+                                    .to_string(),
+                            ),
+                            metadata: serde_json::json!({"annex": "v"}),
+                        },
+                    )],
+                    Some("technical_doc"),
+                )),
+                artefacts: vec![InlineArtefact {
+                    name: "provider-declaration.json".to_string(),
+                    content_type: "application/json".to_string(),
+                    data_base64: Base64::encode_string(br#"{"declaration":"provider"}"#),
+                }],
+            },
+        )
+        .await;
+
+        create_bundle_response(
+            &app,
+            &CreateBundleRequest {
+                capture: SealableCaptureInput::V10(sample_event_with_profile(
+                    "system-conformity",
+                    proof_layer_core::ActorRole::Integrator,
+                    vec![EvidenceItem::Declaration(
+                        proof_layer_core::schema::DeclarationEvidence {
+                            declaration_id: "decl-78".to_string(),
+                            jurisdiction: "eu".to_string(),
+                            status: "issued".to_string(),
+                            document_commitment: Some(
+                                "sha256:f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0"
+                                    .to_string(),
+                            ),
+                            metadata: serde_json::json!({"annex": "v"}),
+                        },
+                    )],
+                    Some("technical_doc"),
+                )),
+                artefacts: vec![InlineArtefact {
+                    name: "integrator-declaration.json".to_string(),
+                    content_type: "application/json".to_string(),
+                    data_base64: Base64::encode_string(br#"{"declaration":"integrator"}"#),
+                }],
+            },
+        )
+        .await;
+
+        let pack_req = Request::builder()
+            .method("POST")
+            .uri("/v1/packs")
+            .header("content-type", "application/json")
+            .body(Body::from(
+                serde_json::to_vec(&CreatePackRequest {
+                    pack_type: "conformity".to_string(),
+                    system_id: Some("system-conformity".to_string()),
+                    from: None,
+                    to: None,
+                })
+                .unwrap(),
+            ))
+            .unwrap();
+        let pack_res = app.clone().oneshot(pack_req).await.unwrap();
+        assert_eq!(pack_res.status(), StatusCode::CREATED);
+        let body = axum::body::to_bytes(pack_res.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let pack: PackSummaryResponse = serde_json::from_slice(&body).unwrap();
+
+        assert_eq!(pack.bundle_count, 1);
+        assert_eq!(pack.bundle_ids, vec![provider_bundle.bundle_id]);
+
+        let manifest_req = Request::builder()
+            .method("GET")
+            .uri(format!("/v1/packs/{}/manifest", pack.pack_id))
+            .body(Body::empty())
+            .unwrap();
+        let manifest_res = app.oneshot(manifest_req).await.unwrap();
+        assert_eq!(manifest_res.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(manifest_res.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let manifest: PackManifest = serde_json::from_slice(&body).unwrap();
+
+        assert_eq!(manifest.bundles.len(), 1);
+        assert_eq!(manifest.bundles[0].actor_role, "provider");
+        assert_eq!(manifest.bundles[0].item_types, vec!["declaration"]);
+        assert_eq!(manifest.bundles[0].obligation_refs, vec!["art47_annex_v"]);
+        assert!(
+            manifest.bundles[0]
+                .matched_rules
+                .contains(&"actor_role:provider".to_string())
+        );
+        assert!(
+            manifest.bundles[0]
+                .matched_rules
+                .contains(&"item_type:declaration".to_string())
+        );
+        assert!(
+            manifest.bundles[0]
+                .matched_rules
+                .contains(&"obligation_ref:art47_annex_v".to_string())
         );
     }
 }

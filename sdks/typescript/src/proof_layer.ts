@@ -1,13 +1,16 @@
 import { readFileSync } from "node:fs";
 import {
   createAdversarialTestRequest,
+  createConformityAssessmentRequest,
   createDataGovernanceRequest,
+  createDeclarationRequest,
   createHumanOversightRequest,
   createIncidentReportRequest,
   createLiteracyAttestationRequest,
   createLlmInteractionRequest,
   createModelEvaluationRequest,
   createPolicyDecisionRequest,
+  createRegistrationRequest,
   createRetrievalRequest,
   createRiskAssessmentRequest,
   createTechnicalDocRequest,
@@ -19,9 +22,11 @@ import { ProofLayerClient } from "./client.js";
 import type {
   AdversarialTestRequestOptions,
   BundleCreateClient,
+  ConformityAssessmentRequestOptions,
   CreateBundleRequest,
   CreateBundleResponse,
   DataGovernanceRequestOptions,
+  DeclarationRequestOptions,
   HumanOversightRequestOptions,
   IncidentReportRequestOptions,
   LiteracyAttestationRequestOptions,
@@ -30,6 +35,7 @@ import type {
   ProofLayerCaptureOptions,
   ProofLayerOptions,
   ProofLayerResult,
+  RegistrationRequestOptions,
   RetrievalRequestOptions,
   RiskAssessmentRequestOptions,
   TechnicalDocRequestOptions,
@@ -358,6 +364,60 @@ export class ProofLayer implements BundleCreateClient {
   ): Promise<ProofLayerResult> {
     return this.#submitCapture(
       createTrainingProvenanceRequest({
+        keyId: this.keyId,
+        role: this.role,
+        issuer: this.issuer,
+        appId: this.appId,
+        env: this.env,
+        systemId: options.systemId ?? this.systemId,
+        ...options
+      }),
+      options
+    );
+  }
+
+  async captureConformityAssessment(
+    options: Omit<
+      ConformityAssessmentRequestOptions,
+      "keyId" | "role" | "issuer" | "appId" | "env"
+    >
+  ): Promise<ProofLayerResult> {
+    return this.#submitCapture(
+      createConformityAssessmentRequest({
+        keyId: this.keyId,
+        role: this.role,
+        issuer: this.issuer,
+        appId: this.appId,
+        env: this.env,
+        systemId: options.systemId ?? this.systemId,
+        ...options
+      }),
+      options
+    );
+  }
+
+  async captureDeclaration(
+    options: Omit<DeclarationRequestOptions, "keyId" | "role" | "issuer" | "appId" | "env">
+  ): Promise<ProofLayerResult> {
+    return this.#submitCapture(
+      createDeclarationRequest({
+        keyId: this.keyId,
+        role: this.role,
+        issuer: this.issuer,
+        appId: this.appId,
+        env: this.env,
+        systemId: options.systemId ?? this.systemId,
+        ...options
+      }),
+      options
+    );
+  }
+
+  async captureRegistration(
+    options: Omit<RegistrationRequestOptions, "keyId" | "role" | "issuer" | "appId" | "env">
+  ): Promise<ProofLayerResult> {
+    return this.#submitCapture(
+      createRegistrationRequest({
         keyId: this.keyId,
         role: this.role,
         issuer: this.issuer,

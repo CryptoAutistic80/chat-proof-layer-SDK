@@ -241,6 +241,39 @@ pub struct TrainingProvenanceEvidence {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ConformityAssessmentEvidence {
+    pub assessment_id: String,
+    pub procedure: String,
+    pub status: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub report_commitment: Option<String>,
+    #[serde(default = "null_json", skip_serializing_if = "Value::is_null")]
+    pub metadata: Value,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct DeclarationEvidence {
+    pub declaration_id: String,
+    pub jurisdiction: String,
+    pub status: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub document_commitment: Option<String>,
+    #[serde(default = "null_json", skip_serializing_if = "Value::is_null")]
+    pub metadata: Value,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct RegistrationEvidence {
+    pub registration_id: String,
+    pub authority: String,
+    pub status: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub receipt_commitment: Option<String>,
+    #[serde(default = "null_json", skip_serializing_if = "Value::is_null")]
+    pub metadata: Value,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct LiteracyAttestationEvidence {
     pub attested_role: String,
     pub status: String,
@@ -281,6 +314,9 @@ pub enum EvidenceItem {
     ModelEvaluation(ModelEvaluationEvidence),
     AdversarialTest(AdversarialTestEvidence),
     TrainingProvenance(TrainingProvenanceEvidence),
+    ConformityAssessment(ConformityAssessmentEvidence),
+    Declaration(DeclarationEvidence),
+    Registration(RegistrationEvidence),
     LiteracyAttestation(LiteracyAttestationEvidence),
     IncidentReport(IncidentReportEvidence),
 }
@@ -707,6 +743,21 @@ fn validate_item_digests(index: usize, item: &EvidenceItem) -> Result<(), Bundle
                 validate_named_digest(index, "record_commitment", value)?;
             }
         }
+        EvidenceItem::ConformityAssessment(evidence) => {
+            if let Some(value) = &evidence.report_commitment {
+                validate_named_digest(index, "report_commitment", value)?;
+            }
+        }
+        EvidenceItem::Declaration(evidence) => {
+            if let Some(value) = &evidence.document_commitment {
+                validate_named_digest(index, "document_commitment", value)?;
+            }
+        }
+        EvidenceItem::Registration(evidence) => {
+            if let Some(value) = &evidence.receipt_commitment {
+                validate_named_digest(index, "receipt_commitment", value)?;
+            }
+        }
         EvidenceItem::LiteracyAttestation(evidence) => {
             if let Some(value) = &evidence.attestation_commitment {
                 validate_named_digest(index, "attestation_commitment", value)?;
@@ -997,6 +1048,59 @@ mod tests {
             err,
             BundleValidationError::InvalidDigest { field, .. }
             if field == "items[0].record_commitment"
+        ));
+    }
+
+    #[test]
+    fn declaration_invalid_digest_is_rejected() {
+        let mut event = sample_event();
+        event.items = vec![EvidenceItem::Declaration(DeclarationEvidence {
+            declaration_id: "decl-001".to_string(),
+            jurisdiction: "eu".to_string(),
+            status: "issued".to_string(),
+            document_commitment: Some("sha256:not-a-digest".to_string()),
+            metadata: json!({"annex": "v"}),
+        })];
+
+        let bundle = EvidenceBundle {
+            bundle_version: BUNDLE_VERSION.to_string(),
+            bundle_id: "01JNFVDSM64DJN8SNMZP63YQC8".to_string(),
+            created_at: "2026-03-02T00:00:00+00:00".to_string(),
+            actor: event.actor,
+            subject: event.subject,
+            context: event.context,
+            items: event.items,
+            artefacts: vec![ArtefactRef {
+                name: "declaration.json".to_string(),
+                digest: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                    .to_string(),
+                size: 1,
+                content_type: "application/json".to_string(),
+            }],
+            policy: event.policy,
+            integrity: Integrity {
+                header_digest:
+                    "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+                        .to_string(),
+                bundle_root:
+                    "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+                        .to_string(),
+                signature: SignatureInfo {
+                    kid: "kid-dev-01".to_string(),
+                    value: "signature".to_string(),
+                    ..SignatureInfo::default()
+                },
+                ..Integrity::default()
+            },
+            timestamp: None,
+            receipt: None,
+        };
+
+        let err = validate_bundle_integrity_fields(&bundle).unwrap_err();
+        assert!(matches!(
+            err,
+            BundleValidationError::InvalidDigest { field, .. }
+            if field == "items[0].document_commitment"
         ));
     }
 }

@@ -211,6 +211,9 @@ enum EvidenceTypeArg {
     ModelEvaluation,
     AdversarialTest,
     TrainingProvenance,
+    ConformityAssessment,
+    Declaration,
+    Registration,
     LiteracyAttestation,
     IncidentReport,
 }
@@ -226,6 +229,7 @@ enum PackTypeArg {
     AiLiteracy,
     SystemicRisk,
     IncidentResponse,
+    Conformity,
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, ValueEnum)]
@@ -589,6 +593,12 @@ impl EvidenceTypeArg {
                     EvidenceItem::TrainingProvenance(_)
                 )
                 | (
+                    Self::ConformityAssessment,
+                    EvidenceItem::ConformityAssessment(_)
+                )
+                | (Self::Declaration, EvidenceItem::Declaration(_))
+                | (Self::Registration, EvidenceItem::Registration(_))
+                | (
                     Self::LiteracyAttestation,
                     EvidenceItem::LiteracyAttestation(_)
                 )
@@ -609,6 +619,9 @@ impl EvidenceTypeArg {
             Self::ModelEvaluation => "model_evaluation",
             Self::AdversarialTest => "adversarial_test",
             Self::TrainingProvenance => "training_provenance",
+            Self::ConformityAssessment => "conformity_assessment",
+            Self::Declaration => "declaration",
+            Self::Registration => "registration",
             Self::LiteracyAttestation => "literacy_attestation",
             Self::IncidentReport => "incident_report",
         }
@@ -626,6 +639,7 @@ impl PackTypeArg {
             Self::AiLiteracy => "ai_literacy",
             Self::SystemicRisk => "systemic_risk",
             Self::IncidentResponse => "incident_response",
+            Self::Conformity => "conformity",
         }
     }
 }
@@ -1596,6 +1610,18 @@ fn describe_evidence_item(item: &EvidenceItem) -> String {
         EvidenceItem::TrainingProvenance(data) => format!(
             "training_provenance dataset_ref={} stage={}",
             data.dataset_ref, data.stage
+        ),
+        EvidenceItem::ConformityAssessment(data) => format!(
+            "conformity_assessment assessment_id={} procedure={} status={}",
+            data.assessment_id, data.procedure, data.status
+        ),
+        EvidenceItem::Declaration(data) => format!(
+            "declaration declaration_id={} jurisdiction={} status={}",
+            data.declaration_id, data.jurisdiction, data.status
+        ),
+        EvidenceItem::Registration(data) => format!(
+            "registration registration_id={} authority={} status={}",
+            data.registration_id, data.authority, data.status
         ),
         EvidenceItem::LiteracyAttestation(data) => format!(
             "literacy_attestation role={} status={}",

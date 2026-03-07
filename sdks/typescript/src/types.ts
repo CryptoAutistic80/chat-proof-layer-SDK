@@ -297,6 +297,30 @@ export interface TrainingProvenanceRequestOptions extends LifecycleCaptureOption
   metadata?: JsonValue;
 }
 
+export interface ConformityAssessmentRequestOptions extends LifecycleCaptureOptions {
+  assessmentId: string;
+  procedure: string;
+  status: string;
+  report?: BinaryLike;
+  metadata?: JsonValue;
+}
+
+export interface DeclarationRequestOptions extends LifecycleCaptureOptions {
+  declarationId: string;
+  jurisdiction: string;
+  status: string;
+  document?: BinaryLike;
+  metadata?: JsonValue;
+}
+
+export interface RegistrationRequestOptions extends LifecycleCaptureOptions {
+  registrationId: string;
+  authority: string;
+  status: string;
+  receipt?: BinaryLike;
+  metadata?: JsonValue;
+}
+
 export interface ProofLayerOptions {
   vaultUrl?: string;
   apiKey?: string;

@@ -81,6 +81,7 @@ Current pack export behavior:
 
 - Vault pack assembly uses a heuristic curation profile (`pack-rules-v1`).
 - Selection currently keys off actor role, evidence item type, retention class, and derived obligation references.
+- Implemented pack families now include `conformity` alongside the Annex/runtime/risk/GPAI slices.
 - Exported pack archives still contain full `bundle.pkg` members; redaction/selective disclosure is a later phase.
 
 Current retention behavior:
@@ -101,6 +102,7 @@ Current config behavior:
 - `GET /v1/config` returns the active service view for payload limits, signing algorithm/key id, storage backends, retention grace period, retention policies, and persisted timestamp/transparency provider settings.
 - `GET /v1/config` also reports the bound address and retention scan interval currently active in the process.
 - `PUT /v1/config/retention` upserts retention policy rows in SQLite.
+- Retention policies now carry an `expiry_mode`; `fixed_days` computes `expires_at`, while `until_withdrawn` leaves bundles active until an explicit withdrawal/delete event.
 - `PUT /v1/config/timestamp` persists RFC 3161 provider configuration (`enabled`, `provider`, `url`, optional `assurance`) used by the timestamp attachment endpoint.
 - `PUT /v1/config/transparency` persists transparency provider configuration (`none`, `rekor`, `scitt`) plus URL when applicable.
 - Startup file config is synchronized into SQLite for retention/timestamp/transparency so the API view matches the current boot configuration.
@@ -108,6 +110,7 @@ Current config behavior:
 - `POST /v1/bundles/{id}/anchor` loads a stored active timestamped bundle, submits its RFC 3161 token to Rekor as an `rfc3161` entry, stores the returned receipt in bundle JSON, and flips `has_receipt`.
 - `POST /v1/verify/timestamp` and `POST /v1/verify/receipt` accept either direct assurance artefacts or a stored `bundle_id`, returning typed verification details without requiring full package verification.
 - When an updated retention policy remains active, the vault recomputes `expires_at` for existing active bundles in that class.
+- The seeded `gpai_documentation` class uses `until_withdrawn`, and the GPAI SDK builders default to that class for `model_evaluation`, `adversarial_test`, and `training_provenance`.
 - Transparency config is active for Rekor RFC 3161 anchoring; `scitt` remains an explicit stub.
 - The retention engine now supports both manual `POST /v1/retention/scan` and an automatic background scan interval configured via file/env.
 - `GET /v1/systems` summarizes bundle counts per `system_id`, and `GET /v1/systems/{id}/summary` expands that into role/item/retention/assurance/model breakdowns for operator-facing inventory views.
@@ -119,14 +122,14 @@ Current config behavior:
 - The first native TypeScript surface covers RFC 8785 canonicalization, SHA-256 digesting, Merkle root computation, Ed25519 JWS sign/verify, deterministic local bundle construction, and offline bundle verification.
 - The package now has a shared `evidence.ts` surface for v1 `llm_interaction` capture assembly, so wrappers and direct callers seal the same bundle shape.
 - The package now exposes both an HTTP vault client and a `LocalProofLayerClient` that seals bundles locally via the native module.
-- The package now also exposes first-class typed helpers for all evidence item types currently implemented in Rust core, including `captureToolCall(...)`, `captureRetrieval(...)`, `captureHumanOversight(...)`, `capturePolicyDecision(...)`, `captureRiskAssessment(...)`, `captureDataGovernance(...)`, `captureTechnicalDoc(...)`, `captureModelEvaluation(...)`, `captureAdversarialTest(...)`, `captureTrainingProvenance(...)`, `captureLiteracyAttestation(...)`, and `captureIncidentReport(...)`.
+- The package now also exposes first-class typed helpers for all evidence item types currently implemented in Rust core, including `captureToolCall(...)`, `captureRetrieval(...)`, `captureHumanOversight(...)`, `capturePolicyDecision(...)`, `captureRiskAssessment(...)`, `captureDataGovernance(...)`, `captureTechnicalDoc(...)`, `captureModelEvaluation(...)`, `captureAdversarialTest(...)`, `captureTrainingProvenance(...)`, `captureLiteracyAttestation(...)`, `captureIncidentReport(...)`, `captureConformityAssessment(...)`, `captureDeclaration(...)`, and `captureRegistration(...)`.
 - The package also now exposes a higher-level `ProofLayer` facade plus provider-specific `withProofLayer(...)` wrappers for OpenAI-like, Anthropic-like, generic async clients, and Vercel-AI-style functions.
 - The TypeScript SDK now exposes `ProofLayerExporter` and OTel helpers under `@proof-layer/sdk/otel`.
 - The TypeScript provider wrappers and tool helpers now call that shared surface for integrity-sensitive operations instead of reimplementing them in JavaScript.
 - `packages/sdk-python` now loads a local PyO3 module compiled from `crates/pyo3` via the package build helper.
 - The first native Python surface matches Node: canonicalization, SHA-256 digesting, Merkle root computation, Ed25519 JWS sign/verify, deterministic local bundle construction, and offline bundle verification.
 - `packages/sdk-python` now exposes both an HTTP vault client and a `LocalProofLayerClient` that seals bundles locally via the native module.
-- The Python package now also exposes a higher-level `ProofLayer` facade, shared `evidence.py` request builders for all evidence item types currently implemented in Rust core, and provider-specific `with_proof_layer(...)` wrappers for OpenAI-like and Anthropic-like clients, including GPAI evaluation/provenance/test evidence, Art 4 literacy attestations, and incident-report lifecycle evidence.
+- The Python package now also exposes a higher-level `ProofLayer` facade, shared `evidence.py` request builders for all evidence item types currently implemented in Rust core, and provider-specific `with_proof_layer(...)` wrappers for OpenAI-like and Anthropic-like clients, including GPAI evaluation/provenance/test evidence, Art 4 literacy attestations, incident-report lifecycle evidence, and the conformity/declaration/registration group.
 - The Python provider wrappers, decorator helpers, and golden fixture tests now route integrity-sensitive operations through that shared Rust implementation.
 - Tool capture and OTel GenAI export helpers for trace pipelines.
 - Provider adapters remain thin and provider-shaped; integrity semantics stay in Rust core/service.

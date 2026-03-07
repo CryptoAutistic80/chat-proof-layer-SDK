@@ -102,6 +102,15 @@ Completed:
   first-class `model_evaluation`, `adversarial_test`, and `training_provenance` item types in Rust core,
   direct Annex XI / systemic-risk pack curation and obligation tagging in the vault,
   and matching builder/facade coverage in both the TypeScript and Python SDKs.
+- Added the GPAI retention-model cleanup:
+  a dedicated seeded `gpai_documentation` retention class,
+  an explicit retention `expiry_mode` with `until_withdrawn` semantics in the vault,
+  SDK defaults so GPAI builders use that class automatically,
+  and a fix for retention-status aggregation so empty policy rows no longer count as active bundles.
+- Added the conformity evidence slice:
+  first-class `conformity_assessment`, `declaration`, and `registration` item types in Rust core,
+  a real `conformity` pack profile in the vault with market-surveillance-oriented curation,
+  and matching builder/facade coverage in both the TypeScript and Python SDKs.
 - Added the first pack export slice:
   `POST /v1/packs`,
   `GET /v1/packs/{id}`,
@@ -121,6 +130,6 @@ Still outstanding from `plan.md`:
 - The CLI now covers the main vault operational read paths, but there is still no `proofctl disclose` flow.
 - TypeScript and Python now both have native FFI bridges, local sealing paths, and higher-level `ProofLayer` facades, but there is still no shared native build/release pipeline for SDK artifacts.
 - SCITT receipts and selective disclosure CLI flows remain future phases.
-- The broader plan evidence catalog still has several future-phase gaps in Rust core, especially `conformity_assessment`, `declaration`, and `registration`.
+- The main remaining gaps are no longer the evidence catalog itself; they are the harder later-phase items like selective disclosure, SCITT, stronger trust validation, and alternative storage/runtime backends.
 - RFC 3161 verification currently checks CMS signature integrity and message-imprint binding, but TSA certificate-chain / revocation trust validation and eIDAS-qualified trust policy are still outstanding.
 - Rekor verification currently checks receipt structure, entry UUID to leaf-hash binding, Merkle inclusion proofs, and embedded RFC 3161 token binding, but not Rekor SET signature validation.

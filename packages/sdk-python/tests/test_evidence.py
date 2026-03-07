@@ -2,13 +2,16 @@ import unittest
 
 from proofsdk import (
     create_adversarial_test_request,
+    create_conformity_assessment_request,
     create_data_governance_request,
+    create_declaration_request,
     create_human_oversight_request,
     create_incident_report_request,
     create_literacy_attestation_request,
     create_llm_interaction_request,
     create_model_evaluation_request,
     create_policy_decision_request,
+    create_registration_request,
     create_retrieval_request,
     create_risk_assessment_request,
     create_technical_doc_request,
@@ -207,6 +210,7 @@ class TestEvidenceBuilders(unittest.TestCase):
 
         self.assertEqual(request["capture"]["items"][0]["type"], "model_evaluation")
         self.assertEqual(request["capture"]["items"][0]["data"]["benchmark"], "mmlu-pro")
+        self.assertEqual(request["capture"]["policy"]["retention_class"], "gpai_documentation")
         self.assertTrue(
             request["capture"]["items"][0]["data"]["report_commitment"].startswith("sha256:")
         )
@@ -227,6 +231,7 @@ class TestEvidenceBuilders(unittest.TestCase):
 
         self.assertEqual(request["capture"]["items"][0]["type"], "adversarial_test")
         self.assertEqual(request["capture"]["items"][0]["data"]["focus"], "prompt-injection")
+        self.assertEqual(request["capture"]["policy"]["retention_class"], "gpai_documentation")
         self.assertTrue(
             request["capture"]["items"][0]["data"]["report_commitment"].startswith("sha256:")
         )
@@ -246,11 +251,72 @@ class TestEvidenceBuilders(unittest.TestCase):
 
         self.assertEqual(request["capture"]["items"][0]["type"], "training_provenance")
         self.assertEqual(request["capture"]["items"][0]["data"]["stage"], "pretraining")
+        self.assertEqual(request["capture"]["policy"]["retention_class"], "gpai_documentation")
         self.assertTrue(
             request["capture"]["items"][0]["data"]["record_commitment"].startswith("sha256:")
         )
         self.assertEqual(request["artefacts"][0]["name"], "training_provenance.json")
         self.assertEqual(request["artefacts"][1]["name"], "training_provenance_record.json")
+
+    def test_conformity_assessment_request_emits_conformity_evidence(self):
+        request = create_conformity_assessment_request(
+            key_id="kid-dev-01",
+            system_id="system-conf-1",
+            assessment_id="ca-1",
+            procedure="annex_vii",
+            status="completed",
+            report={"outcome": "pass"},
+            metadata={"notified_body": "nb-1234"},
+            retention_class="technical_doc",
+        )
+
+        self.assertEqual(request["capture"]["items"][0]["type"], "conformity_assessment")
+        self.assertEqual(request["capture"]["items"][0]["data"]["procedure"], "annex_vii")
+        self.assertTrue(
+            request["capture"]["items"][0]["data"]["report_commitment"].startswith("sha256:")
+        )
+        self.assertEqual(request["artefacts"][0]["name"], "conformity_assessment.json")
+        self.assertEqual(request["artefacts"][1]["name"], "conformity_assessment_report.json")
+
+    def test_declaration_request_emits_declaration_evidence(self):
+        request = create_declaration_request(
+            key_id="kid-dev-01",
+            system_id="system-conf-2",
+            declaration_id="decl-1",
+            jurisdiction="eu",
+            status="issued",
+            document="eu declaration body",
+            metadata={"annex": "v"},
+            retention_class="technical_doc",
+        )
+
+        self.assertEqual(request["capture"]["items"][0]["type"], "declaration")
+        self.assertEqual(request["capture"]["items"][0]["data"]["jurisdiction"], "eu")
+        self.assertTrue(
+            request["capture"]["items"][0]["data"]["document_commitment"].startswith("sha256:")
+        )
+        self.assertEqual(request["artefacts"][0]["name"], "declaration.json")
+        self.assertEqual(request["artefacts"][1]["name"], "declaration_document.txt")
+
+    def test_registration_request_emits_registration_evidence(self):
+        request = create_registration_request(
+            key_id="kid-dev-01",
+            system_id="system-conf-3",
+            registration_id="reg-1",
+            authority="eu_database",
+            status="accepted",
+            receipt={"receipt_id": "rcpt-1"},
+            metadata={"article": "49"},
+            retention_class="technical_doc",
+        )
+
+        self.assertEqual(request["capture"]["items"][0]["type"], "registration")
+        self.assertEqual(request["capture"]["items"][0]["data"]["authority"], "eu_database")
+        self.assertTrue(
+            request["capture"]["items"][0]["data"]["receipt_commitment"].startswith("sha256:")
+        )
+        self.assertEqual(request["artefacts"][0]["name"], "registration.json")
+        self.assertEqual(request["artefacts"][1]["name"], "registration_receipt.json")
 
 
 if __name__ == "__main__":

@@ -844,7 +844,7 @@ def create_model_evaluation_request(
         ],
         redactions=redactions,
         encryption_enabled=encryption_enabled,
-        retention_class=retention_class,
+        retention_class=retention_class or "gpai_documentation",
         artefacts=artefacts,
     )
 
@@ -917,7 +917,7 @@ def create_adversarial_test_request(
         ],
         redactions=redactions,
         encryption_enabled=encryption_enabled,
-        retention_class=retention_class,
+        retention_class=retention_class or "gpai_documentation",
         artefacts=artefacts,
     )
 
@@ -981,6 +981,216 @@ def create_training_provenance_request(
                     "stage": stage,
                     "lineage_ref": lineage_ref,
                     "record_commitment": hash_sha256(record) if record is not None else None,
+                    "metadata": metadata,
+                },
+            }
+        ],
+        redactions=redactions,
+        encryption_enabled=encryption_enabled,
+        retention_class=retention_class or "gpai_documentation",
+        artefacts=artefacts,
+    )
+
+
+def create_conformity_assessment_request(
+    *,
+    key_id: str,
+    assessment_id: str,
+    procedure: str,
+    status: str,
+    report: Any = None,
+    metadata: Any = None,
+    role: str = "provider",
+    issuer: str = "proof-layer-python",
+    app_id: str = "python-sdk",
+    env: str = "dev",
+    request_id: str | None = None,
+    thread_id: str | None = None,
+    user_ref: str | None = None,
+    system_id: str | None = None,
+    deployment_id: str | None = None,
+    version: str | None = None,
+    redactions: list[str] | None = None,
+    encryption_enabled: bool = False,
+    retention_class: str | None = None,
+    artefacts: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    artefacts = list(artefacts or [])
+    if not artefacts:
+        artefacts.append(
+            _json_artefact(
+                "conformity_assessment.json",
+                {
+                    "assessment_id": assessment_id,
+                    "procedure": procedure,
+                    "status": status,
+                    "metadata": metadata,
+                },
+            )
+        )
+        if report is not None:
+            artefacts.append(_named_data_artefact("conformity_assessment_report", report))
+
+    return _create_capture_request(
+        key_id=key_id,
+        role=role,
+        issuer=issuer,
+        app_id=app_id,
+        env=env,
+        request_id=request_id,
+        thread_id=thread_id,
+        user_ref=user_ref,
+        system_id=system_id,
+        deployment_id=deployment_id,
+        version=version,
+        items=[
+            {
+                "type": "conformity_assessment",
+                "data": {
+                    "assessment_id": assessment_id,
+                    "procedure": procedure,
+                    "status": status,
+                    "report_commitment": hash_sha256(report) if report is not None else None,
+                    "metadata": metadata,
+                },
+            }
+        ],
+        redactions=redactions,
+        encryption_enabled=encryption_enabled,
+        retention_class=retention_class,
+        artefacts=artefacts,
+    )
+
+
+def create_declaration_request(
+    *,
+    key_id: str,
+    declaration_id: str,
+    jurisdiction: str,
+    status: str,
+    document: Any = None,
+    metadata: Any = None,
+    role: str = "provider",
+    issuer: str = "proof-layer-python",
+    app_id: str = "python-sdk",
+    env: str = "dev",
+    request_id: str | None = None,
+    thread_id: str | None = None,
+    user_ref: str | None = None,
+    system_id: str | None = None,
+    deployment_id: str | None = None,
+    version: str | None = None,
+    redactions: list[str] | None = None,
+    encryption_enabled: bool = False,
+    retention_class: str | None = None,
+    artefacts: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    artefacts = list(artefacts or [])
+    if not artefacts:
+        artefacts.append(
+            _json_artefact(
+                "declaration.json",
+                {
+                    "declaration_id": declaration_id,
+                    "jurisdiction": jurisdiction,
+                    "status": status,
+                    "metadata": metadata,
+                },
+            )
+        )
+        if document is not None:
+            artefacts.append(_named_data_artefact("declaration_document", document))
+
+    return _create_capture_request(
+        key_id=key_id,
+        role=role,
+        issuer=issuer,
+        app_id=app_id,
+        env=env,
+        request_id=request_id,
+        thread_id=thread_id,
+        user_ref=user_ref,
+        system_id=system_id,
+        deployment_id=deployment_id,
+        version=version,
+        items=[
+            {
+                "type": "declaration",
+                "data": {
+                    "declaration_id": declaration_id,
+                    "jurisdiction": jurisdiction,
+                    "status": status,
+                    "document_commitment": hash_sha256(document) if document is not None else None,
+                    "metadata": metadata,
+                },
+            }
+        ],
+        redactions=redactions,
+        encryption_enabled=encryption_enabled,
+        retention_class=retention_class,
+        artefacts=artefacts,
+    )
+
+
+def create_registration_request(
+    *,
+    key_id: str,
+    registration_id: str,
+    authority: str,
+    status: str,
+    receipt: Any = None,
+    metadata: Any = None,
+    role: str = "provider",
+    issuer: str = "proof-layer-python",
+    app_id: str = "python-sdk",
+    env: str = "dev",
+    request_id: str | None = None,
+    thread_id: str | None = None,
+    user_ref: str | None = None,
+    system_id: str | None = None,
+    deployment_id: str | None = None,
+    version: str | None = None,
+    redactions: list[str] | None = None,
+    encryption_enabled: bool = False,
+    retention_class: str | None = None,
+    artefacts: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    artefacts = list(artefacts or [])
+    if not artefacts:
+        artefacts.append(
+            _json_artefact(
+                "registration.json",
+                {
+                    "registration_id": registration_id,
+                    "authority": authority,
+                    "status": status,
+                    "metadata": metadata,
+                },
+            )
+        )
+        if receipt is not None:
+            artefacts.append(_named_data_artefact("registration_receipt", receipt))
+
+    return _create_capture_request(
+        key_id=key_id,
+        role=role,
+        issuer=issuer,
+        app_id=app_id,
+        env=env,
+        request_id=request_id,
+        thread_id=thread_id,
+        user_ref=user_ref,
+        system_id=system_id,
+        deployment_id=deployment_id,
+        version=version,
+        items=[
+            {
+                "type": "registration",
+                "data": {
+                    "registration_id": registration_id,
+                    "authority": authority,
+                    "status": status,
+                    "receipt_commitment": hash_sha256(receipt) if receipt is not None else None,
                     "metadata": metadata,
                 },
             }

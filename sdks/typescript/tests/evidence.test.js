@@ -2,13 +2,16 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   createAdversarialTestRequest,
+  createConformityAssessmentRequest,
   createDataGovernanceRequest,
+  createDeclarationRequest,
   createHumanOversightRequest,
   createIncidentReportRequest,
   createLiteracyAttestationRequest,
   createLlmInteractionRequest,
   createModelEvaluationRequest,
   createPolicyDecisionRequest,
+  createRegistrationRequest,
   createRetrievalRequest,
   createRiskAssessmentRequest,
   createTechnicalDocRequest,
@@ -205,6 +208,7 @@ test("createModelEvaluationRequest emits GPAI evaluation evidence", () => {
 
   assert.equal(request.capture.items[0].type, "model_evaluation");
   assert.equal(request.capture.items[0].data.benchmark, "mmlu-pro");
+  assert.equal(request.capture.policy.retention_class, "gpai_documentation");
   assert.ok(request.capture.items[0].data.report_commitment.startsWith("sha256:"));
   assert.equal(request.artefacts[0].name, "model_evaluation.json");
   assert.equal(request.artefacts[1].name, "model_evaluation_report.json");
@@ -224,6 +228,7 @@ test("createAdversarialTestRequest emits systemic-risk evidence", () => {
 
   assert.equal(request.capture.items[0].type, "adversarial_test");
   assert.equal(request.capture.items[0].data.focus, "prompt-injection");
+  assert.equal(request.capture.policy.retention_class, "gpai_documentation");
   assert.ok(request.capture.items[0].data.report_commitment.startsWith("sha256:"));
   assert.equal(request.artefacts[0].name, "adversarial_test.json");
   assert.equal(request.artefacts[1].name, "adversarial_test_report.txt");
@@ -242,7 +247,65 @@ test("createTrainingProvenanceRequest emits provenance evidence", () => {
 
   assert.equal(request.capture.items[0].type, "training_provenance");
   assert.equal(request.capture.items[0].data.stage, "pretraining");
+  assert.equal(request.capture.policy.retention_class, "gpai_documentation");
   assert.ok(request.capture.items[0].data.record_commitment.startsWith("sha256:"));
   assert.equal(request.artefacts[0].name, "training_provenance.json");
   assert.equal(request.artefacts[1].name, "training_provenance_record.json");
+});
+
+test("createConformityAssessmentRequest emits conformity evidence", () => {
+  const request = createConformityAssessmentRequest({
+    keyId: "kid-dev-01",
+    systemId: "system-conf-1",
+    assessmentId: "ca-1",
+    procedure: "annex_vii",
+    status: "completed",
+    report: { outcome: "pass" },
+    metadata: { notified_body: "nb-1234" },
+    retentionClass: "technical_doc"
+  });
+
+  assert.equal(request.capture.items[0].type, "conformity_assessment");
+  assert.equal(request.capture.items[0].data.procedure, "annex_vii");
+  assert.ok(request.capture.items[0].data.report_commitment.startsWith("sha256:"));
+  assert.equal(request.artefacts[0].name, "conformity_assessment.json");
+  assert.equal(request.artefacts[1].name, "conformity_assessment_report.json");
+});
+
+test("createDeclarationRequest emits declaration evidence", () => {
+  const request = createDeclarationRequest({
+    keyId: "kid-dev-01",
+    systemId: "system-conf-2",
+    declarationId: "decl-1",
+    jurisdiction: "eu",
+    status: "issued",
+    document: "eu declaration body",
+    metadata: { annex: "v" },
+    retentionClass: "technical_doc"
+  });
+
+  assert.equal(request.capture.items[0].type, "declaration");
+  assert.equal(request.capture.items[0].data.jurisdiction, "eu");
+  assert.ok(request.capture.items[0].data.document_commitment.startsWith("sha256:"));
+  assert.equal(request.artefacts[0].name, "declaration.json");
+  assert.equal(request.artefacts[1].name, "declaration_document.txt");
+});
+
+test("createRegistrationRequest emits registration evidence", () => {
+  const request = createRegistrationRequest({
+    keyId: "kid-dev-01",
+    systemId: "system-conf-3",
+    registrationId: "reg-1",
+    authority: "eu_database",
+    status: "accepted",
+    receipt: { receipt_id: "rcpt-1" },
+    metadata: { article: "49" },
+    retentionClass: "technical_doc"
+  });
+
+  assert.equal(request.capture.items[0].type, "registration");
+  assert.equal(request.capture.items[0].data.authority, "eu_database");
+  assert.ok(request.capture.items[0].data.receipt_commitment.startsWith("sha256:"));
+  assert.equal(request.artefacts[0].name, "registration.json");
+  assert.equal(request.artefacts[1].name, "registration_receipt.json");
 });

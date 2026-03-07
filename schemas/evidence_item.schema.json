@@ -83,6 +83,126 @@
       "additionalProperties": false,
       "properties": {
         "type": {
+          "const": "conformity_assessment"
+        },
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "assessment_id",
+            "procedure",
+            "status"
+          ],
+          "properties": {
+            "assessment_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "procedure": {
+              "type": "string",
+              "minLength": 1
+            },
+            "status": {
+              "type": "string",
+              "minLength": 1
+            },
+            "report_commitment": {
+              "$ref": "#/$defs/sha256Digest"
+            },
+            "metadata": true
+          }
+        }
+      },
+      "required": [
+        "type",
+        "data"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "declaration"
+        },
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "declaration_id",
+            "jurisdiction",
+            "status"
+          ],
+          "properties": {
+            "declaration_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "jurisdiction": {
+              "type": "string",
+              "minLength": 1
+            },
+            "status": {
+              "type": "string",
+              "minLength": 1
+            },
+            "document_commitment": {
+              "$ref": "#/$defs/sha256Digest"
+            },
+            "metadata": true
+          }
+        }
+      },
+      "required": [
+        "type",
+        "data"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "registration"
+        },
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "registration_id",
+            "authority",
+            "status"
+          ],
+          "properties": {
+            "registration_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "authority": {
+              "type": "string",
+              "minLength": 1
+            },
+            "status": {
+              "type": "string",
+              "minLength": 1
+            },
+            "receipt_commitment": {
+              "$ref": "#/$defs/sha256Digest"
+            },
+            "metadata": true
+          }
+        }
+      },
+      "required": [
+        "type",
+        "data"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "type": {
           "const": "model_evaluation"
         },
         "data": {

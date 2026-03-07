@@ -2,7 +2,8 @@
 
 Python SDK for creating Proof Layer evidence bundles around model calls and lifecycle events.
 Integrity-sensitive helpers are backed by the local Rust PyO3 module in `crates/pyo3`.
-The shared builder/facade surface now covers all evidence item types currently implemented in Rust core, including `model_evaluation`, `adversarial_test`, `training_provenance`, `literacy_attestation`, and `incident_report`.
+The shared builder/facade surface now covers all evidence item types currently implemented in Rust core, including `model_evaluation`, `adversarial_test`, `training_provenance`, `literacy_attestation`, `incident_report`, `conformity_assessment`, `declaration`, and `registration`.
+The GPAI helpers default `model_evaluation`, `adversarial_test`, and `training_provenance` captures to the vault's `gpai_documentation` retention class.
 
 ## Build Native Bindings
 

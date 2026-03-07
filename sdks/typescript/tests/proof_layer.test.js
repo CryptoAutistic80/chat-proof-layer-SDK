@@ -251,3 +251,66 @@ test("ProofLayer.captureTrainingProvenance seals provenance evidence locally", a
   assert.equal(result.bundle?.subject.system_id, "system-gpai-44");
   assert.ok(result.bundle?.items[0].data.record_commitment.startsWith("sha256:"));
 });
+
+test("ProofLayer.captureConformityAssessment seals conformity evidence locally", async () => {
+  const signingKeyPem = await readFile(path.join(goldenDir, "signing_key.txt"), "utf8");
+  const proofLayer = new ProofLayer({
+    signingKeyPem,
+    keyId: "kid-dev-01",
+    systemId: "system-conf-42"
+  });
+
+  const result = await proofLayer.captureConformityAssessment({
+    assessmentId: "ca-42",
+    procedure: "annex_vii",
+    status: "completed",
+    report: { outcome: "pass" },
+    retentionClass: "technical_doc"
+  });
+
+  assert.equal(result.bundle?.items[0].type, "conformity_assessment");
+  assert.equal(result.bundle?.subject.system_id, "system-conf-42");
+  assert.ok(result.bundle?.items[0].data.report_commitment.startsWith("sha256:"));
+});
+
+test("ProofLayer.captureDeclaration seals declaration evidence locally", async () => {
+  const signingKeyPem = await readFile(path.join(goldenDir, "signing_key.txt"), "utf8");
+  const proofLayer = new ProofLayer({
+    signingKeyPem,
+    keyId: "kid-dev-01",
+    systemId: "system-conf-43"
+  });
+
+  const result = await proofLayer.captureDeclaration({
+    declarationId: "decl-42",
+    jurisdiction: "eu",
+    status: "issued",
+    document: "eu declaration body",
+    retentionClass: "technical_doc"
+  });
+
+  assert.equal(result.bundle?.items[0].type, "declaration");
+  assert.equal(result.bundle?.subject.system_id, "system-conf-43");
+  assert.ok(result.bundle?.items[0].data.document_commitment.startsWith("sha256:"));
+});
+
+test("ProofLayer.captureRegistration seals registration evidence locally", async () => {
+  const signingKeyPem = await readFile(path.join(goldenDir, "signing_key.txt"), "utf8");
+  const proofLayer = new ProofLayer({
+    signingKeyPem,
+    keyId: "kid-dev-01",
+    systemId: "system-conf-44"
+  });
+
+  const result = await proofLayer.captureRegistration({
+    registrationId: "reg-42",
+    authority: "eu_database",
+    status: "accepted",
+    receipt: { receipt_id: "rcpt-42" },
+    retentionClass: "technical_doc"
+  });
+
+  assert.equal(result.bundle?.items[0].type, "registration");
+  assert.equal(result.bundle?.subject.system_id, "system-conf-44");
+  assert.ok(result.bundle?.items[0].data.receipt_commitment.startsWith("sha256:"));
+});

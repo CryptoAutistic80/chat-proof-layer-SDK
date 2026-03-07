@@ -85,6 +85,10 @@ Completed:
   matching `ProofLayer.captureRiskAssessment(...)`, `captureDataGovernance(...)`, and `captureTechnicalDoc(...)` convenience methods,
   default evidence artefact generation for those lifecycle items,
   and test coverage proving those bundles seal locally through the Rust-native path.
+- Completed the current Rust-core evidence coverage in the TypeScript SDK:
+  added typed builders for `tool_call`, `retrieval`, `human_oversight`, and `policy_decision`,
+  matching `ProofLayer` convenience methods for those evidence types,
+  and default artefact generation plus local sealing tests for the expanded evidence catalog.
 - Added the first pack export slice:
   `POST /v1/packs`,
   `GET /v1/packs/{id}`,

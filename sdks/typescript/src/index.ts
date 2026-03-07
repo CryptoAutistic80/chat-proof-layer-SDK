@@ -3,9 +3,13 @@ export { LocalProofLayerClient } from "./local_client.js";
 export { ProofLayer } from "./proof_layer.js";
 export {
   createDataGovernanceRequest,
+  createHumanOversightRequest,
   createLlmInteractionRequest,
+  createPolicyDecisionRequest,
+  createRetrievalRequest,
   createRiskAssessmentRequest,
   createTechnicalDocRequest,
+  createToolCallRequest,
   defaultLlmInteractionArtefacts
 } from "./evidence.js";
 export { provedCompletion } from "./providers/openai_like.js";
@@ -39,6 +43,7 @@ export type {
   EvidenceSubjectOptions,
   GenericProofLayerOptions,
   FetchLike,
+  HumanOversightRequestOptions,
   HttpClientOptions,
   JsonObject,
   JsonValue,
@@ -54,10 +59,13 @@ export type {
   ProofLayerCaptureOptions,
   ProofLayerOptions,
   ProofLayerResult,
+  PolicyDecisionRequestOptions,
   ProviderCaptureOptions,
+  RetrievalRequestOptions,
   RiskAssessmentRequestOptions,
   TechnicalDocRequestOptions,
   ToolEvent,
+  ToolCallRequestOptions,
   VerifyBundleRequest,
   VerifyBundleSummary,
   VerifyPackageRequest

@@ -2,9 +2,13 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   createDataGovernanceRequest,
+  createHumanOversightRequest,
   createLlmInteractionRequest,
+  createPolicyDecisionRequest,
+  createRetrievalRequest,
   createRiskAssessmentRequest,
-  createTechnicalDocRequest
+  createTechnicalDocRequest,
+  createToolCallRequest
 } from "../dist/index.js";
 
 test("createLlmInteractionRequest emits v1 llm_interaction capture shape", () => {
@@ -76,4 +80,67 @@ test("createTechnicalDocRequest hashes inline documents when commitment is omitt
   assert.equal(request.capture.items[0].type, "technical_doc");
   assert.ok(request.capture.items[0].data.commitment.startsWith("sha256:"));
   assert.equal(request.artefacts[0].name, "system-card.txt");
+});
+
+test("createToolCallRequest hashes input/output and emits default artefacts", () => {
+  const request = createToolCallRequest({
+    keyId: "kid-dev-01",
+    systemId: "system-tool-1",
+    toolName: "search_database",
+    input: { query: "hello" },
+    output: { hits: 3 },
+    metadata: { latency_ms: 18 }
+  });
+
+  assert.equal(request.capture.items[0].type, "tool_call");
+  assert.ok(request.capture.items[0].data.input_commitment.startsWith("sha256:"));
+  assert.ok(request.capture.items[0].data.output_commitment.startsWith("sha256:"));
+  assert.equal(request.artefacts[0].name, "tool_call.json");
+  assert.equal(request.artefacts[1].name, "tool_input.json");
+  assert.equal(request.artefacts[2].name, "tool_output.json");
+});
+
+test("createRetrievalRequest hashes result/query and emits retrieval artefacts", () => {
+  const request = createRetrievalRequest({
+    keyId: "kid-dev-01",
+    systemId: "system-rag-1",
+    corpus: "knowledge-base",
+    query: "refund policy",
+    result: { docs: [{ id: "doc-1" }] },
+    metadata: { top_k: 3 }
+  });
+
+  assert.equal(request.capture.items[0].type, "retrieval");
+  assert.ok(request.capture.items[0].data.result_commitment.startsWith("sha256:"));
+  assert.ok(request.capture.items[0].data.query_commitment.startsWith("sha256:"));
+  assert.equal(request.artefacts[1].name, "retrieval_result.json");
+});
+
+test("createHumanOversightRequest hashes notes when provided", () => {
+  const request = createHumanOversightRequest({
+    keyId: "kid-dev-01",
+    systemId: "system-oversight-1",
+    action: "approved_after_review",
+    reviewer: "ops-lead",
+    notes: "Reviewed against internal policy"
+  });
+
+  assert.equal(request.capture.items[0].type, "human_oversight");
+  assert.ok(request.capture.items[0].data.notes_commitment.startsWith("sha256:"));
+  assert.equal(request.artefacts[1].name, "oversight_notes.txt");
+});
+
+test("createPolicyDecisionRequest hashes rationale when provided", () => {
+  const request = createPolicyDecisionRequest({
+    keyId: "kid-dev-01",
+    systemId: "system-policy-1",
+    policyName: "harm-filter",
+    decision: "blocked",
+    rationale: { score: 0.98 },
+    metadata: { rule: "violence" }
+  });
+
+  assert.equal(request.capture.items[0].type, "policy_decision");
+  assert.ok(request.capture.items[0].data.rationale_commitment.startsWith("sha256:"));
+  assert.equal(request.artefacts[1].name, "policy_rationale.json");
 });

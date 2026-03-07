@@ -1,9 +1,13 @@
 import { readFileSync } from "node:fs";
 import {
   createDataGovernanceRequest,
+  createHumanOversightRequest,
   createLlmInteractionRequest,
+  createPolicyDecisionRequest,
+  createRetrievalRequest,
   createRiskAssessmentRequest,
-  createTechnicalDocRequest
+  createTechnicalDocRequest,
+  createToolCallRequest
 } from "./evidence.js";
 import { LocalProofLayerClient } from "./local_client.js";
 import { ProofLayerClient } from "./client.js";
@@ -12,11 +16,15 @@ import type {
   CreateBundleRequest,
   CreateBundleResponse,
   DataGovernanceRequestOptions,
+  HumanOversightRequestOptions,
+  PolicyDecisionRequestOptions,
   ProofLayerCaptureOptions,
   ProofLayerOptions,
   ProofLayerResult,
+  RetrievalRequestOptions,
   RiskAssessmentRequestOptions,
   TechnicalDocRequestOptions,
+  ToolCallRequestOptions,
   VerifyBundleRequest,
   VerifyBundleSummary
 } from "./types.js";
@@ -181,6 +189,74 @@ export class ProofLayer implements BundleCreateClient {
   ): Promise<ProofLayerResult> {
     return this.#submitCapture(
       createTechnicalDocRequest({
+        keyId: this.keyId,
+        role: this.role,
+        issuer: this.issuer,
+        appId: this.appId,
+        env: this.env,
+        systemId: options.systemId ?? this.systemId,
+        ...options
+      }),
+      options
+    );
+  }
+
+  async captureToolCall(
+    options: Omit<ToolCallRequestOptions, "keyId" | "role" | "issuer" | "appId" | "env">
+  ): Promise<ProofLayerResult> {
+    return this.#submitCapture(
+      createToolCallRequest({
+        keyId: this.keyId,
+        role: this.role,
+        issuer: this.issuer,
+        appId: this.appId,
+        env: this.env,
+        systemId: options.systemId ?? this.systemId,
+        ...options
+      }),
+      options
+    );
+  }
+
+  async captureRetrieval(
+    options: Omit<RetrievalRequestOptions, "keyId" | "role" | "issuer" | "appId" | "env">
+  ): Promise<ProofLayerResult> {
+    return this.#submitCapture(
+      createRetrievalRequest({
+        keyId: this.keyId,
+        role: this.role,
+        issuer: this.issuer,
+        appId: this.appId,
+        env: this.env,
+        systemId: options.systemId ?? this.systemId,
+        ...options
+      }),
+      options
+    );
+  }
+
+  async captureHumanOversight(
+    options: Omit<HumanOversightRequestOptions, "keyId" | "role" | "issuer" | "appId" | "env">
+  ): Promise<ProofLayerResult> {
+    return this.#submitCapture(
+      createHumanOversightRequest({
+        keyId: this.keyId,
+        role: this.role,
+        issuer: this.issuer,
+        appId: this.appId,
+        env: this.env,
+        systemId: options.systemId ?? this.systemId,
+        ...options
+      }),
+      options
+    );
+  }
+
+  async capturePolicyDecision(
+    options: Omit<PolicyDecisionRequestOptions, "keyId" | "role" | "issuer" | "appId" | "env">
+  ): Promise<ProofLayerResult> {
+    return this.#submitCapture(
+      createPolicyDecisionRequest({
         keyId: this.keyId,
         role: this.role,
         issuer: this.issuer,

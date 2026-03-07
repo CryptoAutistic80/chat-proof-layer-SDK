@@ -119,7 +119,7 @@ Current config behavior:
 - The first native TypeScript surface covers RFC 8785 canonicalization, SHA-256 digesting, Merkle root computation, Ed25519 JWS sign/verify, deterministic local bundle construction, and offline bundle verification.
 - The package now has a shared `evidence.ts` surface for v1 `llm_interaction` capture assembly, so wrappers and direct callers seal the same bundle shape.
 - The package now exposes both an HTTP vault client and a `LocalProofLayerClient` that seals bundles locally via the native module.
-- The package now also exposes first-class lifecycle helpers for the Rust-core item types already implemented: `captureRiskAssessment(...)`, `captureDataGovernance(...)`, and `captureTechnicalDoc(...)`.
+- The package now also exposes first-class typed helpers for all evidence item types currently implemented in Rust core, including `captureToolCall(...)`, `captureRetrieval(...)`, `captureHumanOversight(...)`, `capturePolicyDecision(...)`, `captureRiskAssessment(...)`, `captureDataGovernance(...)`, and `captureTechnicalDoc(...)`.
 - The package also now exposes a higher-level `ProofLayer` facade plus provider-specific `withProofLayer(...)` wrappers for OpenAI-like, Anthropic-like, generic async clients, and Vercel-AI-style functions.
 - The TypeScript SDK now exposes `ProofLayerExporter` and OTel helpers under `@proof-layer/sdk/otel`.
 - The TypeScript provider wrappers and tool helpers now call that shared surface for integrity-sensitive operations instead of reimplementing them in JavaScript.

@@ -107,3 +107,41 @@ test("ProofLayer.captureTechnicalDoc seals inline document evidence locally", as
   assert.equal(result.bundle?.subject.system_id, "system-doc-42");
   assert.ok(result.bundle?.items[0].data.commitment.startsWith("sha256:"));
 });
+
+test("ProofLayer.captureRetrieval seals retrieval evidence locally", async () => {
+  const signingKeyPem = await readFile(path.join(goldenDir, "signing_key.txt"), "utf8");
+  const proofLayer = new ProofLayer({
+    signingKeyPem,
+    keyId: "kid-dev-01",
+    systemId: "system-rag-42"
+  });
+
+  const result = await proofLayer.captureRetrieval({
+    corpus: "policy-kb",
+    query: "refund policy",
+    result: { docs: [{ id: "doc-1", score: 0.99 }] }
+  });
+
+  assert.equal(result.bundle?.items[0].type, "retrieval");
+  assert.equal(result.bundle?.subject.system_id, "system-rag-42");
+  assert.ok(result.bundle?.items[0].data.result_commitment.startsWith("sha256:"));
+});
+
+test("ProofLayer.capturePolicyDecision seals policy decision evidence locally", async () => {
+  const signingKeyPem = await readFile(path.join(goldenDir, "signing_key.txt"), "utf8");
+  const proofLayer = new ProofLayer({
+    signingKeyPem,
+    keyId: "kid-dev-01",
+    systemId: "system-policy-42"
+  });
+
+  const result = await proofLayer.capturePolicyDecision({
+    policyName: "harm-filter",
+    decision: "blocked",
+    rationale: { classifier_score: 0.98 }
+  });
+
+  assert.equal(result.bundle?.items[0].type, "policy_decision");
+  assert.equal(result.bundle?.subject.system_id, "system-policy-42");
+  assert.ok(result.bundle?.items[0].data.rationale_commitment.startsWith("sha256:"));
+});

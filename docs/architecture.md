@@ -109,9 +109,10 @@ Current config behavior:
 - `POST /v1/bundles/{id}/timestamp` loads a stored active bundle, requests an RFC 3161 token over the UTF-8 bytes of `integrity.bundle_root`, stores the token in bundle JSON, and flips `has_timestamp`.
 - `POST /v1/bundles/{id}/anchor` loads a stored active timestamped bundle, submits its RFC 3161 token to Rekor as an `rfc3161` entry, stores the returned receipt in bundle JSON, and flips `has_receipt`.
 - `POST /v1/verify/timestamp` and `POST /v1/verify/receipt` accept either direct assurance artefacts or a stored `bundle_id`, returning typed verification details without requiring full package verification.
-- Local `proofctl create --timestamp-url/--transparency-log` now uses the same trust-policy helpers as verify mode, so local assurance attachment can fail early when configured anchors, policy OIDs, or Rekor keys do not match the returned artefacts.
+- Local `proofctl create --timestamp-url/--transparency-log` now uses the same trust-policy helpers as verify mode, so local assurance attachment can fail early when configured assurance profiles, anchors, policy OIDs, or Rekor keys do not match the returned artefacts.
 - When timestamp trust anchors are configured, the vault verifies the RFC 3161 signer certificate chain against those anchors at `genTime`.
 - When timestamp policy OIDs are configured, the vault also requires the token `TSTInfo.policy` OID to match one of those values.
+- When `timestamp.assurance == "qualified"`, the vault requires both of those constraints to be configured and satisfied, treating the result as a stricter qualified-profile check rather than a claim of full eIDAS qualified status.
 - When a Rekor public key is configured, the vault verifies the signed-entry-timestamp over the canonical Rekor payload and requires `logID == sha256(SPKI_DER(public_key))`.
 - When an updated retention policy remains active, the vault recomputes `expires_at` for existing active bundles in that class.
 - The seeded `gpai_documentation` class uses `until_withdrawn`, and the GPAI SDK builders default to that class for `model_evaluation`, `adversarial_test`, and `training_provenance`.
@@ -192,7 +193,7 @@ A verifier needs only:
 
 No network calls are required for core verification.
 Timestamp and transparency checks are optional in PoC and report as skipped/missing when not requested.
-Current assurance verification checks bundle-root binding, embedded RFC 3161 token validity, optional RFC 3161 policy OID constraints, Rekor entry UUID to leaf-hash binding, Rekor inclusion proofs against the advertised root hash, and can optionally verify TSA signer chains / Rekor SET signatures when trust material is configured.
+Current assurance verification checks bundle-root binding, embedded RFC 3161 token validity, optional RFC 3161 policy OID constraints, optional timestamp assurance profiles (`standard` / `qualified`), Rekor entry UUID to leaf-hash binding, Rekor inclusion proofs against the advertised root hash, and can optionally verify TSA signer chains / Rekor SET signatures when trust material is configured.
 
 ## Provider-Agnostic Boundary
 
@@ -214,7 +215,7 @@ It does not claim model replay determinism.
 
 ## Out of Scope for PoC
 
-- TSA revocation and qualified/eIDAS trust evaluation
+- TSA revocation and full eIDAS qualified trust evaluation
 - SCITT receipts
 - HSM/KMS-backed keys
 - WORM/cloud object lock

@@ -12,13 +12,13 @@ use ed25519_dalek::SigningKey;
 use flate2::{Compression, read::GzDecoder, write::GzEncoder};
 use proof_layer_core::{
     ArtefactInput, BuildBundleError, CaptureEvent, CaptureInput, EvidenceItem, ProofBundle,
-    ReceiptVerification, RekorTransparencyProvider, Rfc3161HttpTimestampProvider, TimestampToken,
-    TimestampTrustPolicy, TimestampVerification, TransparencyReceipt, TransparencyTrustPolicy,
-    anchor_bundle as anchor_bundle_receipt, build_bundle, canonicalize_value,
-    decode_private_key_pem, decode_public_key_pem, sha256_prefixed, timestamp_digest,
-    validate_bundle_integrity_fields, validate_timestamp_trust_policy,
-    validate_transparency_trust_policy, verify_receipt, verify_receipt_with_policy,
-    verify_timestamp, verify_timestamp_with_policy,
+    ReceiptVerification, RekorTransparencyProvider, Rfc3161HttpTimestampProvider,
+    TimestampAssuranceProfile, TimestampToken, TimestampTrustPolicy, TimestampVerification,
+    TransparencyReceipt, TransparencyTrustPolicy, anchor_bundle as anchor_bundle_receipt,
+    build_bundle, canonicalize_value, decode_private_key_pem, decode_public_key_pem,
+    sha256_prefixed, timestamp_digest, validate_bundle_integrity_fields,
+    validate_timestamp_trust_policy, validate_transparency_trust_policy, verify_receipt,
+    verify_receipt_with_policy, verify_timestamp, verify_timestamp_with_policy,
 };
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use sqlx::{
@@ -3484,8 +3484,17 @@ fn timestamp_trust_policy(config: &TimestampConfig) -> Option<TimestampTrustPoli
     let policy = TimestampTrustPolicy {
         trust_anchor_pems: config.trust_anchor_pems.clone(),
         policy_oids: config.policy_oids.clone(),
+        assurance_profile: parse_timestamp_assurance_profile(config.assurance.as_deref()),
     };
     (!policy.is_empty()).then_some(policy)
+}
+
+fn parse_timestamp_assurance_profile(value: Option<&str>) -> Option<TimestampAssuranceProfile> {
+    match value.map(str::trim).filter(|value| !value.is_empty()) {
+        Some("standard") => Some(TimestampAssuranceProfile::Standard),
+        Some("qualified") => Some(TimestampAssuranceProfile::Qualified),
+        _ => None,
+    }
 }
 
 fn transparency_trust_policy(
@@ -3695,6 +3704,7 @@ fn validate_timestamp_config(mut config: TimestampConfig) -> Result<TimestampCon
     validate_timestamp_trust_policy(&TimestampTrustPolicy {
         trust_anchor_pems: config.trust_anchor_pems.clone(),
         policy_oids: config.policy_oids.clone(),
+        assurance_profile: parse_timestamp_assurance_profile(config.assurance.as_deref()),
     })
     .map_err(anyhow::Error::from)?;
 
@@ -5165,6 +5175,7 @@ mod tests {
         ));
         std::fs::create_dir_all(&config_dir).unwrap();
         let config_path = config_dir.join("vault.toml");
+        let (tsa_certificate, _) = build_test_certificate();
         let file_config = VaultFileConfig {
             server: VaultServerFileConfig {
                 addr: Some("127.0.0.1:8181".to_string()),
@@ -5190,9 +5201,9 @@ mod tests {
                 provider: Some("rfc3161".to_string()),
                 url: Some("https://tsa.example.test".to_string()),
                 assurance: Some("qualified".to_string()),
-                trust_anchor_pems: Vec::new(),
+                trust_anchor_pems: vec![tsa_certificate.encode_pem()],
                 trust_anchor_paths: Vec::new(),
-                policy_oids: Vec::new(),
+                policy_oids: vec!["1.2.3.4".to_string()],
             }),
             transparency: Some(VaultTransparencyFileConfig {
                 enabled: Some(true),
@@ -6463,6 +6474,7 @@ mod tests {
     #[tokio::test]
     async fn apply_runtime_config_to_db_seeds_retention_and_assurance_settings() {
         let state = test_state(DEFAULT_MAX_PAYLOAD_BYTES).await;
+        let (tsa_certificate, _) = build_test_certificate();
         let runtime_config = VaultRuntimeConfig {
             addr: SocketAddr::from(([127, 0, 0, 1], 8080)),
             storage_dir: state.storage_dir.clone(),
@@ -6487,8 +6499,8 @@ mod tests {
                 provider: "rfc3161".to_string(),
                 url: "https://tsa.example.test".to_string(),
                 assurance: Some("qualified".to_string()),
-                trust_anchor_pems: Vec::new(),
-                policy_oids: Vec::new(),
+                trust_anchor_pems: vec![tsa_certificate.encode_pem()],
+                policy_oids: vec!["1.2.3.4".to_string()],
             }),
             transparency_config: Some(TransparencyConfig {
                 enabled: true,
@@ -6978,6 +6990,9 @@ mod tests {
         let state = test_state(DEFAULT_MAX_PAYLOAD_BYTES).await;
         let db = state.db.clone();
         let app = build_router(state, DEFAULT_MAX_PAYLOAD_BYTES);
+        let (tsa_certificate, _) = build_test_certificate();
+        let tsa_certificate_pem = tsa_certificate.encode_pem();
+        let expected_trust_anchor_pem = tsa_certificate_pem.trim().to_string();
 
         let put_req = Request::builder()
             .method("PUT")
@@ -6989,8 +7004,8 @@ mod tests {
                     provider: "RFC3161".to_string(),
                     url: "https://tsa.example.test".to_string(),
                     assurance: Some("Qualified".to_string()),
-                    trust_anchor_pems: Vec::new(),
-                    policy_oids: Vec::new(),
+                    trust_anchor_pems: vec![tsa_certificate_pem],
+                    policy_oids: vec!["1.2.3.4".to_string()],
                 })
                 .unwrap(),
             ))
@@ -7008,8 +7023,8 @@ mod tests {
                 provider: DEFAULT_TIMESTAMP_PROVIDER.to_string(),
                 url: "https://tsa.example.test".to_string(),
                 assurance: Some("qualified".to_string()),
-                trust_anchor_pems: Vec::new(),
-                policy_oids: Vec::new(),
+                trust_anchor_pems: vec![expected_trust_anchor_pem],
+                policy_oids: vec!["1.2.3.4".to_string()],
             }
         );
 
@@ -7060,6 +7075,51 @@ mod tests {
                 .get("assurance")
                 .and_then(serde_json::Value::as_str),
             Some("qualified")
+        );
+        assert_eq!(
+            update_audit
+                .get("policy_oid_count")
+                .and_then(serde_json::Value::as_u64),
+            Some(1)
+        );
+    }
+
+    #[tokio::test]
+    async fn update_timestamp_config_rejects_qualified_without_trust_material() {
+        let state = test_state(DEFAULT_MAX_PAYLOAD_BYTES).await;
+        let app = build_router(state, DEFAULT_MAX_PAYLOAD_BYTES);
+
+        let put_req = Request::builder()
+            .method("PUT")
+            .uri("/v1/config/timestamp")
+            .header("content-type", "application/json")
+            .body(Body::from(
+                serde_json::to_vec(&TimestampConfig {
+                    enabled: true,
+                    provider: "rfc3161".to_string(),
+                    url: "https://tsa.example.test".to_string(),
+                    assurance: Some("qualified".to_string()),
+                    trust_anchor_pems: Vec::new(),
+                    policy_oids: Vec::new(),
+                })
+                .unwrap(),
+            ))
+            .unwrap();
+
+        let put_res = app.oneshot(put_req).await.unwrap();
+        assert_eq!(put_res.status(), StatusCode::BAD_REQUEST);
+        let body = axum::body::to_bytes(put_res.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let error: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert!(
+            error
+                .get("error")
+                .and_then(serde_json::Value::as_str)
+                .unwrap()
+                .contains(
+                    "qualified timestamp assurance requires at least one expected policy OID"
+                )
         );
     }
 

@@ -46,9 +46,9 @@ pub use sign::{
 };
 pub use timestamp::{
     DIGICERT_TIMESTAMP_URL, FREETSA_TIMESTAMP_URL, RFC3161_TIMESTAMP_KIND,
-    Rfc3161HttpTimestampProvider, TimestampError, TimestampProvider, TimestampTrustPolicy,
-    TimestampVerification, timestamp_digest, validate_timestamp_trust_policy, verify_timestamp,
-    verify_timestamp_with_policy,
+    Rfc3161HttpTimestampProvider, TimestampAssuranceProfile, TimestampError, TimestampProvider,
+    TimestampTrustPolicy, TimestampVerification, timestamp_digest, validate_timestamp_trust_policy,
+    verify_timestamp, verify_timestamp_with_policy,
 };
 pub use transparency::{
     REKOR_RFC3161_API_VERSION, REKOR_RFC3161_ENTRY_KIND, REKOR_TRANSPARENCY_KIND,

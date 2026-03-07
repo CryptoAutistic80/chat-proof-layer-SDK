@@ -6,13 +6,13 @@ use ed25519_dalek::SigningKey;
 use flate2::{Compression, read::GzDecoder, write::GzEncoder};
 use proof_layer_core::{
     ArtefactInput, CaptureEvent, CaptureInput, EvidenceItem, ProofBundle, ReceiptVerification,
-    RekorTransparencyProvider, Rfc3161HttpTimestampProvider, TimestampProvider,
-    TimestampTrustPolicy, TransparencyProvider, TransparencyTrustPolicy,
+    RekorTransparencyProvider, Rfc3161HttpTimestampProvider, TimestampAssuranceProfile,
+    TimestampProvider, TimestampTrustPolicy, TransparencyProvider, TransparencyTrustPolicy,
     anchor_bundle as anchor_bundle_receipt, build_bundle, build_inclusion_proof,
     capture_input_v01_to_event, decode_private_key_pem, decode_public_key_pem,
     encode_private_key_pem, encode_public_key_pem, sha256_prefixed, timestamp_digest,
-    validate_bundle_integrity_fields, verify_receipt, verify_receipt_with_policy, verify_timestamp,
-    verify_timestamp_with_policy,
+    validate_bundle_integrity_fields, validate_timestamp_trust_policy, verify_receipt,
+    verify_receipt_with_policy, verify_timestamp, verify_timestamp_with_policy,
 };
 use reqwest::{
     Url,
@@ -112,6 +112,8 @@ struct CreateArgs {
     timestamp_trust_anchor: Vec<PathBuf>,
     #[arg(long = "timestamp-policy-oid")]
     timestamp_policy_oid: Vec<String>,
+    #[arg(long = "timestamp-assurance")]
+    timestamp_assurance: Option<TimestampAssuranceArg>,
     #[arg(long = "transparency-public-key")]
     transparency_public_key: Option<PathBuf>,
 }
@@ -132,6 +134,8 @@ struct VerifyArgs {
     timestamp_trust_anchor: Vec<PathBuf>,
     #[arg(long = "timestamp-policy-oid")]
     timestamp_policy_oid: Vec<String>,
+    #[arg(long = "timestamp-assurance")]
+    timestamp_assurance: Option<TimestampAssuranceArg>,
     #[arg(long = "transparency-public-key")]
     transparency_public_key: Option<PathBuf>,
 }
@@ -268,6 +272,13 @@ enum AssuranceLevelArg {
     TransparencyAnchored,
 }
 
+#[derive(Copy, Clone, Debug, Eq, PartialEq, ValueEnum)]
+#[value(rename_all = "snake_case")]
+enum TimestampAssuranceArg {
+    Standard,
+    Qualified,
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 struct Manifest {
     files: Vec<ManifestEntry>,
@@ -332,6 +343,7 @@ struct CreateCommandInput<'a> {
     transparency_log: Option<&'a str>,
     timestamp_trust_anchor_paths: &'a [PathBuf],
     timestamp_policy_oids: &'a [String],
+    timestamp_assurance: Option<TimestampAssuranceArg>,
     transparency_public_key_path: Option<&'a Path>,
 }
 
@@ -343,6 +355,7 @@ struct VerifyCommandInput<'a> {
     check_receipt: bool,
     timestamp_trust_anchor_paths: &'a [PathBuf],
     timestamp_policy_oids: &'a [String],
+    timestamp_assurance: Option<TimestampAssuranceArg>,
     transparency_public_key_path: Option<&'a Path>,
 }
 
@@ -532,9 +545,12 @@ struct VaultTimestampConfig {
     enabled: bool,
     provider: String,
     url: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     assurance: Option<String>,
     #[serde(default)]
     trust_anchor_pems: Vec<String>,
+    #[serde(default)]
+    policy_oids: Vec<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -607,6 +623,9 @@ struct VaultStatusOutput {
     scan_interval_hours: i64,
     timestamp_enabled: bool,
     timestamp_provider: String,
+    timestamp_assurance: Option<String>,
+    timestamp_trust_anchor_count: usize,
+    timestamp_policy_oid_count: usize,
     transparency_enabled: bool,
     transparency_provider: String,
 }
@@ -728,6 +747,7 @@ fn main() -> Result<()> {
             transparency_log: args.transparency_log.as_deref(),
             timestamp_trust_anchor_paths: &args.timestamp_trust_anchor,
             timestamp_policy_oids: &args.timestamp_policy_oid,
+            timestamp_assurance: args.timestamp_assurance,
             transparency_public_key_path: args.transparency_public_key.as_deref(),
         }),
         Commands::Verify(args) => cmd_verify(VerifyCommandInput {
@@ -738,6 +758,7 @@ fn main() -> Result<()> {
             check_receipt: args.check_receipt,
             timestamp_trust_anchor_paths: &args.timestamp_trust_anchor,
             timestamp_policy_oids: &args.timestamp_policy_oid,
+            timestamp_assurance: args.timestamp_assurance,
             transparency_public_key_path: args.transparency_public_key.as_deref(),
         }),
         Commands::Inspect {
@@ -858,6 +879,9 @@ fn cmd_create(args: CreateCommandInput<'_>) -> Result<()> {
     if !args.timestamp_policy_oids.is_empty() && args.timestamp_url.is_none() {
         bail!("--timestamp-policy-oid requires --timestamp-url during local bundle creation");
     }
+    if args.timestamp_assurance.is_some() && args.timestamp_url.is_none() {
+        bail!("--timestamp-assurance requires --timestamp-url during local bundle creation");
+    }
     if args.transparency_public_key_path.is_some() && args.transparency_log.is_none() {
         bail!("--transparency-public-key requires --transparency-log during local bundle creation");
     }
@@ -888,6 +912,7 @@ fn cmd_create(args: CreateCommandInput<'_>) -> Result<()> {
     let timestamp_trust_policy = load_timestamp_trust_policy(
         args.timestamp_trust_anchor_paths,
         args.timestamp_policy_oids,
+        args.timestamp_assurance,
     )?;
     let transparency_trust_policy = load_transparency_trust_policy(
         args.transparency_public_key_path,
@@ -1017,6 +1042,7 @@ fn cmd_verify(args: VerifyCommandInput<'_>) -> Result<()> {
     let timestamp_trust_policy = load_timestamp_trust_policy(
         args.timestamp_trust_anchor_paths,
         args.timestamp_policy_oids,
+        args.timestamp_assurance,
     )?;
     let transparency_trust_policy = load_transparency_trust_policy(
         args.transparency_public_key_path,
@@ -1334,6 +1360,9 @@ fn cmd_vault_status(vault_url: &str, format: OutputFormat) -> Result<()> {
         scan_interval_hours: config.retention.scan_interval_hours,
         timestamp_enabled: config.timestamp.enabled,
         timestamp_provider: config.timestamp.provider.clone(),
+        timestamp_assurance: config.timestamp.assurance.clone(),
+        timestamp_trust_anchor_count: config.timestamp.trust_anchor_pems.len(),
+        timestamp_policy_oid_count: config.timestamp.policy_oids.len(),
         transparency_enabled: config.transparency.enabled,
         transparency_provider: config.transparency.provider.clone(),
     };
@@ -1426,8 +1455,12 @@ fn print_vault_status_human(status: &VaultStatusOutput, config: &VaultConfigResp
         status.scan_interval_hours
     );
     println!(
-        "timestamp: enabled={} provider={}",
-        status.timestamp_enabled, status.timestamp_provider
+        "timestamp: enabled={} provider={} assurance={} trust_anchors={} policy_oids={}",
+        status.timestamp_enabled,
+        status.timestamp_provider,
+        status.timestamp_assurance.as_deref().unwrap_or("n/a"),
+        status.timestamp_trust_anchor_count,
+        status.timestamp_policy_oid_count
     );
     println!(
         "transparency: enabled={} provider={}",
@@ -1721,6 +1754,7 @@ fn read_text_files(paths: &[PathBuf], label: &str) -> Result<Vec<String>> {
 fn load_timestamp_trust_policy(
     trust_anchor_paths: &[PathBuf],
     policy_oids: &[String],
+    assurance: Option<TimestampAssuranceArg>,
 ) -> Result<Option<TimestampTrustPolicy>> {
     let policy = TimestampTrustPolicy {
         trust_anchor_pems: read_text_files(trust_anchor_paths, "timestamp trust anchor")?,
@@ -1729,10 +1763,21 @@ fn load_timestamp_trust_policy(
             .map(|policy_oid| policy_oid.trim().to_string())
             .filter(|policy_oid| !policy_oid.is_empty())
             .collect(),
+        assurance_profile: assurance.map(map_timestamp_assurance_profile),
     };
     (!policy.is_empty())
         .then_some(policy)
-        .map_or(Ok(None), |policy| Ok(Some(policy)))
+        .map_or(Ok(None), |policy| {
+            validate_timestamp_trust_policy(&policy)?;
+            Ok(Some(policy))
+        })
+}
+
+fn map_timestamp_assurance_profile(assurance: TimestampAssuranceArg) -> TimestampAssuranceProfile {
+    match assurance {
+        TimestampAssuranceArg::Standard => TimestampAssuranceProfile::Standard,
+        TimestampAssuranceArg::Qualified => TimestampAssuranceProfile::Qualified,
+    }
 }
 
 fn load_transparency_trust_policy(
@@ -1785,11 +1830,7 @@ fn evaluate_timestamp_check(
             state: OptionalCheckState::Valid,
             message: format!(
                 "RFC 3161 token {} at {} ({} signer{})",
-                if verification.trusted {
-                    "trusted"
-                } else {
-                    "structurally valid"
-                },
+                timestamp_verification_label(&verification),
                 verification.generated_at,
                 verification.signer_count,
                 if verification.signer_count == 1 {
@@ -1803,6 +1844,19 @@ fn evaluate_timestamp_check(
             state: OptionalCheckState::Invalid,
             message: format!("RFC 3161 timestamp verification failed: {err}"),
         },
+    }
+}
+
+fn timestamp_verification_label(verification: &proof_layer_core::TimestampVerification) -> String {
+    match verification.assurance_profile {
+        Some(TimestampAssuranceProfile::Qualified) if verification.assurance_profile_verified => {
+            "qualified-profile verified".to_string()
+        }
+        Some(TimestampAssuranceProfile::Standard) if verification.assurance_profile_verified => {
+            "standard-profile verified".to_string()
+        }
+        _ if verification.trusted => "trusted".to_string(),
+        _ => "structurally valid".to_string(),
     }
 }
 

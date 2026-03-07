@@ -21,12 +21,22 @@ pub trait TimestampProvider {
     fn timestamp(&self, digest: &str) -> Result<TimestampToken, TimestampError>;
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TimestampAssuranceProfile {
+    #[default]
+    Standard,
+    Qualified,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct TimestampTrustPolicy {
     #[serde(default)]
     pub trust_anchor_pems: Vec<String>,
     #[serde(default)]
     pub policy_oids: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub assurance_profile: Option<TimestampAssuranceProfile>,
 }
 
 impl TimestampTrustPolicy {
@@ -38,6 +48,7 @@ impl TimestampTrustPolicy {
                 .policy_oids
                 .iter()
                 .all(|policy_oid| policy_oid.trim().is_empty())
+            && self.assurance_profile.is_none()
     }
 }
 
@@ -116,8 +127,12 @@ pub struct TimestampVerification {
     pub digest_algorithm: String,
     pub message_imprint: String,
     pub policy_oid: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub assurance_profile: Option<TimestampAssuranceProfile>,
     pub signer_count: usize,
     pub certificate_count: usize,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub assurance_profile_verified: bool,
     #[serde(default, skip_serializing_if = "is_false")]
     pub policy_oid_verified: bool,
     #[serde(default, skip_serializing_if = "is_false")]
@@ -164,6 +179,10 @@ pub enum TimestampError {
     InvalidPolicyOid(String),
     #[error("timestamp policy OID {actual} did not match the configured policy set")]
     UnexpectedPolicyOid { actual: String },
+    #[error("qualified timestamp assurance requires at least one expected policy OID")]
+    QualifiedAssuranceRequiresPolicyOids,
+    #[error("qualified timestamp assurance requires at least one PEM trust anchor certificate")]
+    QualifiedAssuranceRequiresTrustAnchors,
     #[error("timestamp trust policy requires at least one PEM trust anchor certificate")]
     MissingTrustAnchors,
     #[error("timestamp trust anchor certificate is invalid: {0}")]
@@ -199,6 +218,7 @@ pub fn verify_timestamp_with_policy(
     digest: &str,
     policy: &TimestampTrustPolicy,
 ) -> Result<TimestampVerification, TimestampError> {
+    validate_timestamp_trust_policy(policy)?;
     verify_timestamp_internal(token, digest, Some(policy))
 }
 
@@ -207,6 +227,14 @@ pub fn validate_timestamp_trust_policy(
 ) -> Result<(), TimestampError> {
     if policy.is_empty() {
         return Ok(());
+    }
+    if policy.assurance_profile == Some(TimestampAssuranceProfile::Qualified) {
+        if !has_expected_policy_oids(policy) {
+            return Err(TimestampError::QualifiedAssuranceRequiresPolicyOids);
+        }
+        if !has_trust_anchors(policy) {
+            return Err(TimestampError::QualifiedAssuranceRequiresTrustAnchors);
+        }
     }
     for policy_oid in &policy.policy_oids {
         parse_expected_policy_oid(policy_oid)?;
@@ -271,6 +299,7 @@ fn verify_timestamp_internal(
     let generated_at_time = DateTime::<Utc>::from(tst_info.gen_time.clone());
     let generated_at = generated_at_time.to_rfc3339();
     let certificate_count = signed_data.certificates().count();
+    let assurance_profile = policy.and_then(|policy| policy.assurance_profile);
     let expected_policy_oids = policy
         .map(|policy| {
             policy
@@ -298,6 +327,11 @@ fn verify_timestamp_internal(
         } else {
             (false, false, None, None)
         };
+    let assurance_profile_verified = match assurance_profile {
+        Some(TimestampAssuranceProfile::Standard) => true,
+        Some(TimestampAssuranceProfile::Qualified) => policy_oid_verified && trusted,
+        None => false,
+    };
 
     Ok(TimestampVerification {
         kind: token.kind.clone(),
@@ -306,8 +340,10 @@ fn verify_timestamp_internal(
         digest_algorithm: digest_algorithm_name(digest_algorithm).to_string(),
         message_imprint: actual_imprint,
         policy_oid,
+        assurance_profile,
         signer_count,
         certificate_count,
+        assurance_profile_verified,
         policy_oid_verified,
         trusted,
         chain_verified,
@@ -344,6 +380,13 @@ fn has_trust_anchors(policy: &TimestampTrustPolicy) -> bool {
         .trust_anchor_pems
         .iter()
         .any(|pem| !pem.trim().is_empty())
+}
+
+fn has_expected_policy_oids(policy: &TimestampTrustPolicy) -> bool {
+    policy
+        .policy_oids
+        .iter()
+        .any(|policy_oid| !policy_oid.trim().is_empty())
 }
 
 fn verify_timestamp_trust(
@@ -569,9 +612,12 @@ mod tests {
         let policy = TimestampTrustPolicy {
             trust_anchor_pems: vec![certificate.encode_pem()],
             policy_oids: Vec::new(),
+            assurance_profile: None,
         };
 
         let verification = verify_timestamp_with_policy(&token, digest, &policy).unwrap();
+        assert_eq!(verification.assurance_profile, None);
+        assert!(!verification.assurance_profile_verified);
         assert!(verification.trusted);
         assert!(verification.chain_verified);
         assert!(!verification.revocation_checked);
@@ -592,6 +638,7 @@ mod tests {
         let policy = TimestampTrustPolicy {
             trust_anchor_pems: Vec::new(),
             policy_oids: vec!["1.2.3.4".to_string()],
+            assurance_profile: None,
         };
 
         let verification = verify_timestamp_with_policy(&token, digest, &policy).unwrap();
@@ -614,6 +661,7 @@ mod tests {
         let policy = TimestampTrustPolicy {
             trust_anchor_pems: vec![untrusted_anchor.encode_pem()],
             policy_oids: Vec::new(),
+            assurance_profile: None,
         };
 
         let err = verify_timestamp_with_policy(&token, digest, &policy).unwrap_err();
@@ -636,6 +684,7 @@ mod tests {
         let policy = TimestampTrustPolicy {
             trust_anchor_pems: vec![certificate.encode_pem()],
             policy_oids: Vec::new(),
+            assurance_profile: None,
         };
 
         let err = verify_timestamp_with_policy(&token, digest, &policy).unwrap_err();
@@ -652,10 +701,73 @@ mod tests {
         let policy = TimestampTrustPolicy {
             trust_anchor_pems: Vec::new(),
             policy_oids: vec!["1.2.3.5".to_string()],
+            assurance_profile: None,
         };
 
         let err = verify_timestamp_with_policy(&token, digest, &policy).unwrap_err();
         assert!(matches!(err, TimestampError::UnexpectedPolicyOid { .. }));
+    }
+
+    #[test]
+    fn validate_timestamp_trust_policy_rejects_qualified_without_policy_oids() {
+        let (_, certificate) = build_timestamp_token_fixture(
+            "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            Some("test-tsa"),
+            Utc::now(),
+            Duration::hours(6),
+        );
+        let policy = TimestampTrustPolicy {
+            trust_anchor_pems: vec![certificate.encode_pem()],
+            policy_oids: Vec::new(),
+            assurance_profile: Some(TimestampAssuranceProfile::Qualified),
+        };
+
+        let err = validate_timestamp_trust_policy(&policy).unwrap_err();
+        assert!(matches!(
+            err,
+            TimestampError::QualifiedAssuranceRequiresPolicyOids
+        ));
+    }
+
+    #[test]
+    fn validate_timestamp_trust_policy_rejects_qualified_without_trust_anchors() {
+        let policy = TimestampTrustPolicy {
+            trust_anchor_pems: Vec::new(),
+            policy_oids: vec!["1.2.3.4".to_string()],
+            assurance_profile: Some(TimestampAssuranceProfile::Qualified),
+        };
+
+        let err = validate_timestamp_trust_policy(&policy).unwrap_err();
+        assert!(matches!(
+            err,
+            TimestampError::QualifiedAssuranceRequiresTrustAnchors
+        ));
+    }
+
+    #[test]
+    fn verify_timestamp_with_policy_accepts_qualified_assurance_profile() {
+        let digest = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        let generated_at = Utc::now();
+        let (token, certificate) = build_timestamp_token_fixture(
+            digest,
+            Some("test-tsa"),
+            generated_at,
+            Duration::hours(6),
+        );
+        let policy = TimestampTrustPolicy {
+            trust_anchor_pems: vec![certificate.encode_pem()],
+            policy_oids: vec!["1.2.3.4".to_string()],
+            assurance_profile: Some(TimestampAssuranceProfile::Qualified),
+        };
+
+        let verification = verify_timestamp_with_policy(&token, digest, &policy).unwrap();
+        assert_eq!(
+            verification.assurance_profile,
+            Some(TimestampAssuranceProfile::Qualified)
+        );
+        assert!(verification.assurance_profile_verified);
+        assert!(verification.policy_oid_verified);
+        assert!(verification.trusted);
     }
 
     fn build_test_timestamp_token(digest: &str, provider: Option<&str>) -> TimestampToken {

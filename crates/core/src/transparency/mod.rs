@@ -430,9 +430,21 @@ fn verify_receipt_internal(
         .to_rfc3339();
     let (signed_entry_timestamp_verified, log_id_verified, trusted) =
         if let Some(policy) = policy.filter(|policy| !policy.is_empty()) {
-            let (signed_entry_timestamp_verified, log_id_verified, set_trusted) =
-                verify_rekor_signed_entry_timestamp(&entry, signed_entry_timestamp, policy)?;
-            let trusted = set_trusted && (policy.timestamp.is_empty() || timestamp.trusted);
+            let (signed_entry_timestamp_verified, log_id_verified, set_trusted) = if policy
+                .log_public_key_pem
+                .as_deref()
+                .is_some_and(|pem| !pem.trim().is_empty())
+            {
+                verify_rekor_signed_entry_timestamp(&entry, signed_entry_timestamp, policy)?
+            } else {
+                (false, false, false)
+            };
+            let timestamp_trusted = match policy.timestamp.assurance_profile {
+                Some(_) => timestamp.assurance_profile_verified,
+                None if policy.timestamp.is_empty() => true,
+                None => timestamp.trusted,
+            };
+            let trusted = set_trusted && timestamp_trusted;
             (signed_entry_timestamp_verified, log_id_verified, trusted)
         } else {
             (false, false, false)
@@ -828,6 +840,44 @@ mod tests {
 
         let err = verify_receipt_with_policy(&receipt, bundle_root, &policy).unwrap_err();
         assert!(matches!(err, TransparencyError::LogIdKeyMismatch { .. }));
+    }
+
+    #[test]
+    fn verify_receipt_with_policy_accepts_standard_timestamp_assurance_profile() {
+        let bundle_root = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        let (receipt, log_public_key_pem) = build_trusted_rekor_receipt(bundle_root, Some("rekor"));
+        let policy = TransparencyTrustPolicy {
+            log_public_key_pem: Some(log_public_key_pem),
+            timestamp: TimestampTrustPolicy {
+                trust_anchor_pems: Vec::new(),
+                policy_oids: Vec::new(),
+                assurance_profile: Some(crate::timestamp::TimestampAssuranceProfile::Standard),
+            },
+        };
+
+        let verification = verify_receipt_with_policy(&receipt, bundle_root, &policy).unwrap();
+        assert!(verification.signed_entry_timestamp_verified);
+        assert!(verification.log_id_verified);
+        assert!(verification.trusted);
+    }
+
+    #[test]
+    fn verify_receipt_with_policy_allows_timestamp_profile_without_log_key() {
+        let bundle_root = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        let receipt = build_test_rekor_receipt(bundle_root, Some("rekor"));
+        let policy = TransparencyTrustPolicy {
+            log_public_key_pem: None,
+            timestamp: TimestampTrustPolicy {
+                trust_anchor_pems: Vec::new(),
+                policy_oids: Vec::new(),
+                assurance_profile: Some(crate::timestamp::TimestampAssuranceProfile::Standard),
+            },
+        };
+
+        let verification = verify_receipt_with_policy(&receipt, bundle_root, &policy).unwrap();
+        assert!(!verification.signed_entry_timestamp_verified);
+        assert!(!verification.log_id_verified);
+        assert!(!verification.trusted);
     }
 
     #[test]

@@ -121,6 +121,11 @@ Completed:
   local `proofctl create` trust-aware timestamp/receipt attachment parity,
   `proofctl verify --timestamp-policy-oid`,
   and persisted vault timestamp policy configuration through `policy_oids`.
+- Added the next qualified-assurance slice:
+  operational `standard` / `qualified` timestamp assurance profiles in Rust core,
+  `proofctl create|verify --timestamp-assurance`,
+  vault enforcement of `timestamp.assurance = "qualified"` via trust anchors plus policy OIDs,
+  and receipt verification updates so timestamp-profile checks do not incorrectly require a Rekor log key.
 - Added the first pack export slice:
   `POST /v1/packs`,
   `GET /v1/packs/{id}`,
@@ -141,5 +146,5 @@ Still outstanding from `plan.md`:
 - TypeScript and Python now both have native FFI bridges, local sealing paths, and higher-level `ProofLayer` facades, but there is still no shared native build/release pipeline for SDK artifacts.
 - SCITT receipts and selective disclosure CLI flows remain future phases.
 - The main remaining gaps are no longer the evidence catalog itself; they are the harder later-phase items like selective disclosure, SCITT, deeper trust policy work, and alternative storage/runtime backends.
-- RFC 3161 verification now supports signer-chain validation against configured PEM trust anchors and optional `TSTInfo.policy` OID enforcement, but TSA revocation checking and eIDAS-qualified trust policy are still outstanding.
+- RFC 3161 verification now supports signer-chain validation against configured PEM trust anchors, optional `TSTInfo.policy` OID enforcement, and operational `qualified` profile gating, but TSA revocation checking and full eIDAS-qualified trust evaluation are still outstanding.
 - Rekor verification now supports SET signature validation and `logID` binding against a configured PEM log public key; live-log consistency checks beyond the stored inclusion proof and SCITT remain future work.

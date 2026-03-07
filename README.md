@@ -77,6 +77,7 @@ cargo run -p proofctl -- create \
   --key ./keys/signing.pem \
   --out ./bundle.pkg \
   --timestamp-url http://timestamp.digicert.com \
+  --timestamp-assurance qualified \
   --timestamp-policy-oid 1.2.3.4 \
   --timestamp-trust-anchor ./tsa-root.pem \
   --transparency-log https://rekor.sigstore.dev \
@@ -87,6 +88,7 @@ cargo run -p proofctl -- verify \
   --in ./bundle.pkg \
   --key ./keys/verify.pub \
   --check-timestamp \
+  --timestamp-assurance qualified \
   --timestamp-trust-anchor ./tsa-root.pem \
   --timestamp-policy-oid 1.2.3.4 \
   --check-receipt \
@@ -138,7 +140,7 @@ docker compose up --build
 Supported runtime config knobs:
 
 - `vault.toml` sections: `[server]`, `[signing]`, `[storage]`, `[timestamp]`, `[transparency]`, `[retention]`, and `[[retention.policies]]`
-- trust-aware assurance fields: `[timestamp].trust_anchor_pems` / `[timestamp].trust_anchor_paths`, `[timestamp].policy_oids`, and `[transparency].log_public_key_pem` / `[transparency].log_public_key_path`
+- trust-aware assurance fields: `[timestamp].assurance`, `[timestamp].trust_anchor_pems` / `[timestamp].trust_anchor_paths`, `[timestamp].policy_oids`, and `[transparency].log_public_key_pem` / `[transparency].log_public_key_path`
 - `PROOF_SERVICE_CONFIG_PATH=/path/to/vault.toml` to point at a non-default file
 - env overrides for `PROOF_SERVICE_ADDR`, `PROOF_SERVICE_STORAGE_DIR`, `PROOF_SERVICE_DB_PATH`, `PROOF_SIGNING_KEY_PATH`, `PROOF_SIGNING_KEY_ID`, `PROOF_SERVICE_MAX_PAYLOAD_BYTES`, `PROOF_SERVICE_RETENTION_GRACE_DAYS`, and `PROOF_SERVICE_RETENTION_SCAN_INTERVAL_HOURS`
 
@@ -297,9 +299,9 @@ npm run dev
 - `proofctl create` also supports Phase 2 migration overrides such as `--system-id`, `--retention-class`, and `--evidence-type`.
 - `proofctl create` now supports `--timestamp-url <tsa>` and can attach an RFC 3161 token before packaging.
 - `proofctl create --transparency-log <rekor>` now anchors the RFC 3161 token into Rekor before packaging; this currently requires `--timestamp-url`.
-- `proofctl create` also supports local trust-aware attachment via `--timestamp-trust-anchor <pem>`, `--timestamp-policy-oid <oid>`, and `--transparency-public-key <pem>`, so locally attached assurance fails fast when it does not satisfy the configured policy.
+- `proofctl create` also supports local trust-aware attachment via `--timestamp-assurance <standard|qualified>`, `--timestamp-trust-anchor <pem>`, `--timestamp-policy-oid <oid>`, and `--transparency-public-key <pem>`, so locally attached assurance fails fast when it does not satisfy the configured policy.
 - `proofctl verify --check-timestamp` now validates RFC 3161 tokens against the UTF-8 bytes of `integrity.bundle_root`, and `--check-receipt` now validates Rekor RFC 3161 receipts against the same bundle root.
-- `proofctl verify` also supports `--timestamp-trust-anchor <pem>` (repeatable), `--timestamp-policy-oid <oid>` (repeatable), and `--transparency-public-key <pem>` so offline assurance checks can move from structural validity to configured trust validation.
+- `proofctl verify` also supports `--timestamp-assurance <standard|qualified>`, `--timestamp-trust-anchor <pem>` (repeatable), `--timestamp-policy-oid <oid>` (repeatable), and `--transparency-public-key <pem>` so offline assurance checks can move from structural validity to configured trust validation.
 - `proofctl verify` now reports the bundle assurance level as `signed`, `timestamped`, or `transparency_anchored`.
 - `proofctl inspect` now supports `--show-items` and `--show-merkle`.
 - `proofctl pack` now requests pack assembly from the vault and downloads the resulting `pl-evidence-pack-v1` archive.
@@ -314,7 +316,7 @@ npm run dev
 - `POST /v1/bundles/{bundle_id}/timestamp` now uses the configured RFC 3161 provider to timestamp an existing stored bundle and persist the token back into bundle JSON.
 - `POST /v1/bundles/{bundle_id}/anchor` now uses the configured Rekor provider to anchor an existing timestamped bundle and persist the receipt back into bundle JSON; `scitt` remains a stubbed provider choice.
 - `POST /v1/verify/timestamp` and `POST /v1/verify/receipt` now verify assurance artefacts either directly (`bundle_root` + token/receipt) or by stored `bundle_id`, and they automatically use configured trust anchors / Rekor public keys when present.
-- Timestamp verification now has three layers: structural CMS/message-imprint validation by default, optional RFC 3161 policy OID matching when configured, and signer-chain validation against configured PEM trust anchors at token generation time when trust material is configured. Revocation and qualified/eIDAS trust status are still future work.
+- Timestamp verification now has three layers: structural CMS/message-imprint validation by default, optional RFC 3161 policy OID matching when configured, and signer-chain validation against configured PEM trust anchors at token generation time when trust material is configured. Setting `assurance = "qualified"` now makes those trust anchors plus expected policy OIDs mandatory and treats the result as a stricter qualified-profile check, but full eIDAS qualified trust-list evaluation and revocation are still future work.
 - Transparency verification now checks Rekor receipt structure, entry UUID to leaf-hash binding, the Merkle inclusion proof against the advertised Rekor root hash, the embedded RFC 3161 token binding to `integrity.bundle_root`, and Rekor signed-entry-timestamp signatures plus `logID` binding when a trusted Rekor public key is configured.
 - Pack assembly is now available through `/v1/packs`; packs apply an initial heuristic curation profile (`pack-rules-v1`) based on actor role, evidence item types, retention class, and derived obligation refs, then export matching bundles as embedded `bundle.pkg` files plus a manifest.
 - Pack redaction/selective disclosure is still not implemented; current exports remain full bundle packages.

@@ -13,10 +13,12 @@ use flate2::{Compression, read::GzDecoder, write::GzEncoder};
 use proof_layer_core::{
     ArtefactInput, BuildBundleError, CaptureEvent, CaptureInput, EvidenceItem, ProofBundle,
     ReceiptVerification, RekorTransparencyProvider, Rfc3161HttpTimestampProvider, TimestampToken,
-    TimestampVerification, TransparencyReceipt, anchor_bundle as anchor_bundle_receipt,
-    build_bundle, canonicalize_value, decode_private_key_pem, decode_public_key_pem,
-    sha256_prefixed, timestamp_digest, validate_bundle_integrity_fields, verify_receipt,
-    verify_timestamp,
+    TimestampTrustPolicy, TimestampVerification, TransparencyReceipt, TransparencyTrustPolicy,
+    anchor_bundle as anchor_bundle_receipt, build_bundle, canonicalize_value,
+    decode_private_key_pem, decode_public_key_pem, sha256_prefixed, timestamp_digest,
+    validate_bundle_integrity_fields, validate_timestamp_trust_policy,
+    validate_transparency_trust_policy, verify_receipt, verify_receipt_with_policy,
+    verify_timestamp, verify_timestamp_with_policy,
 };
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use sqlx::{
@@ -146,6 +148,12 @@ struct VaultTimestampFileConfig {
     provider: Option<String>,
     url: Option<String>,
     assurance: Option<String>,
+    #[serde(default)]
+    trust_anchor_pems: Vec<String>,
+    #[serde(default)]
+    trust_anchor_paths: Vec<String>,
+    #[serde(default)]
+    policy_oids: Vec<String>,
 }
 
 #[derive(Debug, Default, Clone, Deserialize)]
@@ -154,6 +162,8 @@ struct VaultTransparencyFileConfig {
     provider: Option<String>,
     url: Option<String>,
     rekor_url: Option<String>,
+    log_public_key_pem: Option<String>,
+    log_public_key_path: Option<String>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -529,6 +539,10 @@ struct TimestampConfig {
     url: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     assurance: Option<String>,
+    #[serde(default)]
+    trust_anchor_pems: Vec<String>,
+    #[serde(default)]
+    policy_oids: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -537,6 +551,8 @@ struct TransparencyConfig {
     provider: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    log_public_key_pem: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -957,8 +973,9 @@ fn build_vault_runtime_config(
         })
         .collect::<Result<Vec<_>>>()?;
 
-    let timestamp_config = resolve_timestamp_file_config(file_config.timestamp)?;
-    let transparency_config = resolve_transparency_file_config(file_config.transparency)?;
+    let timestamp_config = resolve_timestamp_file_config(config_base_dir, file_config.timestamp)?;
+    let transparency_config =
+        resolve_transparency_file_config(config_base_dir, file_config.transparency)?;
 
     Ok(VaultRuntimeConfig {
         addr,
@@ -1023,7 +1040,13 @@ fn resolve_path_from_config(base_dir: &FsPath, raw: &str) -> PathBuf {
     }
 }
 
+fn read_config_text_file(base_dir: &FsPath, raw_path: &str, label: &str) -> Result<String> {
+    let path = resolve_path_from_config(base_dir, raw_path);
+    fs::read_to_string(&path).with_context(|| format!("failed to read {label} {}", path.display()))
+}
+
 fn resolve_timestamp_file_config(
+    base_dir: &FsPath,
     file_config: Option<VaultTimestampFileConfig>,
 ) -> Result<Option<TimestampConfig>> {
     let Some(file_config) = file_config else {
@@ -1043,11 +1066,31 @@ fn resolve_timestamp_file_config(
     if file_config.assurance.is_some() {
         config.assurance = file_config.assurance;
     }
+    config.trust_anchor_pems.extend(
+        file_config
+            .trust_anchor_pems
+            .into_iter()
+            .filter(|pem| !pem.trim().is_empty()),
+    );
+    config.policy_oids.extend(
+        file_config
+            .policy_oids
+            .into_iter()
+            .filter(|policy_oid| !policy_oid.trim().is_empty()),
+    );
+    for path in file_config.trust_anchor_paths {
+        config.trust_anchor_pems.push(read_config_text_file(
+            base_dir,
+            &path,
+            "timestamp trust anchor",
+        )?);
+    }
 
     validate_timestamp_config(config).map(Some)
 }
 
 fn resolve_transparency_file_config(
+    base_dir: &FsPath,
     file_config: Option<VaultTransparencyFileConfig>,
 ) -> Result<Option<TransparencyConfig>> {
     let Some(file_config) = file_config else {
@@ -1063,6 +1106,14 @@ fn resolve_transparency_file_config(
     }
     if let Some(url) = file_config.url.or(file_config.rekor_url) {
         config.url = Some(url);
+    }
+    config.log_public_key_pem = normalize_optional_string(file_config.log_public_key_pem);
+    if let Some(path) = file_config.log_public_key_path {
+        config.log_public_key_pem = Some(read_config_text_file(
+            base_dir,
+            &path,
+            "transparency public key",
+        )?);
     }
 
     validate_transparency_config(config).map(Some)
@@ -1842,6 +1893,8 @@ async fn update_timestamp_config(
             "provider": &config.provider,
             "url": &config.url,
             "assurance": &config.assurance,
+            "trust_anchor_count": config.trust_anchor_pems.len(),
+            "policy_oid_count": config.policy_oids.len(),
         }),
     )
     .await
@@ -1869,6 +1922,7 @@ async fn update_transparency_config(
             "enabled": config.enabled,
             "provider": &config.provider,
             "url": &config.url,
+            "has_log_public_key": config.log_public_key_pem.is_some(),
         }),
     )
     .await
@@ -1954,14 +2008,17 @@ async fn timestamp_bundle(
     }
 
     let bundle_root = bundle.integrity.bundle_root.clone();
-    let provider = Rfc3161HttpTimestampProvider::with_label(config.url.clone(), config.provider);
+    let provider =
+        Rfc3161HttpTimestampProvider::with_label(config.url.clone(), config.provider.clone());
     let token = tokio::task::spawn_blocking(move || timestamp_digest(&bundle_root, &provider))
         .await
         .map_err(ApiError::internal_anyhow)?
         .map_err(ApiError::internal_anyhow)?;
+    let timestamp_policy = timestamp_trust_policy(&config);
 
     let verification =
-        apply_timestamp_token_to_bundle(&mut bundle, token).map_err(ApiError::internal_anyhow)?;
+        apply_timestamp_token_to_bundle(&mut bundle, token, timestamp_policy.as_ref())
+            .map_err(ApiError::internal_anyhow)?;
     persist_bundle_timestamp(&state.db, &bundle)
         .await
         .map_err(ApiError::internal_anyhow)?;
@@ -2017,6 +2074,9 @@ async fn anchor_bundle(
     let config = load_transparency_config(&state.db)
         .await
         .map_err(ApiError::internal_anyhow)?;
+    let timestamp_config = load_timestamp_config(&state.db)
+        .await
+        .map_err(ApiError::internal_anyhow)?;
     if !config.enabled {
         return Err(ApiError::conflict(
             "transparency anchoring is disabled in vault config",
@@ -2051,9 +2111,10 @@ async fn anchor_bundle(
             ));
         }
     };
+    let transparency_policy = transparency_trust_policy(&config, &timestamp_config);
 
-    let verification =
-        apply_receipt_to_bundle(&mut bundle, receipt).map_err(ApiError::internal_anyhow)?;
+    let verification = apply_receipt_to_bundle(&mut bundle, receipt, transparency_policy.as_ref())
+        .map_err(ApiError::internal_anyhow)?;
     persist_bundle_receipt(&state.db, &bundle)
         .await
         .map_err(ApiError::internal_anyhow)?;
@@ -2477,12 +2538,24 @@ async fn verify_timestamp_token(
         resolve_timestamp_verification_target(&state.db, request)
             .await
             .map_err(ApiError::bad_request_anyhow)?;
+    let timestamp_config = load_timestamp_config(&state.db)
+        .await
+        .map_err(ApiError::internal_anyhow)?;
+    let timestamp_policy = timestamp_trust_policy(&timestamp_config);
 
-    let response = match verify_timestamp(&timestamp, &bundle_root) {
+    let response = match match timestamp_policy.as_ref() {
+        Some(policy) => verify_timestamp_with_policy(&timestamp, &bundle_root, policy),
+        None => verify_timestamp(&timestamp, &bundle_root),
+    } {
         Ok(verification) => VerifyTimestampResponse {
             valid: true,
             message: format!(
-                "VALID: RFC 3161 token verified at {}",
+                "VALID: RFC 3161 token {} at {}",
+                if verification.trusted {
+                    "trusted"
+                } else {
+                    "verified"
+                },
                 verification.generated_at
             ),
             verification: Some(verification),
@@ -2517,12 +2590,27 @@ async fn verify_transparency_receipt(
     let (bundle_id, bundle_root, receipt) = resolve_receipt_verification_target(&state.db, request)
         .await
         .map_err(ApiError::bad_request_anyhow)?;
+    let timestamp_config = load_timestamp_config(&state.db)
+        .await
+        .map_err(ApiError::internal_anyhow)?;
+    let transparency_config = load_transparency_config(&state.db)
+        .await
+        .map_err(ApiError::internal_anyhow)?;
+    let transparency_policy = transparency_trust_policy(&transparency_config, &timestamp_config);
 
-    let response = match verify_receipt(&receipt, &bundle_root) {
+    let response = match match transparency_policy.as_ref() {
+        Some(policy) => verify_receipt_with_policy(&receipt, &bundle_root, policy),
+        None => verify_receipt(&receipt, &bundle_root),
+    } {
         Ok(verification) => VerifyReceiptResponse {
             valid: true,
             message: format!(
-                "VALID: transparency receipt verified at {}",
+                "VALID: transparency receipt {} at {}",
+                if verification.trusted {
+                    "trusted"
+                } else {
+                    "verified"
+                },
                 verification.integrated_time
             ),
             verification: Some(verification),
@@ -3357,12 +3445,18 @@ fn parse_pack_manifest(row: &StoredPackRow) -> Result<PackManifest> {
 fn apply_timestamp_token_to_bundle(
     bundle: &mut ProofBundle,
     token: TimestampToken,
+    trust_policy: Option<&TimestampTrustPolicy>,
 ) -> Result<TimestampVerification> {
     if bundle.timestamp.is_some() {
         bail!("bundle already has a timestamp token");
     }
 
-    let verification = verify_timestamp(&token, &bundle.integrity.bundle_root)?;
+    let verification = match trust_policy {
+        Some(policy) if !policy.is_empty() => {
+            verify_timestamp_with_policy(&token, &bundle.integrity.bundle_root, policy)?
+        }
+        _ => verify_timestamp(&token, &bundle.integrity.bundle_root)?,
+    };
     bundle.timestamp = Some(token);
     Ok(verification)
 }
@@ -3370,14 +3464,39 @@ fn apply_timestamp_token_to_bundle(
 fn apply_receipt_to_bundle(
     bundle: &mut ProofBundle,
     receipt: TransparencyReceipt,
+    trust_policy: Option<&TransparencyTrustPolicy>,
 ) -> Result<ReceiptVerification> {
     if bundle.receipt.is_some() {
         bail!("bundle already has a transparency receipt");
     }
 
-    let verification = verify_receipt(&receipt, &bundle.integrity.bundle_root)?;
+    let verification = match trust_policy {
+        Some(policy) if !policy.is_empty() => {
+            verify_receipt_with_policy(&receipt, &bundle.integrity.bundle_root, policy)?
+        }
+        _ => verify_receipt(&receipt, &bundle.integrity.bundle_root)?,
+    };
     bundle.receipt = Some(receipt);
     Ok(verification)
+}
+
+fn timestamp_trust_policy(config: &TimestampConfig) -> Option<TimestampTrustPolicy> {
+    let policy = TimestampTrustPolicy {
+        trust_anchor_pems: config.trust_anchor_pems.clone(),
+        policy_oids: config.policy_oids.clone(),
+    };
+    (!policy.is_empty()).then_some(policy)
+}
+
+fn transparency_trust_policy(
+    transparency: &TransparencyConfig,
+    timestamp: &TimestampConfig,
+) -> Option<TransparencyTrustPolicy> {
+    let policy = TransparencyTrustPolicy {
+        log_public_key_pem: transparency.log_public_key_pem.clone(),
+        timestamp: timestamp_trust_policy(timestamp).unwrap_or_default(),
+    };
+    (!policy.is_empty()).then_some(policy)
 }
 
 fn map_audit_log_row(row: StoredAuditLogRow) -> Result<AuditLogEntry> {
@@ -3542,6 +3661,22 @@ fn validate_timestamp_config(mut config: TimestampConfig) -> Result<TimestampCon
     config.url = config.url.trim().to_string();
     config.assurance =
         normalize_optional_string(config.assurance).map(|value| value.to_ascii_lowercase());
+    config.trust_anchor_pems = config
+        .trust_anchor_pems
+        .into_iter()
+        .filter_map(|pem| {
+            let trimmed = pem.trim();
+            (!trimmed.is_empty()).then(|| trimmed.to_string())
+        })
+        .collect();
+    config.policy_oids = config
+        .policy_oids
+        .into_iter()
+        .filter_map(|policy_oid| {
+            let trimmed = policy_oid.trim();
+            (!trimmed.is_empty()).then(|| trimmed.to_string())
+        })
+        .collect();
 
     if config.provider != DEFAULT_TIMESTAMP_PROVIDER {
         bail!("timestamp provider must be {}", DEFAULT_TIMESTAMP_PROVIDER);
@@ -3557,6 +3692,11 @@ fn validate_timestamp_config(mut config: TimestampConfig) -> Result<TimestampCon
     {
         bail!("timestamp assurance must be standard or qualified");
     }
+    validate_timestamp_trust_policy(&TimestampTrustPolicy {
+        trust_anchor_pems: config.trust_anchor_pems.clone(),
+        policy_oids: config.policy_oids.clone(),
+    })
+    .map_err(anyhow::Error::from)?;
 
     Ok(config)
 }
@@ -3564,6 +3704,7 @@ fn validate_timestamp_config(mut config: TimestampConfig) -> Result<TimestampCon
 fn validate_transparency_config(mut config: TransparencyConfig) -> Result<TransparencyConfig> {
     config.provider = config.provider.trim().to_ascii_lowercase();
     config.url = normalize_optional_string(config.url);
+    config.log_public_key_pem = normalize_optional_string(config.log_public_key_pem);
 
     match config.provider.as_str() {
         "none" => {
@@ -3572,6 +3713,9 @@ fn validate_transparency_config(mut config: TransparencyConfig) -> Result<Transp
             }
             if config.url.is_some() {
                 bail!("transparency url must be omitted when provider is none");
+            }
+            if config.log_public_key_pem.is_some() {
+                bail!("transparency log public key must be omitted when provider is none");
             }
         }
         "rekor" | "scitt" => {
@@ -3582,6 +3726,11 @@ fn validate_transparency_config(mut config: TransparencyConfig) -> Result<Transp
         }
         _ => bail!("transparency provider must be one of none, rekor, or scitt"),
     }
+    validate_transparency_trust_policy(&TransparencyTrustPolicy {
+        log_public_key_pem: config.log_public_key_pem.clone(),
+        timestamp: TimestampTrustPolicy::default(),
+    })
+    .map_err(anyhow::Error::from)?;
 
     Ok(config)
 }
@@ -3624,6 +3773,8 @@ fn default_timestamp_config() -> TimestampConfig {
         provider: DEFAULT_TIMESTAMP_PROVIDER.to_string(),
         url: DEFAULT_TIMESTAMP_URL.to_string(),
         assurance: None,
+        trust_anchor_pems: Vec::new(),
+        policy_oids: Vec::new(),
     }
 }
 
@@ -3632,6 +3783,7 @@ fn default_transparency_config() -> TransparencyConfig {
         enabled: false,
         provider: DEFAULT_TRANSPARENCY_PROVIDER.to_string(),
         url: None,
+        log_public_key_pem: None,
     }
 }
 
@@ -3709,8 +3861,7 @@ async fn load_retention_policies(db: &SqlitePool) -> Result<Vec<RetentionPolicyC
     .await
     .context("failed to load retention policies")?;
 
-    rows
-        .into_iter()
+    rows.into_iter()
         .map(|row| {
             Ok(RetentionPolicyConfig {
                 retention_class: row.retention_class,
@@ -5039,12 +5190,17 @@ mod tests {
                 provider: Some("rfc3161".to_string()),
                 url: Some("https://tsa.example.test".to_string()),
                 assurance: Some("qualified".to_string()),
+                trust_anchor_pems: Vec::new(),
+                trust_anchor_paths: Vec::new(),
+                policy_oids: Vec::new(),
             }),
             transparency: Some(VaultTransparencyFileConfig {
                 enabled: Some(true),
                 provider: Some("rekor".to_string()),
                 url: None,
                 rekor_url: Some("https://rekor.example.test".to_string()),
+                log_public_key_pem: None,
+                log_public_key_path: None,
             }),
             retention: VaultRetentionFileConfig {
                 grace_period_days: Some(21),
@@ -5532,7 +5688,7 @@ mod tests {
         ));
         persist_bundle_timestamp(&db, &bundle).await.unwrap();
         let receipt = build_test_rekor_receipt(&bundle.integrity.bundle_root, Some("rekor"));
-        apply_receipt_to_bundle(&mut bundle, receipt).unwrap();
+        apply_receipt_to_bundle(&mut bundle, receipt, None).unwrap();
         persist_bundle_receipt(&db, &bundle).await.unwrap();
 
         let query_req = Request::builder()
@@ -5629,7 +5785,7 @@ mod tests {
         ));
         persist_bundle_timestamp(&db, &bundle).await.unwrap();
         let receipt = build_test_rekor_receipt(&bundle.integrity.bundle_root, Some("rekor"));
-        apply_receipt_to_bundle(&mut bundle, receipt).unwrap();
+        apply_receipt_to_bundle(&mut bundle, receipt, None).unwrap();
         persist_bundle_receipt(&db, &bundle).await.unwrap();
 
         let delete_req = Request::builder()
@@ -5725,7 +5881,7 @@ mod tests {
         ));
         persist_bundle_timestamp(&db, &bundle).await.unwrap();
         let receipt = build_test_rekor_receipt(&bundle.integrity.bundle_root, Some("rekor"));
-        apply_receipt_to_bundle(&mut bundle, receipt).unwrap();
+        apply_receipt_to_bundle(&mut bundle, receipt, None).unwrap();
         persist_bundle_receipt(&db, &bundle).await.unwrap();
 
         let request = Request::builder()
@@ -6331,11 +6487,14 @@ mod tests {
                 provider: "rfc3161".to_string(),
                 url: "https://tsa.example.test".to_string(),
                 assurance: Some("qualified".to_string()),
+                trust_anchor_pems: Vec::new(),
+                policy_oids: Vec::new(),
             }),
             transparency_config: Some(TransparencyConfig {
                 enabled: true,
                 provider: "rekor".to_string(),
                 url: Some("https://rekor.example.test".to_string()),
+                log_public_key_pem: None,
             }),
             config_path: Some(state.storage_dir.join("vault.toml")),
         };
@@ -6470,6 +6629,7 @@ mod tests {
                 enabled: true,
                 provider: "rekor".to_string(),
                 url: Some("https://rekor.example.test".to_string()),
+                log_public_key_pem: None,
             },
         )
         .await
@@ -6522,7 +6682,7 @@ mod tests {
             .unwrap();
         let token = build_test_timestamp_token(&bundle.integrity.bundle_root, Some("test-tsa"));
 
-        let verification = apply_timestamp_token_to_bundle(&mut bundle, token).unwrap();
+        let verification = apply_timestamp_token_to_bundle(&mut bundle, token, None).unwrap();
         assert_eq!(verification.provider.as_deref(), Some("test-tsa"));
         persist_bundle_timestamp(&db, &bundle).await.unwrap();
 
@@ -6571,7 +6731,7 @@ mod tests {
         persist_bundle_timestamp(&db, &bundle).await.unwrap();
 
         let receipt = build_test_rekor_receipt(&bundle.integrity.bundle_root, Some("rekor"));
-        let verification = apply_receipt_to_bundle(&mut bundle, receipt).unwrap();
+        let verification = apply_receipt_to_bundle(&mut bundle, receipt, None).unwrap();
         assert_eq!(verification.provider.as_deref(), Some("rekor"));
         assert_eq!(verification.log_index, 0);
         persist_bundle_receipt(&db, &bundle).await.unwrap();
@@ -6620,7 +6780,7 @@ mod tests {
         ));
         persist_bundle_timestamp(&db, &bundle).await.unwrap();
         let receipt = build_test_rekor_receipt(&bundle.integrity.bundle_root, Some("rekor"));
-        apply_receipt_to_bundle(&mut bundle, receipt).unwrap();
+        apply_receipt_to_bundle(&mut bundle, receipt, None).unwrap();
         persist_bundle_receipt(&db, &bundle).await.unwrap();
 
         let request = Request::builder()
@@ -6829,6 +6989,8 @@ mod tests {
                     provider: "RFC3161".to_string(),
                     url: "https://tsa.example.test".to_string(),
                     assurance: Some("Qualified".to_string()),
+                    trust_anchor_pems: Vec::new(),
+                    policy_oids: Vec::new(),
                 })
                 .unwrap(),
             ))
@@ -6846,6 +7008,8 @@ mod tests {
                 provider: DEFAULT_TIMESTAMP_PROVIDER.to_string(),
                 url: "https://tsa.example.test".to_string(),
                 assurance: Some("qualified".to_string()),
+                trust_anchor_pems: Vec::new(),
+                policy_oids: Vec::new(),
             }
         );
 
@@ -6914,6 +7078,7 @@ mod tests {
                     enabled: true,
                     provider: "none".to_string(),
                     url: None,
+                    log_public_key_pem: None,
                 })
                 .unwrap(),
             ))
@@ -6930,6 +7095,7 @@ mod tests {
                     enabled: true,
                     provider: "Rekor".to_string(),
                     url: Some("https://rekor.example.test".to_string()),
+                    log_public_key_pem: None,
                 })
                 .unwrap(),
             ))
@@ -6946,6 +7112,7 @@ mod tests {
                 enabled: true,
                 provider: "rekor".to_string(),
                 url: Some("https://rekor.example.test".to_string()),
+                log_public_key_pem: None,
             }
         );
 

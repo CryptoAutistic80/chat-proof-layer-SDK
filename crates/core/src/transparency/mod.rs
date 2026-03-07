@@ -1,9 +1,17 @@
 use crate::{
+    canon::canonicalize_value,
     schema::{ProofBundle, TimestampToken, TransparencyReceipt},
-    timestamp::{RFC3161_TIMESTAMP_KIND, TimestampError, verify_timestamp},
+    timestamp::{
+        RFC3161_TIMESTAMP_KIND, TimestampError, TimestampTrustPolicy, verify_timestamp,
+        verify_timestamp_with_policy,
+    },
 };
 use base64ct::{Base64, Encoding};
 use chrono::{TimeZone, Utc};
+use p256::{
+    ecdsa::{Signature, VerifyingKey, signature::Verifier},
+    pkcs8::{DecodePublicKey, EncodePublicKey},
+};
 use reqwest::{StatusCode, blocking::Client};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -18,6 +26,23 @@ pub const SIGSTORE_REKOR_URL: &str = "https://rekor.sigstore.dev";
 
 pub trait TransparencyProvider {
     fn submit(&self, entry: &TransparencyEntry) -> Result<TransparencyReceipt, TransparencyError>;
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TransparencyTrustPolicy {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub log_public_key_pem: Option<String>,
+    #[serde(default)]
+    pub timestamp: TimestampTrustPolicy,
+}
+
+impl TransparencyTrustPolicy {
+    pub fn is_empty(&self) -> bool {
+        self.log_public_key_pem
+            .as_deref()
+            .is_none_or(|pem| pem.trim().is_empty())
+            && self.timestamp.is_empty()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -174,6 +199,12 @@ pub struct ReceiptVerification {
     pub inclusion_proof_hashes: usize,
     pub inclusion_proof_verified: bool,
     pub signed_entry_timestamp_present: bool,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub signed_entry_timestamp_verified: bool,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub log_id_verified: bool,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub trusted: bool,
     pub timestamp_generated_at: String,
 }
 
@@ -205,6 +236,18 @@ pub enum TransparencyError {
     MissingInclusionProof,
     #[error("transparency receipt missing signed entry timestamp")]
     MissingSignedEntryTimestamp,
+    #[error("transparency trust policy requires a PEM Rekor log public key")]
+    MissingLogPublicKey,
+    #[error("transparency log public key is invalid: {0}")]
+    InvalidLogPublicKey(String),
+    #[error("transparency receipt signed entry timestamp base64 is invalid: {0}")]
+    InvalidSignedEntryTimestamp(String),
+    #[error("transparency receipt log ID did not match trusted log public key")]
+    LogIdKeyMismatch { expected: String, actual: String },
+    #[error("transparency receipt signed entry timestamp verification failed")]
+    SignedEntryTimestampVerification,
+    #[error("transparency receipt signed entry timestamp canonicalization failed: {0}")]
+    SignedEntryTimestampCanonicalization(String),
     #[error("transparency receipt body encoding is invalid: {0}")]
     InvalidEntryEncoding(String),
     #[error(
@@ -251,6 +294,37 @@ pub fn verify_receipt(
     receipt: &TransparencyReceipt,
     bundle_root: &str,
 ) -> Result<ReceiptVerification, TransparencyError> {
+    verify_receipt_internal(receipt, bundle_root, None)
+}
+
+pub fn verify_receipt_with_policy(
+    receipt: &TransparencyReceipt,
+    bundle_root: &str,
+    policy: &TransparencyTrustPolicy,
+) -> Result<ReceiptVerification, TransparencyError> {
+    verify_receipt_internal(receipt, bundle_root, Some(policy))
+}
+
+pub fn validate_transparency_trust_policy(
+    policy: &TransparencyTrustPolicy,
+) -> Result<(), TransparencyError> {
+    if policy.is_empty() {
+        return Ok(());
+    }
+
+    load_log_public_key(policy)?;
+    if !policy.timestamp.is_empty() {
+        crate::timestamp::validate_timestamp_trust_policy(&policy.timestamp)
+            .map_err(TransparencyError::Timestamp)?;
+    }
+    Ok(())
+}
+
+fn verify_receipt_internal(
+    receipt: &TransparencyReceipt,
+    bundle_root: &str,
+    policy: Option<&TransparencyTrustPolicy>,
+) -> Result<ReceiptVerification, TransparencyError> {
     if receipt.kind != REKOR_TRANSPARENCY_KIND {
         return Err(TransparencyError::UnsupportedReceiptKind(
             receipt.kind.clone(),
@@ -288,12 +362,15 @@ pub fn verify_receipt(
 
     let verification = entry
         .verification
+        .as_ref()
         .ok_or(TransparencyError::MissingVerification)?;
     let inclusion_proof = verification
         .inclusion_proof
+        .as_ref()
         .ok_or(TransparencyError::MissingInclusionProof)?;
     let signed_entry_timestamp = verification
         .signed_entry_timestamp
+        .as_deref()
         .ok_or(TransparencyError::MissingSignedEntryTimestamp)?;
     if inclusion_proof.log_index != entry.log_index {
         return Err(TransparencyError::InvalidBody(format!(
@@ -309,7 +386,7 @@ pub fn verify_receipt(
         });
     }
 
-    let (body_bytes, proposed_entry) = decode_rekor_proposed_entry(entry.body)?;
+    let (body_bytes, proposed_entry) = decode_rekor_proposed_entry(entry.body.clone())?;
     let leaf_hash_bytes = hash_rekor_leaf(&body_bytes);
     let leaf_hash = hex::encode(&leaf_hash_bytes);
     if leaf_hash != entry_uuid {
@@ -322,7 +399,7 @@ pub fn verify_receipt(
         entry.log_index,
         inclusion_proof.tree_size,
         &leaf_hash_bytes,
-        &inclusion_proof,
+        inclusion_proof,
     )?;
 
     if proposed_entry.kind != REKOR_RFC3161_ENTRY_KIND {
@@ -339,7 +416,11 @@ pub fn verify_receipt(
         provider: receipt.provider.clone(),
         token_base64: proposed_entry.spec.tsr.content,
     };
-    let timestamp = verify_timestamp(&embedded_token, bundle_root)?;
+    let timestamp = if let Some(policy) = policy.filter(|policy| !policy.timestamp.is_empty()) {
+        verify_timestamp_with_policy(&embedded_token, bundle_root, &policy.timestamp)?
+    } else {
+        verify_timestamp(&embedded_token, bundle_root)?
+    };
     let integrated_time = Utc
         .timestamp_opt(entry.integrated_time, 0)
         .single()
@@ -347,6 +428,15 @@ pub fn verify_receipt(
             entry.integrated_time,
         ))?
         .to_rfc3339();
+    let (signed_entry_timestamp_verified, log_id_verified, trusted) =
+        if let Some(policy) = policy.filter(|policy| !policy.is_empty()) {
+            let (signed_entry_timestamp_verified, log_id_verified, set_trusted) =
+                verify_rekor_signed_entry_timestamp(&entry, signed_entry_timestamp, policy)?;
+            let trusted = set_trusted && (policy.timestamp.is_empty() || timestamp.trusted);
+            (signed_entry_timestamp_verified, log_id_verified, trusted)
+        } else {
+            (false, false, false)
+        };
 
     Ok(ReceiptVerification {
         kind: receipt.kind.clone(),
@@ -362,12 +452,72 @@ pub fn verify_receipt(
         inclusion_proof_hashes: inclusion_proof.hashes.len(),
         inclusion_proof_verified: true,
         signed_entry_timestamp_present: !signed_entry_timestamp.is_empty(),
+        signed_entry_timestamp_verified,
+        log_id_verified,
+        trusted,
         timestamp_generated_at: timestamp.generated_at,
     })
 }
 
 fn normalize_url(url: String) -> String {
     url.trim_end_matches('/').to_string()
+}
+
+fn load_log_public_key(
+    policy: &TransparencyTrustPolicy,
+) -> Result<VerifyingKey, TransparencyError> {
+    let pem = policy
+        .log_public_key_pem
+        .as_deref()
+        .map(str::trim)
+        .filter(|pem| !pem.is_empty())
+        .ok_or(TransparencyError::MissingLogPublicKey)?;
+
+    VerifyingKey::from_public_key_pem(pem)
+        .map_err(|err| TransparencyError::InvalidLogPublicKey(err.to_string()))
+}
+
+fn verify_rekor_signed_entry_timestamp(
+    entry: &RekorLogEntry,
+    signed_entry_timestamp: &str,
+    policy: &TransparencyTrustPolicy,
+) -> Result<(bool, bool, bool), TransparencyError> {
+    let verifying_key = load_log_public_key(policy)?;
+    let expected_log_id = compute_rekor_log_id(&verifying_key)?;
+    if entry.log_id != expected_log_id {
+        return Err(TransparencyError::LogIdKeyMismatch {
+            expected: expected_log_id,
+            actual: entry.log_id.clone(),
+        });
+    }
+
+    let canonical_payload = canonicalize_rekor_set_payload(entry)?;
+    let signature_bytes = Base64::decode_vec(signed_entry_timestamp)
+        .map_err(|err| TransparencyError::InvalidSignedEntryTimestamp(err.to_string()))?;
+    let signature = Signature::from_der(&signature_bytes)
+        .map_err(|err| TransparencyError::InvalidSignedEntryTimestamp(err.to_string()))?;
+    verifying_key
+        .verify(&canonical_payload, &signature)
+        .map_err(|_| TransparencyError::SignedEntryTimestampVerification)?;
+
+    Ok((true, true, true))
+}
+
+fn canonicalize_rekor_set_payload(entry: &RekorLogEntry) -> Result<Vec<u8>, TransparencyError> {
+    canonicalize_value(&json!({
+        "body": entry.body,
+        "integratedTime": entry.integrated_time,
+        "logID": entry.log_id,
+        "logIndex": entry.log_index,
+    }))
+    .map_err(|err| TransparencyError::SignedEntryTimestampCanonicalization(err.to_string()))
+}
+
+fn compute_rekor_log_id(verifying_key: &VerifyingKey) -> Result<String, TransparencyError> {
+    let public_key_der = verifying_key
+        .to_public_key_der()
+        .map_err(|err| TransparencyError::InvalidLogPublicKey(err.to_string()))?;
+    Ok(hex::encode(Sha256::digest(public_key_der.as_bytes())))
 }
 
 fn validate_http_url(url: &str) -> Result<(), TransparencyError> {
@@ -513,6 +663,10 @@ fn inner_proof_size(index: u64, size: u64) -> usize {
     }
 }
 
+fn is_false(value: &bool) -> bool {
+    !*value
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct RekorStoredReceiptBody {
     log_url: String,
@@ -589,6 +743,11 @@ mod tests {
         Bytes, SignedDataBuilder, SignerBuilder,
         asn1::rfc3161::{MessageImprint, TstInfo},
     };
+    use p256::{
+        ecdsa::{Signature, SigningKey, signature::Signer},
+        elliptic_curve::rand_core::OsRng,
+        pkcs8::{EncodePublicKey, LineEnding},
+    };
     use x509_certificate::{
         CapturedX509Certificate, InMemorySigningKeyPair, KeyAlgorithm, X509CertificateBuilder,
     };
@@ -620,6 +779,8 @@ mod tests {
         assert_eq!(verification.inclusion_proof_hashes, 0);
         assert!(verification.inclusion_proof_verified);
         assert!(verification.signed_entry_timestamp_present);
+        assert!(!verification.signed_entry_timestamp_verified);
+        assert!(!verification.trusted);
         assert!(
             verification
                 .integrated_time
@@ -632,6 +793,41 @@ mod tests {
         );
         assert_eq!(verification.entry_uuid, verification.leaf_hash);
         assert_eq!(verification.root_hash, verification.leaf_hash);
+    }
+
+    #[test]
+    fn verify_receipt_with_policy_accepts_trusted_log_key() {
+        let bundle_root = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        let (receipt, log_public_key_pem) = build_trusted_rekor_receipt(bundle_root, Some("rekor"));
+        let policy = TransparencyTrustPolicy {
+            log_public_key_pem: Some(log_public_key_pem),
+            timestamp: TimestampTrustPolicy::default(),
+        };
+
+        let verification = verify_receipt_with_policy(&receipt, bundle_root, &policy).unwrap();
+        assert!(verification.signed_entry_timestamp_present);
+        assert!(verification.signed_entry_timestamp_verified);
+        assert!(verification.log_id_verified);
+        assert!(verification.trusted);
+    }
+
+    #[test]
+    fn verify_receipt_with_policy_rejects_wrong_log_key() {
+        let bundle_root = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        let (receipt, _) = build_trusted_rekor_receipt(bundle_root, Some("rekor"));
+        let wrong_key = SigningKey::random(&mut OsRng);
+        let policy = TransparencyTrustPolicy {
+            log_public_key_pem: Some(
+                wrong_key
+                    .verifying_key()
+                    .to_public_key_pem(LineEnding::LF)
+                    .unwrap(),
+            ),
+            timestamp: TimestampTrustPolicy::default(),
+        };
+
+        let err = verify_receipt_with_policy(&receipt, bundle_root, &policy).unwrap_err();
+        assert!(matches!(err, TransparencyError::LogIdKeyMismatch { .. }));
     }
 
     #[test]
@@ -797,6 +993,74 @@ mod tests {
                 "log_entry": log_entry,
             }),
         }
+    }
+
+    fn build_trusted_rekor_receipt(
+        bundle_root: &str,
+        provider: Option<&str>,
+    ) -> (TransparencyReceipt, String) {
+        let token = build_test_timestamp_token(bundle_root, provider);
+        let body_bytes = serde_json::to_vec(&json!({
+            "kind": REKOR_RFC3161_ENTRY_KIND,
+            "apiVersion": REKOR_RFC3161_API_VERSION,
+            "spec": {
+                "tsr": {
+                    "content": token.token_base64,
+                }
+            }
+        }))
+        .unwrap();
+        let leaf_hash = hex::encode(hash_rekor_leaf(&body_bytes));
+        let signing_key = SigningKey::random(&mut OsRng);
+        let log_id = compute_rekor_log_id(signing_key.verifying_key()).unwrap();
+        let entry = RekorLogEntry {
+            body: Value::String(Base64::encode_string(&body_bytes)),
+            integrated_time: 1772802000_i64,
+            log_id: log_id.clone(),
+            log_index: 0,
+            verification: None,
+        };
+        let set_payload = canonicalize_rekor_set_payload(&entry).unwrap();
+        let set_signature: Signature = signing_key.sign(&set_payload);
+        let mut log_entry = serde_json::Map::new();
+        log_entry.insert(
+            leaf_hash.clone(),
+            json!({
+                "body": entry.body,
+                "integratedTime": entry.integrated_time,
+                "logID": entry.log_id,
+                "logIndex": entry.log_index,
+                "verification": {
+                    "inclusionProof": {
+                        "logIndex": 0,
+                        "treeSize": 1,
+                        "rootHash": leaf_hash.clone(),
+                        "hashes": []
+                    },
+                    "signedEntryTimestamp": Base64::encode_string(
+                        set_signature.to_der().as_bytes()
+                    )
+                }
+            }),
+        );
+
+        let receipt = TransparencyReceipt {
+            kind: REKOR_TRANSPARENCY_KIND.to_string(),
+            provider: provider.map(str::to_string),
+            body: json!({
+                "log_url": SIGSTORE_REKOR_URL,
+                "entry_uuid": leaf_hash.clone(),
+                "log_entry": Value::Object(log_entry),
+            }),
+        };
+
+        (
+            receipt,
+            signing_key
+                .verifying_key()
+                .to_public_key_pem(LineEnding::LF)
+                .unwrap(),
+        )
     }
 
     fn build_test_rekor_log_entry_response(token_base64: &str) -> (String, Value) {

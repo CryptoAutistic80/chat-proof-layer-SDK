@@ -17,11 +17,14 @@ blob_path = "./storage"
 enabled = false
 provider = "rfc3161"
 url = "http://timestamp.digicert.com"
+# trust_anchor_paths = ["./trust/tsa-root.pem"]
+# policy_oids = ["1.2.3.4"]
 
 [transparency]
 enabled = false
 provider = "none"
 # rekor_url = "https://rekor.sigstore.dev"
+# log_public_key_path = "./trust/rekor.pub"
 
 [retention]
 grace_period_days = 30

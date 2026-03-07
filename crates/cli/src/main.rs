@@ -1,16 +1,18 @@
 use anyhow::{Context, Result, anyhow, bail};
 use base64ct::Encoding;
 use chrono::{DateTime, Utc};
-use clap::{Parser, Subcommand, ValueEnum};
+use clap::{Args, Parser, Subcommand, ValueEnum};
 use ed25519_dalek::SigningKey;
 use flate2::{Compression, read::GzDecoder, write::GzEncoder};
 use proof_layer_core::{
     ArtefactInput, CaptureEvent, CaptureInput, EvidenceItem, ProofBundle, ReceiptVerification,
     RekorTransparencyProvider, Rfc3161HttpTimestampProvider, TimestampProvider,
-    TransparencyProvider, anchor_bundle as anchor_bundle_receipt, build_bundle,
-    build_inclusion_proof, capture_input_v01_to_event, decode_private_key_pem,
-    decode_public_key_pem, encode_private_key_pem, encode_public_key_pem, sha256_prefixed,
-    timestamp_digest, validate_bundle_integrity_fields, verify_receipt, verify_timestamp,
+    TimestampTrustPolicy, TransparencyProvider, TransparencyTrustPolicy,
+    anchor_bundle as anchor_bundle_receipt, build_bundle, build_inclusion_proof,
+    capture_input_v01_to_event, decode_private_key_pem, decode_public_key_pem,
+    encode_private_key_pem, encode_public_key_pem, sha256_prefixed, timestamp_digest,
+    validate_bundle_integrity_fields, verify_receipt, verify_receipt_with_policy, verify_timestamp,
+    verify_timestamp_with_policy,
 };
 use reqwest::{
     Url,
@@ -44,45 +46,9 @@ enum Commands {
         out: PathBuf,
     },
     /// Create a proof bundle package from capture input and artefacts.
-    Create {
-        #[arg(long)]
-        input: PathBuf,
-        #[arg(long, value_parser = parse_artefact_arg)]
-        artefact: Vec<ArtefactArg>,
-        #[arg(long)]
-        key: PathBuf,
-        #[arg(long)]
-        out: PathBuf,
-        #[arg(long)]
-        bundle_id: Option<String>,
-        #[arg(long)]
-        created_at: Option<String>,
-        #[arg(long, default_value = "kid-dev-01")]
-        signing_kid: String,
-        #[arg(long)]
-        evidence_type: Option<EvidenceTypeArg>,
-        #[arg(long)]
-        retention_class: Option<String>,
-        #[arg(long)]
-        system_id: Option<String>,
-        #[arg(long)]
-        timestamp_url: Option<String>,
-        #[arg(long)]
-        transparency_log: Option<String>,
-    },
+    Create(Box<CreateArgs>),
     /// Verify a proof bundle package offline.
-    Verify {
-        #[arg(long = "in")]
-        input: PathBuf,
-        #[arg(long)]
-        key: PathBuf,
-        #[arg(long, default_value = "human")]
-        format: OutputFormat,
-        #[arg(long)]
-        check_timestamp: bool,
-        #[arg(long)]
-        check_receipt: bool,
-    },
+    Verify(Box<VerifyArgs>),
     /// Print key fields from a proof bundle package.
     Inspect {
         #[arg(long = "in")]
@@ -114,6 +80,60 @@ enum Commands {
         #[command(subcommand)]
         command: VaultCommands,
     },
+}
+
+#[derive(Args)]
+struct CreateArgs {
+    #[arg(long)]
+    input: PathBuf,
+    #[arg(long, value_parser = parse_artefact_arg)]
+    artefact: Vec<ArtefactArg>,
+    #[arg(long)]
+    key: PathBuf,
+    #[arg(long)]
+    out: PathBuf,
+    #[arg(long)]
+    bundle_id: Option<String>,
+    #[arg(long)]
+    created_at: Option<String>,
+    #[arg(long, default_value = "kid-dev-01")]
+    signing_kid: String,
+    #[arg(long)]
+    evidence_type: Option<EvidenceTypeArg>,
+    #[arg(long)]
+    retention_class: Option<String>,
+    #[arg(long)]
+    system_id: Option<String>,
+    #[arg(long)]
+    timestamp_url: Option<String>,
+    #[arg(long)]
+    transparency_log: Option<String>,
+    #[arg(long = "timestamp-trust-anchor")]
+    timestamp_trust_anchor: Vec<PathBuf>,
+    #[arg(long = "timestamp-policy-oid")]
+    timestamp_policy_oid: Vec<String>,
+    #[arg(long = "transparency-public-key")]
+    transparency_public_key: Option<PathBuf>,
+}
+
+#[derive(Args)]
+struct VerifyArgs {
+    #[arg(long = "in")]
+    input: PathBuf,
+    #[arg(long)]
+    key: PathBuf,
+    #[arg(long, default_value = "human")]
+    format: OutputFormat,
+    #[arg(long)]
+    check_timestamp: bool,
+    #[arg(long)]
+    check_receipt: bool,
+    #[arg(long = "timestamp-trust-anchor")]
+    timestamp_trust_anchor: Vec<PathBuf>,
+    #[arg(long = "timestamp-policy-oid")]
+    timestamp_policy_oid: Vec<String>,
+    #[arg(long = "transparency-public-key")]
+    transparency_public_key: Option<PathBuf>,
 }
 
 #[derive(Subcommand)]
@@ -310,6 +330,20 @@ struct CreateCommandInput<'a> {
     overrides: &'a CreateOverrides,
     timestamp_url: Option<&'a str>,
     transparency_log: Option<&'a str>,
+    timestamp_trust_anchor_paths: &'a [PathBuf],
+    timestamp_policy_oids: &'a [String],
+    transparency_public_key_path: Option<&'a Path>,
+}
+
+struct VerifyCommandInput<'a> {
+    input_path: &'a Path,
+    key_path: &'a Path,
+    format: OutputFormat,
+    check_timestamp: bool,
+    check_receipt: bool,
+    timestamp_trust_anchor_paths: &'a [PathBuf],
+    timestamp_policy_oids: &'a [String],
+    transparency_public_key_path: Option<&'a Path>,
 }
 
 struct VaultQueryCommandInput<'a> {
@@ -499,6 +533,8 @@ struct VaultTimestampConfig {
     provider: String,
     url: String,
     assurance: Option<String>,
+    #[serde(default)]
+    trust_anchor_pems: Vec<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -506,6 +542,7 @@ struct VaultTransparencyConfig {
     enabled: bool,
     provider: String,
     url: Option<String>,
+    log_public_key_pem: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -674,42 +711,35 @@ fn main() -> Result<()> {
 
     match cli.command {
         Commands::Keygen { out } => cmd_keygen(&out),
-        Commands::Create {
-            input,
-            artefact,
-            key,
-            out,
-            bundle_id,
-            created_at,
-            signing_kid,
-            evidence_type,
-            retention_class,
-            system_id,
-            timestamp_url,
-            transparency_log,
-        } => cmd_create(CreateCommandInput {
-            input_path: &input,
-            artefacts: &artefact,
-            key_path: &key,
-            out_path: &out,
-            bundle_id: bundle_id.as_deref(),
-            created_at: created_at.as_deref(),
-            signing_kid: &signing_kid,
+        Commands::Create(args) => cmd_create(CreateCommandInput {
+            input_path: &args.input,
+            artefacts: &args.artefact,
+            key_path: &args.key,
+            out_path: &args.out,
+            bundle_id: args.bundle_id.as_deref(),
+            created_at: args.created_at.as_deref(),
+            signing_kid: &args.signing_kid,
             overrides: &CreateOverrides {
-                evidence_type,
-                retention_class,
-                system_id,
+                evidence_type: args.evidence_type,
+                retention_class: args.retention_class.clone(),
+                system_id: args.system_id.clone(),
             },
-            timestamp_url: timestamp_url.as_deref(),
-            transparency_log: transparency_log.as_deref(),
+            timestamp_url: args.timestamp_url.as_deref(),
+            transparency_log: args.transparency_log.as_deref(),
+            timestamp_trust_anchor_paths: &args.timestamp_trust_anchor,
+            timestamp_policy_oids: &args.timestamp_policy_oid,
+            transparency_public_key_path: args.transparency_public_key.as_deref(),
         }),
-        Commands::Verify {
-            input,
-            key,
-            format,
-            check_timestamp,
-            check_receipt,
-        } => cmd_verify(&input, &key, format, check_timestamp, check_receipt),
+        Commands::Verify(args) => cmd_verify(VerifyCommandInput {
+            input_path: &args.input,
+            key_path: &args.key,
+            format: args.format,
+            check_timestamp: args.check_timestamp,
+            check_receipt: args.check_receipt,
+            timestamp_trust_anchor_paths: &args.timestamp_trust_anchor,
+            timestamp_policy_oids: &args.timestamp_policy_oid,
+            transparency_public_key_path: args.transparency_public_key.as_deref(),
+        }),
         Commands::Inspect {
             input,
             format,
@@ -822,6 +852,15 @@ fn cmd_create(args: CreateCommandInput<'_>) -> Result<()> {
             "--transparency-log requires --timestamp-url because Rekor anchoring submits RFC 3161 timestamp tokens"
         );
     }
+    if !args.timestamp_trust_anchor_paths.is_empty() && args.timestamp_url.is_none() {
+        bail!("--timestamp-trust-anchor requires --timestamp-url during local bundle creation");
+    }
+    if !args.timestamp_policy_oids.is_empty() && args.timestamp_url.is_none() {
+        bail!("--timestamp-policy-oid requires --timestamp-url during local bundle creation");
+    }
+    if args.transparency_public_key_path.is_some() && args.transparency_log.is_none() {
+        bail!("--transparency-public-key requires --transparency-log during local bundle creation");
+    }
 
     let max_payload_bytes = max_payload_bytes()?;
     let capture_json = fs::read(args.input_path)
@@ -846,6 +885,14 @@ fn cmd_create(args: CreateCommandInput<'_>) -> Result<()> {
         .with_context(|| format!("failed to read {}", args.key_path.display()))?;
     let signing_key = decode_private_key_pem(&signing_key_pem)
         .with_context(|| format!("failed to parse signing key {}", args.key_path.display()))?;
+    let timestamp_trust_policy = load_timestamp_trust_policy(
+        args.timestamp_trust_anchor_paths,
+        args.timestamp_policy_oids,
+    )?;
+    let transparency_trust_policy = load_transparency_trust_policy(
+        args.transparency_public_key_path,
+        timestamp_trust_policy.as_ref(),
+    )?;
 
     let mut artefact_inputs = Vec::with_capacity(args.artefacts.len());
     let mut artefact_files = BTreeMap::new();
@@ -892,7 +939,8 @@ fn cmd_create(args: CreateCommandInput<'_>) -> Result<()> {
     let mut bundle = bundle;
     if let Some(timestamp_url) = args.timestamp_url {
         let provider = Rfc3161HttpTimestampProvider::new(timestamp_url.to_string());
-        let verification = attach_timestamp_to_bundle(&mut bundle, &provider)?;
+        let verification =
+            attach_timestamp_to_bundle(&mut bundle, &provider, timestamp_trust_policy.as_ref())?;
         info!(
             "timestamp provider={} generated_at={}",
             verification.provider.as_deref().unwrap_or("rfc3161"),
@@ -901,7 +949,8 @@ fn cmd_create(args: CreateCommandInput<'_>) -> Result<()> {
     }
     if let Some(transparency_log) = args.transparency_log {
         let provider = RekorTransparencyProvider::new(transparency_log.to_string());
-        let verification = attach_receipt_to_bundle(&mut bundle, &provider)?;
+        let verification =
+            attach_receipt_to_bundle(&mut bundle, &provider, transparency_trust_policy.as_ref())?;
         info!(
             "transparency provider={} entry_uuid={} log_index={}",
             verification.provider.as_deref().unwrap_or("rekor"),
@@ -944,16 +993,10 @@ fn cmd_create(args: CreateCommandInput<'_>) -> Result<()> {
     Ok(())
 }
 
-fn cmd_verify(
-    input_path: &Path,
-    key_path: &Path,
-    format: OutputFormat,
-    check_timestamp: bool,
-    check_receipt: bool,
-) -> Result<()> {
+fn cmd_verify(args: VerifyCommandInput<'_>) -> Result<()> {
     let max_payload_bytes = max_payload_bytes()?;
-    let package_size = fs::metadata(input_path)
-        .with_context(|| format!("failed to stat {}", input_path.display()))?
+    let package_size = fs::metadata(args.input_path)
+        .with_context(|| format!("failed to stat {}", args.input_path.display()))?
         .len() as usize;
     if package_size > max_payload_bytes {
         bail!(
@@ -963,14 +1006,22 @@ fn cmd_verify(
         );
     }
 
-    let files = read_bundle_package(input_path)?;
+    let files = read_bundle_package(args.input_path)?;
     let bundle = parse_bundle_file(&files)?;
     validate_bundle_integrity_fields(&bundle)?;
 
-    let key_pem = fs::read_to_string(key_path)
-        .with_context(|| format!("failed to read {}", key_path.display()))?;
+    let key_pem = fs::read_to_string(args.key_path)
+        .with_context(|| format!("failed to read {}", args.key_path.display()))?;
     let verifying_key = decode_public_key_pem(&key_pem)
-        .with_context(|| format!("failed to parse public key {}", key_path.display()))?;
+        .with_context(|| format!("failed to parse public key {}", args.key_path.display()))?;
+    let timestamp_trust_policy = load_timestamp_trust_policy(
+        args.timestamp_trust_anchor_paths,
+        args.timestamp_policy_oids,
+    )?;
+    let transparency_trust_policy = load_transparency_trust_policy(
+        args.transparency_public_key_path,
+        timestamp_trust_policy.as_ref(),
+    )?;
 
     let recomputed_canonical = bundle.canonical_header_bytes()?;
     let canonical_file = files
@@ -1006,13 +1057,21 @@ fn cmd_verify(
         }
     };
 
-    let timestamp = evaluate_timestamp_check(&bundle, check_timestamp);
-    if check_timestamp && timestamp.state != OptionalCheckState::Valid {
+    let timestamp = evaluate_timestamp_check(
+        &bundle,
+        args.check_timestamp,
+        timestamp_trust_policy.as_ref(),
+    );
+    if args.check_timestamp && timestamp.state != OptionalCheckState::Valid {
         failures.push(timestamp.message.clone());
     }
 
-    let receipt = evaluate_receipt_check(&bundle, check_receipt);
-    if check_receipt && receipt.state != OptionalCheckState::Valid {
+    let receipt = evaluate_receipt_check(
+        &bundle,
+        args.check_receipt,
+        transparency_trust_policy.as_ref(),
+    );
+    if args.check_receipt && receipt.state != OptionalCheckState::Valid {
         failures.push(receipt.message.clone());
     }
 
@@ -1034,7 +1093,7 @@ fn cmd_verify(
         receipt,
     };
 
-    match format {
+    match args.format {
         OutputFormat::Human => print_human_verify_report(&report),
         OutputFormat::Json => {
             println!("{}", serde_json::to_string_pretty(&report)?);
@@ -1045,8 +1104,8 @@ fn cmd_verify(
         && report.artefact_integrity_ok
         && report.signature_ok
         && report.manifest_ok
-        && (!check_timestamp || report.timestamp.state == OptionalCheckState::Valid)
-        && (!check_receipt || report.receipt.state == OptionalCheckState::Valid)
+        && (!args.check_timestamp || report.timestamp.state == OptionalCheckState::Valid)
+        && (!args.check_receipt || report.receipt.state == OptionalCheckState::Valid)
     {
         Ok(())
     } else {
@@ -1648,7 +1707,54 @@ fn abbreviate_value(value: &str) -> String {
     format!("{}...{}", &value[..12], &value[value.len() - 6..])
 }
 
-fn evaluate_timestamp_check(bundle: &ProofBundle, requested: bool) -> OptionalCheckReport {
+fn read_text_file(path: &Path, label: &str) -> Result<String> {
+    fs::read_to_string(path).with_context(|| format!("failed to read {label} {}", path.display()))
+}
+
+fn read_text_files(paths: &[PathBuf], label: &str) -> Result<Vec<String>> {
+    paths
+        .iter()
+        .map(|path| read_text_file(path, label))
+        .collect()
+}
+
+fn load_timestamp_trust_policy(
+    trust_anchor_paths: &[PathBuf],
+    policy_oids: &[String],
+) -> Result<Option<TimestampTrustPolicy>> {
+    let policy = TimestampTrustPolicy {
+        trust_anchor_pems: read_text_files(trust_anchor_paths, "timestamp trust anchor")?,
+        policy_oids: policy_oids
+            .iter()
+            .map(|policy_oid| policy_oid.trim().to_string())
+            .filter(|policy_oid| !policy_oid.is_empty())
+            .collect(),
+    };
+    (!policy.is_empty())
+        .then_some(policy)
+        .map_or(Ok(None), |policy| Ok(Some(policy)))
+}
+
+fn load_transparency_trust_policy(
+    public_key_path: Option<&Path>,
+    timestamp_policy: Option<&TimestampTrustPolicy>,
+) -> Result<Option<TransparencyTrustPolicy>> {
+    let policy = TransparencyTrustPolicy {
+        log_public_key_pem: public_key_path
+            .map(|path| read_text_file(path, "transparency public key"))
+            .transpose()?,
+        timestamp: timestamp_policy.cloned().unwrap_or_default(),
+    };
+    (!policy.is_empty())
+        .then_some(policy)
+        .map_or(Ok(None), |policy| Ok(Some(policy)))
+}
+
+fn evaluate_timestamp_check(
+    bundle: &ProofBundle,
+    requested: bool,
+    trust_policy: Option<&TimestampTrustPolicy>,
+) -> OptionalCheckReport {
     if !requested {
         return OptionalCheckReport {
             state: OptionalCheckState::Skipped,
@@ -1667,11 +1773,23 @@ fn evaluate_timestamp_check(bundle: &ProofBundle, requested: bool) -> OptionalCh
         };
     };
 
-    match verify_timestamp(timestamp, &bundle.integrity.bundle_root) {
+    let verification = match trust_policy {
+        Some(policy) if !policy.is_empty() => {
+            verify_timestamp_with_policy(timestamp, &bundle.integrity.bundle_root, policy)
+        }
+        _ => verify_timestamp(timestamp, &bundle.integrity.bundle_root),
+    };
+
+    match verification {
         Ok(verification) => OptionalCheckReport {
             state: OptionalCheckState::Valid,
             message: format!(
-                "RFC 3161 token valid at {} ({} signer{})",
+                "RFC 3161 token {} at {} ({} signer{})",
+                if verification.trusted {
+                    "trusted"
+                } else {
+                    "structurally valid"
+                },
                 verification.generated_at,
                 verification.signer_count,
                 if verification.signer_count == 1 {
@@ -1688,7 +1806,11 @@ fn evaluate_timestamp_check(bundle: &ProofBundle, requested: bool) -> OptionalCh
     }
 }
 
-fn evaluate_receipt_check(bundle: &ProofBundle, requested: bool) -> OptionalCheckReport {
+fn evaluate_receipt_check(
+    bundle: &ProofBundle,
+    requested: bool,
+    trust_policy: Option<&TransparencyTrustPolicy>,
+) -> OptionalCheckReport {
     if !requested {
         return OptionalCheckReport {
             state: OptionalCheckState::Skipped,
@@ -1708,11 +1830,23 @@ fn evaluate_receipt_check(bundle: &ProofBundle, requested: bool) -> OptionalChec
         };
     };
 
-    match verify_receipt(receipt, &bundle.integrity.bundle_root) {
+    let verification = match trust_policy {
+        Some(policy) if !policy.is_empty() => {
+            verify_receipt_with_policy(receipt, &bundle.integrity.bundle_root, policy)
+        }
+        _ => verify_receipt(receipt, &bundle.integrity.bundle_root),
+    };
+
+    match verification {
         Ok(verification) => OptionalCheckReport {
             state: OptionalCheckState::Valid,
             message: format!(
-                "Rekor receipt valid at {} with inclusion proof (log_index {}, entry {})",
+                "Rekor receipt {} at {} with inclusion proof (log_index {}, entry {})",
+                if verification.trusted {
+                    "trusted"
+                } else {
+                    "structurally valid"
+                },
                 verification.integrated_time,
                 verification.log_index,
                 abbreviate_value(&verification.entry_uuid)
@@ -1728,6 +1862,7 @@ fn evaluate_receipt_check(bundle: &ProofBundle, requested: bool) -> OptionalChec
 fn attach_timestamp_to_bundle(
     bundle: &mut ProofBundle,
     provider: &dyn TimestampProvider,
+    trust_policy: Option<&TimestampTrustPolicy>,
 ) -> Result<proof_layer_core::TimestampVerification> {
     if bundle.timestamp.is_some() {
         bail!("bundle already contains a timestamp token");
@@ -1735,8 +1870,13 @@ fn attach_timestamp_to_bundle(
 
     let token = timestamp_digest(&bundle.integrity.bundle_root, provider)
         .context("failed to request timestamp token")?;
-    let verification = verify_timestamp(&token, &bundle.integrity.bundle_root)
-        .context("failed to verify returned timestamp token")?;
+    let verification = match trust_policy {
+        Some(policy) if !policy.is_empty() => {
+            verify_timestamp_with_policy(&token, &bundle.integrity.bundle_root, policy)
+        }
+        _ => verify_timestamp(&token, &bundle.integrity.bundle_root),
+    }
+    .context("failed to verify returned timestamp token")?;
     bundle.timestamp = Some(token);
 
     Ok(verification)
@@ -1745,6 +1885,7 @@ fn attach_timestamp_to_bundle(
 fn attach_receipt_to_bundle(
     bundle: &mut ProofBundle,
     provider: &dyn TransparencyProvider,
+    trust_policy: Option<&TransparencyTrustPolicy>,
 ) -> Result<ReceiptVerification> {
     if bundle.receipt.is_some() {
         bail!("bundle already contains a transparency receipt");
@@ -1752,8 +1893,13 @@ fn attach_receipt_to_bundle(
 
     let receipt =
         anchor_bundle_receipt(bundle, provider).context("failed to submit transparency receipt")?;
-    let verification = verify_receipt(&receipt, &bundle.integrity.bundle_root)
-        .context("failed to verify returned transparency receipt")?;
+    let verification = match trust_policy {
+        Some(policy) if !policy.is_empty() => {
+            verify_receipt_with_policy(&receipt, &bundle.integrity.bundle_root, policy)
+        }
+        _ => verify_receipt(&receipt, &bundle.integrity.bundle_root),
+    }
+    .context("failed to verify returned transparency receipt")?;
     bundle.receipt = Some(receipt);
 
     Ok(verification)
@@ -2651,7 +2797,7 @@ mod tests {
 
     #[test]
     fn optional_check_reports_missing_invalid_and_valid_states() {
-        let missing = evaluate_timestamp_check(&sample_bundle(), true);
+        let missing = evaluate_timestamp_check(&sample_bundle(), true, None);
         assert_eq!(missing.state, OptionalCheckState::Missing);
 
         let mut bundle = sample_bundle();
@@ -2659,24 +2805,24 @@ mod tests {
             "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
             Some("test-tsa"),
         ));
-        let invalid = evaluate_timestamp_check(&bundle, true);
+        let invalid = evaluate_timestamp_check(&bundle, true, None);
         assert_eq!(invalid.state, OptionalCheckState::Invalid);
 
-        let missing_receipt = evaluate_receipt_check(&bundle, true);
+        let missing_receipt = evaluate_receipt_check(&bundle, true, None);
         assert_eq!(missing_receipt.state, OptionalCheckState::Missing);
 
         bundle.receipt = Some(build_test_rekor_receipt(
             &bundle.integrity.bundle_root,
             Some("rekor"),
         ));
-        let valid_receipt = evaluate_receipt_check(&bundle, true);
+        let valid_receipt = evaluate_receipt_check(&bundle, true, None);
         assert_eq!(valid_receipt.state, OptionalCheckState::Valid);
 
         bundle.receipt = Some(build_test_rekor_receipt(
             "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
             Some("rekor"),
         ));
-        let invalid_receipt = evaluate_receipt_check(&bundle, true);
+        let invalid_receipt = evaluate_receipt_check(&bundle, true, None);
         assert_eq!(invalid_receipt.state, OptionalCheckState::Invalid);
     }
 
@@ -2687,13 +2833,17 @@ mod tests {
             token: build_test_timestamp_token(&bundle.integrity.bundle_root, Some("test-tsa")),
         };
 
-        let verification = attach_timestamp_to_bundle(&mut bundle, &provider).unwrap();
+        let verification = attach_timestamp_to_bundle(&mut bundle, &provider, None).unwrap();
         assert_eq!(verification.provider.as_deref(), Some("test-tsa"));
         assert!(bundle.timestamp.is_some());
 
-        let timestamp_report = evaluate_timestamp_check(&bundle, true);
+        let timestamp_report = evaluate_timestamp_check(&bundle, true, None);
         assert_eq!(timestamp_report.state, OptionalCheckState::Valid);
-        assert!(timestamp_report.message.contains("RFC 3161 token valid"));
+        assert!(
+            timestamp_report
+                .message
+                .contains("RFC 3161 token structurally valid")
+        );
     }
 
     #[test]
@@ -2707,14 +2857,18 @@ mod tests {
             receipt: build_test_rekor_receipt(&bundle.integrity.bundle_root, Some("rekor")),
         };
 
-        let verification = attach_receipt_to_bundle(&mut bundle, &provider).unwrap();
+        let verification = attach_receipt_to_bundle(&mut bundle, &provider, None).unwrap();
         assert_eq!(verification.provider.as_deref(), Some("rekor"));
         assert_eq!(verification.log_index, 0);
         assert!(bundle.receipt.is_some());
 
-        let receipt_report = evaluate_receipt_check(&bundle, true);
+        let receipt_report = evaluate_receipt_check(&bundle, true, None);
         assert_eq!(receipt_report.state, OptionalCheckState::Valid);
-        assert!(receipt_report.message.contains("Rekor receipt valid"));
+        assert!(
+            receipt_report
+                .message
+                .contains("Rekor receipt structurally valid")
+        );
     }
 
     #[test]

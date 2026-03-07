@@ -111,6 +111,16 @@ Completed:
   first-class `conformity_assessment`, `declaration`, and `registration` item types in Rust core,
   a real `conformity` pack profile in the vault with market-surveillance-oriented curation,
   and matching builder/facade coverage in both the TypeScript and Python SDKs.
+- Added the next trust-hardening slice:
+  trust-aware RFC 3161 verification against configured PEM trust anchors in Rust core,
+  Rekor SET signature + `logID` verification against a configured PEM log public key,
+  `proofctl verify --timestamp-trust-anchor/--transparency-public-key`,
+  and vault config/verify/attach flows that automatically use persisted trust material when present.
+- Added the next assurance-policy slice:
+  RFC 3161 policy OID constraints in Rust core,
+  local `proofctl create` trust-aware timestamp/receipt attachment parity,
+  `proofctl verify --timestamp-policy-oid`,
+  and persisted vault timestamp policy configuration through `policy_oids`.
 - Added the first pack export slice:
   `POST /v1/packs`,
   `GET /v1/packs/{id}`,
@@ -130,6 +140,6 @@ Still outstanding from `plan.md`:
 - The CLI now covers the main vault operational read paths, but there is still no `proofctl disclose` flow.
 - TypeScript and Python now both have native FFI bridges, local sealing paths, and higher-level `ProofLayer` facades, but there is still no shared native build/release pipeline for SDK artifacts.
 - SCITT receipts and selective disclosure CLI flows remain future phases.
-- The main remaining gaps are no longer the evidence catalog itself; they are the harder later-phase items like selective disclosure, SCITT, stronger trust validation, and alternative storage/runtime backends.
-- RFC 3161 verification currently checks CMS signature integrity and message-imprint binding, but TSA certificate-chain / revocation trust validation and eIDAS-qualified trust policy are still outstanding.
-- Rekor verification currently checks receipt structure, entry UUID to leaf-hash binding, Merkle inclusion proofs, and embedded RFC 3161 token binding, but not Rekor SET signature validation.
+- The main remaining gaps are no longer the evidence catalog itself; they are the harder later-phase items like selective disclosure, SCITT, deeper trust policy work, and alternative storage/runtime backends.
+- RFC 3161 verification now supports signer-chain validation against configured PEM trust anchors and optional `TSTInfo.policy` OID enforcement, but TSA revocation checking and eIDAS-qualified trust policy are still outstanding.
+- Rekor verification now supports SET signature validation and `logID` binding against a configured PEM log public key; live-log consistency checks beyond the stored inclusion proof and SCITT remain future work.

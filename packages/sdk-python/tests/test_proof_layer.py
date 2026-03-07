@@ -1,0 +1,72 @@
+import unittest
+from pathlib import Path
+
+from proofsdk import ProofLayer
+
+REPO_ROOT = Path(__file__).resolve().parents[3]
+GOLDEN_DIR = REPO_ROOT / "fixtures" / "golden"
+
+
+class TestProofLayer(unittest.TestCase):
+    def test_capture_seals_local_llm_interaction_bundle(self):
+        signing_key_pem = (GOLDEN_DIR / "signing_key.txt").read_text(encoding="utf-8")
+        proof_layer = ProofLayer(
+            signing_key_pem=signing_key_pem,
+            key_id="kid-dev-01",
+            system_id="system-123",
+            issuer="proof-layer-python",
+            app_id="python-sdk",
+            env="test",
+        )
+
+        result = proof_layer.capture(
+            provider="openai",
+            model="gpt-4o-mini",
+            input=[{"role": "user", "content": "hello"}],
+            output={"role": "assistant", "content": "hi"},
+            request_id="req-proof-layer-1",
+        )
+
+        self.assertEqual(result["bundle"]["bundle_version"], "1.0")
+        self.assertEqual(result["bundle"]["subject"]["system_id"], "system-123")
+        self.assertEqual(result["bundle"]["integrity"]["signature"]["kid"], "kid-dev-01")
+
+    def test_capture_risk_assessment_seals_lifecycle_evidence(self):
+        signing_key_pem = (GOLDEN_DIR / "signing_key.txt").read_text(encoding="utf-8")
+        proof_layer = ProofLayer(
+            signing_key_pem=signing_key_pem,
+            key_id="kid-dev-01",
+            system_id="system-risk-42",
+        )
+
+        result = proof_layer.capture_risk_assessment(
+            risk_id="risk-42",
+            severity="medium",
+            status="mitigated",
+            summary="manual review added",
+        )
+
+        self.assertEqual(result["bundle"]["items"][0]["type"], "risk_assessment")
+        self.assertEqual(result["bundle"]["subject"]["system_id"], "system-risk-42")
+
+    def test_capture_retrieval_seals_retrieval_evidence(self):
+        signing_key_pem = (GOLDEN_DIR / "signing_key.txt").read_text(encoding="utf-8")
+        proof_layer = ProofLayer(
+            signing_key_pem=signing_key_pem,
+            key_id="kid-dev-01",
+            system_id="system-rag-42",
+        )
+
+        result = proof_layer.capture_retrieval(
+            corpus="policy-kb",
+            query="refund policy",
+            result={"docs": [{"id": "doc-1", "score": 0.99}]},
+        )
+
+        self.assertEqual(result["bundle"]["items"][0]["type"], "retrieval")
+        self.assertEqual(result["bundle"]["subject"]["system_id"], "system-rag-42")
+        self.assertTrue(result["bundle"]["items"][0]["data"]["result_commitment"].startswith("sha256:"))
+
+
+if __name__ == "__main__":
+    unittest.main()

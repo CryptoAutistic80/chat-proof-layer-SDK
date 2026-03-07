@@ -89,6 +89,11 @@ Completed:
   added typed builders for `tool_call`, `retrieval`, `human_oversight`, and `policy_decision`,
   matching `ProofLayer` convenience methods for those evidence types,
   and default artefact generation plus local sealing tests for the expanded evidence catalog.
+- Added the Python parity slice:
+  new `proofsdk.evidence` shared request builders for all evidence item types currently implemented in Rust core,
+  a higher-level `proofsdk.ProofLayer` facade with local-or-vault transport selection plus capture helpers,
+  updated OpenAI-like / Anthropic-like wrappers and decorator helpers to emit the same v1 capture shape,
+  and Python tests covering raw builders, the facade, and `with_proof_layer(...)` wrapper attachment.
 - Added the first pack export slice:
   `POST /v1/packs`,
   `GET /v1/packs/{id}`,
@@ -106,7 +111,7 @@ Still outstanding from `plan.md`:
 - JSON schema coverage is now started, with timestamp and Rekor transparency receipt coverage added, but richer export/archive schemas are still incomplete.
 - The vault now uses SQLite with legal-hold-aware retention, audit logging, file/env/runtime configuration, background retention scanning, curated pack export, and RFC 3161 bundle timestamp attachment, but PostgreSQL and redacted/Annex-complete pack assembly are not built yet.
 - The CLI now covers the main vault operational read paths, but there is still no `proofctl disclose` flow.
-- TypeScript and Python now both have native FFI bridges and local sealing paths, but there is still no shared native build/release pipeline for SDK artifacts and Python still lacks the equivalent higher-level `ProofLayer` facade/API.
+- TypeScript and Python now both have native FFI bridges, local sealing paths, and higher-level `ProofLayer` facades, but there is still no shared native build/release pipeline for SDK artifacts.
 - SCITT receipts and selective disclosure CLI flows remain future phases.
 - RFC 3161 verification currently checks CMS signature integrity and message-imprint binding, but TSA certificate-chain / revocation trust validation and eIDAS-qualified trust policy are still outstanding.
 - Rekor verification currently checks receipt structure, entry UUID to leaf-hash binding, Merkle inclusion proofs, and embedded RFC 3161 token binding, but not Rekor SET signature validation.

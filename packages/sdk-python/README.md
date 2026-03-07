@@ -1,7 +1,7 @@
-# proof-layer-sdk-python (PoC)
+# proof-layer-sdk-python
 
-Python wrappers for creating proof bundles around LLM requests and tool calls.
-Integrity-sensitive helpers are now backed by the local Rust PyO3 module in `crates/pyo3`.
+Python SDK for creating Proof Layer evidence bundles around model calls and lifecycle events.
+Integrity-sensitive helpers are backed by the local Rust PyO3 module in `crates/pyo3`.
 
 ## Build Native Bindings
 
@@ -12,27 +12,54 @@ python3 ./scripts/build_native.py
 ## Quick Usage
 
 ```python
-from proofsdk import LocalProofLayerClient, build_bundle, hash_sha256, verify_bundle
+from proofsdk import LocalProofLayerClient, ProofLayer, build_bundle, hash_sha256, verify_bundle
 from proofsdk.client import ProofLayerClient
-from proofsdk.providers.openai_like import proved_completion
+from proofsdk.providers.openai import with_proof_layer
 
 proof_client = ProofLayerClient(base_url="http://127.0.0.1:8080")
 local_client = LocalProofLayerClient(
     signing_key_pem="-----BEGIN PROOF LAYER ED25519 PRIVATE KEY-----\n...\n-----END PROOF LAYER ED25519 PRIVATE KEY-----\n",
     signing_key_id="kid-dev-01",
 )
-
-completion, proof = proved_completion(
-    lambda params: {
-        "id": "cmpl-1",
-        "model": params["model"],
-        "choices": [{"message": {"role": "assistant", "content": "hello"}}]
-    },
-    {"model": "gpt-4o-mini", "messages": [{"role": "user", "content": "Hi"}]},
-    proof_client,
+proof_layer = ProofLayer(
+    signing_key_pem="-----BEGIN PROOF LAYER ED25519 PRIVATE KEY-----\n...\n-----END PROOF LAYER ED25519 PRIVATE KEY-----\n",
+    key_id="kid-dev-01",
+    system_id="system-123",
 )
 
-print(completion["id"], proof["bundle_id"])
+wrapped = with_proof_layer(
+    type(
+        "Client",
+        (),
+        {
+            "chat": type(
+                "Chat",
+                (),
+                {
+                    "completions": type(
+                        "Completions",
+                        (),
+                        {
+                            "create": staticmethod(
+                                lambda params: {
+                                    "id": "cmpl-1",
+                                    "model": params["model"],
+                                    "choices": [{"message": {"role": "assistant", "content": "hello"}}],
+                                }
+                            )
+                        },
+                    )()
+                },
+            )()
+        },
+    )(),
+    proof_layer,
+)
+completion = wrapped.chat.completions.create(
+    {"model": "gpt-4o-mini", "messages": [{"role": "user", "content": "Hi"}]}
+)
+
+print(completion["id"], completion["proof_layer"]["bundle_id"])
 print(hash_sha256(b'{"hello":"world"}'))
 
 local_bundle = build_bundle(
@@ -56,4 +83,13 @@ summary = verify_bundle(
 )
 
 print(summary["artefact_count"])
+
+risk_bundle = proof_layer.capture_risk_assessment(
+    risk_id="risk-42",
+    severity="medium",
+    status="mitigated",
+    summary="manual review added",
+)
+
+print(risk_bundle["bundle"]["items"][0]["type"])
 ```

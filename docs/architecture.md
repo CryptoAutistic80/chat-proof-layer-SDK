@@ -126,6 +126,7 @@ Current config behavior:
 - `packages/sdk-python` now loads a local PyO3 module compiled from `crates/pyo3` via the package build helper.
 - The first native Python surface matches Node: canonicalization, SHA-256 digesting, Merkle root computation, Ed25519 JWS sign/verify, deterministic local bundle construction, and offline bundle verification.
 - `packages/sdk-python` now exposes both an HTTP vault client and a `LocalProofLayerClient` that seals bundles locally via the native module.
+- The Python package now also exposes a higher-level `ProofLayer` facade, shared `evidence.py` request builders for all evidence item types currently implemented in Rust core, and provider-specific `with_proof_layer(...)` wrappers for OpenAI-like and Anthropic-like clients.
 - The Python provider wrappers, decorator helpers, and golden fixture tests now route integrity-sensitive operations through that shared Rust implementation.
 - Tool capture and OTel GenAI export helpers for trace pipelines.
 - Provider adapters remain thin and provider-shaped; integrity semantics stay in Rust core/service.

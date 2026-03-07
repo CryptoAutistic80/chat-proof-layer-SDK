@@ -1,0 +1,143 @@
+import unittest
+
+from proofsdk import (
+    create_data_governance_request,
+    create_human_oversight_request,
+    create_llm_interaction_request,
+    create_policy_decision_request,
+    create_retrieval_request,
+    create_risk_assessment_request,
+    create_technical_doc_request,
+    create_tool_call_request,
+)
+
+
+class TestEvidenceBuilders(unittest.TestCase):
+    def test_llm_interaction_request_uses_v1_shape(self):
+        request = create_llm_interaction_request(
+            key_id="kid-dev-01",
+            role="deployer",
+            system_id="system-123",
+            provider="openai",
+            model="gpt-4o-mini",
+            input=[{"role": "user", "content": "hello"}],
+            output={"role": "assistant", "content": "hi"},
+            request_id="req-1",
+            model_parameters={"temperature": 0.2},
+            trace={"usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2}},
+        )
+
+        self.assertEqual(request["capture"]["actor"]["role"], "deployer")
+        self.assertEqual(request["capture"]["subject"]["system_id"], "system-123")
+        self.assertEqual(request["capture"]["context"]["provider"], "openai")
+        self.assertEqual(request["capture"]["items"][0]["type"], "llm_interaction")
+        self.assertTrue(request["capture"]["items"][0]["data"]["input_commitment"].startswith("sha256:"))
+        self.assertEqual(request["artefacts"][0]["name"], "prompt.json")
+        self.assertEqual(request["artefacts"][1]["name"], "response.json")
+
+    def test_risk_assessment_request_emits_default_artefact(self):
+        request = create_risk_assessment_request(
+            key_id="kid-dev-01",
+            system_id="system-risk-1",
+            risk_id="risk-123",
+            severity="high",
+            status="open",
+            summary="hallucination path under review",
+            metadata={"owner": "risk-team"},
+            record={"controls": ["approval", "monitoring"]},
+            retention_class="provider_documentation_days",
+        )
+
+        self.assertEqual(request["capture"]["items"][0]["type"], "risk_assessment")
+        self.assertEqual(request["capture"]["policy"]["retention_class"], "provider_documentation_days")
+        self.assertEqual(request["artefacts"][0]["name"], "risk_assessment.json")
+
+    def test_data_governance_request_emits_dataset_ref(self):
+        request = create_data_governance_request(
+            key_id="kid-dev-01",
+            system_id="system-data-1",
+            decision="approved_with_restrictions",
+            dataset_ref="dataset://curated/training-v2",
+            metadata={"reviewer": "privacy"},
+        )
+
+        self.assertEqual(request["capture"]["items"][0]["type"], "data_governance")
+        self.assertEqual(
+            request["capture"]["items"][0]["data"]["dataset_ref"],
+            "dataset://curated/training-v2",
+        )
+
+    def test_technical_doc_request_hashes_inline_document(self):
+        request = create_technical_doc_request(
+            key_id="kid-dev-01",
+            system_id="system-doc-1",
+            document_ref="annex-iv/system-card",
+            section="risk_controls",
+            document=b"system-card-v1",
+            document_name="system-card.txt",
+        )
+
+        self.assertEqual(request["capture"]["items"][0]["type"], "technical_doc")
+        self.assertTrue(request["capture"]["items"][0]["data"]["commitment"].startswith("sha256:"))
+        self.assertEqual(request["artefacts"][0]["name"], "system-card.txt")
+
+    def test_tool_call_request_hashes_input_output(self):
+        request = create_tool_call_request(
+            key_id="kid-dev-01",
+            system_id="system-tool-1",
+            tool_name="search_database",
+            input={"query": "hello"},
+            output={"hits": 3},
+            metadata={"latency_ms": 18},
+        )
+
+        self.assertEqual(request["capture"]["items"][0]["type"], "tool_call")
+        self.assertTrue(request["capture"]["items"][0]["data"]["input_commitment"].startswith("sha256:"))
+        self.assertTrue(request["capture"]["items"][0]["data"]["output_commitment"].startswith("sha256:"))
+        self.assertEqual(request["artefacts"][1]["name"], "tool_input.json")
+        self.assertEqual(request["artefacts"][2]["name"], "tool_output.json")
+
+    def test_retrieval_request_hashes_result_query(self):
+        request = create_retrieval_request(
+            key_id="kid-dev-01",
+            system_id="system-rag-1",
+            corpus="knowledge-base",
+            query="refund policy",
+            result={"docs": [{"id": "doc-1"}]},
+            metadata={"top_k": 3},
+        )
+
+        self.assertEqual(request["capture"]["items"][0]["type"], "retrieval")
+        self.assertTrue(request["capture"]["items"][0]["data"]["result_commitment"].startswith("sha256:"))
+        self.assertTrue(request["capture"]["items"][0]["data"]["query_commitment"].startswith("sha256:"))
+
+    def test_human_oversight_request_hashes_notes(self):
+        request = create_human_oversight_request(
+            key_id="kid-dev-01",
+            system_id="system-oversight-1",
+            action="approved_after_review",
+            reviewer="ops-lead",
+            notes="Reviewed against internal policy",
+        )
+
+        self.assertEqual(request["capture"]["items"][0]["type"], "human_oversight")
+        self.assertTrue(request["capture"]["items"][0]["data"]["notes_commitment"].startswith("sha256:"))
+
+    def test_policy_decision_request_hashes_rationale(self):
+        request = create_policy_decision_request(
+            key_id="kid-dev-01",
+            system_id="system-policy-1",
+            policy_name="harm-filter",
+            decision="blocked",
+            rationale={"score": 0.98},
+            metadata={"rule": "violence"},
+        )
+
+        self.assertEqual(request["capture"]["items"][0]["type"], "policy_decision")
+        self.assertTrue(
+            request["capture"]["items"][0]["data"]["rationale_commitment"].startswith("sha256:")
+        )
+
+
+if __name__ == "__main__":
+    unittest.main()

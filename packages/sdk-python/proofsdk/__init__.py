@@ -3,6 +3,8 @@ from .decorators import prove_llm_call
 from .evidence import (
     create_data_governance_request,
     create_human_oversight_request,
+    create_incident_report_request,
+    create_literacy_attestation_request,
     create_llm_interaction_request,
     create_policy_decision_request,
     create_retrieval_request,
@@ -31,6 +33,8 @@ __all__ = [
     "compute_merkle_root",
     "create_data_governance_request",
     "create_human_oversight_request",
+    "create_incident_report_request",
+    "create_literacy_attestation_request",
     "create_llm_interaction_request",
     "create_policy_decision_request",
     "create_retrieval_request",

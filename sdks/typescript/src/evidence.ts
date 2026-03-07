@@ -5,8 +5,10 @@ import type {
   CreateBundleRequest,
   DataGovernanceRequestOptions,
   HumanOversightRequestOptions,
+  IncidentReportRequestOptions,
   JsonObject,
   JsonValue,
+  LiteracyAttestationRequestOptions,
   LlmInteractionRequestOptions,
   PolicyDecisionRequestOptions,
   ProofArtefactInput,
@@ -506,6 +508,109 @@ export function createTechnicalDocRequest(
           commitment:
             options.commitment ??
             (options.document !== undefined ? hashSha256(options.document) : null)
+        }
+      }
+    ],
+    redactions: options.redactions,
+    encryptionEnabled: options.encryptionEnabled,
+    retentionClass: options.retentionClass,
+    artefacts
+  });
+}
+
+export function createLiteracyAttestationRequest(
+  options: LiteracyAttestationRequestOptions
+): CreateBundleRequest {
+  const artefacts = options.artefacts ? [...options.artefacts] : [];
+  if (artefacts.length === 0) {
+    artefacts.push(
+      jsonArtefact("literacy_attestation.json", {
+        attested_role: options.attestedRole,
+        status: options.status,
+        training_ref: options.trainingRef ?? null,
+        metadata: options.metadata ?? null
+      })
+    );
+    if (options.attestation !== undefined) {
+      artefacts.push(namedDataArtefact("literacy_attestation_record", options.attestation));
+    }
+  }
+
+  return createCaptureRequest({
+    keyId: options.keyId,
+    role: options.role,
+    issuer: options.issuer,
+    appId: options.appId,
+    env: options.env,
+    requestId: options.requestId,
+    threadId: options.threadId,
+    userRef: options.userRef,
+    systemId: options.systemId,
+    deploymentId: options.deploymentId,
+    version: options.version,
+    items: [
+      {
+        type: "literacy_attestation",
+        data: {
+          attested_role: options.attestedRole,
+          status: options.status,
+          training_ref: options.trainingRef ?? null,
+          attestation_commitment:
+            options.attestation !== undefined ? hashSha256(options.attestation) : null,
+          metadata: options.metadata ?? null
+        }
+      }
+    ],
+    redactions: options.redactions,
+    encryptionEnabled: options.encryptionEnabled,
+    retentionClass: options.retentionClass,
+    artefacts
+  });
+}
+
+export function createIncidentReportRequest(
+  options: IncidentReportRequestOptions
+): CreateBundleRequest {
+  const artefacts = options.artefacts ? [...options.artefacts] : [];
+  if (artefacts.length === 0) {
+    artefacts.push(
+      jsonArtefact("incident_report.json", {
+        incident_id: options.incidentId,
+        severity: options.severity,
+        status: options.status,
+        occurred_at: options.occurredAt ?? null,
+        summary: options.summary ?? null,
+        metadata: options.metadata ?? null
+      })
+    );
+    if (options.report !== undefined) {
+      artefacts.push(namedDataArtefact("incident_report_record", options.report));
+    }
+  }
+
+  return createCaptureRequest({
+    keyId: options.keyId,
+    role: options.role,
+    issuer: options.issuer,
+    appId: options.appId,
+    env: options.env,
+    requestId: options.requestId,
+    threadId: options.threadId,
+    userRef: options.userRef,
+    systemId: options.systemId,
+    deploymentId: options.deploymentId,
+    version: options.version,
+    items: [
+      {
+        type: "incident_report",
+        data: {
+          incident_id: options.incidentId,
+          severity: options.severity,
+          status: options.status,
+          occurred_at: options.occurredAt ?? null,
+          summary: options.summary ?? null,
+          report_commitment: options.report !== undefined ? hashSha256(options.report) : null,
+          metadata: options.metadata ?? null
         }
       }
     ],

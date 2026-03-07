@@ -203,6 +203,33 @@ pub struct TechnicalDocEvidence {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct LiteracyAttestationEvidence {
+    pub attested_role: String,
+    pub status: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub training_ref: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub attestation_commitment: Option<String>,
+    #[serde(default = "null_json", skip_serializing_if = "Value::is_null")]
+    pub metadata: Value,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct IncidentReportEvidence {
+    pub incident_id: String,
+    pub severity: String,
+    pub status: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub occurred_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub summary: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub report_commitment: Option<String>,
+    #[serde(default = "null_json", skip_serializing_if = "Value::is_null")]
+    pub metadata: Value,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", content = "data", rename_all = "snake_case")]
 pub enum EvidenceItem {
     LlmInteraction(LlmInteractionEvidence),
@@ -213,6 +240,8 @@ pub enum EvidenceItem {
     RiskAssessment(RiskAssessmentEvidence),
     DataGovernance(DataGovernanceEvidence),
     TechnicalDoc(TechnicalDocEvidence),
+    LiteracyAttestation(LiteracyAttestationEvidence),
+    IncidentReport(IncidentReportEvidence),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -622,6 +651,16 @@ fn validate_item_digests(index: usize, item: &EvidenceItem) -> Result<(), Bundle
                 validate_named_digest(index, "commitment", value)?;
             }
         }
+        EvidenceItem::LiteracyAttestation(evidence) => {
+            if let Some(value) = &evidence.attestation_commitment {
+                validate_named_digest(index, "attestation_commitment", value)?;
+            }
+        }
+        EvidenceItem::IncidentReport(evidence) => {
+            if let Some(value) = &evidence.report_commitment {
+                validate_named_digest(index, "report_commitment", value)?;
+            }
+        }
         EvidenceItem::RiskAssessment(_) | EvidenceItem::DataGovernance(_) => {}
     }
 
@@ -793,5 +832,60 @@ mod tests {
 
         bundle.artefacts.pop();
         assert!(validate_bundle_integrity_fields(&bundle).is_ok());
+    }
+
+    #[test]
+    fn incident_report_invalid_digest_is_rejected() {
+        let mut event = sample_event();
+        event.items = vec![EvidenceItem::IncidentReport(IncidentReportEvidence {
+            incident_id: "inc-001".to_string(),
+            severity: "serious".to_string(),
+            status: "open".to_string(),
+            occurred_at: Some("2026-03-05T12:30:00Z".to_string()),
+            summary: Some("model produced unsafe escalation advice".to_string()),
+            report_commitment: Some("sha256:not-a-digest".to_string()),
+            metadata: json!({"source": "runtime_monitor"}),
+        })];
+
+        let bundle = EvidenceBundle {
+            bundle_version: BUNDLE_VERSION.to_string(),
+            bundle_id: "01JNFVDSM64DJN8SNMZP63YQC8".to_string(),
+            created_at: "2026-03-02T00:00:00+00:00".to_string(),
+            actor: event.actor,
+            subject: event.subject,
+            context: event.context,
+            items: event.items,
+            artefacts: vec![ArtefactRef {
+                name: "incident.json".to_string(),
+                digest: "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                    .to_string(),
+                size: 1,
+                content_type: "application/json".to_string(),
+            }],
+            policy: event.policy,
+            integrity: Integrity {
+                header_digest:
+                    "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+                        .to_string(),
+                bundle_root:
+                    "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+                        .to_string(),
+                signature: SignatureInfo {
+                    kid: "kid-dev-01".to_string(),
+                    value: "signature".to_string(),
+                    ..SignatureInfo::default()
+                },
+                ..Integrity::default()
+            },
+            timestamp: None,
+            receipt: None,
+        };
+
+        let err = validate_bundle_integrity_fields(&bundle).unwrap_err();
+        assert!(matches!(
+            err,
+            BundleValidationError::InvalidDigest { field, .. }
+            if field == "items[0].report_commitment"
+        ));
     }
 }

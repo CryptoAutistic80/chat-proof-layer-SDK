@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import {
   createDataGovernanceRequest,
   createHumanOversightRequest,
+  createIncidentReportRequest,
+  createLiteracyAttestationRequest,
   createLlmInteractionRequest,
   createPolicyDecisionRequest,
   createRetrievalRequest,
@@ -143,4 +145,45 @@ test("createPolicyDecisionRequest hashes rationale when provided", () => {
   assert.equal(request.capture.items[0].type, "policy_decision");
   assert.ok(request.capture.items[0].data.rationale_commitment.startsWith("sha256:"));
   assert.equal(request.artefacts[1].name, "policy_rationale.json");
+});
+
+test("createLiteracyAttestationRequest emits art4 evidence with optional commitment", () => {
+  const request = createLiteracyAttestationRequest({
+    keyId: "kid-dev-01",
+    systemId: "system-literacy-1",
+    attestedRole: "reviewer",
+    status: "completed",
+    trainingRef: "course://ai-literacy/v1",
+    attestation: { completion_id: "att-1" },
+    metadata: { source: "lms" },
+    retentionClass: "ai_literacy"
+  });
+
+  assert.equal(request.capture.items[0].type, "literacy_attestation");
+  assert.equal(request.capture.items[0].data.training_ref, "course://ai-literacy/v1");
+  assert.ok(request.capture.items[0].data.attestation_commitment.startsWith("sha256:"));
+  assert.equal(request.capture.policy.retention_class, "ai_literacy");
+  assert.equal(request.artefacts[0].name, "literacy_attestation.json");
+  assert.equal(request.artefacts[1].name, "literacy_attestation_record.json");
+});
+
+test("createIncidentReportRequest emits incident evidence with report commitment", () => {
+  const request = createIncidentReportRequest({
+    keyId: "kid-dev-01",
+    systemId: "system-incident-1",
+    incidentId: "inc-1",
+    severity: "serious",
+    status: "open",
+    occurredAt: "2026-03-06T10:15:00Z",
+    summary: "unsafe escalation path",
+    report: "timeline and corrective actions",
+    metadata: { source: "runtime-monitor" },
+    retentionClass: "risk_mgmt"
+  });
+
+  assert.equal(request.capture.items[0].type, "incident_report");
+  assert.equal(request.capture.items[0].data.occurred_at, "2026-03-06T10:15:00Z");
+  assert.ok(request.capture.items[0].data.report_commitment.startsWith("sha256:"));
+  assert.equal(request.artefacts[0].name, "incident_report.json");
+  assert.equal(request.artefacts[1].name, "incident_report_record.txt");
 });

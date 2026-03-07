@@ -208,6 +208,8 @@ enum EvidenceTypeArg {
     RiskAssessment,
     DataGovernance,
     TechnicalDoc,
+    LiteracyAttestation,
+    IncidentReport,
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, ValueEnum)]
@@ -577,6 +579,11 @@ impl EvidenceTypeArg {
                 | (Self::RiskAssessment, EvidenceItem::RiskAssessment(_))
                 | (Self::DataGovernance, EvidenceItem::DataGovernance(_))
                 | (Self::TechnicalDoc, EvidenceItem::TechnicalDoc(_))
+                | (
+                    Self::LiteracyAttestation,
+                    EvidenceItem::LiteracyAttestation(_)
+                )
+                | (Self::IncidentReport, EvidenceItem::IncidentReport(_))
         )
     }
 
@@ -590,6 +597,8 @@ impl EvidenceTypeArg {
             Self::RiskAssessment => "risk_assessment",
             Self::DataGovernance => "data_governance",
             Self::TechnicalDoc => "technical_doc",
+            Self::LiteracyAttestation => "literacy_attestation",
+            Self::IncidentReport => "incident_report",
         }
     }
 }
@@ -1564,6 +1573,14 @@ fn describe_evidence_item(item: &EvidenceItem) -> String {
         EvidenceItem::TechnicalDoc(data) => {
             format!("technical_doc document_ref={}", data.document_ref)
         }
+        EvidenceItem::LiteracyAttestation(data) => format!(
+            "literacy_attestation role={} status={}",
+            data.attested_role, data.status
+        ),
+        EvidenceItem::IncidentReport(data) => format!(
+            "incident_report incident_id={} severity={} status={}",
+            data.incident_id, data.severity, data.status
+        ),
     }
 }
 

@@ -2,6 +2,7 @@
 
 Python SDK for creating Proof Layer evidence bundles around model calls and lifecycle events.
 Integrity-sensitive helpers are backed by the local Rust PyO3 module in `crates/pyo3`.
+The shared builder/facade surface now covers all evidence item types currently implemented in Rust core, including `literacy_attestation` and `incident_report`.
 
 ## Build Native Bindings
 

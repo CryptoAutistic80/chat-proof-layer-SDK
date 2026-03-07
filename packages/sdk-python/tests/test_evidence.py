@@ -3,6 +3,8 @@ import unittest
 from proofsdk import (
     create_data_governance_request,
     create_human_oversight_request,
+    create_incident_report_request,
+    create_literacy_attestation_request,
     create_llm_interaction_request,
     create_policy_decision_request,
     create_retrieval_request,
@@ -137,6 +139,56 @@ class TestEvidenceBuilders(unittest.TestCase):
         self.assertTrue(
             request["capture"]["items"][0]["data"]["rationale_commitment"].startswith("sha256:")
         )
+
+    def test_literacy_attestation_request_emits_art4_evidence(self):
+        request = create_literacy_attestation_request(
+            key_id="kid-dev-01",
+            system_id="system-literacy-1",
+            attested_role="reviewer",
+            status="completed",
+            training_ref="course://ai-literacy/v1",
+            attestation={"completion_id": "att-1"},
+            metadata={"source": "lms"},
+            retention_class="ai_literacy",
+        )
+
+        self.assertEqual(request["capture"]["items"][0]["type"], "literacy_attestation")
+        self.assertEqual(
+            request["capture"]["items"][0]["data"]["training_ref"],
+            "course://ai-literacy/v1",
+        )
+        self.assertTrue(
+            request["capture"]["items"][0]["data"]["attestation_commitment"].startswith(
+                "sha256:"
+            )
+        )
+        self.assertEqual(request["artefacts"][0]["name"], "literacy_attestation.json")
+        self.assertEqual(request["artefacts"][1]["name"], "literacy_attestation_record.json")
+
+    def test_incident_report_request_hashes_report(self):
+        request = create_incident_report_request(
+            key_id="kid-dev-01",
+            system_id="system-incident-1",
+            incident_id="inc-1",
+            severity="serious",
+            status="open",
+            occurred_at="2026-03-06T10:15:00Z",
+            summary="unsafe escalation path",
+            report="timeline and corrective actions",
+            metadata={"source": "runtime-monitor"},
+            retention_class="risk_mgmt",
+        )
+
+        self.assertEqual(request["capture"]["items"][0]["type"], "incident_report")
+        self.assertEqual(
+            request["capture"]["items"][0]["data"]["occurred_at"],
+            "2026-03-06T10:15:00Z",
+        )
+        self.assertTrue(
+            request["capture"]["items"][0]["data"]["report_commitment"].startswith("sha256:")
+        )
+        self.assertEqual(request["artefacts"][0]["name"], "incident_report.json")
+        self.assertEqual(request["artefacts"][1]["name"], "incident_report_record.txt")
 
 
 if __name__ == "__main__":

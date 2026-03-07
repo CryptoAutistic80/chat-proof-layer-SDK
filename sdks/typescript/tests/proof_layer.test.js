@@ -145,3 +145,47 @@ test("ProofLayer.capturePolicyDecision seals policy decision evidence locally", 
   assert.equal(result.bundle?.subject.system_id, "system-policy-42");
   assert.ok(result.bundle?.items[0].data.rationale_commitment.startsWith("sha256:"));
 });
+
+test("ProofLayer.captureLiteracyAttestation seals literacy evidence locally", async () => {
+  const signingKeyPem = await readFile(path.join(goldenDir, "signing_key.txt"), "utf8");
+  const proofLayer = new ProofLayer({
+    signingKeyPem,
+    keyId: "kid-dev-01",
+    systemId: "system-literacy-42"
+  });
+
+  const result = await proofLayer.captureLiteracyAttestation({
+    attestedRole: "reviewer",
+    status: "completed",
+    trainingRef: "course://ai-literacy/v1",
+    attestation: { completion_id: "att-42" },
+    retentionClass: "ai_literacy"
+  });
+
+  assert.equal(result.bundle?.items[0].type, "literacy_attestation");
+  assert.equal(result.bundle?.subject.system_id, "system-literacy-42");
+  assert.ok(result.bundle?.items[0].data.attestation_commitment.startsWith("sha256:"));
+});
+
+test("ProofLayer.captureIncidentReport seals incident evidence locally", async () => {
+  const signingKeyPem = await readFile(path.join(goldenDir, "signing_key.txt"), "utf8");
+  const proofLayer = new ProofLayer({
+    signingKeyPem,
+    keyId: "kid-dev-01",
+    systemId: "system-incident-42"
+  });
+
+  const result = await proofLayer.captureIncidentReport({
+    incidentId: "inc-42",
+    severity: "serious",
+    status: "open",
+    occurredAt: "2026-03-06T10:15:00Z",
+    summary: "unsafe medical guidance surfaced",
+    report: "timeline and corrective actions",
+    retentionClass: "risk_mgmt"
+  });
+
+  assert.equal(result.bundle?.items[0].type, "incident_report");
+  assert.equal(result.bundle?.subject.system_id, "system-incident-42");
+  assert.ok(result.bundle?.items[0].data.report_commitment.startsWith("sha256:"));
+});

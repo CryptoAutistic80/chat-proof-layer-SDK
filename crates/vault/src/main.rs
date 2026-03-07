@@ -2931,7 +2931,7 @@ fn pack_profile(pack_type: &str) -> Result<PackProfile> {
         "ai_literacy" => Ok(PackProfile {
             pack_type: "ai_literacy",
             allowed_roles: &[],
-            item_types: &[],
+            item_types: &["literacy_attestation"],
             retention_classes: &["ai_literacy"],
             obligation_refs: &["art4"],
         }),
@@ -2951,13 +2951,14 @@ fn pack_profile(pack_type: &str) -> Result<PackProfile> {
             pack_type: "incident_response",
             allowed_roles: &[],
             item_types: &[
+                "incident_report",
                 "risk_assessment",
                 "human_oversight",
                 "policy_decision",
                 "technical_doc",
             ],
             retention_classes: &["risk_mgmt", "technical_doc"],
-            obligation_refs: &["art9", "art11_annex_iv", "art14"],
+            obligation_refs: &["art9", "art11_annex_iv", "art14", "art55_73"],
         }),
         _ => bail!("unsupported pack_type {pack_type}"),
     }
@@ -3172,6 +3173,8 @@ fn evidence_item_obligation_ref(bundle: &ProofBundle, item: &EvidenceItem) -> Op
         EvidenceItem::RiskAssessment(_) => Some("art9"),
         EvidenceItem::DataGovernance(_) => Some("art10"),
         EvidenceItem::HumanOversight(_) => Some("art14"),
+        EvidenceItem::LiteracyAttestation(_) => Some("art4"),
+        EvidenceItem::IncidentReport(_) => Some("art55_73"),
         EvidenceItem::LlmInteraction(_)
         | EvidenceItem::ToolCall(_)
         | EvidenceItem::Retrieval(_) => match bundle.policy.retention_class.as_deref() {
@@ -4152,6 +4155,8 @@ fn evidence_item_type(item: &EvidenceItem) -> &'static str {
         EvidenceItem::RiskAssessment(_) => "risk_assessment",
         EvidenceItem::DataGovernance(_) => "data_governance",
         EvidenceItem::TechnicalDoc(_) => "technical_doc",
+        EvidenceItem::LiteracyAttestation(_) => "literacy_attestation",
+        EvidenceItem::IncidentReport(_) => "incident_report",
     }
 }
 
@@ -5445,12 +5450,13 @@ mod tests {
                 capture: SealableCaptureInput::V10(sample_event_with_profile(
                     "system-a",
                     proof_layer_core::ActorRole::Integrator,
-                    vec![EvidenceItem::PolicyDecision(
-                        proof_layer_core::schema::PolicyDecisionEvidence {
-                            policy_name: "ai_literacy".to_string(),
-                            decision: "approved".to_string(),
-                            rationale_commitment: None,
-                            metadata: serde_json::Value::Null,
+                    vec![EvidenceItem::LiteracyAttestation(
+                        proof_layer_core::schema::LiteracyAttestationEvidence {
+                            attested_role: "support_agent".to_string(),
+                            status: "completed".to_string(),
+                            training_ref: Some("course://ai-literacy/v1".to_string()),
+                            attestation_commitment: None,
+                            metadata: serde_json::json!({"source": "lms"}),
                         },
                     )],
                     Some("ai_literacy"),
@@ -5557,11 +5563,12 @@ mod tests {
                 capture: SealableCaptureInput::V10(sample_event_with_profile(
                     "system-summary",
                     proof_layer_core::ActorRole::Integrator,
-                    vec![EvidenceItem::PolicyDecision(
-                        proof_layer_core::schema::PolicyDecisionEvidence {
-                            policy_name: "literacy".to_string(),
-                            decision: "approved".to_string(),
-                            rationale_commitment: None,
+                    vec![EvidenceItem::LiteracyAttestation(
+                        proof_layer_core::schema::LiteracyAttestationEvidence {
+                            attested_role: "reviewer".to_string(),
+                            status: "approved".to_string(),
+                            training_ref: Some("training://eu-ai-act-basics".to_string()),
+                            attestation_commitment: None,
                             metadata: serde_json::json!({"source": "training"}),
                         },
                     )],
@@ -5629,7 +5636,7 @@ mod tests {
             summary
                 .evidence_types
                 .iter()
-                .any(|entry| entry.value == "policy_decision" && entry.count == 1)
+                .any(|entry| entry.value == "literacy_attestation" && entry.count == 1)
         );
         assert!(
             summary
@@ -6987,6 +6994,107 @@ mod tests {
         let verify_response: VerifyResponse = serde_json::from_slice(&body).unwrap();
         assert!(verify_response.valid);
         assert_eq!(verify_response.artefacts_verified, 1);
+    }
+
+    #[tokio::test]
+    async fn incident_response_pack_curates_incident_reports_and_indexes_obligation_ref() {
+        let state = test_state(DEFAULT_MAX_PAYLOAD_BYTES).await;
+        let db = state.db.clone();
+        let app = build_router(state, DEFAULT_MAX_PAYLOAD_BYTES);
+
+        let incident_bundle = create_bundle_response(
+            &app,
+            &CreateBundleRequest {
+                capture: SealableCaptureInput::V10(sample_event_with_profile(
+                    "system-incident",
+                    proof_layer_core::ActorRole::Provider,
+                    vec![EvidenceItem::IncidentReport(
+                        proof_layer_core::schema::IncidentReportEvidence {
+                            incident_id: "inc-42".to_string(),
+                            severity: "serious".to_string(),
+                            status: "open".to_string(),
+                            occurred_at: Some("2026-03-06T10:15:00Z".to_string()),
+                            summary: Some("unsafe medical guidance surfaced in production".to_string()),
+                            report_commitment: Some(
+                                "sha256:abababababababababababababababababababababababababababababababab"
+                                    .to_string(),
+                            ),
+                            metadata: serde_json::json!({"reported_by": "runtime-monitor"}),
+                        },
+                    )],
+                    Some("risk_mgmt"),
+                )),
+                artefacts: vec![InlineArtefact {
+                    name: "incident.json".to_string(),
+                    content_type: "application/json".to_string(),
+                    data_base64: Base64::encode_string(
+                        br#"{"incident_id":"inc-42","summary":"unsafe medical guidance surfaced in production"}"#,
+                    ),
+                }],
+            },
+        )
+        .await;
+
+        let pack_req = Request::builder()
+            .method("POST")
+            .uri("/v1/packs")
+            .header("content-type", "application/json")
+            .body(Body::from(
+                serde_json::to_vec(&CreatePackRequest {
+                    pack_type: "incident_response".to_string(),
+                    system_id: Some("system-incident".to_string()),
+                    from: None,
+                    to: None,
+                })
+                .unwrap(),
+            ))
+            .unwrap();
+        let pack_res = app.clone().oneshot(pack_req).await.unwrap();
+        assert_eq!(pack_res.status(), StatusCode::CREATED);
+        let body = axum::body::to_bytes(pack_res.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let pack: PackSummaryResponse = serde_json::from_slice(&body).unwrap();
+        assert_eq!(pack.bundle_ids, vec![incident_bundle.bundle_id.clone()]);
+
+        let manifest_req = Request::builder()
+            .method("GET")
+            .uri(format!("/v1/packs/{}/manifest", pack.pack_id))
+            .body(Body::empty())
+            .unwrap();
+        let manifest_res = app.clone().oneshot(manifest_req).await.unwrap();
+        assert_eq!(manifest_res.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(manifest_res.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let manifest: PackManifest = serde_json::from_slice(&body).unwrap();
+
+        assert_eq!(manifest.bundles.len(), 1);
+        assert_eq!(manifest.bundles[0].item_types, vec!["incident_report"]);
+        assert_eq!(manifest.bundles[0].obligation_refs, vec!["art55_73"]);
+        assert!(
+            manifest.bundles[0]
+                .matched_rules
+                .contains(&"item_type:incident_report".to_string())
+        );
+        assert!(
+            manifest.bundles[0]
+                .matched_rules
+                .contains(&"obligation_ref:art55_73".to_string())
+        );
+
+        let obligation_ref: Option<String> = sqlx::query_scalar(
+            "SELECT obligation_ref
+             FROM evidence_items
+             WHERE bundle_id = ?
+             ORDER BY item_index
+             LIMIT 1",
+        )
+        .bind(&incident_bundle.bundle_id)
+        .fetch_one(&db)
+        .await
+        .unwrap();
+        assert_eq!(obligation_ref.as_deref(), Some("art55_73"));
     }
 
     #[tokio::test]

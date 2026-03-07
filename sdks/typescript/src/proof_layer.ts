@@ -2,6 +2,8 @@ import { readFileSync } from "node:fs";
 import {
   createDataGovernanceRequest,
   createHumanOversightRequest,
+  createIncidentReportRequest,
+  createLiteracyAttestationRequest,
   createLlmInteractionRequest,
   createPolicyDecisionRequest,
   createRetrievalRequest,
@@ -17,6 +19,8 @@ import type {
   CreateBundleResponse,
   DataGovernanceRequestOptions,
   HumanOversightRequestOptions,
+  IncidentReportRequestOptions,
+  LiteracyAttestationRequestOptions,
   PolicyDecisionRequestOptions,
   ProofLayerCaptureOptions,
   ProofLayerOptions,
@@ -257,6 +261,43 @@ export class ProofLayer implements BundleCreateClient {
   ): Promise<ProofLayerResult> {
     return this.#submitCapture(
       createPolicyDecisionRequest({
+        keyId: this.keyId,
+        role: this.role,
+        issuer: this.issuer,
+        appId: this.appId,
+        env: this.env,
+        systemId: options.systemId ?? this.systemId,
+        ...options
+      }),
+      options
+    );
+  }
+
+  async captureLiteracyAttestation(
+    options: Omit<
+      LiteracyAttestationRequestOptions,
+      "keyId" | "role" | "issuer" | "appId" | "env"
+    >
+  ): Promise<ProofLayerResult> {
+    return this.#submitCapture(
+      createLiteracyAttestationRequest({
+        keyId: this.keyId,
+        role: this.role,
+        issuer: this.issuer,
+        appId: this.appId,
+        env: this.env,
+        systemId: options.systemId ?? this.systemId,
+        ...options
+      }),
+      options
+    );
+  }
+
+  async captureIncidentReport(
+    options: Omit<IncidentReportRequestOptions, "keyId" | "role" | "issuer" | "appId" | "env">
+  ): Promise<ProofLayerResult> {
+    return this.#submitCapture(
+      createIncidentReportRequest({
         keyId: this.keyId,
         role: this.role,
         issuer: this.issuer,

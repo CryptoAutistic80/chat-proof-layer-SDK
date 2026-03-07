@@ -313,6 +313,90 @@
         "type",
         "data"
       ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "literacy_attestation"
+        },
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "attested_role",
+            "status"
+          ],
+          "properties": {
+            "attested_role": {
+              "type": "string",
+              "minLength": 1
+            },
+            "status": {
+              "type": "string",
+              "minLength": 1
+            },
+            "training_ref": {
+              "type": "string"
+            },
+            "attestation_commitment": {
+              "$ref": "#/$defs/sha256Digest"
+            },
+            "metadata": true
+          }
+        }
+      },
+      "required": [
+        "type",
+        "data"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "incident_report"
+        },
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "incident_id",
+            "severity",
+            "status"
+          ],
+          "properties": {
+            "incident_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "severity": {
+              "type": "string",
+              "minLength": 1
+            },
+            "status": {
+              "type": "string",
+              "minLength": 1
+            },
+            "occurred_at": {
+              "type": "string"
+            },
+            "summary": {
+              "type": "string"
+            },
+            "report_commitment": {
+              "$ref": "#/$defs/sha256Digest"
+            },
+            "metadata": true
+          }
+        }
+      },
+      "required": [
+        "type",
+        "data"
+      ]
     }
   ],
   "$defs": {

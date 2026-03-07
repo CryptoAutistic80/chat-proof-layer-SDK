@@ -253,6 +253,24 @@ export interface PolicyDecisionRequestOptions extends LifecycleCaptureOptions {
   metadata?: JsonValue;
 }
 
+export interface LiteracyAttestationRequestOptions extends LifecycleCaptureOptions {
+  attestedRole: string;
+  status: string;
+  trainingRef?: string;
+  attestation?: BinaryLike;
+  metadata?: JsonValue;
+}
+
+export interface IncidentReportRequestOptions extends LifecycleCaptureOptions {
+  incidentId: string;
+  severity: string;
+  status: string;
+  occurredAt?: string;
+  summary?: string;
+  report?: BinaryLike;
+  metadata?: JsonValue;
+}
+
 export interface ProofLayerOptions {
   vaultUrl?: string;
   apiKey?: string;

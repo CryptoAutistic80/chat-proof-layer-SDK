@@ -94,6 +94,10 @@ Completed:
   a higher-level `proofsdk.ProofLayer` facade with local-or-vault transport selection plus capture helpers,
   updated OpenAI-like / Anthropic-like wrappers and decorator helpers to emit the same v1 capture shape,
   and Python tests covering raw builders, the facade, and `with_proof_layer(...)` wrapper attachment.
+- Expanded the implemented evidence catalog toward the plan:
+  added first-class `literacy_attestation` and `incident_report` item types in Rust core,
+  extended vault indexing/pack curation so `ai_literacy` and `incident_response` can match those types directly,
+  and exposed matching builders plus `ProofLayer` capture helpers in both the TypeScript and Python SDKs.
 - Added the first pack export slice:
   `POST /v1/packs`,
   `GET /v1/packs/{id}`,
@@ -113,5 +117,6 @@ Still outstanding from `plan.md`:
 - The CLI now covers the main vault operational read paths, but there is still no `proofctl disclose` flow.
 - TypeScript and Python now both have native FFI bridges, local sealing paths, and higher-level `ProofLayer` facades, but there is still no shared native build/release pipeline for SDK artifacts.
 - SCITT receipts and selective disclosure CLI flows remain future phases.
+- The broader plan evidence catalog still has several future-phase gaps in Rust core, especially `model_evaluation`, `adversarial_test`, `training_provenance`, and conformity/declaration/registration evidence.
 - RFC 3161 verification currently checks CMS signature integrity and message-imprint binding, but TSA certificate-chain / revocation trust validation and eIDAS-qualified trust policy are still outstanding.
 - Rekor verification currently checks receipt structure, entry UUID to leaf-hash binding, Merkle inclusion proofs, and embedded RFC 3161 token binding, but not Rekor SET signature validation.

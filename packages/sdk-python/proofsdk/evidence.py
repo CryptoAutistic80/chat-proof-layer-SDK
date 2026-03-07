@@ -626,3 +626,151 @@ def create_technical_doc_request(
         retention_class=retention_class,
         artefacts=artefacts,
     )
+
+
+def create_literacy_attestation_request(
+    *,
+    key_id: str,
+    attested_role: str,
+    status: str,
+    training_ref: str | None = None,
+    attestation: Any = None,
+    metadata: Any = None,
+    role: str = "provider",
+    issuer: str = "proof-layer-python",
+    app_id: str = "python-sdk",
+    env: str = "dev",
+    request_id: str | None = None,
+    thread_id: str | None = None,
+    user_ref: str | None = None,
+    system_id: str | None = None,
+    deployment_id: str | None = None,
+    version: str | None = None,
+    redactions: list[str] | None = None,
+    encryption_enabled: bool = False,
+    retention_class: str | None = None,
+    artefacts: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    artefacts = list(artefacts or [])
+    if not artefacts:
+        artefacts.append(
+            _json_artefact(
+                "literacy_attestation.json",
+                {
+                    "attested_role": attested_role,
+                    "status": status,
+                    "training_ref": training_ref,
+                    "metadata": metadata,
+                },
+            )
+        )
+        if attestation is not None:
+            artefacts.append(_named_data_artefact("literacy_attestation_record", attestation))
+
+    return _create_capture_request(
+        key_id=key_id,
+        role=role,
+        issuer=issuer,
+        app_id=app_id,
+        env=env,
+        request_id=request_id,
+        thread_id=thread_id,
+        user_ref=user_ref,
+        system_id=system_id,
+        deployment_id=deployment_id,
+        version=version,
+        items=[
+            {
+                "type": "literacy_attestation",
+                "data": {
+                    "attested_role": attested_role,
+                    "status": status,
+                    "training_ref": training_ref,
+                    "attestation_commitment": (
+                        hash_sha256(attestation) if attestation is not None else None
+                    ),
+                    "metadata": metadata,
+                },
+            }
+        ],
+        redactions=redactions,
+        encryption_enabled=encryption_enabled,
+        retention_class=retention_class,
+        artefacts=artefacts,
+    )
+
+
+def create_incident_report_request(
+    *,
+    key_id: str,
+    incident_id: str,
+    severity: str,
+    status: str,
+    occurred_at: str | None = None,
+    summary: str | None = None,
+    report: Any = None,
+    metadata: Any = None,
+    role: str = "provider",
+    issuer: str = "proof-layer-python",
+    app_id: str = "python-sdk",
+    env: str = "dev",
+    request_id: str | None = None,
+    thread_id: str | None = None,
+    user_ref: str | None = None,
+    system_id: str | None = None,
+    deployment_id: str | None = None,
+    version: str | None = None,
+    redactions: list[str] | None = None,
+    encryption_enabled: bool = False,
+    retention_class: str | None = None,
+    artefacts: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    artefacts = list(artefacts or [])
+    if not artefacts:
+        artefacts.append(
+            _json_artefact(
+                "incident_report.json",
+                {
+                    "incident_id": incident_id,
+                    "severity": severity,
+                    "status": status,
+                    "occurred_at": occurred_at,
+                    "summary": summary,
+                    "metadata": metadata,
+                },
+            )
+        )
+        if report is not None:
+            artefacts.append(_named_data_artefact("incident_report_record", report))
+
+    return _create_capture_request(
+        key_id=key_id,
+        role=role,
+        issuer=issuer,
+        app_id=app_id,
+        env=env,
+        request_id=request_id,
+        thread_id=thread_id,
+        user_ref=user_ref,
+        system_id=system_id,
+        deployment_id=deployment_id,
+        version=version,
+        items=[
+            {
+                "type": "incident_report",
+                "data": {
+                    "incident_id": incident_id,
+                    "severity": severity,
+                    "status": status,
+                    "occurred_at": occurred_at,
+                    "summary": summary,
+                    "report_commitment": hash_sha256(report) if report is not None else None,
+                    "metadata": metadata,
+                },
+            }
+        ],
+        redactions=redactions,
+        encryption_enabled=encryption_enabled,
+        retention_class=retention_class,
+        artefacts=artefacts,
+    )

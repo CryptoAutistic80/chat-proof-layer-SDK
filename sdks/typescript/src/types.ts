@@ -69,6 +69,17 @@ export interface ProofBundle extends JsonObject {
   integrity: IntegrityInfo;
 }
 
+export interface RedactedBundle extends JsonObject {
+  bundle_id: string;
+  bundle_version: string;
+  created_at: string;
+  integrity: IntegrityInfo;
+  total_items: number;
+  total_artefacts: number;
+  disclosed_items: JsonObject[];
+  disclosed_artefacts: JsonObject[];
+}
+
 export interface CreateBundleResponse extends JsonObject {
   bundle_id: string;
   bundle_root: string;
@@ -79,6 +90,11 @@ export interface CreateBundleResponse extends JsonObject {
 
 export interface VerifyBundleSummary extends JsonObject {
   artefact_count: number;
+}
+
+export interface VerifyRedactedBundleSummary extends JsonObject {
+  disclosed_item_count: number;
+  disclosed_artefact_count: number;
 }
 
 export interface FetchLike {
@@ -136,9 +152,72 @@ export interface VerifyBundleRequest {
   publicKeyPem: string;
 }
 
+export interface RedactBundleRequest {
+  bundle: string | ProofBundle;
+  itemIndices: number[];
+  artefactIndices?: number[];
+}
+
+export interface VerifyRedactedBundleRequest {
+  bundle: string | RedactedBundle;
+  artefacts: Array<{ name: string; data: BinaryLike }>;
+  publicKeyPem: string;
+}
+
 export interface VerifyPackageRequest {
   bundlePackage: BinaryLike;
   publicKeyPem: string;
+}
+
+export type PackBundleFormat = "full" | "disclosure";
+
+export interface CreatePackRequest {
+  packType: string;
+  systemId?: string;
+  from?: string;
+  to?: string;
+  bundleFormat?: PackBundleFormat;
+}
+
+export interface PackBundleEntry extends JsonObject {
+  bundle_id: string;
+  created_at: string;
+  actor_role: string;
+  system_id?: string;
+  model_id?: string;
+  retention_class: string;
+  item_types: string[];
+  bundle_format: PackBundleFormat;
+  package_name?: string;
+  disclosed_item_indices?: number[];
+  disclosed_item_types?: string[];
+  obligation_refs?: string[];
+  matched_rules: string[];
+}
+
+export interface PackSummaryResponse extends JsonObject {
+  pack_id: string;
+  pack_type: string;
+  created_at: string;
+  system_id?: string;
+  from?: string;
+  to?: string;
+  bundle_format: PackBundleFormat;
+  bundle_count: number;
+  bundle_ids: string[];
+}
+
+export interface PackManifest extends JsonObject {
+  pack_id: string;
+  pack_type: string;
+  curation_profile: string;
+  generated_at: string;
+  system_id?: string;
+  from?: string;
+  to?: string;
+  bundle_format: PackBundleFormat;
+  bundle_ids: string[];
+  bundles: PackBundleEntry[];
 }
 
 export interface LocalClientOptions {
@@ -384,4 +463,10 @@ export interface ProofLayerAttachment {
   signature: string;
   createdAt?: string;
   bundle?: ProofBundle;
+}
+
+export interface ProofLayerDiscloseOptions {
+  bundle: string | ProofBundle;
+  itemIndices: number[];
+  artefactIndices?: number[];
 }

@@ -61,6 +61,34 @@ class ProofLayerClient:
         }
         return self._request_fn("POST", "/v1/verify", self._headers_json(), json.dumps(payload).encode("utf-8"))
 
+    def create_pack(
+        self,
+        *,
+        pack_type: str,
+        system_id: str | None = None,
+        from_date: str | None = None,
+        to_date: str | None = None,
+        bundle_format: str | None = None,
+    ) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "pack_type": pack_type,
+            "system_id": system_id,
+            "from": from_date,
+            "to": to_date,
+        }
+        if bundle_format is not None:
+            payload["bundle_format"] = bundle_format
+        return self._request_fn("POST", "/v1/packs", self._headers_json(), json.dumps(payload).encode("utf-8"))
+
+    def get_pack(self, pack_id: str) -> dict[str, Any]:
+        return self._request_fn("GET", f"/v1/packs/{pack_id}", self._headers(), None)
+
+    def get_pack_manifest(self, pack_id: str) -> dict[str, Any]:
+        return self._request_fn("GET", f"/v1/packs/{pack_id}/manifest", self._headers(), None)
+
+    def download_pack_export(self, pack_id: str) -> bytes:
+        return self._request_bytes("GET", f"/v1/packs/{pack_id}/export", self._headers(), None)
+
     def get_bundle(self, bundle_id: str) -> dict[str, Any]:
         return self._request_fn("GET", f"/v1/bundles/{bundle_id}", self._headers(), None)
 

@@ -90,6 +90,60 @@ class ProofLayer:
     ) -> dict[str, Any]:
         return self.client.verify_bundle(bundle, artefacts, public_key_pem)
 
+    def disclose(
+        self,
+        *,
+        bundle: dict[str, Any],
+        item_indices: list[int],
+        artefact_indices: list[int] | None = None,
+    ) -> dict[str, Any]:
+        if hasattr(self.client, "disclose_bundle"):
+            return self.client.disclose_bundle(
+                bundle,
+                item_indices=item_indices,
+                artefact_indices=artefact_indices or [],
+            )
+        raise ValueError("underlying client does not support disclose; use local signing mode")
+
+    def verify_redacted_bundle(
+        self,
+        bundle: dict[str, Any],
+        artefacts: list[dict[str, Any]],
+        public_key_pem: str,
+    ) -> dict[str, Any]:
+        if hasattr(self.client, "verify_redacted_bundle"):
+            return self.client.verify_redacted_bundle(bundle, artefacts, public_key_pem)
+        raise ValueError("underlying client does not support verify_redacted_bundle")
+
+    def create_pack(
+        self,
+        *,
+        pack_type: str,
+        system_id: str | None = None,
+        from_date: str | None = None,
+        to_date: str | None = None,
+        bundle_format: str | None = None,
+    ) -> dict[str, Any]:
+        if hasattr(self.client, "create_pack"):
+            return self.client.create_pack(
+                pack_type=pack_type,
+                system_id=system_id,
+                from_date=from_date,
+                to_date=to_date,
+                bundle_format=bundle_format,
+            )
+        raise ValueError("underlying client does not support create_pack; use vault mode")
+
+    def get_pack_manifest(self, pack_id: str) -> dict[str, Any]:
+        if hasattr(self.client, "get_pack_manifest"):
+            return self.client.get_pack_manifest(pack_id)
+        raise ValueError("underlying client does not support get_pack_manifest; use vault mode")
+
+    def download_pack_export(self, pack_id: str) -> bytes:
+        if hasattr(self.client, "download_pack_export"):
+            return self.client.download_pack_export(pack_id)
+        raise ValueError("underlying client does not support download_pack_export; use vault mode")
+
     def _submit_capture(
         self,
         request: dict[str, Any],

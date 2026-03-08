@@ -22,6 +22,7 @@ import { ProofLayerClient } from "./client.js";
 import type {
   AdversarialTestRequestOptions,
   BundleCreateClient,
+  CreatePackRequest,
   ConformityAssessmentRequestOptions,
   CreateBundleRequest,
   CreateBundleResponse,
@@ -31,10 +32,14 @@ import type {
   IncidentReportRequestOptions,
   LiteracyAttestationRequestOptions,
   ModelEvaluationRequestOptions,
+  PackManifest,
+  PackSummaryResponse,
   PolicyDecisionRequestOptions,
   ProofLayerCaptureOptions,
+  ProofLayerDiscloseOptions,
   ProofLayerOptions,
   ProofLayerResult,
+  RedactedBundle,
   RegistrationRequestOptions,
   RetrievalRequestOptions,
   RiskAssessmentRequestOptions,
@@ -42,7 +47,9 @@ import type {
   TrainingProvenanceRequestOptions,
   ToolCallRequestOptions,
   VerifyBundleRequest,
-  VerifyBundleSummary
+  VerifyBundleSummary,
+  VerifyRedactedBundleRequest,
+  VerifyRedactedBundleSummary
 } from "./types.js";
 
 function resolveSigningKeyPem(options: ProofLayerOptions): string | undefined {
@@ -124,9 +131,60 @@ export class ProofLayer implements BundleCreateClient {
 
   async verifyBundle(request: VerifyBundleRequest): Promise<VerifyBundleSummary> {
     if ("verifyBundle" in this.client && typeof this.client.verifyBundle === "function") {
-      return this.client.verifyBundle(request as never);
+      return (this.client as LocalProofLayerClient | ProofLayerClient).verifyBundle(request);
     }
     throw new Error("underlying client does not support verifyBundle");
+  }
+
+  async disclose({
+    bundle,
+    itemIndices,
+    artefactIndices
+  }: ProofLayerDiscloseOptions): Promise<RedactedBundle> {
+    if ("discloseBundle" in this.client && typeof this.client.discloseBundle === "function") {
+      return (this.client as LocalProofLayerClient).discloseBundle({
+        bundle,
+        itemIndices,
+        artefactIndices
+      });
+    }
+    throw new Error("underlying client does not support disclose; use local signing mode");
+  }
+
+  async verifyRedactedBundle(
+    request: VerifyRedactedBundleRequest
+  ): Promise<VerifyRedactedBundleSummary> {
+    if (
+      "verifyRedactedBundle" in this.client &&
+      typeof this.client.verifyRedactedBundle === "function"
+    ) {
+      return (this.client as LocalProofLayerClient).verifyRedactedBundle(request);
+    }
+    throw new Error("underlying client does not support verifyRedactedBundle");
+  }
+
+  async createPack(request: CreatePackRequest): Promise<PackSummaryResponse> {
+    if ("createPack" in this.client && typeof this.client.createPack === "function") {
+      return (this.client as ProofLayerClient).createPack(request);
+    }
+    throw new Error("underlying client does not support createPack; use vault mode");
+  }
+
+  async getPackManifest(packId: string): Promise<PackManifest> {
+    if ("getPackManifest" in this.client && typeof this.client.getPackManifest === "function") {
+      return (this.client as ProofLayerClient).getPackManifest(packId);
+    }
+    throw new Error("underlying client does not support getPackManifest; use vault mode");
+  }
+
+  async downloadPackExport(packId: string): Promise<Uint8Array> {
+    if (
+      "downloadPackExport" in this.client &&
+      typeof this.client.downloadPackExport === "function"
+    ) {
+      return (this.client as ProofLayerClient).downloadPackExport(packId);
+    }
+    throw new Error("underlying client does not support downloadPackExport; use vault mode");
   }
 
   async capture(options: ProofLayerCaptureOptions): Promise<ProofLayerResult> {

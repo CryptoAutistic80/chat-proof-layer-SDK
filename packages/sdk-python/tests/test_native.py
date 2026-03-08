@@ -2,7 +2,15 @@ import json
 import unittest
 from pathlib import Path
 
-from proofsdk.native import build_bundle, hash_sha256, sign_bundle_root, verify_bundle, verify_bundle_root
+from proofsdk.native import (
+    build_bundle,
+    hash_sha256,
+    redact_bundle,
+    sign_bundle_root,
+    verify_bundle,
+    verify_bundle_root,
+    verify_redacted_bundle,
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 GOLDEN_DIR = REPO_ROOT / "fixtures" / "golden"
@@ -59,6 +67,23 @@ class TestNativeBindings(unittest.TestCase):
         )
 
         self.assertEqual(bundle, expected_bundle)
+
+    def test_native_redact_bundle_and_verify_redacted_bundle_round_trip(self):
+        bundle = json.loads((GOLDEN_DIR / "fixed_bundle" / "proof_bundle.json").read_text(encoding="utf-8"))
+        public_key_pem = (GOLDEN_DIR / "verify_key.txt").read_text(encoding="utf-8")
+
+        redacted = redact_bundle(bundle=bundle, item_indices=[0])
+        summary = verify_redacted_bundle(bundle=redacted, artefacts=[], public_key_pem=public_key_pem)
+
+        self.assertEqual(len(redacted["disclosed_items"]), 1)
+        self.assertEqual(len(redacted["disclosed_artefacts"]), 0)
+        self.assertEqual(
+            summary,
+            {
+                "disclosed_item_count": 1,
+                "disclosed_artefact_count": 0,
+            },
+        )
 
 
 if __name__ == "__main__":

@@ -35,6 +35,32 @@ test("ProofLayer.capture seals a local llm_interaction bundle", async () => {
   assert.equal(typeof result.bundleRoot, "string");
 });
 
+test("ProofLayer.disclose returns a locally verifiable redacted bundle", async () => {
+  const signingKeyPem = await readFile(path.join(goldenDir, "signing_key.txt"), "utf8");
+  const publicKeyPem = await readFile(path.join(goldenDir, "verify_key.txt"), "utf8");
+  const bundle = JSON.parse(await readFile(path.join(goldenDir, "fixed_bundle", "proof_bundle.json"), "utf8"));
+  const proofLayer = new ProofLayer({
+    signingKeyPem,
+    keyId: "kid-dev-01"
+  });
+
+  const redacted = await proofLayer.disclose({
+    bundle,
+    itemIndices: [0]
+  });
+  const summary = await proofLayer.verifyRedactedBundle({
+    bundle: redacted,
+    artefacts: [],
+    publicKeyPem
+  });
+
+  assert.equal(redacted.disclosed_items.length, 1);
+  assert.deepEqual(summary, {
+    disclosed_item_count: 1,
+    disclosed_artefact_count: 0
+  });
+});
+
 test("withProofLayer attaches proof metadata to OpenAI-like responses", async () => {
   const signingKeyPem = await readFile(path.join(goldenDir, "signing_key.txt"), "utf8");
   const proofLayer = new ProofLayer({

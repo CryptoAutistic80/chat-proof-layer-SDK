@@ -24,8 +24,10 @@ from .native import (
     canonicalize_json,
     compute_merkle_root,
     hash_sha256,
+    redact_bundle,
     sign_bundle_root,
     verify_bundle,
+    verify_redacted_bundle,
     verify_bundle_root,
 )
 from .proof_layer import ProofLayer
@@ -55,7 +57,9 @@ __all__ = [
     "create_tool_call_request",
     "hash_sha256",
     "prove_llm_call",
+    "redact_bundle",
     "sign_bundle_root",
     "verify_bundle",
+    "verify_redacted_bundle",
     "verify_bundle_root",
 ]

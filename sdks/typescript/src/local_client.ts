@@ -1,12 +1,16 @@
 import { randomUUID } from "node:crypto";
-import { buildBundle, verifyBundle } from "./native.js";
+import { buildBundle, redactBundle, verifyBundle, verifyRedactedBundle } from "./native.js";
 import type {
   CreateBundleResponse,
   LocalBuildOptions,
   LocalClientOptions,
   LocalCreateBundleRequest,
+  RedactBundleRequest,
+  RedactedBundle,
   VerifyBundleRequest,
-  VerifyBundleSummary
+  VerifyBundleSummary,
+  VerifyRedactedBundleRequest,
+  VerifyRedactedBundleSummary
 } from "./types.js";
 
 function defaultBundleId(): string {
@@ -70,5 +74,17 @@ export class LocalProofLayerClient {
     publicKeyPem
   }: VerifyBundleRequest): Promise<VerifyBundleSummary> {
     return verifyBundle({ bundle, artefacts, publicKeyPem });
+  }
+
+  async discloseBundle(request: RedactBundleRequest): Promise<RedactedBundle> {
+    return redactBundle(request);
+  }
+
+  async verifyRedactedBundle({
+    bundle,
+    artefacts,
+    publicKeyPem
+  }: VerifyRedactedBundleRequest): Promise<VerifyRedactedBundleSummary> {
+    return verifyRedactedBundle({ bundle, artefacts, publicKeyPem });
   }
 }

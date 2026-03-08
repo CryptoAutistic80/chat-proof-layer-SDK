@@ -41,3 +41,26 @@ test("LocalProofLayerClient builds the deterministic golden bundle", async () =>
   assert.equal(out.signature, expectedBundle.integrity.signature.value);
   assert.deepEqual(out.bundle, expectedBundle);
 });
+
+test("LocalProofLayerClient discloses and verifies a redacted bundle locally", async () => {
+  const bundle = JSON.parse(await readFile(path.join(goldenDir, "fixed_bundle", "proof_bundle.json"), "utf8"));
+  const signingKeyPem = await readFile(path.join(goldenDir, "signing_key.txt"), "utf8");
+  const publicKeyPem = await readFile(path.join(goldenDir, "verify_key.txt"), "utf8");
+  const client = new LocalProofLayerClient({ signingKeyPem, signingKeyId: "kid-dev-01" });
+
+  const redacted = await client.discloseBundle({
+    bundle,
+    itemIndices: [0]
+  });
+  const summary = await client.verifyRedactedBundle({
+    bundle: redacted,
+    artefacts: [],
+    publicKeyPem
+  });
+
+  assert.equal(redacted.disclosed_items.length, 1);
+  assert.deepEqual(summary, {
+    disclosed_item_count: 1,
+    disclosed_artefact_count: 0
+  });
+});

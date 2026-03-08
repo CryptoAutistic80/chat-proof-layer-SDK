@@ -6,8 +6,10 @@ import { fileURLToPath } from "node:url";
 import {
   buildBundle,
   hashSha256,
+  redactBundle,
   signBundleRoot,
   verifyBundle,
+  verifyRedactedBundle,
   verifyBundleRoot
 } from "../dist/index.js";
 
@@ -68,4 +70,26 @@ test("native buildBundle reproduces the deterministic golden bundle", async () =
   });
 
   assert.deepEqual(bundle, expectedBundle);
+});
+
+test("native redactBundle and verifyRedactedBundle round-trip a disclosed item", async () => {
+  const bundle = JSON.parse(await readFile(path.join(goldenDir, "fixed_bundle", "proof_bundle.json"), "utf8"));
+  const publicKeyPem = await readFile(path.join(goldenDir, "verify_key.txt"), "utf8");
+
+  const redacted = redactBundle({
+    bundle,
+    itemIndices: [0]
+  });
+  const summary = verifyRedactedBundle({
+    bundle: redacted,
+    artefacts: [],
+    publicKeyPem
+  });
+
+  assert.equal(redacted.disclosed_items.length, 1);
+  assert.equal(redacted.disclosed_artefacts.length, 0);
+  assert.deepEqual(summary, {
+    disclosed_item_count: 1,
+    disclosed_artefact_count: 0
+  });
 });

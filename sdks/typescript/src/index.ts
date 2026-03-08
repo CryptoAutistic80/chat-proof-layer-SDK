@@ -36,8 +36,10 @@ export {
   canonicalizeJson,
   computeMerkleRoot,
   hashSha256,
+  redactBundle,
   signBundleRoot,
   verifyBundle,
+  verifyRedactedBundle,
   verifyBundleRoot
 } from "./native.js";
 export type {
@@ -45,6 +47,7 @@ export type {
   BinaryLike,
   BundleCreateClient,
   ConformityAssessmentRequestOptions,
+  CreatePackRequest,
   CreateBundleRequest,
   CreateBundleResponse,
   DataGovernanceRequestOptions,
@@ -82,7 +85,16 @@ export type {
   TrainingProvenanceRequestOptions,
   ToolEvent,
   ToolCallRequestOptions,
+  PackBundleEntry,
+  PackBundleFormat,
+  PackManifest,
+  PackSummaryResponse,
   VerifyBundleRequest,
   VerifyBundleSummary,
-  VerifyPackageRequest
+  VerifyPackageRequest,
+  ProofLayerDiscloseOptions,
+  RedactBundleRequest,
+  RedactedBundle,
+  VerifyRedactedBundleRequest,
+  VerifyRedactedBundleSummary
 } from "./types.js";

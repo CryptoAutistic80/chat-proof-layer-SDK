@@ -328,6 +328,7 @@ npm run dev
 - `proofctl verify` also supports `--timestamp-assurance <standard|qualified>`, `--timestamp-trust-anchor <pem>` (repeatable), `--timestamp-crl <pem>` (repeatable), `--timestamp-ocsp-url <url>` (repeatable), `--timestamp-qualified-signer <pem>` (repeatable), `--timestamp-policy-oid <oid>` (repeatable), and `--transparency-public-key <pem>` so optional assurance checks can move from structural validity to configured trust validation.
 - `proofctl verify` now reports the bundle assurance level as `signed`, `timestamped`, or `transparency_anchored`.
 - `proofctl disclose --items ...` now creates item-level redacted packages with Merkle inclusion proofs, and `proofctl verify` auto-detects full vs disclosure package formats.
+- The TypeScript and Python SDKs now expose local disclosure helpers plus vault pack client methods for `bundle_format = "full" | "disclosure"`, so SDK callers can request redacted exports or build/verify redacted bundles without dropping to the CLI.
 - `proofctl inspect` now supports `--show-items` and `--show-merkle`.
 - `proofctl pack` and `proofctl vault export` now support `--bundle-format <full|disclosure>` so vault exports can contain either full `bundle.pkg` members or redacted disclosure packages.
 - `proofctl vault status|query|retention|systems|export` now covers the main vault read/query/export flows from the plan without requiring manual `curl`.

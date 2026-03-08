@@ -7,8 +7,12 @@ import type {
   LocalBuildOptions,
   ProofArtefactInput,
   ProofBundle,
+  RedactBundleRequest,
+  RedactedBundle,
   VerifyBundleRequest,
-  VerifyBundleSummary
+  VerifyBundleSummary,
+  VerifyRedactedBundleRequest,
+  VerifyRedactedBundleSummary
 } from "./types.js";
 
 interface NativeModule {
@@ -26,6 +30,8 @@ interface NativeModule {
     createdAt: string
   ): string;
   verifyBundle(bundleJson: string, artefactsJson: string, publicKeyPem: string): string;
+  redactBundle(bundleJson: string, itemIndicesJson: string, artefactIndicesJson: string): string;
+  verifyRedactedBundle(bundleJson: string, artefactsJson: string, publicKeyPem: string): string;
 }
 
 type NamedBinaryArtefact = { name: string; data: BinaryLike };
@@ -80,6 +86,18 @@ function normalizeArtefacts(
   }));
 }
 
+function normalizeBuildArtefacts(artefacts: ProofArtefactInput[]): Array<{
+  name: string;
+  content_type: string;
+  data_base64: string;
+}> {
+  return artefacts.map((artefact) => ({
+    name: artefact.name,
+    content_type: artefact.contentType ?? "application/octet-stream",
+    data_base64: toBase64(artefact.data)
+  }));
+}
+
 export function canonicalizeJson(value: BinaryLike): Buffer {
   return Buffer.from(native.canonicalizeJson(toBytes(value)));
 }
@@ -109,12 +127,7 @@ export function buildBundle({
   createdAt
 }: LocalBuildOptions): ProofBundle {
   const captureJson = typeof capture === "string" ? capture : JSON.stringify(capture);
-  const artefactsJson = JSON.stringify(
-    normalizeArtefacts(artefacts).map((artefact, index) => ({
-      ...artefact,
-      content_type: artefacts[index]?.contentType ?? "application/octet-stream"
-    }))
-  );
+  const artefactsJson = JSON.stringify(normalizeBuildArtefacts(artefacts));
   return JSON.parse(native.buildBundle(captureJson, artefactsJson, keyPem, kid, bundleId, createdAt)) as ProofBundle;
 }
 
@@ -128,4 +141,27 @@ export function verifyBundle({
     normalizeArtefacts(artefacts as NamedBinaryArtefact[])
   );
   return JSON.parse(native.verifyBundle(bundleJson, artefactsJson, publicKeyPem)) as VerifyBundleSummary;
+}
+
+export function redactBundle({
+  bundle,
+  itemIndices,
+  artefactIndices = []
+}: RedactBundleRequest): RedactedBundle {
+  const bundleJson = typeof bundle === "string" ? bundle : JSON.stringify(bundle);
+  return JSON.parse(
+    native.redactBundle(bundleJson, JSON.stringify(itemIndices), JSON.stringify(artefactIndices))
+  ) as RedactedBundle;
+}
+
+export function verifyRedactedBundle({
+  bundle,
+  artefacts,
+  publicKeyPem
+}: VerifyRedactedBundleRequest): VerifyRedactedBundleSummary {
+  const bundleJson = typeof bundle === "string" ? bundle : JSON.stringify(bundle);
+  const artefactsJson = JSON.stringify(normalizeArtefacts(artefacts as NamedBinaryArtefact[]));
+  return JSON.parse(
+    native.verifyRedactedBundle(bundleJson, artefactsJson, publicKeyPem)
+  ) as VerifyRedactedBundleSummary;
 }

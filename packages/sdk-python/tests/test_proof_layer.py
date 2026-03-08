@@ -1,3 +1,4 @@
+import json
 import unittest
 from pathlib import Path
 
@@ -30,6 +31,27 @@ class TestProofLayer(unittest.TestCase):
         self.assertEqual(result["bundle"]["bundle_version"], "1.0")
         self.assertEqual(result["bundle"]["subject"]["system_id"], "system-123")
         self.assertEqual(result["bundle"]["integrity"]["signature"]["kid"], "kid-dev-01")
+
+    def test_disclose_returns_a_locally_verifiable_redacted_bundle(self):
+        signing_key_pem = (GOLDEN_DIR / "signing_key.txt").read_text(encoding="utf-8")
+        public_key_pem = (GOLDEN_DIR / "verify_key.txt").read_text(encoding="utf-8")
+        bundle = json.loads((GOLDEN_DIR / "fixed_bundle" / "proof_bundle.json").read_text(encoding="utf-8"))
+        proof_layer = ProofLayer(
+            signing_key_pem=signing_key_pem,
+            key_id="kid-dev-01",
+        )
+
+        redacted = proof_layer.disclose(bundle=bundle, item_indices=[0])
+        summary = proof_layer.verify_redacted_bundle(redacted, [], public_key_pem)
+
+        self.assertEqual(len(redacted["disclosed_items"]), 1)
+        self.assertEqual(
+            summary,
+            {
+                "disclosed_item_count": 1,
+                "disclosed_artefact_count": 0,
+            },
+        )
 
     def test_capture_risk_assessment_seals_lifecycle_evidence(self):
         signing_key_pem = (GOLDEN_DIR / "signing_key.txt").read_text(encoding="utf-8")

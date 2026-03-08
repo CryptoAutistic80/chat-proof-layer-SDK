@@ -85,3 +85,25 @@ def verify_bundle(*, bundle: Any, artefacts: Any, public_key_pem: str) -> dict[s
     bundle_json = bundle if isinstance(bundle, str) else json.dumps(bundle)
     artefacts_json = json.dumps(_normalize_artefacts(artefacts))
     return json.loads(_native_impl.verify_bundle(bundle_json, artefacts_json, public_key_pem))
+
+
+def redact_bundle(
+    *,
+    bundle: Any,
+    item_indices: list[int],
+    artefact_indices: list[int] | None = None,
+) -> dict[str, Any]:
+    bundle_json = bundle if isinstance(bundle, str) else json.dumps(bundle)
+    return json.loads(
+        _native_impl.redact_bundle_json(
+            bundle_json,
+            json.dumps(item_indices),
+            json.dumps(artefact_indices or []),
+        )
+    )
+
+
+def verify_redacted_bundle(*, bundle: Any, artefacts: Any, public_key_pem: str) -> dict[str, Any]:
+    bundle_json = bundle if isinstance(bundle, str) else json.dumps(bundle)
+    artefacts_json = json.dumps(_normalize_artefacts(artefacts))
+    return json.loads(_native_impl.verify_redacted_bundle_json(bundle_json, artefacts_json, public_key_pem))

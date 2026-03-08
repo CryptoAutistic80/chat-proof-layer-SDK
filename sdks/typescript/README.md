@@ -92,6 +92,23 @@ const summary = verifyBundle({
 console.log(summary.artefact_count);
 console.log(proofClient.baseUrl);
 
+const redacted = await proofLayer.disclose({
+  bundle: locallySealed.bundle,
+  itemIndices: [0]
+});
+const redactedSummary = await proofLayer.verifyRedactedBundle({
+  bundle: redacted,
+  artefacts: [],
+  publicKeyPem: "-----BEGIN PROOF LAYER ED25519 PUBLIC KEY-----\n...\n-----END PROOF LAYER ED25519 PUBLIC KEY-----\n"
+});
+
+const pack = await proofClient.createPack({
+  packType: "annex_iv",
+  systemId: "system-123",
+  bundleFormat: "disclosure"
+});
+const archive = await proofClient.downloadPackExport(pack.pack_id);
+
 const generic = withGenericProofLayer(
   async (params) => ({ id: "generic-1", model: params.model, output_text: "ok" }),
   proofLayer,
@@ -114,4 +131,5 @@ const riskBundle = await proofLayer.captureRiskAssessment({
 });
 
 console.log(riskBundle.bundle?.items[0].type);
+console.log(redactedSummary.disclosed_item_count, archive.length);
 ```

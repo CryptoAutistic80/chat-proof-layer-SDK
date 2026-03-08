@@ -1,12 +1,15 @@
 import { Buffer } from "node:buffer";
 import type {
   BinaryLike,
+  CreatePackRequest,
   CreateBundleRequest,
   CreateBundleResponse,
   FetchLike,
   HttpClientOptions,
   InlineArtefactRequest,
   JsonObject,
+  PackManifest,
+  PackSummaryResponse,
   VerifyBundleRequest,
   VerifyBundleSummary,
   VerifyPackageRequest
@@ -81,6 +84,50 @@ export class ProofLayerClient {
       public_key_pem: publicKeyPem
     };
     return this.#post("/v1/verify", payload);
+  }
+
+  async createPack({
+    packType,
+    systemId,
+    from,
+    to,
+    bundleFormat
+  }: CreatePackRequest): Promise<PackSummaryResponse> {
+    const payload = {
+      pack_type: packType,
+      system_id: systemId,
+      from,
+      to,
+      ...(bundleFormat ? { bundle_format: bundleFormat } : {})
+    };
+    return this.#post("/v1/packs", payload);
+  }
+
+  async getPack(packId: string): Promise<PackSummaryResponse> {
+    return this.#get(`/v1/packs/${encodeURIComponent(packId)}`) as Promise<PackSummaryResponse>;
+  }
+
+  async getPackManifest(packId: string): Promise<PackManifest> {
+    return this.#get(`/v1/packs/${encodeURIComponent(packId)}/manifest`) as Promise<PackManifest>;
+  }
+
+  async downloadPackExport(packId: string): Promise<Uint8Array> {
+    const res = await this.fetchImpl(`${this.baseUrl}/v1/packs/${encodeURIComponent(packId)}/export`, {
+      method: "GET",
+      headers: this.#headers()
+    });
+    if (!res.ok) {
+      const text = await res.text();
+      let parsed: unknown;
+      try {
+        parsed = text ? JSON.parse(text) : {};
+      } catch {
+        parsed = { raw: text };
+      }
+      throw new ProofLayerHttpError(`GET /v1/packs/${packId}/export`, res.status, parsed);
+    }
+    const arrayBuffer = await res.arrayBuffer();
+    return new Uint8Array(arrayBuffer);
   }
 
   async getBundle(bundleId: string): Promise<JsonObject> {

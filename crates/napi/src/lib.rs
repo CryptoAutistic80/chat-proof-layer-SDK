@@ -3,9 +3,10 @@ use chrono::{DateTime, Utc};
 use napi::{Error, Result, bindgen_prelude::Buffer};
 use napi_derive::napi;
 use proof_layer_core::{
-    ArtefactInput, BundleBuildInput, CaptureEvent, LegacyCaptureInput, ProofBundle, build_bundle,
-    canonicalize_json_strict, compute_commitment, decode_private_key_pem, decode_public_key_pem,
-    sha256_prefixed, sign_bundle_root, validate_bundle_integrity_fields, verify_bundle_root,
+    ArtefactInput, BundleBuildInput, CaptureEvent, LegacyCaptureInput, ProofBundle, RedactedBundle,
+    build_bundle, canonicalize_json_strict, compute_commitment, decode_private_key_pem,
+    decode_public_key_pem, redact_bundle, sha256_prefixed, sign_bundle_root,
+    validate_bundle_integrity_fields, verify_bundle_root, verify_redacted_bundle,
 };
 use serde::Deserialize;
 use std::collections::BTreeMap;
@@ -98,6 +99,54 @@ pub fn verify_bundle_native(
 
     serde_json::to_string(&serde_json::json!({
         "artefact_count": summary.artefact_count,
+    }))
+    .map_err(|err| napi_error(err.to_string()))
+}
+
+#[napi(js_name = "redactBundle")]
+pub fn redact_bundle_native(
+    bundle_json: String,
+    item_indices_json: String,
+    artefact_indices_json: String,
+) -> Result<String> {
+    let bundle: ProofBundle =
+        serde_json::from_str(&bundle_json).map_err(|err| napi_error(err.to_string()))?;
+    let item_indices: Vec<usize> =
+        serde_json::from_str(&item_indices_json).map_err(|err| napi_error(err.to_string()))?;
+    let artefact_indices: Vec<usize> =
+        serde_json::from_str(&artefact_indices_json).map_err(|err| napi_error(err.to_string()))?;
+
+    let redacted = redact_bundle(&bundle, &item_indices, &artefact_indices)
+        .map_err(|err| napi_error(err.to_string()))?;
+    serde_json::to_string(&redacted).map_err(|err| napi_error(err.to_string()))
+}
+
+#[napi(js_name = "verifyRedactedBundle")]
+pub fn verify_redacted_bundle_native(
+    bundle_json: String,
+    artefacts_json: String,
+    public_key_pem: String,
+) -> Result<String> {
+    let bundle: RedactedBundle =
+        serde_json::from_str(&bundle_json).map_err(|err| napi_error(err.to_string()))?;
+
+    let artefacts: Vec<VerifyArtefact> =
+        serde_json::from_str(&artefacts_json).map_err(|err| napi_error(err.to_string()))?;
+    let mut artefact_map = BTreeMap::new();
+    for artefact in artefacts {
+        let bytes = Base64::decode_vec(&artefact.data_base64)
+            .map_err(|err| napi_error(format!("invalid base64 for {}: {err}", artefact.name)))?;
+        artefact_map.insert(artefact.name, bytes);
+    }
+
+    let verifying_key =
+        decode_public_key_pem(&public_key_pem).map_err(|err| napi_error(err.to_string()))?;
+    let summary = verify_redacted_bundle(&bundle, &artefact_map, &verifying_key)
+        .map_err(|err| napi_error(err.to_string()))?;
+
+    serde_json::to_string(&serde_json::json!({
+        "disclosed_item_count": summary.disclosed_item_count,
+        "disclosed_artefact_count": summary.disclosed_artefact_count,
     }))
     .map_err(|err| napi_error(err.to_string()))
 }

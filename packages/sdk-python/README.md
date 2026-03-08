@@ -14,7 +14,13 @@ python3 ./scripts/build_native.py
 ## Quick Usage
 
 ```python
-from proofsdk import LocalProofLayerClient, ProofLayer, build_bundle, hash_sha256, verify_bundle
+from proofsdk import (
+    LocalProofLayerClient,
+    ProofLayer,
+    build_bundle,
+    hash_sha256,
+    verify_bundle,
+)
 from proofsdk.client import ProofLayerClient
 from proofsdk.providers.openai import with_proof_layer
 
@@ -86,6 +92,20 @@ summary = verify_bundle(
 
 print(summary["artefact_count"])
 
+redacted = proof_layer.disclose(bundle=locally_sealed["bundle"], item_indices=[0])
+redacted_summary = proof_layer.verify_redacted_bundle(
+    redacted,
+    [],
+    "-----BEGIN PROOF LAYER ED25519 PUBLIC KEY-----\n...\n-----END PROOF LAYER ED25519 PUBLIC KEY-----\n",
+)
+
+pack = proof_client.create_pack(
+    pack_type="annex_iv",
+    system_id="system-123",
+    bundle_format="disclosure",
+)
+archive = proof_client.download_pack_export(pack["pack_id"])
+
 risk_bundle = proof_layer.capture_risk_assessment(
     risk_id="risk-42",
     severity="medium",
@@ -94,4 +114,5 @@ risk_bundle = proof_layer.capture_risk_assessment(
 )
 
 print(risk_bundle["bundle"]["items"][0]["type"])
+print(redacted_summary["disclosed_item_count"], len(archive))
 ```

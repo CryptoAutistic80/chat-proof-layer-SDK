@@ -72,7 +72,8 @@ Current SQLite tables:
 
 - `keygen`: generate dev key pairs
 - `create`: build `bundle.pkg` from capture JSON + artifacts
-- `verify`: offline integrity and signature verification
+- `disclose`: build item-level redacted disclosure packages with Merkle proofs
+- `verify`: offline integrity and signature verification for full and disclosure packages
 - `inspect`: human/JSON diagnostics
 - `pack`: request a vault export pack and write the archive locally
 - `vault status|query|retention|systems|export`: thin CLI wrappers over the vault HTTP query/export surfaces
@@ -82,7 +83,8 @@ Current pack export behavior:
 - Vault pack assembly uses a heuristic curation profile (`pack-rules-v1`).
 - Selection currently keys off actor role, evidence item type, retention class, and derived obligation references.
 - Implemented pack families now include `conformity` alongside the Annex/runtime/risk/GPAI slices.
-- Exported pack archives still contain full `bundle.pkg` members; redaction/selective disclosure is a later phase.
+- Exported pack archives still contain full `bundle.pkg` members.
+- Local `proofctl disclose` now supports item-level selective disclosure for v2 bundles, but vault-side redacted pack assembly is still a later phase.
 
 Current retention behavior:
 
@@ -147,11 +149,12 @@ Current config behavior:
 2. Validate schema and size limits.
 3. Persist artifact files via temp-file write + `fsync` + atomic rename.
 4. Compute each artifact digest as `sha256:<lower_hex>`.
-5. Build canonical header projection from validated payload (`context`, typed `items`, artefact refs, and policy).
+5. Build canonical header projection from validated payload.
 6. Canonicalize header projection via RFC 8785 (strict path for untrusted raw JSON).
 7. Compute `header_digest = sha256(canonical_header_bytes)`.
-8. Compute `bundle_root` from ordered digest list:
-   - `[header_digest, artefact_digest_1, artefact_digest_2, ...]`
+8. Compute `bundle_root` from the ordered digest list for the selected commitment model:
+   - current default (`pl-merkle-sha256-v2`): `[header_digest, item_digest_1, ..., artefact_meta_digest_1, ...]`
+   - legacy verification (`pl-merkle-sha256-v1`): `[header_digest, artefact_digest_1, artefact_digest_2, ...]`
 9. Sign UTF-8 bytes of `bundle_root` using Ed25519 JWS compact serialization.
 10. Persist bundle metadata + indexes in SQLite and artifact bytes on disk.
 11. Optionally request an RFC 3161 token over UTF-8 `bundle_root` bytes.
@@ -163,7 +166,11 @@ Current config behavior:
 - Canonicalization input: canonical header projection JSON bytes.
 - Canonicalization output: RFC 8785 UTF-8 JSON bytes.
 - `header_digest`: SHA-256 over canonical header bytes, formatted `sha256:<64 lower hex>`.
-- Merkle leaves: parsed raw 32-byte digest values, never hex strings.
+- Current default canonical header projection fields: `bundle_version`, `bundle_id`, `created_at`, `actor`, `subject`, `context`, `policy`, `item_count`, `artefact_count`.
+- Legacy canonical header projection additionally included full `items` and `artefacts`.
+- Current default Merkle leaves: `header_digest`, then one digest per canonicalized evidence item, then one digest per canonicalized artefact metadata record.
+- Legacy Merkle leaves: `header_digest`, then one digest per artefact byte payload.
+- Merkle leaves are parsed raw 32-byte digest values, never hex strings.
 - Leaf hash: `H(0x00 || digest_bytes)`.
 - Parent hash: `H(0x01 || left_hash || right_hash)`.
 - Odd leaf count: duplicate last node at each odd level.
@@ -197,6 +204,8 @@ No network calls are required for core verification.
 Timestamp and transparency checks are optional in PoC and report as skipped/missing when not requested.
 If OCSP responder URLs are configured, the optional timestamp trust check becomes a live networked verification step.
 Current assurance verification checks bundle-root binding, embedded RFC 3161 token validity, optional RFC 3161 policy OID constraints, optional timestamp assurance profiles (`standard` / `qualified`), optional CRL-based TSA revocation checks, optional live OCSP checks, optional qualified TSA signer allowlist matching, Rekor entry UUID to leaf-hash binding, Rekor inclusion proofs against the advertised root hash, and the current draft-aligned SCITT statement/receipt contract; it can optionally verify TSA signer chains and provider receipt signatures when trust material is configured.
+
+Current selective-disclosure verification is also offline for `pl-merkle-sha256-v2` bundles: `proofctl disclose` emits a redacted bundle carrying a header inclusion proof plus inclusion proofs for each disclosed item, and `proofctl verify` can validate that package without access to the original full bundle.
 
 ## Provider-Agnostic Boundary
 

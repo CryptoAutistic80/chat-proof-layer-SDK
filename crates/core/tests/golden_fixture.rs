@@ -92,12 +92,12 @@ fn golden_fixture_is_deterministic_and_verifiable() {
         assert_eq!(bytes.len() as u64, entry.size);
     }
 
-    let mut ordered_digests = Vec::with_capacity(1 + bundle.artefacts.len());
-    ordered_digests.push(expected.header_digest.clone());
-    ordered_digests.extend(bundle.artefacts.iter().map(|item| item.digest.clone()));
-
-    let commitment_once = compute_commitment(&ordered_digests).expect("commitment should succeed");
-    let commitment_twice = compute_commitment(&ordered_digests).expect("commitment should succeed");
+    let commitment_once =
+        compute_commitment(&bundle.commitment_digests().expect("digests should build"))
+            .expect("commitment should succeed");
+    let commitment_twice =
+        compute_commitment(&bundle.commitment_digests().expect("digests should build"))
+            .expect("commitment should succeed");
     assert_eq!(commitment_once.root, commitment_twice.root);
     assert_eq!(commitment_once.root, expected.bundle_root);
 

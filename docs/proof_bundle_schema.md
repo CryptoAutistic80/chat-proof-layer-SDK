@@ -1,222 +1,192 @@
-# Proof Bundle Schema (PoC v0.1)
+# Proof Bundle Schema
 
 ## Status
 
-This document is the normative schema reference for PoC bundle creation and verification.
-If implementation behavior diverges from this document, update code and this spec together.
-Machine-readable validation schema is in `docs/proof_bundle.schema.json`.
+This document is the normative bundle-format reference for the current implementation.
+If code and this document diverge, update both together.
 
-## Conventions
+Machine-readable schemas:
 
-- MUST/SHOULD/MAY are used as RFC 2119 normative terms.
-- JSON canonicalization uses RFC 8785.
-- Hash algorithm is SHA-256 only in PoC.
+- `schemas/evidence_bundle.schema.json`
+- `schemas/redacted_bundle.schema.json`
+- `docs/proof_bundle.schema.json` is a compatibility wrapper that points at `schemas/evidence_bundle.schema.json`
 
 ## Top-Level Bundle Shape
 
-```json
-{
-  "bundle_version": "0.1",
-  "bundle_id": "01JMBQ3Q7V0T9E0XH1MG6G4X3E",
-  "created_at": "2026-03-01T14:12:09Z",
-  "actor": {},
-  "subject": {},
-  "model": {},
-  "inputs": {},
-  "outputs": {},
-  "trace": {},
-  "artefacts": [],
-  "policy": {},
-  "integrity": {},
-  "timestamp": null,
-  "receipt": null
-}
-```
-
-## Canonical Header Projection
-
-The canonical header projection is the exact object below (field names and values), derived from the bundle before signing:
+Current bundles are `bundle_version: "1.0"` and contain:
 
 - `bundle_version`
 - `bundle_id`
 - `created_at`
 - `actor`
 - `subject`
-- `model`
-- `inputs`
-- `outputs`
-- `trace`
+- `context`
+- `items`
+- `artefacts`
+- `policy`
+- `integrity`
+- optional `timestamp`
+- optional `receipt`
+
+`timestamp` and `receipt` are intentionally outside the signed header so they can be attached after initial sealing.
+
+## Integrity Fields
+
+`integrity` contains:
+
+- `canonicalization = "RFC8785-JCS"`
+- `hash = "SHA-256"`
+- `header_digest`
+- `bundle_root_algorithm`
+- `bundle_root`
+- `signature`
+
+`signature.value` is an Ed25519 JWS compact string over the UTF-8 bytes of `integrity.bundle_root`.
+
+## Header Projection
+
+`proof_bundle.canonical.json` always stores the exact canonical UTF-8 bytes used to derive `integrity.header_digest`.
+
+### Current Default Projection (`pl-merkle-sha256-v2`)
+
+New bundles use the following canonical header projection:
+
+- `bundle_version`
+- `bundle_id`
+- `created_at`
+- `actor`
+- `subject`
+- `context`
+- `policy`
+- `item_count`
+- `artefact_count`
+
+This keeps the signed header stable while letting individual evidence items and artefact metadata become separate Merkle leaves for selective disclosure.
+
+### Legacy Projection (`pl-merkle-sha256-v1`)
+
+Legacy bundles are still accepted during verification.
+Their canonical header projection contains:
+
+- `bundle_version`
+- `bundle_id`
+- `created_at`
+- `actor`
+- `subject`
+- `context`
+- `items`
 - `artefacts`
 - `policy`
 
-Excluded from canonical header projection:
+## Merkle Root Algorithms
 
-- `integrity`
-- `timestamp`
-- `receipt`
+### Legacy Verification (`pl-merkle-sha256-v1`)
 
-Rationale: this avoids circular dependencies when deriving integrity fields.
-
-## Integrity Field Semantics
-
-`integrity` MUST include:
-
-- `canonicalization`: fixed string `RFC8785-JCS`
-- `hash`: fixed string `SHA-256`
-- `header_digest`: SHA-256 of canonical header bytes, format `sha256:<64-lower-hex>`
-- `bundle_root_algorithm`: fixed string `pl-merkle-sha256-v1`
-- `bundle_root`: Merkle root digest string, format `sha256:<64-lower-hex>`
-- `signature` object:
-  - `format`: fixed string `JWS`
-  - `alg`: fixed string `EdDSA`
-  - `kid`: issuer key identifier
-  - `value`: JWS compact string
-
-## Merkle Root Algorithm (`pl-merkle-sha256-v1`)
-
-Input digest order MUST be:
+Legacy bundles use:
 
 `[header_digest, artefact_digest_1, artefact_digest_2, ...]`
 
-Each input digest is parsed into raw 32 bytes before tree construction.
+where each artefact leaf is the digest of the artefact bytes themselves.
 
-Algorithm:
+### Current Default (`pl-merkle-sha256-v2`)
 
-1. Leaf hash: `H(0x00 || digest_bytes)`
-2. Parent hash: `H(0x01 || left_hash || right_hash)`
-3. If node count is odd at any level, duplicate the last node
-4. Final root encoded as `sha256:<hex(root_hash)>`
+New bundles use:
 
-## Signature Input
+`[header_digest, item_digest_1, item_digest_2, ..., artefact_meta_digest_1, artefact_meta_digest_2, ...]`
 
-Signature payload bytes MUST be the UTF-8 bytes of `integrity.bundle_root` exactly.
+where:
 
-Verification MUST compare against the exact same UTF-8 byte sequence.
+- `item_digest_n = sha256(RFC8785(item_json))`
+- `artefact_meta_digest_n = sha256(RFC8785(artefact_ref_json))`
 
-## Timestamp Semantics
+Artefact content bytes are still verified separately against each artefact record's `digest` field before trust decisions.
 
-If `timestamp` is present:
+For both algorithms:
 
-- `kind` MUST be `rfc3161`
-- `token_base64` MUST contain DER-encoded CMS `SignedData`
-- the RFC 3161 message imprint is computed over the UTF-8 bytes of `integrity.bundle_root`
-- `timestamp` remains outside the canonical header projection and outside the signed payload so it can be attached after initial bundle signing
+1. Parse each `sha256:<hex>` input digest into raw 32 bytes.
+2. Leaf hash is `H(0x00 || digest_bytes)`.
+3. Parent hash is `H(0x01 || left_hash || right_hash)`.
+4. Duplicate the last node when a level has odd width.
+5. Encode the final root as `sha256:<hex(root_hash)>`.
 
-## Transparency Receipt Semantics
-
-If `receipt` is present:
-
-- `kind` MUST be `rekor` or `scitt`
-- if `kind == "rekor"`:
-  `body.log_url` MUST identify the Rekor base URL used for anchoring,
-  `body.entry_uuid` MUST identify the single returned Rekor log entry,
-  `body.log_entry` MUST store the raw Rekor `LogEntry` JSON object keyed by `entry_uuid`,
-  and the embedded Rekor entry body MUST be an `rfc3161` proposed entry whose `spec.tsr.content` is the bundle's RFC 3161 token
-- if `kind == "scitt"`:
-  `body.service_url` MUST identify the SCITT-style receipt endpoint,
-  `body.entry_id` MUST identify the registered statement entry,
-  `body.service_id` MUST be the transparency-service public-key identifier (`sha256(SPKI_DER(public_key))` when trust material is supplied),
-  `body.statement_b64` MUST be the canonical JSON statement bytes containing `{profile, bundle_root, timestamp}`,
-  `body.statement_hash` MUST equal `sha256:<hex>` over `statement_b64`,
-  and `body.receipt_b64` MUST be the service signature over canonical `{entryId, registeredAt, serviceId, statementHash}`
-- `receipt` remains outside the canonical header projection and outside the signed payload so it can be attached after timestamping
-
-## Field Constraints
-
-### Common Formats
-
-- `bundle_id`: ULID (26 chars, Crockford Base32 uppercase)
-- `created_at`: RFC 3339 UTC timestamp (`...Z`)
-- Digest strings: `^sha256:[0-9a-f]{64}$`
-- `kid`: non-empty ASCII string <= 128 chars
-
-### `artefacts[]`
-
-Each artifact entry MUST include:
-
-- `name`: relative filename, no path traversal segments
-- `digest`: `sha256:<64-lower-hex>`
-- `size`: non-negative integer bytes
-- `content_type`: MIME-like string
-
-The artifact list order MUST be stable and used consistently for Merkle input ordering.
-
-### Numeric Value Rule
-
-Values represented as JSON numbers SHOULD stay in interoperable precision ranges across Rust/Node/Python implementations.
-Large/edge-case numbers MUST be covered by cross-language fixtures.
-
-## Bundle Package (`bundle.pkg`)
-
-`bundle.pkg` is a gzip-compressed JSON container with:
-
-- top-level `format = "pl-bundle-pkg-v1"`
-- top-level `files[]` entries containing:
-  - `name`
-  - `data_base64`
-
-Required file names in `files[]`:
-
-- `proof_bundle.json`
-- `proof_bundle.canonical.json` (canonical header bytes rendered as UTF-8 JSON)
-- `proof_bundle.sig` (JWS compact)
-- `artefacts/<name>` entries (one per artifact)
-- `manifest.json`
-
-`manifest.json` MUST include per-file digests and sizes for package-level integrity checks.
+The proof format still uses `algorithm = "pl-merkle-sha256-v1"` because the Merkle tree construction itself is unchanged; v1 vs v2 only changes which digests become leaves.
 
 ## Verification Procedure
 
-Implementations MUST execute, in order:
+Implementations must:
 
-1. Parse and validate schema/required fields.
-2. Rebuild canonical header projection and canonicalize.
-3. Recompute `header_digest` and compare with recorded value.
-4. Recompute artifact digests and compare.
-5. Recompute `bundle_root` and compare.
-6. Verify JWS signature over UTF-8 `bundle_root` bytes using issuer public key.
-7. If timestamp verification is requested and `timestamp` is present, verify the RFC 3161 token CMS signature and ensure its message imprint matches SHA-256 over UTF-8 `integrity.bundle_root` bytes.
-8. If expected RFC 3161 policy OIDs are supplied, additionally require `TSTInfo.policy` to match one of them.
-9. If timestamp trust anchors are supplied, additionally require the RFC 3161 signer certificate to chain to one of those anchors, to be valid at `genTime`, and to present a time-stamping-appropriate certificate profile.
-10. If timestamp CRLs are supplied, additionally require the applicable CRL to be valid at `genTime`, signed by the issuer certificate, and not to revoke the TSA signer certificate.
-11. If timestamp OCSP responder URLs are supplied, additionally perform a live OCSP request for the RFC 3161 signer certificate, verify the OCSP response signature against the configured trust anchors, require the OCSP response to be current, and reject the timestamp when the OCSP responder reports a revocation time at or before `genTime`.
-12. If a timestamp assurance profile is supplied, enforce its configured requirements. In the current PoC, `qualified` means the verifier must be configured with trust anchors, expected policy OIDs, CRLs, and at least one allowed TSA signer certificate, and those checks must all succeed.
-13. If receipt verification is requested and `receipt` is present, branch by `receipt.kind`.
-14. For `rekor`, verify the receipt structure, require inclusion-proof and signed-entry-timestamp fields, verify the entry UUID equals the RFC 6962 leaf hash of the Rekor body, recompute the Rekor root from the inclusion proof, decode the embedded `rfc3161` entry body, and verify that embedded RFC 3161 token against UTF-8 `integrity.bundle_root` bytes.
-15. For `scitt`, verify the receipt structure, decode `statement_b64`, require `statement_hash == sha256(statement_b64)`, parse the statement, require `profile == application/vnd.proof-layer.scitt-statement.v1+json`, require `statement.bundle_root == integrity.bundle_root`, and verify the embedded RFC 3161 token against UTF-8 `integrity.bundle_root` bytes.
-16. If a transparency public key is supplied, additionally verify the provider-specific receipt signature. For `rekor`, canonicalize `{body, integratedTime, logID, logIndex}`, verify the signed-entry-timestamp signature, and require `logID == sha256(SPKI_DER(public_key))`. For `scitt`, canonicalize `{entryId, registeredAt, serviceId, statementHash}`, verify `receipt_b64`, and require `serviceId == sha256(SPKI_DER(public_key))`.
-17. The current SCITT path is a draft-aligned JSON statement/receipt contract, not a full interoperable COSE/CCF profile.
-18. Report optional checks (timestamp/receipt) as skipped if absent or not requested.
+1. Parse the package and validate required files.
+2. Parse the bundle and validate required fields.
+3. Rebuild the canonical header bytes for the bundle's `bundle_root_algorithm`.
+4. Recompute `header_digest` and compare.
+5. Verify artefact bytes against each recorded artefact digest.
+6. Recompute `bundle_root` using the bundle's leaf-layout algorithm and compare.
+7. Verify the JWS signature over UTF-8 `integrity.bundle_root` bytes.
+8. If requested, verify `timestamp` against UTF-8 `integrity.bundle_root` bytes.
+9. If requested, verify `receipt` against UTF-8 `integrity.bundle_root` bytes.
 
-Any required check failure MUST produce an invalid result.
+Optional timestamp/receipt trust policy can additionally enforce:
 
-## Minimal Example (illustrative)
+- trust-anchor chaining
+- RFC 3161 policy OID matching
+- CRL checks
+- live OCSP checks
+- qualified TSA signer allowlists
+- timestamp assurance profiles
+- Rekor SET / `logID` verification
+- SCITT service-signature / `serviceId` verification
 
-```json
-{
-  "bundle_version": "0.1",
-  "bundle_id": "01JMBQ3Q7V0T9E0XH1MG6G4X3E",
-  "created_at": "2026-03-01T14:12:09Z",
-  "actor": { "issuer": "proof-layer-local", "app_id": "demo", "env": "dev", "signing_key_id": "kid-dev-01" },
-  "subject": { "request_id": "req_9f3c2a", "thread_id": "thr_17a1", "user_ref": "hmac_sha256:9b2e..." },
-  "model": { "provider": "anthropic", "model": "claude-sonnet-4-6", "parameters": { "temperature": 0.7, "max_tokens": 1024 } },
-  "inputs": { "messages_commitment": "sha256:2f3c..." },
-  "outputs": { "assistant_text_commitment": "sha256:91fe..." },
-  "trace": { "otel_genai_semconv_version": "1.0.0", "trace_commitment": "sha256:77ab..." },
-  "artefacts": [
-    { "name": "prompt.json", "digest": "sha256:2f3c...", "size": 412, "content_type": "application/json" },
-    { "name": "response.json", "digest": "sha256:91fe...", "size": 890, "content_type": "application/json" }
-  ],
-  "policy": { "redactions": [], "encryption": { "enabled": false } },
-  "integrity": {
-    "canonicalization": "RFC8785-JCS",
-    "hash": "SHA-256",
-    "header_digest": "sha256:2f3c...",
-    "bundle_root_algorithm": "pl-merkle-sha256-v1",
-    "bundle_root": "sha256:5b12...",
-    "signature": { "format": "JWS", "alg": "EdDSA", "kid": "kid-dev-01", "value": "eyJ..." }
-  },
-  "timestamp": null,
-  "receipt": null
-}
-```
+## Bundle Package
+
+Standard full packages are gzip-compressed JSON archives with:
+
+- top-level `format = "pl-bundle-pkg-v1"`
+- top-level `files[]` entries containing `name` and `data_base64`
+
+Required members:
+
+- `proof_bundle.json`
+- `proof_bundle.canonical.json`
+- `proof_bundle.sig`
+- `manifest.json`
+- `artefacts/<name>` for each artefact
+
+`manifest.json` contains per-file digests and sizes for package-level integrity checks.
+
+## Redacted Bundle Shape
+
+Selective disclosure is currently defined for `pl-merkle-sha256-v2` bundles only.
+
+`schemas/redacted_bundle.schema.json` describes the redacted bundle object carried inside a disclosure package. It contains:
+
+- original bundle metadata and `integrity`
+- optional `timestamp`
+- optional `receipt`
+- `total_items`
+- `total_artefacts`
+- `header_proof`
+- `disclosed_items[]`
+- `disclosed_artefacts[]`
+
+Each disclosed entry carries the original object plus an inclusion proof.
+
+Leaf indices for v2 disclosure are fixed:
+
+- header leaf: `0`
+- item leaf `n`: `1 + n`
+- artefact leaf `n`: `1 + total_items + n`
+
+## Disclosure Package
+
+Redacted disclosure packages are gzip-compressed JSON archives with:
+
+- top-level `format = "pl-bundle-disclosure-pkg-v1"`
+- `redacted_bundle.json`
+- `manifest.json`
+
+Current CLI support is:
+
+- `proofctl disclose --items ...` for item-level disclosure
+- `proofctl verify` auto-detects and verifies both full packages and disclosure packages
+
+Vault-side redacted pack assembly is still future work.

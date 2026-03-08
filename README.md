@@ -38,7 +38,7 @@ What it does **not** claim: model determinism or legal finality. It proves what 
 ## Workspace
 
 - `crates/core` (`proof-layer-core`): RFC 8785 canonicalization, hashing, Merkle commitment + inclusion proofs, Ed25519 JWS sign/verify, v1.0 evidence bundle build/verify logic, and v0.1 -> v1.0 migration helpers.
-- `crates/cli` (`proofctl`): keygen, create bundle package, verify package offline, inspect package, query vault state, and download vault-assembled evidence packs.
+- `crates/cli` (`proofctl`): keygen, create full bundle packages, produce redacted disclosure packages, verify packages offline, inspect packages, query vault state, and download vault-assembled evidence packs.
 - `crates/vault` (`proof-service`): Axum service with SQLite metadata storage, retention scanning, pack assembly, and local artifact storage.
 - `crates/napi` (`proof-layer-napi`): native TypeScript/Node bridge over the Rust core for canonicalization, hashing, Merkle root computation, JWS sign/verify, and offline bundle verification.
 - `crates/pyo3` (`proof-layer-pyo3`): native Python bridge over the Rust core for the same canonicalization, hashing, Merkle root, JWS sign/verify, and offline bundle verification surface.
@@ -70,6 +70,14 @@ cargo run -p proofctl -- create \
 
 # 4) Verify offline
 cargo run -p proofctl -- verify --in ./bundle.pkg --key ./keys/verify.pub
+
+# 4b) Produce a selective-disclosure package for item 0 and verify it
+cargo run -p proofctl -- disclose \
+  --in ./bundle.pkg \
+  --items 0 \
+  --out ./bundle.disclosure.pkg
+
+cargo run -p proofctl -- verify --in ./bundle.disclosure.pkg --key ./keys/verify.pub
 
 # Optional trust-aware local timestamp/receipt attachment during create
 cargo run -p proofctl -- create \
@@ -299,8 +307,10 @@ npm run dev
 
 ## Notes
 
-- Proof package is gzip-compressed JSON (`bundle.pkg`) containing named files (`proof_bundle.json`, `proof_bundle.canonical.json`, `proof_bundle.sig`, `artefacts/*`, `manifest.json`).
+- Full proof packages are gzip-compressed JSON (`bundle.pkg`) containing named files (`proof_bundle.json`, `proof_bundle.canonical.json`, `proof_bundle.sig`, `artefacts/*`, `manifest.json`).
+- Redacted disclosure packages use `format = "pl-bundle-disclosure-pkg-v1"` and contain `redacted_bundle.json` plus `manifest.json`.
 - Bundles now serialize as `bundle_version: "1.0"` with typed `items` plus `context`.
+- New bundles now default to `bundle_root_algorithm = "pl-merkle-sha256-v2"` with separate header, item, and artefact-metadata Merkle leaves; `proofctl verify` still accepts legacy `pl-merkle-sha256-v1` bundles.
 - `proofctl create` and `POST /v1/bundles` accept either the legacy PoC capture shape or the v1.0 capture shape during migration.
 - `proofctl create` also supports Phase 2 migration overrides such as `--system-id`, `--retention-class`, and `--evidence-type`.
 - `proofctl create` now supports `--timestamp-url <tsa>` and can attach an RFC 3161 token before packaging.
@@ -309,6 +319,7 @@ npm run dev
 - `proofctl verify --check-timestamp` now validates RFC 3161 tokens against the UTF-8 bytes of `integrity.bundle_root`, and `--check-receipt` now validates both Rekor RFC 3161 receipts and the current draft-aligned SCITT receipt format against the same bundle root.
 - `proofctl verify` also supports `--timestamp-assurance <standard|qualified>`, `--timestamp-trust-anchor <pem>` (repeatable), `--timestamp-crl <pem>` (repeatable), `--timestamp-ocsp-url <url>` (repeatable), `--timestamp-qualified-signer <pem>` (repeatable), `--timestamp-policy-oid <oid>` (repeatable), and `--transparency-public-key <pem>` so optional assurance checks can move from structural validity to configured trust validation.
 - `proofctl verify` now reports the bundle assurance level as `signed`, `timestamped`, or `transparency_anchored`.
+- `proofctl disclose --items ...` now creates item-level redacted packages with Merkle inclusion proofs, and `proofctl verify` auto-detects full vs disclosure package formats.
 - `proofctl inspect` now supports `--show-items` and `--show-merkle`.
 - `proofctl pack` now requests pack assembly from the vault and downloads the resulting `pl-evidence-pack-v1` archive.
 - `proofctl vault status|query|retention|systems|export` now covers the main vault read/query/export flows from the plan without requiring manual `curl`.
@@ -325,10 +336,10 @@ npm run dev
 - Timestamp verification now has six layers: structural CMS/message-imprint validation by default, optional RFC 3161 policy OID matching when configured, signer-chain validation against configured PEM trust anchors at token generation time, optional CRL-based revocation checks against configured PEM CRLs, optional live OCSP checks against configured responder URLs, and optional qualified TSA signer allowlist matching. Setting `assurance = "qualified"` still makes trust anchors, CRLs, expected policy OIDs, and at least one allowed TSA signer certificate mandatory and also requires the TSA signer certificate profile to be appropriate for time stamping. EU trusted-list ingestion and archival OCSP evidence handling are still future work.
 - Transparency verification now checks Rekor receipt structure, entry UUID to leaf-hash binding, the Merkle inclusion proof against the advertised Rekor root hash, the embedded RFC 3161 token binding to `integrity.bundle_root`, and Rekor signed-entry-timestamp signatures plus `logID` binding when a trusted public key is configured. The SCITT path verifies a draft-aligned canonical JSON statement/receipt contract with `serviceId == sha256(SPKI_DER(public_key))`; full interoperable COSE/CCF SCITT is still future work.
 - Pack assembly is now available through `/v1/packs`; packs apply an initial heuristic curation profile (`pack-rules-v1`) based on actor role, evidence item types, retention class, and derived obligation refs, then export matching bundles as embedded `bundle.pkg` files plus a manifest.
-- Pack redaction/selective disclosure is still not implemented; current exports remain full bundle packages.
+- Vault pack redaction is still not implemented; current exports remain full `bundle.pkg` members even though local `proofctl disclose` selective disclosure is now available.
 - Vault startup now supports `vault.toml` + env override configuration and an automatic background retention scan loop; PostgreSQL/S3/TLS remain future work.
 - Canonicalization and signing semantics follow `docs/architecture.md`.
-- Verification is designed to work offline with `bundle.pkg` + public key.
-- JSON Schemas: `schemas/evidence_bundle.schema.json`, `schemas/capture_event.schema.json`, `schemas/evidence_item.schema.json`, `schemas/evidence_pack.schema.json`.
+- Verification is designed to work offline with a full or disclosure package plus the public key.
+- JSON Schemas: `schemas/evidence_bundle.schema.json`, `schemas/redacted_bundle.schema.json`, `schemas/capture_event.schema.json`, `schemas/evidence_item.schema.json`, `schemas/evidence_pack.schema.json`.
 - Test matrix: `docs/verification-test-matrix.md`.
 - Deterministic fixture inputs: `fixtures/golden/`.

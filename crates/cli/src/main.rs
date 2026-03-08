@@ -5,14 +5,17 @@ use clap::{Args, Parser, Subcommand, ValueEnum};
 use ed25519_dalek::SigningKey;
 use flate2::{Compression, read::GzDecoder, write::GzEncoder};
 use proof_layer_core::{
-    ArtefactInput, CaptureEvent, CaptureInput, EvidenceItem, ProofBundle, ReceiptVerification,
+    ArtefactInput, CaptureEvent, CaptureInput, DisclosureError, EvidenceItem,
+    LEGACY_BUNDLE_ROOT_ALGORITHM, ProofBundle, ReceiptVerification, RedactedBundle,
     RekorTransparencyProvider, Rfc3161HttpTimestampProvider, SCITT_TRANSPARENCY_KIND,
-    ScittTransparencyProvider, TimestampAssuranceProfile, TimestampProvider, TimestampTrustPolicy,
-    TransparencyProvider, TransparencyTrustPolicy, anchor_bundle as anchor_bundle_receipt,
-    build_bundle, build_inclusion_proof, capture_input_v01_to_event, decode_private_key_pem,
-    decode_public_key_pem, encode_private_key_pem, encode_public_key_pem, sha256_prefixed,
+    ScittTransparencyProvider, TimestampAssuranceProfile, TimestampProvider, TimestampToken,
+    TimestampTrustPolicy, TransparencyProvider, TransparencyReceipt, TransparencyTrustPolicy,
+    anchor_bundle as anchor_bundle_receipt, build_bundle, build_inclusion_proof,
+    capture_input_v01_to_event, decode_private_key_pem, decode_public_key_pem,
+    encode_private_key_pem, encode_public_key_pem, redact_bundle, sha256_prefixed,
     timestamp_digest, validate_bundle_integrity_fields, validate_timestamp_trust_policy,
-    verify_receipt, verify_receipt_with_policy, verify_timestamp, verify_timestamp_with_policy,
+    verify_receipt, verify_receipt_with_policy, verify_redacted_bundle, verify_timestamp,
+    verify_timestamp_with_policy,
 };
 use reqwest::{
     Url,
@@ -28,6 +31,8 @@ use std::{
 use tracing::info;
 use ulid::Ulid;
 
+const BUNDLE_PACKAGE_FORMAT: &str = "pl-bundle-pkg-v1";
+const DISCLOSURE_PACKAGE_FORMAT: &str = "pl-bundle-disclosure-pkg-v1";
 const DEFAULT_MAX_PAYLOAD_BYTES: usize = 10 * 1024 * 1024;
 
 #[derive(Parser)]
@@ -49,6 +54,8 @@ enum Commands {
     Create(Box<CreateArgs>),
     /// Verify a proof bundle package offline.
     Verify(Box<VerifyArgs>),
+    /// Produce a redacted disclosure package with Merkle proofs for selected items.
+    Disclose(Box<DiscloseArgs>),
     /// Print key fields from a proof bundle package.
     Inspect {
         #[arg(long = "in")]
@@ -152,6 +159,16 @@ struct VerifyArgs {
     timestamp_assurance: Option<TimestampAssuranceArg>,
     #[arg(long = "transparency-public-key")]
     transparency_public_key: Option<PathBuf>,
+}
+
+#[derive(Args)]
+struct DiscloseArgs {
+    #[arg(long = "in")]
+    input: PathBuf,
+    #[arg(long)]
+    items: String,
+    #[arg(long)]
+    out: PathBuf,
 }
 
 #[derive(Subcommand)]
@@ -324,9 +341,17 @@ struct PackagedFile {
     data_base64: String,
 }
 
+struct DecodedPackage {
+    format: String,
+    files: BTreeMap<String, Vec<u8>>,
+}
+
 #[derive(Debug, Serialize)]
 struct VerifyReport {
+    package_kind: String,
     canonicalization_ok: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    disclosure_proof_ok: Option<bool>,
     artefact_integrity_ok: bool,
     signature_ok: bool,
     manifest_ok: bool,
@@ -803,6 +828,7 @@ fn main() -> Result<()> {
             timestamp_assurance: args.timestamp_assurance,
             transparency_public_key_path: args.transparency_public_key.as_deref(),
         }),
+        Commands::Disclose(args) => cmd_disclose(&args.input, &args.items, &args.out),
         Commands::Inspect {
             input,
             format,
@@ -1096,10 +1122,6 @@ fn cmd_verify(args: VerifyCommandInput<'_>) -> Result<()> {
         );
     }
 
-    let files = read_bundle_package(args.input_path)?;
-    let bundle = parse_bundle_file(&files)?;
-    validate_bundle_integrity_fields(&bundle)?;
-
     let key_pem = fs::read_to_string(args.key_path)
         .with_context(|| format!("failed to read {}", args.key_path.display()))?;
     let verifying_key = decode_public_key_pem(&key_pem)
@@ -1117,6 +1139,59 @@ fn cmd_verify(args: VerifyCommandInput<'_>) -> Result<()> {
         timestamp_trust_policy.as_ref(),
     )?;
 
+    let package = read_package(args.input_path)?;
+    let report = match package.format.as_str() {
+        BUNDLE_PACKAGE_FORMAT => verify_full_package(
+            &package.files,
+            &verifying_key,
+            args.check_timestamp,
+            args.check_receipt,
+            timestamp_trust_policy.as_ref(),
+            transparency_trust_policy.as_ref(),
+        )?,
+        DISCLOSURE_PACKAGE_FORMAT => verify_disclosure_package(
+            &package.files,
+            &verifying_key,
+            args.check_timestamp,
+            args.check_receipt,
+            timestamp_trust_policy.as_ref(),
+            transparency_trust_policy.as_ref(),
+        )?,
+        other => bail!("unsupported package format {other}"),
+    };
+
+    match args.format {
+        OutputFormat::Human => print_human_verify_report(&report),
+        OutputFormat::Json => {
+            println!("{}", serde_json::to_string_pretty(&report)?);
+        }
+    }
+
+    if report.canonicalization_ok
+        && report.artefact_integrity_ok
+        && report.signature_ok
+        && report.manifest_ok
+        && report.disclosure_proof_ok.unwrap_or(true)
+        && (!args.check_timestamp || report.timestamp.state == OptionalCheckState::Valid)
+        && (!args.check_receipt || report.receipt.state == OptionalCheckState::Valid)
+    {
+        Ok(())
+    } else {
+        bail!("verification failed")
+    }
+}
+
+fn verify_full_package(
+    files: &BTreeMap<String, Vec<u8>>,
+    verifying_key: &ed25519_dalek::VerifyingKey,
+    check_timestamp: bool,
+    check_receipt: bool,
+    timestamp_trust_policy: Option<&TimestampTrustPolicy>,
+    transparency_trust_policy: Option<&TransparencyTrustPolicy>,
+) -> Result<VerifyReport> {
+    let bundle = parse_bundle_file(files)?;
+    validate_bundle_integrity_fields(&bundle)?;
+
     let recomputed_canonical = bundle.canonical_header_bytes()?;
     let canonical_file = files
         .get("proof_bundle.canonical.json")
@@ -1128,10 +1203,10 @@ fn cmd_verify(args: VerifyCommandInput<'_>) -> Result<()> {
         .ok_or_else(|| anyhow!("package missing proof_bundle.sig"))?;
     let signature_ok = signature_file == bundle.integrity.signature.value.as_bytes();
 
-    let manifest_ok = verify_manifest(&files)?;
+    let manifest_ok = verify_manifest(files)?;
+    let artefacts = extract_artefacts(files)?;
+    let verification = bundle.verify_with_artefacts(&artefacts, verifying_key);
 
-    let artefacts = extract_artefacts(&files)?;
-    let verification = bundle.verify_with_artefacts(&artefacts, &verifying_key);
     let mut failures = Vec::new();
     if !canonicalization_ok {
         failures.push("canonicalized header bytes mismatch package".to_string());
@@ -1151,21 +1226,13 @@ fn cmd_verify(args: VerifyCommandInput<'_>) -> Result<()> {
         }
     };
 
-    let timestamp = evaluate_timestamp_check(
-        &bundle,
-        args.check_timestamp,
-        timestamp_trust_policy.as_ref(),
-    );
-    if args.check_timestamp && timestamp.state != OptionalCheckState::Valid {
+    let timestamp = evaluate_timestamp_check(&bundle, check_timestamp, timestamp_trust_policy);
+    if check_timestamp && timestamp.state != OptionalCheckState::Valid {
         failures.push(timestamp.message.clone());
     }
 
-    let receipt = evaluate_receipt_check(
-        &bundle,
-        args.check_receipt,
-        transparency_trust_policy.as_ref(),
-    );
-    if args.check_receipt && receipt.state != OptionalCheckState::Valid {
+    let receipt = evaluate_receipt_check(&bundle, check_receipt, transparency_trust_policy);
+    if check_receipt && receipt.state != OptionalCheckState::Valid {
         failures.push(receipt.message.clone());
     }
 
@@ -1175,8 +1242,10 @@ fn cmd_verify(args: VerifyCommandInput<'_>) -> Result<()> {
         format!("INVALID: {}", failures.join("; "))
     };
 
-    let report = VerifyReport {
+    Ok(VerifyReport {
+        package_kind: "bundle".to_string(),
         canonicalization_ok,
+        disclosure_proof_ok: None,
         artefact_integrity_ok,
         signature_ok: signature_ok && artefact_integrity_ok,
         manifest_ok,
@@ -1185,26 +1254,122 @@ fn cmd_verify(args: VerifyCommandInput<'_>) -> Result<()> {
         assurance_level: assurance_level(&bundle),
         timestamp,
         receipt,
+    })
+}
+
+fn verify_disclosure_package(
+    files: &BTreeMap<String, Vec<u8>>,
+    verifying_key: &ed25519_dalek::VerifyingKey,
+    check_timestamp: bool,
+    check_receipt: bool,
+    timestamp_trust_policy: Option<&TimestampTrustPolicy>,
+    transparency_trust_policy: Option<&TransparencyTrustPolicy>,
+) -> Result<VerifyReport> {
+    let bundle = parse_redacted_bundle_file(files)?;
+    let manifest_ok = verify_manifest(files)?;
+    let artefacts = extract_artefacts(files)?;
+    let verification = verify_redacted_bundle(&bundle, &artefacts, verifying_key);
+    let mut failures = Vec::new();
+    if !manifest_ok {
+        failures.push("manifest mismatch".to_string());
+    }
+
+    let (disclosure_proof_ok, artefact_integrity_ok, artefacts_verified) = match verification {
+        Ok(summary) => (
+            true,
+            true,
+            summary.disclosed_artefact_count.min(artefacts.len()),
+        ),
+        Err(err) => {
+            failures.push(format!("disclosure verification failed: {err}"));
+            (false, false, 0)
+        }
     };
 
-    match args.format {
-        OutputFormat::Human => print_human_verify_report(&report),
-        OutputFormat::Json => {
-            println!("{}", serde_json::to_string_pretty(&report)?);
-        }
+    let timestamp = evaluate_timestamp_check_from_parts(
+        &bundle.integrity.bundle_root,
+        bundle.timestamp.as_ref(),
+        check_timestamp,
+        timestamp_trust_policy,
+    );
+    if check_timestamp && timestamp.state != OptionalCheckState::Valid {
+        failures.push(timestamp.message.clone());
     }
 
-    if report.canonicalization_ok
-        && report.artefact_integrity_ok
-        && report.signature_ok
-        && report.manifest_ok
-        && (!args.check_timestamp || report.timestamp.state == OptionalCheckState::Valid)
-        && (!args.check_receipt || report.receipt.state == OptionalCheckState::Valid)
-    {
-        Ok(())
-    } else {
-        bail!("verification failed")
+    let receipt = evaluate_receipt_check_from_parts(
+        &bundle.integrity.bundle_root,
+        bundle.receipt.as_ref(),
+        check_receipt,
+        transparency_trust_policy,
+    );
+    if check_receipt && receipt.state != OptionalCheckState::Valid {
+        failures.push(receipt.message.clone());
     }
+
+    let message = if failures.is_empty() {
+        "VALID".to_string()
+    } else {
+        format!("INVALID: {}", failures.join("; "))
+    };
+
+    Ok(VerifyReport {
+        package_kind: "disclosure".to_string(),
+        canonicalization_ok: disclosure_proof_ok,
+        disclosure_proof_ok: Some(disclosure_proof_ok),
+        artefact_integrity_ok,
+        signature_ok: disclosure_proof_ok,
+        manifest_ok,
+        message,
+        artefacts_verified,
+        assurance_level: assurance_level_from_parts(
+            bundle.timestamp.as_ref(),
+            bundle.receipt.as_ref(),
+        ),
+        timestamp,
+        receipt,
+    })
+}
+
+fn cmd_disclose(input_path: &Path, items: &str, out_path: &Path) -> Result<()> {
+    let max_payload_bytes = max_payload_bytes()?;
+    let package_size = fs::metadata(input_path)
+        .with_context(|| format!("failed to stat {}", input_path.display()))?
+        .len() as usize;
+    if package_size > max_payload_bytes {
+        bail!(
+            "package size {} bytes exceeds max {} bytes",
+            package_size,
+            max_payload_bytes
+        );
+    }
+
+    let files = read_bundle_package(input_path)?;
+    let bundle = parse_bundle_file(&files)?;
+    let item_indices = parse_index_list(items)?;
+    let redacted = redact_bundle(&bundle, &item_indices, &[])
+        .map_err(|err| map_disclosure_error("redact bundle", err))?;
+    let redacted_bytes = serde_json::to_vec_pretty(&redacted)?;
+
+    let mut package_files = BTreeMap::<String, Vec<u8>>::new();
+    package_files.insert("redacted_bundle.json".to_string(), redacted_bytes);
+
+    let manifest = Manifest {
+        files: package_files
+            .iter()
+            .map(|(name, bytes)| ManifestEntry {
+                name: name.clone(),
+                digest: sha256_prefixed(bytes),
+                size: bytes.len() as u64,
+            })
+            .collect(),
+    };
+    package_files.insert(
+        "manifest.json".to_string(),
+        serde_json::to_vec_pretty(&manifest)?,
+    );
+
+    write_package(out_path, DISCLOSURE_PACKAGE_FORMAT, &package_files)?;
+    Ok(())
 }
 
 fn cmd_inspect(
@@ -1694,22 +1859,22 @@ fn apply_create_overrides(
 }
 
 fn build_merkle_inspect_view(bundle: &ProofBundle) -> Result<InspectMerkleView> {
-    let mut digests = Vec::with_capacity(1 + bundle.artefacts.len());
-    digests.push(bundle.integrity.header_digest.clone());
-    digests.extend(
-        bundle
-            .artefacts
-            .iter()
-            .map(|artefact| artefact.digest.clone()),
-    );
+    let digests = bundle.commitment_digests()?;
 
     let mut leaves = Vec::with_capacity(digests.len());
     for (index, digest) in digests.iter().enumerate() {
         let proof = build_inclusion_proof(&digests, index)?;
         let label = if index == 0 {
             "header_digest".to_string()
-        } else {
+        } else if index <= bundle.items.len() {
+            format!("item:{index_minus_one}", index_minus_one = index - 1)
+        } else if bundle.integrity.bundle_root_algorithm == LEGACY_BUNDLE_ROOT_ALGORITHM {
             format!("artefact:{}", bundle.artefacts[index - 1].name)
+        } else {
+            format!(
+                "artefact:{}",
+                bundle.artefacts[index - 1 - bundle.items.len()].name
+            )
         };
 
         leaves.push(InspectMerkleLeaf {
@@ -1883,10 +2048,24 @@ fn evaluate_timestamp_check(
     requested: bool,
     trust_policy: Option<&TimestampTrustPolicy>,
 ) -> OptionalCheckReport {
+    evaluate_timestamp_check_from_parts(
+        &bundle.integrity.bundle_root,
+        bundle.timestamp.as_ref(),
+        requested,
+        trust_policy,
+    )
+}
+
+fn evaluate_timestamp_check_from_parts(
+    bundle_root: &str,
+    timestamp: Option<&TimestampToken>,
+    requested: bool,
+    trust_policy: Option<&TimestampTrustPolicy>,
+) -> OptionalCheckReport {
     if !requested {
         return OptionalCheckReport {
             state: OptionalCheckState::Skipped,
-            message: if bundle.timestamp.is_some() {
+            message: if timestamp.is_some() {
                 "timestamp present but not checked".to_string()
             } else {
                 "timestamp not present (optional)".to_string()
@@ -1894,7 +2073,7 @@ fn evaluate_timestamp_check(
         };
     }
 
-    let Some(timestamp) = bundle.timestamp.as_ref() else {
+    let Some(timestamp) = timestamp else {
         return OptionalCheckReport {
             state: OptionalCheckState::Missing,
             message: "timestamp check requested but bundle has no timestamp".to_string(),
@@ -1903,9 +2082,9 @@ fn evaluate_timestamp_check(
 
     let verification = match trust_policy {
         Some(policy) if !policy.is_empty() => {
-            verify_timestamp_with_policy(timestamp, &bundle.integrity.bundle_root, policy)
+            verify_timestamp_with_policy(timestamp, bundle_root, policy)
         }
-        _ => verify_timestamp(timestamp, &bundle.integrity.bundle_root),
+        _ => verify_timestamp(timestamp, bundle_root),
     };
 
     match verification {
@@ -1948,10 +2127,24 @@ fn evaluate_receipt_check(
     requested: bool,
     trust_policy: Option<&TransparencyTrustPolicy>,
 ) -> OptionalCheckReport {
+    evaluate_receipt_check_from_parts(
+        &bundle.integrity.bundle_root,
+        bundle.receipt.as_ref(),
+        requested,
+        trust_policy,
+    )
+}
+
+fn evaluate_receipt_check_from_parts(
+    bundle_root: &str,
+    receipt: Option<&TransparencyReceipt>,
+    requested: bool,
+    trust_policy: Option<&TransparencyTrustPolicy>,
+) -> OptionalCheckReport {
     if !requested {
         return OptionalCheckReport {
             state: OptionalCheckState::Skipped,
-            message: if bundle.receipt.is_some() {
+            message: if receipt.is_some() {
                 "transparency receipt present but not checked".to_string()
             } else {
                 "transparency receipt not present (optional)".to_string()
@@ -1959,7 +2152,7 @@ fn evaluate_receipt_check(
         };
     }
 
-    let Some(receipt) = bundle.receipt.as_ref() else {
+    let Some(receipt) = receipt else {
         return OptionalCheckReport {
             state: OptionalCheckState::Missing,
             message: "transparency receipt check requested but bundle has no transparency receipt"
@@ -1969,9 +2162,9 @@ fn evaluate_receipt_check(
 
     let verification = match trust_policy {
         Some(policy) if !policy.is_empty() => {
-            verify_receipt_with_policy(receipt, &bundle.integrity.bundle_root, policy)
+            verify_receipt_with_policy(receipt, bundle_root, policy)
         }
-        _ => verify_receipt(receipt, &bundle.integrity.bundle_root),
+        _ => verify_receipt(receipt, bundle_root),
     };
 
     match verification {
@@ -2048,22 +2241,29 @@ fn attach_receipt_to_bundle(
 }
 
 fn assurance_level(bundle: &ProofBundle) -> AssuranceLevel {
-    if bundle.receipt.is_some() {
+    assurance_level_from_parts(bundle.timestamp.as_ref(), bundle.receipt.as_ref())
+}
+
+fn assurance_level_from_parts(
+    timestamp: Option<&TimestampToken>,
+    receipt: Option<&TransparencyReceipt>,
+) -> AssuranceLevel {
+    if receipt.is_some() {
         AssuranceLevel::TransparencyAnchored
-    } else if bundle.timestamp.is_some() {
+    } else if timestamp.is_some() {
         AssuranceLevel::Timestamped
     } else {
         AssuranceLevel::Signed
     }
 }
 
-fn write_bundle_package(out_path: &Path, files: &BTreeMap<String, Vec<u8>>) -> Result<()> {
+fn write_package(out_path: &Path, format: &str, files: &BTreeMap<String, Vec<u8>>) -> Result<()> {
     let parent = out_path.parent().unwrap_or_else(|| Path::new("."));
     fs::create_dir_all(parent)
         .with_context(|| format!("failed to create output directory {}", parent.display()))?;
 
     let package = BundlePackage {
-        format: "pl-bundle-pkg-v1".to_string(),
+        format: format.to_string(),
         files: files
             .iter()
             .map(|(name, bytes)| PackagedFile {
@@ -2084,7 +2284,11 @@ fn write_bundle_package(out_path: &Path, files: &BTreeMap<String, Vec<u8>>) -> R
     Ok(())
 }
 
-fn read_bundle_package(path: &Path) -> Result<BTreeMap<String, Vec<u8>>> {
+fn write_bundle_package(out_path: &Path, files: &BTreeMap<String, Vec<u8>>) -> Result<()> {
+    write_package(out_path, BUNDLE_PACKAGE_FORMAT, files)
+}
+
+fn read_package(path: &Path) -> Result<DecodedPackage> {
     let max_payload_bytes = max_payload_bytes()?;
     let file =
         fs::File::open(path).with_context(|| format!("failed to open {}", path.display()))?;
@@ -2109,10 +2313,6 @@ fn read_bundle_package(path: &Path) -> Result<BTreeMap<String, Vec<u8>>> {
     let package: BundlePackage =
         serde_json::from_slice(&json_bytes).context("failed to parse package JSON")?;
 
-    if package.format != "pl-bundle-pkg-v1" {
-        bail!("unsupported package format {}", package.format);
-    }
-
     let mut files = BTreeMap::new();
     for file in package.files {
         validate_package_member_name(&file.name)?;
@@ -2132,7 +2332,18 @@ fn read_bundle_package(path: &Path) -> Result<BTreeMap<String, Vec<u8>>> {
         files.insert(file.name, bytes);
     }
 
-    Ok(files)
+    Ok(DecodedPackage {
+        format: package.format,
+        files,
+    })
+}
+
+fn read_bundle_package(path: &Path) -> Result<BTreeMap<String, Vec<u8>>> {
+    let package = read_package(path)?;
+    if package.format != BUNDLE_PACKAGE_FORMAT {
+        bail!("unsupported package format {}", package.format);
+    }
+    Ok(package.files)
 }
 
 fn parse_bundle_file(files: &BTreeMap<String, Vec<u8>>) -> Result<ProofBundle> {
@@ -2141,6 +2352,15 @@ fn parse_bundle_file(files: &BTreeMap<String, Vec<u8>>) -> Result<ProofBundle> {
         .ok_or_else(|| anyhow!("package missing proof_bundle.json"))?;
     let bundle: ProofBundle =
         serde_json::from_slice(bundle_json).context("failed to parse proof_bundle.json")?;
+    Ok(bundle)
+}
+
+fn parse_redacted_bundle_file(files: &BTreeMap<String, Vec<u8>>) -> Result<RedactedBundle> {
+    let bundle_json = files
+        .get("redacted_bundle.json")
+        .ok_or_else(|| anyhow!("package missing redacted_bundle.json"))?;
+    let bundle: RedactedBundle =
+        serde_json::from_slice(bundle_json).context("failed to parse redacted_bundle.json")?;
     Ok(bundle)
 }
 
@@ -2193,6 +2413,7 @@ fn extract_artefacts(files: &BTreeMap<String, Vec<u8>>) -> Result<BTreeMap<Strin
 }
 
 fn print_human_verify_report(report: &VerifyReport) {
+    println!("Package kind: {}", report.package_kind);
     println!(
         "[{}] Canonicalisation — header re-canonicalised, digest {}",
         if report.canonicalization_ok {
@@ -2233,6 +2454,17 @@ fn print_human_verify_report(report: &VerifyReport) {
             "manifest mismatch"
         }
     );
+    if let Some(disclosure_proof_ok) = report.disclosure_proof_ok {
+        println!(
+            "[{}] Disclosure proofs — {}",
+            if disclosure_proof_ok { "✓" } else { "✗" },
+            if disclosure_proof_ok {
+                "selected item proofs validate against bundle_root"
+            } else {
+                "one or more disclosure proofs are invalid"
+            }
+        );
+    }
     println!(
         "[{}] Timestamp — {}",
         optional_check_marker(&report.timestamp.state),
@@ -2344,6 +2576,7 @@ fn validate_package_member_name(name: &str) -> Result<()> {
         "proof_bundle.json"
         | "proof_bundle.canonical.json"
         | "proof_bundle.sig"
+        | "redacted_bundle.json"
         | "manifest.json" => Ok(()),
         _ => {
             if let Some(stripped) = name.strip_prefix("artefacts/") {
@@ -2353,6 +2586,29 @@ fn validate_package_member_name(name: &str) -> Result<()> {
             bail!("unsupported package member name {name}");
         }
     }
+}
+
+fn parse_index_list(value: &str) -> Result<Vec<usize>> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        bail!("items must not be empty");
+    }
+
+    trimmed
+        .split(',')
+        .map(|part| {
+            let part = part.trim();
+            if part.is_empty() {
+                bail!("items must not contain empty indices");
+            }
+            part.parse::<usize>()
+                .with_context(|| format!("invalid item index {part}"))
+        })
+        .collect()
+}
+
+fn map_disclosure_error(action: &str, err: DisclosureError) -> anyhow::Error {
+    anyhow!("{action} failed: {err}")
 }
 
 fn normalize_optional_cli_text(label: &str, value: Option<&str>) -> Result<Option<String>> {
@@ -2960,7 +3216,82 @@ mod tests {
         assert_eq!(view.root, bundle.integrity.bundle_root);
         assert_eq!(view.leaves[0].label, "header_digest");
         assert_eq!(view.leaves[0].digest, bundle.integrity.header_digest);
-        assert_eq!(view.leaves.len(), 1 + bundle.artefacts.len());
+        assert_eq!(view.leaves[1].label, "item:0");
+        assert_eq!(
+            view.leaves.len(),
+            1 + bundle.items.len() + bundle.artefacts.len()
+        );
+    }
+
+    #[test]
+    fn parse_index_list_accepts_comma_separated_indices() {
+        let indices = parse_index_list("0, 2,5").unwrap();
+        assert_eq!(indices, vec![0, 2, 5]);
+    }
+
+    #[test]
+    fn disclose_command_produces_verifiable_redacted_package() {
+        let bundle = sample_bundle();
+        let artefact_bytes = br#"{"hello":"world"}"#.to_vec();
+
+        let mut package_files = BTreeMap::<String, Vec<u8>>::new();
+        package_files.insert(
+            "proof_bundle.json".to_string(),
+            serde_json::to_vec_pretty(&bundle).unwrap(),
+        );
+        package_files.insert(
+            "proof_bundle.canonical.json".to_string(),
+            bundle.canonical_header_bytes().unwrap(),
+        );
+        package_files.insert(
+            "proof_bundle.sig".to_string(),
+            bundle.integrity.signature.value.as_bytes().to_vec(),
+        );
+        package_files.insert("artefacts/prompt.json".to_string(), artefact_bytes);
+
+        let manifest = Manifest {
+            files: package_files
+                .iter()
+                .map(|(name, bytes)| ManifestEntry {
+                    name: name.clone(),
+                    digest: sha256_prefixed(bytes),
+                    size: bytes.len() as u64,
+                })
+                .collect(),
+        };
+        package_files.insert(
+            "manifest.json".to_string(),
+            serde_json::to_vec_pretty(&manifest).unwrap(),
+        );
+
+        let tmp_dir = std::env::temp_dir().join(format!("proofctl-disclose-test-{}", Ulid::new()));
+        fs::create_dir_all(&tmp_dir).unwrap();
+        let bundle_path = tmp_dir.join("bundle.pkg");
+        let disclosure_path = tmp_dir.join("bundle.disclosure.pkg");
+
+        write_bundle_package(&bundle_path, &package_files).unwrap();
+        cmd_disclose(&bundle_path, "0", &disclosure_path).unwrap();
+
+        let package = read_package(&disclosure_path).unwrap();
+        assert_eq!(package.format, DISCLOSURE_PACKAGE_FORMAT);
+        let redacted = parse_redacted_bundle_file(&package.files).unwrap();
+        assert_eq!(redacted.disclosed_items.len(), 1);
+        assert!(redacted.disclosed_artefacts.is_empty());
+        assert_eq!(redacted.disclosed_items[0].index, 0);
+
+        let signing_key = SigningKey::from_bytes(&[7_u8; 32]);
+        let verifying_key = signing_key.verifying_key();
+        let report =
+            verify_disclosure_package(&package.files, &verifying_key, false, false, None, None)
+                .unwrap();
+        assert_eq!(report.package_kind, "disclosure");
+        assert_eq!(report.disclosure_proof_ok, Some(true));
+        assert!(report.canonicalization_ok);
+        assert!(report.signature_ok);
+        assert!(report.manifest_ok);
+        assert_eq!(report.message, "VALID");
+
+        fs::remove_dir_all(&tmp_dir).unwrap();
     }
 
     #[test]

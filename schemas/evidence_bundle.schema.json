@@ -101,7 +101,12 @@
           "pattern": "^sha256:[0-9a-f]{64}$"
         },
         "bundle_root_algorithm": {
-          "const": "pl-merkle-sha256-v1"
+          "type": "string",
+          "enum": [
+            "pl-merkle-sha256-v1",
+            "pl-merkle-sha256-v2"
+          ],
+          "description": "New bundles use pl-merkle-sha256-v2; pl-merkle-sha256-v1 remains valid for legacy verification."
         },
         "bundle_root": {
           "type": "string",

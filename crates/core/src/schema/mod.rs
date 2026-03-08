@@ -16,7 +16,9 @@ use thiserror::Error;
 pub const BUNDLE_VERSION: &str = "1.0";
 pub const CANONICALIZATION_ALGORITHM: &str = "RFC8785-JCS";
 pub const HASH_ALGORITHM: &str = "SHA-256";
-pub const BUNDLE_ROOT_ALGORITHM: &str = "pl-merkle-sha256-v1";
+pub const LEGACY_BUNDLE_ROOT_ALGORITHM: &str = "pl-merkle-sha256-v1";
+pub const BUNDLE_ROOT_ALGORITHM_V2: &str = "pl-merkle-sha256-v2";
+pub const BUNDLE_ROOT_ALGORITHM: &str = BUNDLE_ROOT_ALGORITHM_V2;
 pub const SIGNATURE_FORMAT: &str = "JWS";
 pub const SIGNATURE_ALGORITHM: &str = "EdDSA";
 
@@ -439,7 +441,7 @@ pub struct EvidenceBundle {
 pub type ProofBundle = EvidenceBundle;
 
 impl EvidenceBundle {
-    pub fn canonical_header_projection(&self) -> Value {
+    pub fn legacy_canonical_header_projection(&self) -> Value {
         json!({
             "bundle_version": self.bundle_version,
             "bundle_id": self.bundle_id,
@@ -453,8 +455,61 @@ impl EvidenceBundle {
         })
     }
 
+    pub fn canonical_header_projection(&self) -> Value {
+        json!({
+            "bundle_version": self.bundle_version,
+            "bundle_id": self.bundle_id,
+            "created_at": self.created_at,
+            "actor": self.actor,
+            "subject": self.subject,
+            "context": self.context,
+            "policy": self.policy,
+            "item_count": self.items.len(),
+            "artefact_count": self.artefacts.len(),
+        })
+    }
+
+    pub fn legacy_canonical_header_bytes(&self) -> Result<Vec<u8>, CanonError> {
+        canonicalize_value(&self.legacy_canonical_header_projection())
+    }
+
     pub fn canonical_header_bytes(&self) -> Result<Vec<u8>, CanonError> {
         canonicalize_value(&self.canonical_header_projection())
+    }
+
+    pub fn item_commitment_digests(&self) -> Result<Vec<String>, CanonError> {
+        self.items.iter().map(item_commitment_digest).collect()
+    }
+
+    pub fn artefact_commitment_digests(&self) -> Result<Vec<String>, CanonError> {
+        self.artefacts
+            .iter()
+            .map(artefact_commitment_digest)
+            .collect()
+    }
+
+    pub fn commitment_digests(&self) -> Result<Vec<String>, CanonError> {
+        match self.integrity.bundle_root_algorithm.as_str() {
+            LEGACY_BUNDLE_ROOT_ALGORITHM => {
+                let mut ordered_digests = Vec::with_capacity(1 + self.artefacts.len());
+                ordered_digests.push(self.integrity.header_digest.clone());
+                ordered_digests.extend(self.artefacts.iter().map(|item| item.digest.clone()));
+                Ok(ordered_digests)
+            }
+            BUNDLE_ROOT_ALGORITHM_V2 => {
+                let item_digests = self.item_commitment_digests()?;
+                let artefact_digests = self.artefact_commitment_digests()?;
+                let mut ordered_digests =
+                    Vec::with_capacity(1 + item_digests.len() + artefact_digests.len());
+                ordered_digests.push(self.integrity.header_digest.clone());
+                ordered_digests.extend(item_digests);
+                ordered_digests.extend(artefact_digests);
+                Ok(ordered_digests)
+            }
+            other => Err(CanonError::Canonicalization(format!(
+                "unsupported bundle root algorithm {other}"
+            ))),
+        }
     }
 
     pub fn primary_llm_interaction(&self) -> Option<&LlmInteractionEvidence> {
@@ -471,7 +526,17 @@ impl EvidenceBundle {
     ) -> Result<VerificationSummary, BundleVerificationError> {
         validate_bundle_integrity_fields(self)?;
 
-        let canonical_header = self.canonical_header_bytes()?;
+        let canonical_header = match self.integrity.bundle_root_algorithm.as_str() {
+            LEGACY_BUNDLE_ROOT_ALGORITHM => self.legacy_canonical_header_bytes()?,
+            BUNDLE_ROOT_ALGORITHM_V2 => self.canonical_header_bytes()?,
+            other => {
+                return Err(BundleVerificationError::Canonicalization(
+                    CanonError::Canonicalization(format!(
+                        "unsupported bundle root algorithm {other}"
+                    )),
+                ));
+            }
+        };
         let computed_header_digest = sha256_prefixed(&canonical_header);
         if computed_header_digest != self.integrity.header_digest {
             return Err(BundleVerificationError::HeaderDigestMismatch {
@@ -501,11 +566,7 @@ impl EvidenceBundle {
             }
         }
 
-        let mut ordered_digests = Vec::with_capacity(1 + self.artefacts.len());
-        ordered_digests.push(self.integrity.header_digest.clone());
-        ordered_digests.extend(self.artefacts.iter().map(|item| item.digest.clone()));
-
-        let commitment = compute_commitment(&ordered_digests)?;
+        let commitment = compute_commitment(&self.commitment_digests()?)?;
         if commitment.root != self.integrity.bundle_root {
             return Err(BundleVerificationError::BundleRootMismatch {
                 expected: self.integrity.bundle_root.clone(),
@@ -618,7 +679,9 @@ pub fn validate_bundle_integrity_fields(
             bundle.integrity.hash.clone(),
         ));
     }
-    if bundle.integrity.bundle_root_algorithm != BUNDLE_ROOT_ALGORITHM {
+    if bundle.integrity.bundle_root_algorithm != LEGACY_BUNDLE_ROOT_ALGORITHM
+        && bundle.integrity.bundle_root_algorithm != BUNDLE_ROOT_ALGORITHM_V2
+    {
         return Err(BundleValidationError::UnsupportedBundleRootAlgorithm(
             bundle.integrity.bundle_root_algorithm.clone(),
         ));
@@ -772,6 +835,16 @@ fn validate_item_digests(index: usize, item: &EvidenceItem) -> Result<(), Bundle
     }
 
     Ok(())
+}
+
+pub fn item_commitment_digest(item: &EvidenceItem) -> Result<String, CanonError> {
+    let canonical = canonicalize_value(&serde_json::to_value(item)?)?;
+    Ok(sha256_prefixed(&canonical))
+}
+
+pub fn artefact_commitment_digest(meta: &ArtefactRef) -> Result<String, CanonError> {
+    let canonical = canonicalize_value(&serde_json::to_value(meta)?)?;
+    Ok(sha256_prefixed(&canonical))
 }
 
 fn validate_named_digest(

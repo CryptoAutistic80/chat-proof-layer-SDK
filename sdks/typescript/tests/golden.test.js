@@ -29,6 +29,7 @@ test("golden fixture digest and signature assertions are deterministic", async (
   assert.equal(bundle.created_at, expected.created_at);
   assert.equal(bundle.integrity.header_digest, expected.header_digest);
   assert.equal(bundle.integrity.bundle_root, expected.bundle_root);
+  assert.equal(bundle.integrity.bundle_root_algorithm, expected.bundle_root_algorithm);
   assert.equal(bundle.integrity.signature.kid, expected.signing_kid);
   assert.equal(bundle.integrity.signature.value, expected.signature_jws);
   assert.equal(signatureFixture, expected.signature_jws);
@@ -40,9 +41,9 @@ test("golden fixture digest and signature assertions are deterministic", async (
     actor: bundle.actor,
     subject: bundle.subject,
     context: bundle.context,
-    items: bundle.items,
-    artefacts: bundle.artefacts,
-    policy: bundle.policy
+    policy: bundle.policy,
+    item_count: bundle.items.length,
+    artefact_count: bundle.artefacts.length
   };
   const canonical = canonicalizeJson(projection);
   assert.deepEqual(canonical, canonicalFixture);
@@ -61,7 +62,11 @@ test("golden fixture digest and signature assertions are deterministic", async (
     assert.equal(bytes.length, entry.size);
   }
 
-  const orderedDigests = [expected.header_digest, ...bundle.artefacts.map((artefact) => artefact.digest)];
+  const orderedDigests = [
+    expected.header_digest,
+    ...bundle.items.map((item) => hashSha256(canonicalizeJson(item))),
+    ...bundle.artefacts.map((artefact) => hashSha256(canonicalizeJson(artefact)))
+  ];
   const rootOne = computeMerkleRoot(orderedDigests);
   const rootTwo = computeMerkleRoot(orderedDigests);
   assert.equal(rootOne, rootTwo);

@@ -1,5 +1,6 @@
 pub mod build;
 pub mod canon;
+pub mod disclosure;
 pub mod hash;
 pub mod merkle;
 pub mod schema;
@@ -12,12 +13,13 @@ pub mod bundle {
     pub use crate::schema::migration::{capture_input_v01_to_event, migrate_v01_to_v10};
     pub use crate::schema::v01::{CaptureInput, Inputs, ModelInfo, Outputs, Trace};
     pub use crate::schema::{
-        Actor, ActorRole, ArtefactMeta, ArtefactRef, BUNDLE_ROOT_ALGORITHM, BUNDLE_VERSION,
-        BundleValidationError, BundleVerificationError, CANONICALIZATION_ALGORITHM, CaptureEvent,
-        EncryptionPolicy, EvidenceBundle as ProofBundle, EvidenceContext, EvidenceItem,
-        HASH_ALGORITHM, Integrity, LlmInteractionEvidence, Policy, SIGNATURE_ALGORITHM,
-        SIGNATURE_FORMAT, SignatureInfo, Subject, TimestampToken, TransparencyReceipt,
-        VerificationSummary, validate_bundle_integrity_fields,
+        Actor, ActorRole, ArtefactMeta, ArtefactRef, BUNDLE_ROOT_ALGORITHM,
+        BUNDLE_ROOT_ALGORITHM_V2, BUNDLE_VERSION, BundleValidationError, BundleVerificationError,
+        CANONICALIZATION_ALGORITHM, CaptureEvent, EncryptionPolicy, EvidenceBundle as ProofBundle,
+        EvidenceContext, EvidenceItem, HASH_ALGORITHM, Integrity, LEGACY_BUNDLE_ROOT_ALGORITHM,
+        LlmInteractionEvidence, Policy, SIGNATURE_ALGORITHM, SIGNATURE_FORMAT, SignatureInfo,
+        Subject, TimestampToken, TransparencyReceipt, VerificationSummary,
+        validate_bundle_integrity_fields,
     };
 }
 
@@ -33,6 +35,10 @@ pub use bundle::{
     VerificationSummary, validate_bundle_integrity_fields,
 };
 pub use canon::{CanonError, canonicalize_json_strict, canonicalize_value, parse_json_strict};
+pub use disclosure::{
+    DisclosedArtefact, DisclosedItem, DisclosureError, RedactedBundle, RedactedVerificationSummary,
+    redact_bundle, verify_redacted_bundle,
+};
 pub use hash::{DigestError, parse_sha256_prefixed, sha256_prefixed, sha256_prefixed_file};
 pub use merkle::{
     InclusionProof, MerkleCommitment, MerkleError, ProofStep, SiblingPosition,
@@ -40,6 +46,10 @@ pub use merkle::{
 };
 pub use schema::migration::{capture_input_v01_to_event, migrate_v01_to_v10};
 pub use schema::v01::{CaptureInput as LegacyCaptureInput, ProofBundle as LegacyProofBundle};
+pub use schema::{
+    BUNDLE_ROOT_ALGORITHM_V2, LEGACY_BUNDLE_ROOT_ALGORITHM, artefact_commitment_digest,
+    item_commitment_digest,
+};
 pub use sign::{
     JwsHeader, KeyEncodingError, SignError, decode_private_key_pem, decode_public_key_pem,
     encode_private_key_pem, encode_public_key_pem, sign_bundle_root,

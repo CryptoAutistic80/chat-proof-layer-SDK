@@ -132,17 +132,13 @@ pub fn build_bundle(
 
     let canonical_header = bundle.canonical_header_bytes()?;
     let header_digest = sha256_prefixed(&canonical_header);
+    bundle.integrity.header_digest = header_digest.clone();
 
-    let mut ordered_digests = Vec::with_capacity(1 + bundle.artefacts.len());
-    ordered_digests.push(header_digest.clone());
-    ordered_digests.extend(bundle.artefacts.iter().map(|entry| entry.digest.clone()));
-
-    let commitment = compute_commitment(&ordered_digests)?;
+    let commitment = compute_commitment(&bundle.commitment_digests()?)?;
     let signature_value = sign_bundle_root(&commitment.root, signing_key, kid)?;
 
-    bundle.integrity.header_digest = header_digest;
     bundle.integrity.bundle_root = commitment.root;
-    bundle.integrity.bundle_root_algorithm = commitment.algorithm;
+    bundle.integrity.bundle_root_algorithm = BUNDLE_ROOT_ALGORITHM.to_string();
     bundle.integrity.signature.value = signature_value;
 
     Ok(bundle)

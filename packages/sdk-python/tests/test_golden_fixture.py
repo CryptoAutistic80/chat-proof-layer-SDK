@@ -27,6 +27,10 @@ class TestGoldenFixture(unittest.TestCase):
         self.assertEqual(bundle["created_at"], expected["created_at"])
         self.assertEqual(bundle["integrity"]["header_digest"], expected["header_digest"])
         self.assertEqual(bundle["integrity"]["bundle_root"], expected["bundle_root"])
+        self.assertEqual(
+            bundle["integrity"]["bundle_root_algorithm"],
+            expected["bundle_root_algorithm"],
+        )
         self.assertEqual(bundle["integrity"]["signature"]["kid"], expected["signing_kid"])
         self.assertEqual(bundle["integrity"]["signature"]["value"], expected["signature_jws"])
         self.assertEqual(signature_fixture, expected["signature_jws"])
@@ -38,9 +42,9 @@ class TestGoldenFixture(unittest.TestCase):
             "actor": bundle["actor"],
             "subject": bundle["subject"],
             "context": bundle["context"],
-            "items": bundle["items"],
-            "artefacts": bundle["artefacts"],
             "policy": bundle["policy"],
+            "item_count": len(bundle["items"]),
+            "artefact_count": len(bundle["artefacts"]),
         }
         canonical = canonicalize_json(projection)
         self.assertEqual(canonical, canonical_fixture)
@@ -57,7 +61,13 @@ class TestGoldenFixture(unittest.TestCase):
             self.assertEqual(hash_sha256(bytes_), entry["digest"])
             self.assertEqual(len(bytes_), entry["size"])
 
-        ordered_digests = [expected["header_digest"]] + [artefact["digest"] for artefact in bundle["artefacts"]]
+        ordered_digests = [expected["header_digest"]]
+        ordered_digests.extend(
+            hash_sha256(canonicalize_json(item)) for item in bundle["items"]
+        )
+        ordered_digests.extend(
+            hash_sha256(canonicalize_json(artefact)) for artefact in bundle["artefacts"]
+        )
         root_one = compute_merkle_root(ordered_digests)
         root_two = compute_merkle_root(ordered_digests)
         self.assertEqual(root_one, root_two)

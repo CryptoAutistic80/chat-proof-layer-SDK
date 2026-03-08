@@ -850,6 +850,7 @@ mod tests {
             log_public_key_pem: Some(log_public_key_pem),
             timestamp: TimestampTrustPolicy {
                 trust_anchor_pems: Vec::new(),
+                crl_pems: Vec::new(),
                 policy_oids: Vec::new(),
                 assurance_profile: Some(crate::timestamp::TimestampAssuranceProfile::Standard),
             },
@@ -869,6 +870,7 @@ mod tests {
             log_public_key_pem: None,
             timestamp: TimestampTrustPolicy {
                 trust_anchor_pems: Vec::new(),
+                crl_pems: Vec::new(),
                 policy_oids: Vec::new(),
                 assurance_profile: Some(crate::timestamp::TimestampAssuranceProfile::Standard),
             },

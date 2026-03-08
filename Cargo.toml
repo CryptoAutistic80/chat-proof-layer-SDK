@@ -44,3 +44,4 @@ tracing-subscriber = { version = "0.3.20", features = ["env-filter", "fmt"] }
 toml = "0.8.23"
 ulid = { version = "1.2.1", features = ["serde"] }
 x509-certificate = "0.25.0"
+x509-parser = { version = "0.18.0", features = ["verify"] }

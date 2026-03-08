@@ -21,6 +21,7 @@ sha2.workspace = true
 thiserror.workspace = true
 ulid.workspace = true
 x509-certificate.workspace = true
+x509-parser.workspace = true
 
 [dev-dependencies]
 rand.workspace = true

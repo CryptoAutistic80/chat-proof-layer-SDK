@@ -153,6 +153,10 @@ struct VaultTimestampFileConfig {
     #[serde(default)]
     trust_anchor_paths: Vec<String>,
     #[serde(default)]
+    crl_pems: Vec<String>,
+    #[serde(default)]
+    crl_paths: Vec<String>,
+    #[serde(default)]
     policy_oids: Vec<String>,
 }
 
@@ -541,6 +545,8 @@ struct TimestampConfig {
     assurance: Option<String>,
     #[serde(default)]
     trust_anchor_pems: Vec<String>,
+    #[serde(default)]
+    crl_pems: Vec<String>,
     #[serde(default)]
     policy_oids: Vec<String>,
 }
@@ -1072,6 +1078,12 @@ fn resolve_timestamp_file_config(
             .into_iter()
             .filter(|pem| !pem.trim().is_empty()),
     );
+    config.crl_pems.extend(
+        file_config
+            .crl_pems
+            .into_iter()
+            .filter(|pem| !pem.trim().is_empty()),
+    );
     config.policy_oids.extend(
         file_config
             .policy_oids
@@ -1084,6 +1096,11 @@ fn resolve_timestamp_file_config(
             &path,
             "timestamp trust anchor",
         )?);
+    }
+    for path in file_config.crl_paths {
+        config
+            .crl_pems
+            .push(read_config_text_file(base_dir, &path, "timestamp CRL")?);
     }
 
     validate_timestamp_config(config).map(Some)
@@ -1894,6 +1911,7 @@ async fn update_timestamp_config(
             "url": &config.url,
             "assurance": &config.assurance,
             "trust_anchor_count": config.trust_anchor_pems.len(),
+            "crl_count": config.crl_pems.len(),
             "policy_oid_count": config.policy_oids.len(),
         }),
     )
@@ -3483,6 +3501,7 @@ fn apply_receipt_to_bundle(
 fn timestamp_trust_policy(config: &TimestampConfig) -> Option<TimestampTrustPolicy> {
     let policy = TimestampTrustPolicy {
         trust_anchor_pems: config.trust_anchor_pems.clone(),
+        crl_pems: config.crl_pems.clone(),
         policy_oids: config.policy_oids.clone(),
         assurance_profile: parse_timestamp_assurance_profile(config.assurance.as_deref()),
     };
@@ -3678,6 +3697,14 @@ fn validate_timestamp_config(mut config: TimestampConfig) -> Result<TimestampCon
             (!trimmed.is_empty()).then(|| trimmed.to_string())
         })
         .collect();
+    config.crl_pems = config
+        .crl_pems
+        .into_iter()
+        .filter_map(|pem| {
+            let trimmed = pem.trim();
+            (!trimmed.is_empty()).then(|| trimmed.to_string())
+        })
+        .collect();
     config.policy_oids = config
         .policy_oids
         .into_iter()
@@ -3703,6 +3730,7 @@ fn validate_timestamp_config(mut config: TimestampConfig) -> Result<TimestampCon
     }
     validate_timestamp_trust_policy(&TimestampTrustPolicy {
         trust_anchor_pems: config.trust_anchor_pems.clone(),
+        crl_pems: config.crl_pems.clone(),
         policy_oids: config.policy_oids.clone(),
         assurance_profile: parse_timestamp_assurance_profile(config.assurance.as_deref()),
     })
@@ -3784,6 +3812,7 @@ fn default_timestamp_config() -> TimestampConfig {
         url: DEFAULT_TIMESTAMP_URL.to_string(),
         assurance: None,
         trust_anchor_pems: Vec::new(),
+        crl_pems: Vec::new(),
         policy_oids: Vec::new(),
     }
 }
@@ -4871,7 +4900,7 @@ mod tests {
     use tower::ServiceExt;
     use x509_certificate::{
         CapturedX509Certificate, DigestAlgorithm, InMemorySigningKeyPair, KeyAlgorithm,
-        X509CertificateBuilder,
+        X509CertificateBuilder, certificate::KeyUsage,
     };
 
     fn sample_capture() -> CaptureInput {
@@ -5077,9 +5106,30 @@ mod tests {
             .append_common_name_utf8_string("proof-layer-test-tsa")
             .unwrap();
         builder.subject().append_country_utf8_string("GB").unwrap();
+        builder.constraint_not_ca();
+        builder.key_usage(KeyUsage::DigitalSignature);
+        builder.add_extension_der_data(
+            Oid(Bytes::copy_from_slice(&[85, 29, 37])),
+            true,
+            [
+                0x30, 0x0a, 0x06, 0x08, 0x2b, 0x06, 0x01, 0x05, 0x05, 0x07, 0x03, 0x08,
+            ],
+        );
         builder
             .create_with_random_keypair(KeyAlgorithm::Ed25519)
             .unwrap()
+    }
+
+    fn test_timestamp_crl_pem() -> String {
+        r#"-----BEGIN X509 CRL-----
+MIHmMIGNAgEBMAoGCCqGSM49BAMCMCwxHTAbBgNVBAMMFHByb29mLWxheWVyLXRl
+c3QtdHNhMQswCQYDVQQGEwJHQhcNMjYwMzA3MjE1MTI3WhcNMjYwNDA2MjE1MTI3
+WqAwMC4wHwYDVR0jBBgwFoAUpFIKiTRJ7cMFxu7WWuwKitJqAaMwCwYDVR0UBAQC
+AhAAMAoGCCqGSM49BAMCA0gAMEUCIDgOKS2Yghk4zHOJTpUFBiiCjEvlrEwml/S+
+lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
+-----END X509 CRL-----
+"#
+        .to_string()
     }
 
     fn build_package_bytes(
@@ -5203,6 +5253,8 @@ mod tests {
                 assurance: Some("qualified".to_string()),
                 trust_anchor_pems: vec![tsa_certificate.encode_pem()],
                 trust_anchor_paths: Vec::new(),
+                crl_pems: vec![test_timestamp_crl_pem()],
+                crl_paths: Vec::new(),
                 policy_oids: vec!["1.2.3.4".to_string()],
             }),
             transparency: Some(VaultTransparencyFileConfig {
@@ -6500,6 +6552,7 @@ mod tests {
                 url: "https://tsa.example.test".to_string(),
                 assurance: Some("qualified".to_string()),
                 trust_anchor_pems: vec![tsa_certificate.encode_pem()],
+                crl_pems: vec![test_timestamp_crl_pem()],
                 policy_oids: vec!["1.2.3.4".to_string()],
             }),
             transparency_config: Some(TransparencyConfig {
@@ -7005,6 +7058,7 @@ mod tests {
                     url: "https://tsa.example.test".to_string(),
                     assurance: Some("Qualified".to_string()),
                     trust_anchor_pems: vec![tsa_certificate_pem],
+                    crl_pems: vec![test_timestamp_crl_pem()],
                     policy_oids: vec!["1.2.3.4".to_string()],
                 })
                 .unwrap(),
@@ -7024,6 +7078,7 @@ mod tests {
                 url: "https://tsa.example.test".to_string(),
                 assurance: Some("qualified".to_string()),
                 trust_anchor_pems: vec![expected_trust_anchor_pem],
+                crl_pems: vec![test_timestamp_crl_pem().trim().to_string()],
                 policy_oids: vec!["1.2.3.4".to_string()],
             }
         );
@@ -7100,6 +7155,7 @@ mod tests {
                     url: "https://tsa.example.test".to_string(),
                     assurance: Some("qualified".to_string()),
                     trust_anchor_pems: Vec::new(),
+                    crl_pems: Vec::new(),
                     policy_oids: Vec::new(),
                 })
                 .unwrap(),

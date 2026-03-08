@@ -169,11 +169,12 @@ Implementations MUST execute, in order:
 6. Verify JWS signature over UTF-8 `bundle_root` bytes using issuer public key.
 7. If timestamp verification is requested and `timestamp` is present, verify the RFC 3161 token CMS signature and ensure its message imprint matches SHA-256 over UTF-8 `integrity.bundle_root` bytes.
 8. If expected RFC 3161 policy OIDs are supplied, additionally require `TSTInfo.policy` to match one of them.
-9. If timestamp trust anchors are supplied, additionally require the RFC 3161 signer certificate to chain to one of those anchors and to be valid at `genTime`. Revocation and qualified/eIDAS trust policy are out of scope for the PoC.
-10. If a timestamp assurance profile is supplied, enforce its configured requirements. In the current PoC, `qualified` means the verifier must be configured with both trust anchors and expected policy OIDs, and both checks must succeed.
-11. If receipt verification is requested and `receipt` is present, verify the Rekor receipt structure, require inclusion-proof and signed-entry-timestamp fields, verify the entry UUID equals the RFC 6962 leaf hash of the Rekor body, recompute the Rekor root from the inclusion proof, decode the embedded `rfc3161` entry body, and verify that embedded RFC 3161 token against UTF-8 `integrity.bundle_root` bytes.
-12. If a Rekor log public key is supplied, canonicalize `{body, integratedTime, logID, logIndex}`, verify the signed-entry-timestamp signature over those canonical bytes, and require `logID == sha256(SPKI_DER(public_key))`.
-13. Report optional checks (timestamp/receipt) as skipped if absent or not requested.
+9. If timestamp trust anchors are supplied, additionally require the RFC 3161 signer certificate to chain to one of those anchors, to be valid at `genTime`, and to present a time-stamping-appropriate certificate profile.
+10. If timestamp CRLs are supplied, additionally require the applicable CRL to be valid at `genTime`, signed by the issuer certificate, and not to revoke the TSA signer certificate.
+11. If a timestamp assurance profile is supplied, enforce its configured requirements. In the current PoC, `qualified` means the verifier must be configured with trust anchors, expected policy OIDs, and CRLs, and those checks must all succeed.
+12. If receipt verification is requested and `receipt` is present, verify the Rekor receipt structure, require inclusion-proof and signed-entry-timestamp fields, verify the entry UUID equals the RFC 6962 leaf hash of the Rekor body, recompute the Rekor root from the inclusion proof, decode the embedded `rfc3161` entry body, and verify that embedded RFC 3161 token against UTF-8 `integrity.bundle_root` bytes.
+13. If a Rekor log public key is supplied, canonicalize `{body, integratedTime, logID, logIndex}`, verify the signed-entry-timestamp signature over those canonical bytes, and require `logID == sha256(SPKI_DER(public_key))`.
+14. Report optional checks (timestamp/receipt) as skipped if absent or not requested.
 
 Any required check failure MUST produce an invalid result.
 

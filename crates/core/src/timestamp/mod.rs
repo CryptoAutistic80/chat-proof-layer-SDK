@@ -12,6 +12,10 @@ use cryptographic_message_syntax::{
 use std::str::FromStr;
 use thiserror::Error;
 use x509_certificate::{CapturedX509Certificate, DigestAlgorithm};
+use x509_parser::{
+    certificate::X509Certificate as ParsedX509Certificate, pem::Pem, prelude::FromDer,
+    revocation_list::CertificateRevocationList,
+};
 
 pub const RFC3161_TIMESTAMP_KIND: &str = "rfc3161";
 pub const DIGICERT_TIMESTAMP_URL: &str = "http://timestamp.digicert.com";
@@ -34,6 +38,8 @@ pub struct TimestampTrustPolicy {
     #[serde(default)]
     pub trust_anchor_pems: Vec<String>,
     #[serde(default)]
+    pub crl_pems: Vec<String>,
+    #[serde(default)]
     pub policy_oids: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub assurance_profile: Option<TimestampAssuranceProfile>,
@@ -44,6 +50,7 @@ impl TimestampTrustPolicy {
         self.trust_anchor_pems
             .iter()
             .all(|pem| pem.trim().is_empty())
+            && self.crl_pems.iter().all(|pem| pem.trim().is_empty())
             && self
                 .policy_oids
                 .iter()
@@ -140,6 +147,8 @@ pub struct TimestampVerification {
     #[serde(default, skip_serializing_if = "is_false")]
     pub chain_verified: bool,
     #[serde(default, skip_serializing_if = "is_false")]
+    pub certificate_profile_verified: bool,
+    #[serde(default, skip_serializing_if = "is_false")]
     pub revocation_checked: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub signer_subject: Option<String>,
@@ -183,10 +192,16 @@ pub enum TimestampError {
     QualifiedAssuranceRequiresPolicyOids,
     #[error("qualified timestamp assurance requires at least one PEM trust anchor certificate")]
     QualifiedAssuranceRequiresTrustAnchors,
+    #[error("qualified timestamp assurance requires at least one PEM X509 CRL")]
+    QualifiedAssuranceRequiresCrls,
     #[error("timestamp trust policy requires at least one PEM trust anchor certificate")]
     MissingTrustAnchors,
+    #[error("timestamp revocation checking requires at least one PEM trust anchor certificate")]
+    RevocationRequiresTrustAnchors,
     #[error("timestamp trust anchor certificate is invalid: {0}")]
     InvalidTrustAnchor(String),
+    #[error("timestamp CRL is invalid: {0}")]
+    InvalidCrl(String),
     #[error("timestamp signer certificate was not found in the CMS certificate set")]
     MissingSignerCertificate,
     #[error("timestamp certificate {subject} was not valid at {generated_at}")]
@@ -194,6 +209,27 @@ pub enum TimestampError {
         subject: String,
         generated_at: String,
     },
+    #[error("timestamp signer certificate {subject} asserted CA=true")]
+    SignerCertificateIsCa { subject: String },
+    #[error(
+        "timestamp signer certificate {subject} must include a critical ExtendedKeyUsage limited to timeStamping"
+    )]
+    SignerCertificateInvalidExtendedKeyUsage { subject: String },
+    #[error("timestamp signer certificate {subject} key usage is not valid for time stamping")]
+    SignerCertificateInvalidKeyUsage { subject: String },
+    #[error("timestamp CRL issuer certificate was not found for signer certificate {subject}")]
+    MissingCrlIssuerCertificate { subject: String },
+    #[error("no applicable timestamp CRL was found for signer certificate {subject}")]
+    MissingApplicableCrl { subject: String },
+    #[error("timestamp CRL for signer certificate {subject} was not valid at {generated_at}")]
+    CrlNotValidAtGenerationTime {
+        subject: String,
+        generated_at: String,
+    },
+    #[error("timestamp CRL signature verification failed for signer certificate {subject}")]
+    CrlSignatureVerification { subject: String },
+    #[error("timestamp signer certificate {subject} was revoked at {revoked_at}")]
+    SignerCertificateRevoked { subject: String, revoked_at: String },
     #[error("timestamp signer certificate {subject} did not chain to a trusted anchor")]
     SignerCertificateNotTrusted { subject: String },
 }
@@ -235,12 +271,21 @@ pub fn validate_timestamp_trust_policy(
         if !has_trust_anchors(policy) {
             return Err(TimestampError::QualifiedAssuranceRequiresTrustAnchors);
         }
+        if !has_crls(policy) {
+            return Err(TimestampError::QualifiedAssuranceRequiresCrls);
+        }
+    }
+    if has_crls(policy) && !has_trust_anchors(policy) {
+        return Err(TimestampError::RevocationRequiresTrustAnchors);
     }
     for policy_oid in &policy.policy_oids {
         parse_expected_policy_oid(policy_oid)?;
     }
     if has_trust_anchors(policy) {
         load_trust_anchors(policy).map(|_| ())?;
+    }
+    if has_crls(policy) {
+        load_crls(policy).map(|_| ())?;
     }
     Ok(())
 }
@@ -318,18 +363,38 @@ fn verify_timestamp_internal(
             actual: policy_oid.clone(),
         });
     }
-    let (trusted, chain_verified, signer_subject, trust_anchor_subject) =
-        if let Some(policy) = policy.filter(|policy| has_trust_anchors(policy)) {
-            let trust_anchors = load_trust_anchors(policy)?;
-            let (signer_subject, trust_anchor_subject) =
-                verify_timestamp_trust(&signed_data, generated_at_time, &trust_anchors)?;
-            (true, true, Some(signer_subject), Some(trust_anchor_subject))
+    let (
+        trusted,
+        chain_verified,
+        certificate_profile_verified,
+        revocation_checked,
+        signer_subject,
+        trust_anchor_subject,
+    ) = if let Some(policy) = policy.filter(|policy| has_trust_anchors(policy)) {
+        let trust_anchors = load_trust_anchors(policy)?;
+        let crls = if has_crls(policy) {
+            load_crls(policy)?
         } else {
-            (false, false, None, None)
+            Vec::new()
         };
+        let trust_result =
+            verify_timestamp_trust(&signed_data, generated_at_time, &trust_anchors, &crls)?;
+        (
+            true,
+            true,
+            trust_result.certificate_profile_verified,
+            trust_result.revocation_checked,
+            Some(trust_result.signer_subject),
+            Some(trust_result.trust_anchor_subject),
+        )
+    } else {
+        (false, false, false, false, None, None)
+    };
     let assurance_profile_verified = match assurance_profile {
         Some(TimestampAssuranceProfile::Standard) => true,
-        Some(TimestampAssuranceProfile::Qualified) => policy_oid_verified && trusted,
+        Some(TimestampAssuranceProfile::Qualified) => {
+            policy_oid_verified && trusted && certificate_profile_verified && revocation_checked
+        }
         None => false,
     };
 
@@ -347,7 +412,8 @@ fn verify_timestamp_internal(
         policy_oid_verified,
         trusted,
         chain_verified,
-        revocation_checked: false,
+        certificate_profile_verified,
+        revocation_checked,
         signer_subject,
         trust_anchor_subject,
     })
@@ -375,11 +441,52 @@ fn load_trust_anchors(
     Ok(trust_anchors)
 }
 
+fn load_crls(policy: &TimestampTrustPolicy) -> Result<Vec<Vec<u8>>, TimestampError> {
+    let mut crls = Vec::new();
+
+    for pem_bundle in &policy.crl_pems {
+        let trimmed = pem_bundle.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        let mut found_crl = false;
+        for pem in Pem::iter_from_buffer(trimmed.as_bytes()) {
+            let pem = pem.map_err(|err| TimestampError::InvalidCrl(err.to_string()))?;
+            if !pem.label.contains("CRL") {
+                continue;
+            }
+            CertificateRevocationList::from_der(&pem.contents)
+                .map_err(|err| TimestampError::InvalidCrl(err.to_string()))?;
+            crls.push(pem.contents);
+            found_crl = true;
+        }
+
+        if !found_crl {
+            return Err(TimestampError::InvalidCrl(
+                "expected at least one PEM X509 CRL block".to_string(),
+            ));
+        }
+    }
+
+    if crls.is_empty() {
+        return Err(TimestampError::InvalidCrl(
+            "expected at least one PEM X509 CRL block".to_string(),
+        ));
+    }
+
+    Ok(crls)
+}
+
 fn has_trust_anchors(policy: &TimestampTrustPolicy) -> bool {
     policy
         .trust_anchor_pems
         .iter()
         .any(|pem| !pem.trim().is_empty())
+}
+
+fn has_crls(policy: &TimestampTrustPolicy) -> bool {
+    policy.crl_pems.iter().any(|pem| !pem.trim().is_empty())
 }
 
 fn has_expected_policy_oids(policy: &TimestampTrustPolicy) -> bool {
@@ -389,14 +496,24 @@ fn has_expected_policy_oids(policy: &TimestampTrustPolicy) -> bool {
         .any(|policy_oid| !policy_oid.trim().is_empty())
 }
 
+struct TimestampTrustResult {
+    signer_subject: String,
+    trust_anchor_subject: String,
+    certificate_profile_verified: bool,
+    revocation_checked: bool,
+}
+
 fn verify_timestamp_trust(
     signed_data: &SignedData,
     generated_at: DateTime<Utc>,
     trust_anchors: &[CapturedX509Certificate],
-) -> Result<(String, String), TimestampError> {
+    crls: &[Vec<u8>],
+) -> Result<TimestampTrustResult, TimestampError> {
     let embedded_certificates = signed_data.certificates().collect::<Vec<_>>();
     let mut signer_subject = None;
     let mut trust_anchor_subject = None;
+    let mut certificate_profile_verified = false;
+    let revocation_required = !crls.is_empty();
 
     for signer in signed_data.signers() {
         let signer_certificate = find_signer_certificate(&embedded_certificates, signer)?;
@@ -405,8 +522,14 @@ fn verify_timestamp_trust(
             &embedded_certificates,
             trust_anchors,
         )?;
-        for certificate in chain {
+        for certificate in &chain {
             ensure_certificate_valid_at(certificate, generated_at)?;
+        }
+        ensure_timestamp_signer_certificate_profile(signer_certificate)?;
+
+        if revocation_required {
+            let issuer_certificate = chain.get(1).copied().unwrap_or(signer_certificate);
+            ensure_signer_not_revoked(signer_certificate, issuer_certificate, generated_at, crls)?;
         }
 
         if signer_subject.is_none() {
@@ -415,12 +538,16 @@ fn verify_timestamp_trust(
         if trust_anchor_subject.is_none() {
             trust_anchor_subject = Some(certificate_display_name(anchor));
         }
+        certificate_profile_verified = true;
     }
 
-    Ok((
-        signer_subject.unwrap_or_else(|| "unnamed-certificate".to_string()),
-        trust_anchor_subject.unwrap_or_else(|| "unnamed-certificate".to_string()),
-    ))
+    Ok(TimestampTrustResult {
+        signer_subject: signer_subject.unwrap_or_else(|| "unnamed-certificate".to_string()),
+        trust_anchor_subject: trust_anchor_subject
+            .unwrap_or_else(|| "unnamed-certificate".to_string()),
+        certificate_profile_verified,
+        revocation_checked: revocation_required,
+    })
 }
 
 fn find_signer_certificate<'a>(
@@ -456,7 +583,10 @@ fn resolve_chain_to_trust_anchor<'a>(
     let max_depth = embedded_certificates.len() + trust_anchors.len() + 1;
 
     for _ in 0..max_depth {
-        if let Some(anchor) = trust_anchors.iter().find(|anchor| *anchor == current) {
+        if let Some(anchor) = trust_anchors
+            .iter()
+            .find(|anchor| certificates_match(anchor, current))
+        {
             return Ok((anchor, chain));
         }
 
@@ -492,6 +622,124 @@ fn ensure_certificate_valid_at(
             generated_at: generated_at.to_rfc3339(),
         })
     }
+}
+
+fn certificates_match(left: &CapturedX509Certificate, right: &CapturedX509Certificate) -> bool {
+    left == right
+        || (left.subject_name() == right.subject_name()
+            && left.issuer_name() == right.issuer_name()
+            && left.serial_number_asn1() == right.serial_number_asn1()
+            && left.public_key_data().as_ref() == right.public_key_data().as_ref())
+}
+
+fn ensure_timestamp_signer_certificate_profile(
+    certificate: &CapturedX509Certificate,
+) -> Result<(), TimestampError> {
+    let subject = certificate_display_name(certificate);
+    let (_, parsed) = ParsedX509Certificate::from_der(certificate.constructed_data())
+        .map_err(|err| TimestampError::InvalidTrustAnchor(err.to_string()))?;
+
+    if parsed
+        .basic_constraints()
+        .map_err(|err| TimestampError::InvalidTrustAnchor(err.to_string()))?
+        .is_some_and(|basic| basic.value.ca)
+    {
+        return Err(TimestampError::SignerCertificateIsCa { subject });
+    }
+
+    let eku = parsed
+        .extended_key_usage()
+        .map_err(|err| TimestampError::InvalidTrustAnchor(err.to_string()))?
+        .ok_or_else(
+            || TimestampError::SignerCertificateInvalidExtendedKeyUsage {
+                subject: subject.clone(),
+            },
+        )?;
+    let eku_value = eku.value;
+    if !eku.critical
+        || !eku_value.time_stamping
+        || eku_value.any
+        || eku_value.server_auth
+        || eku_value.client_auth
+        || eku_value.code_signing
+        || eku_value.email_protection
+        || eku_value.ocsp_signing
+        || !eku_value.other.is_empty()
+    {
+        return Err(TimestampError::SignerCertificateInvalidExtendedKeyUsage { subject });
+    }
+
+    if let Some(key_usage) = parsed
+        .key_usage()
+        .map_err(|err| TimestampError::InvalidTrustAnchor(err.to_string()))?
+    {
+        let key_usage = key_usage.value;
+        let signing_allowed = key_usage.digital_signature() || key_usage.non_repudiation();
+        let disallowed_usage = key_usage.key_encipherment()
+            || key_usage.data_encipherment()
+            || key_usage.key_agreement()
+            || key_usage.key_cert_sign()
+            || key_usage.crl_sign()
+            || key_usage.encipher_only()
+            || key_usage.decipher_only();
+        if !signing_allowed || disallowed_usage {
+            return Err(TimestampError::SignerCertificateInvalidKeyUsage { subject });
+        }
+    }
+
+    Ok(())
+}
+
+fn ensure_signer_not_revoked(
+    signer_certificate: &CapturedX509Certificate,
+    issuer_certificate: &CapturedX509Certificate,
+    generated_at: DateTime<Utc>,
+    crls: &[Vec<u8>],
+) -> Result<(), TimestampError> {
+    let subject = certificate_display_name(signer_certificate);
+    let generated_at_ts = generated_at.timestamp();
+    let (_, parsed_signer) = ParsedX509Certificate::from_der(signer_certificate.constructed_data())
+        .map_err(|err| TimestampError::InvalidTrustAnchor(err.to_string()))?;
+    let (_, parsed_issuer) = ParsedX509Certificate::from_der(issuer_certificate.constructed_data())
+        .map_err(|err| TimestampError::InvalidTrustAnchor(err.to_string()))?;
+
+    for crl_der in crls {
+        let (_, crl) = CertificateRevocationList::from_der(crl_der)
+            .map_err(|err| TimestampError::InvalidCrl(err.to_string()))?;
+        if crl.issuer() != parsed_issuer.subject() {
+            continue;
+        }
+
+        if crl.last_update().timestamp() > generated_at_ts
+            || crl
+                .next_update()
+                .is_some_and(|next_update| next_update.timestamp() < generated_at_ts)
+        {
+            return Err(TimestampError::CrlNotValidAtGenerationTime {
+                subject: subject.clone(),
+                generated_at: generated_at.to_rfc3339(),
+            });
+        }
+
+        crl.verify_signature(parsed_issuer.public_key())
+            .map_err(|_| TimestampError::CrlSignatureVerification {
+                subject: subject.clone(),
+            })?;
+
+        if let Some(revoked) = crl
+            .iter_revoked_certificates()
+            .find(|revoked| revoked.raw_serial() == parsed_signer.raw_serial())
+        {
+            return Err(TimestampError::SignerCertificateRevoked {
+                subject,
+                revoked_at: revoked.revocation_date.to_datetime().to_string(),
+            });
+        }
+
+        return Ok(());
+    }
+
+    Err(TimestampError::MissingApplicableCrl { subject })
 }
 
 fn certificate_display_name(certificate: &CapturedX509Certificate) -> String {
@@ -546,11 +794,68 @@ mod tests {
     };
     use x509_certificate::{
         CapturedX509Certificate, InMemorySigningKeyPair, KeyAlgorithm, X509CertificateBuilder,
+        certificate::KeyUsage,
     };
 
     struct StaticTimestampProvider {
         token: TimestampToken,
     }
+
+    const FIXTURE_ROOT_CERT_PEM: &str = r#"-----BEGIN CERTIFICATE-----
+MIICBjCCAaygAwIBAgIUU7PBh7taLAmG19BY8phnDDsZVlwwCgYIKoZIzj0EAwIw
+LDEdMBsGA1UEAwwUcHJvb2YtbGF5ZXItdGVzdC10c2ExCzAJBgNVBAYTAkdCMB4X
+DTI2MDMwNzIxNTEyN1oXDTI3MDMwNzIxNTEyN1owLDEdMBsGA1UEAwwUcHJvb2Yt
+bGF5ZXItdGVzdC10c2ExCzAJBgNVBAYTAkdCMFkwEwYHKoZIzj0CAQYIKoZIzj0D
+AQcDQgAEwxuCssNgu7tBvShQqgixNy2HxFXvG0Vl7+s543A6KD/bwu4lrBxpWvdl
+/jh2PIoqiI6437pzD12QPwl0edB7uKOBqzCBqDAdBgNVHQ4EFgQUpFIKiTRJ7cMF
+xu7WWuwKitJqAaMwUQYDVR0jBEowSKEwpC4wLDEdMBsGA1UEAwwUcHJvb2YtbGF5
+ZXItdGVzdC10c2ExCzAJBgNVBAYTAkdCghRTs8GHu1osCYbX0FjymGcMOxlWXDAM
+BgNVHRMBAf8EAjAAMA4GA1UdDwEB/wQEAwIHgDAWBgNVHSUBAf8EDDAKBggrBgEF
+BQcDCDAKBggqhkjOPQQDAgNIADBFAiBM+ejhtT8tdJgaTcIjU6rCIQN6Jj/ilu4W
+cZpYdU8oMQIhAIa52nxpcwMRyZIA7YIEGMYZpC8ln3j0B2aegACNVZG9
+-----END CERTIFICATE-----
+"#;
+
+    const FIXTURE_TSA_CERT_PEM: &str = r#"-----BEGIN CERTIFICATE-----
+MIICBjCCAaygAwIBAgIUU7PBh7taLAmG19BY8phnDDsZVlwwCgYIKoZIzj0EAwIw
+LDEdMBsGA1UEAwwUcHJvb2YtbGF5ZXItdGVzdC10c2ExCzAJBgNVBAYTAkdCMB4X
+DTI2MDMwNzIxNTEyN1oXDTI3MDMwNzIxNTEyN1owLDEdMBsGA1UEAwwUcHJvb2Yt
+bGF5ZXItdGVzdC10c2ExCzAJBgNVBAYTAkdCMFkwEwYHKoZIzj0CAQYIKoZIzj0D
+AQcDQgAEwxuCssNgu7tBvShQqgixNy2HxFXvG0Vl7+s543A6KD/bwu4lrBxpWvdl
+/jh2PIoqiI6437pzD12QPwl0edB7uKOBqzCBqDAdBgNVHQ4EFgQUpFIKiTRJ7cMF
+xu7WWuwKitJqAaMwUQYDVR0jBEowSKEwpC4wLDEdMBsGA1UEAwwUcHJvb2YtbGF5
+ZXItdGVzdC10c2ExCzAJBgNVBAYTAkdCghRTs8GHu1osCYbX0FjymGcMOxlWXDAM
+BgNVHRMBAf8EAjAAMA4GA1UdDwEB/wQEAwIHgDAWBgNVHSUBAf8EDDAKBggrBgEF
+BQcDCDAKBggqhkjOPQQDAgNIADBFAiBM+ejhtT8tdJgaTcIjU6rCIQN6Jj/ilu4W
+cZpYdU8oMQIhAIa52nxpcwMRyZIA7YIEGMYZpC8ln3j0B2aegACNVZG9
+-----END CERTIFICATE-----
+"#;
+
+    const FIXTURE_TSA_KEY_PEM: &str = r#"-----BEGIN PRIVATE KEY-----
+MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQg+vaAJTU2Ob9P93ed
+/t7V2Nqa5+24UlRSlYGjpUh0QvqhRANCAATDG4Kyw2C7u0G9KFCqCLE3LYfEVe8b
+RWXv6znjcDooP9vC7iWsHGla92X+OHY8iiqIjrjfunMPXZA/CXR50Hu4
+-----END PRIVATE KEY-----
+"#;
+
+    const FIXTURE_EMPTY_CRL_PEM: &str = r#"-----BEGIN X509 CRL-----
+MIHmMIGNAgEBMAoGCCqGSM49BAMCMCwxHTAbBgNVBAMMFHByb29mLWxheWVyLXRl
+c3QtdHNhMQswCQYDVQQGEwJHQhcNMjYwMzA3MjE1MTI3WhcNMjYwNDA2MjE1MTI3
+WqAwMC4wHwYDVR0jBBgwFoAUpFIKiTRJ7cMFxu7WWuwKitJqAaMwCwYDVR0UBAQC
+AhAAMAoGCCqGSM49BAMCA0gAMEUCIDgOKS2Yghk4zHOJTpUFBiiCjEvlrEwml/S+
+lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
+-----END X509 CRL-----
+"#;
+
+    const FIXTURE_REVOKED_CRL_PEM: &str = r#"-----BEGIN X509 CRL-----
+MIIBDzCBtgIBATAKBggqhkjOPQQDAjAsMR0wGwYDVQQDDBRwcm9vZi1sYXllci10
+ZXN0LXRzYTELMAkGA1UEBhMCR0IXDTI2MDMwNzIxNTEyN1oXDTI2MDQwNjIxNTEy
+N1owJzAlAhRTs8GHu1osCYbX0FjymGcMOxlWXBcNMjYwMzA3MjE1MTI3WqAwMC4w
+HwYDVR0jBBgwFoAUpFIKiTRJ7cMFxu7WWuwKitJqAaMwCwYDVR0UBAQCAhABMAoG
+CCqGSM49BAMCA0gAMEUCIQDcS8DN0FLpKwFW61x4dbzL6yaf11ufqc27ob4CaPr0
+QAIgPxprcGWSAwfCXug9lIZY8wlqWqLLMKxkWpyq3B/Rp6g=
+-----END X509 CRL-----
+"#;
 
     impl TimestampProvider for StaticTimestampProvider {
         fn timestamp(&self, _digest: &str) -> Result<TimestampToken, TimestampError> {
@@ -611,6 +916,7 @@ mod tests {
         );
         let policy = TimestampTrustPolicy {
             trust_anchor_pems: vec![certificate.encode_pem()],
+            crl_pems: Vec::new(),
             policy_oids: Vec::new(),
             assurance_profile: None,
         };
@@ -637,6 +943,7 @@ mod tests {
         let token = build_test_timestamp_token(digest, Some("test-tsa"));
         let policy = TimestampTrustPolicy {
             trust_anchor_pems: Vec::new(),
+            crl_pems: Vec::new(),
             policy_oids: vec!["1.2.3.4".to_string()],
             assurance_profile: None,
         };
@@ -660,6 +967,7 @@ mod tests {
         let (untrusted_anchor, _) = build_test_certificate(Duration::hours(6));
         let policy = TimestampTrustPolicy {
             trust_anchor_pems: vec![untrusted_anchor.encode_pem()],
+            crl_pems: Vec::new(),
             policy_oids: Vec::new(),
             assurance_profile: None,
         };
@@ -683,6 +991,7 @@ mod tests {
         );
         let policy = TimestampTrustPolicy {
             trust_anchor_pems: vec![certificate.encode_pem()],
+            crl_pems: Vec::new(),
             policy_oids: Vec::new(),
             assurance_profile: None,
         };
@@ -700,6 +1009,7 @@ mod tests {
         let token = build_test_timestamp_token(digest, Some("test-tsa"));
         let policy = TimestampTrustPolicy {
             trust_anchor_pems: Vec::new(),
+            crl_pems: Vec::new(),
             policy_oids: vec!["1.2.3.5".to_string()],
             assurance_profile: None,
         };
@@ -718,6 +1028,7 @@ mod tests {
         );
         let policy = TimestampTrustPolicy {
             trust_anchor_pems: vec![certificate.encode_pem()],
+            crl_pems: Vec::new(),
             policy_oids: Vec::new(),
             assurance_profile: Some(TimestampAssuranceProfile::Qualified),
         };
@@ -733,6 +1044,7 @@ mod tests {
     fn validate_timestamp_trust_policy_rejects_qualified_without_trust_anchors() {
         let policy = TimestampTrustPolicy {
             trust_anchor_pems: Vec::new(),
+            crl_pems: Vec::new(),
             policy_oids: vec!["1.2.3.4".to_string()],
             assurance_profile: Some(TimestampAssuranceProfile::Qualified),
         };
@@ -745,7 +1057,120 @@ mod tests {
     }
 
     #[test]
-    fn verify_timestamp_with_policy_accepts_qualified_assurance_profile() {
+    fn validate_timestamp_trust_policy_rejects_qualified_without_crls() {
+        let (_, certificate) = build_timestamp_token_fixture(
+            "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            Some("test-tsa"),
+            Utc::now(),
+            Duration::hours(6),
+        );
+        let policy = TimestampTrustPolicy {
+            trust_anchor_pems: vec![certificate.encode_pem()],
+            crl_pems: Vec::new(),
+            policy_oids: vec!["1.2.3.4".to_string()],
+            assurance_profile: Some(TimestampAssuranceProfile::Qualified),
+        };
+
+        let err = validate_timestamp_trust_policy(&policy).unwrap_err();
+        assert!(matches!(
+            err,
+            TimestampError::QualifiedAssuranceRequiresCrls
+        ));
+    }
+
+    #[test]
+    fn validate_timestamp_trust_policy_rejects_crls_without_trust_anchors() {
+        let policy = TimestampTrustPolicy {
+            trust_anchor_pems: Vec::new(),
+            crl_pems: vec![FIXTURE_EMPTY_CRL_PEM.to_string()],
+            policy_oids: Vec::new(),
+            assurance_profile: None,
+        };
+
+        let err = validate_timestamp_trust_policy(&policy).unwrap_err();
+        assert!(matches!(
+            err,
+            TimestampError::RevocationRequiresTrustAnchors
+        ));
+    }
+
+    #[test]
+    fn verify_timestamp_with_policy_rejects_invalid_tsa_certificate_profile() {
+        let digest = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        let generated_at = Utc::now();
+        let (certificate, signing_key) = build_unprofiled_test_certificate(Duration::hours(6));
+        let token = TimestampToken {
+            kind: RFC3161_TIMESTAMP_KIND.to_string(),
+            provider: Some("test-tsa".to_string()),
+            token_base64: Base64::encode_string(&build_test_signed_data_der(
+                digest,
+                generated_at,
+                Some((&certificate, &signing_key)),
+            )),
+        };
+        let policy = TimestampTrustPolicy {
+            trust_anchor_pems: vec![certificate.encode_pem()],
+            crl_pems: Vec::new(),
+            policy_oids: Vec::new(),
+            assurance_profile: None,
+        };
+
+        let err = verify_timestamp_with_policy(&token, digest, &policy).unwrap_err();
+        assert!(matches!(
+            err,
+            TimestampError::SignerCertificateInvalidExtendedKeyUsage { .. }
+        ));
+    }
+
+    #[test]
+    fn verify_timestamp_with_policy_accepts_non_revoked_crl() {
+        let digest = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        let generated_at = chrono::DateTime::parse_from_rfc3339("2026-03-07T21:51:27Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        let token = build_crl_backed_timestamp_token(digest, Some("test-tsa"), generated_at);
+        let policy = TimestampTrustPolicy {
+            trust_anchor_pems: vec![FIXTURE_ROOT_CERT_PEM.to_string()],
+            crl_pems: vec![FIXTURE_EMPTY_CRL_PEM.to_string()],
+            policy_oids: vec!["1.2.3.4".to_string()],
+            assurance_profile: Some(TimestampAssuranceProfile::Qualified),
+        };
+
+        let verification = verify_timestamp_with_policy(&token, digest, &policy).unwrap();
+        assert!(verification.trusted);
+        assert!(verification.chain_verified);
+        assert!(verification.certificate_profile_verified);
+        assert!(verification.revocation_checked);
+        assert!(verification.assurance_profile_verified);
+        assert_eq!(
+            verification.trust_anchor_subject.as_deref(),
+            Some("proof-layer-test-tsa")
+        );
+    }
+
+    #[test]
+    fn verify_timestamp_with_policy_rejects_revoked_signer_certificate() {
+        let digest = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        let generated_at = chrono::DateTime::parse_from_rfc3339("2026-03-07T21:51:27Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        let token = build_crl_backed_timestamp_token(digest, Some("test-tsa"), generated_at);
+        let policy = TimestampTrustPolicy {
+            trust_anchor_pems: vec![FIXTURE_ROOT_CERT_PEM.to_string()],
+            crl_pems: vec![FIXTURE_REVOKED_CRL_PEM.to_string()],
+            policy_oids: vec!["1.2.3.4".to_string()],
+            assurance_profile: Some(TimestampAssuranceProfile::Qualified),
+        };
+
+        let err = verify_timestamp_with_policy(&token, digest, &policy).unwrap_err();
+        assert!(matches!(
+            err,
+            TimestampError::SignerCertificateRevoked { .. }
+        ));
+    }
+
+    #[test]
+    fn verify_timestamp_with_policy_rejects_missing_applicable_crl() {
         let digest = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
         let generated_at = Utc::now();
         let (token, certificate) = build_timestamp_token_fixture(
@@ -756,6 +1181,25 @@ mod tests {
         );
         let policy = TimestampTrustPolicy {
             trust_anchor_pems: vec![certificate.encode_pem()],
+            crl_pems: vec![FIXTURE_EMPTY_CRL_PEM.to_string()],
+            policy_oids: vec!["1.2.3.4".to_string()],
+            assurance_profile: Some(TimestampAssuranceProfile::Qualified),
+        };
+
+        let err = verify_timestamp_with_policy(&token, digest, &policy).unwrap_err();
+        assert!(matches!(err, TimestampError::MissingApplicableCrl { .. }));
+    }
+
+    #[test]
+    fn verify_timestamp_with_policy_accepts_qualified_assurance_profile_with_crl_backed_chain() {
+        let digest = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        let generated_at = chrono::DateTime::parse_from_rfc3339("2026-03-07T21:51:27Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        let token = build_crl_backed_timestamp_token(digest, Some("test-tsa"), generated_at);
+        let policy = TimestampTrustPolicy {
+            trust_anchor_pems: vec![FIXTURE_ROOT_CERT_PEM.to_string()],
+            crl_pems: vec![FIXTURE_EMPTY_CRL_PEM.to_string()],
             policy_oids: vec!["1.2.3.4".to_string()],
             assurance_profile: Some(TimestampAssuranceProfile::Qualified),
         };
@@ -802,6 +1246,24 @@ mod tests {
             },
             certificate,
         )
+    }
+
+    fn build_crl_backed_timestamp_token(
+        digest: &str,
+        provider: Option<&str>,
+        generated_at: DateTime<Utc>,
+    ) -> TimestampToken {
+        let certificate =
+            CapturedX509Certificate::from_pem(FIXTURE_TSA_CERT_PEM.as_bytes()).unwrap();
+        let signing_key =
+            InMemorySigningKeyPair::from_pkcs8_pem(FIXTURE_TSA_KEY_PEM.as_bytes()).unwrap();
+        let signed_data_der =
+            build_test_signed_data_der(digest, generated_at, Some((&certificate, &signing_key)));
+        TimestampToken {
+            kind: RFC3161_TIMESTAMP_KIND.to_string(),
+            provider: provider.map(str::to_string),
+            token_base64: Base64::encode_string(&signed_data_der),
+        }
     }
 
     fn build_test_signed_data_der(
@@ -862,6 +1324,30 @@ mod tests {
     }
 
     fn build_test_certificate(
+        validity_duration: Duration,
+    ) -> (CapturedX509Certificate, InMemorySigningKeyPair) {
+        let mut builder = X509CertificateBuilder::default();
+        builder
+            .subject()
+            .append_common_name_utf8_string("proof-layer-test-tsa")
+            .unwrap();
+        builder.subject().append_country_utf8_string("GB").unwrap();
+        builder.validity_duration(validity_duration);
+        builder.constraint_not_ca();
+        builder.key_usage(KeyUsage::DigitalSignature);
+        builder.add_extension_der_data(
+            Oid(Bytes::copy_from_slice(&[85, 29, 37])),
+            true,
+            [
+                0x30, 0x0a, 0x06, 0x08, 0x2b, 0x06, 0x01, 0x05, 0x05, 0x07, 0x03, 0x08,
+            ],
+        );
+        builder
+            .create_with_random_keypair(KeyAlgorithm::Ed25519)
+            .unwrap()
+    }
+
+    fn build_unprofiled_test_certificate(
         validity_duration: Duration,
     ) -> (CapturedX509Certificate, InMemorySigningKeyPair) {
         let mut builder = X509CertificateBuilder::default();

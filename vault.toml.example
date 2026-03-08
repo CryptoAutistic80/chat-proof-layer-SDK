@@ -19,6 +19,7 @@ provider = "rfc3161"
 url = "http://timestamp.digicert.com"
 # assurance = "qualified"
 # trust_anchor_paths = ["./trust/tsa-root.pem"]
+# crl_paths = ["./trust/tsa.crl.pem"]
 # policy_oids = ["1.2.3.4"]
 
 [transparency]

@@ -13,12 +13,13 @@ use flate2::{Compression, read::GzDecoder, write::GzEncoder};
 use proof_layer_core::{
     ArtefactInput, BuildBundleError, CaptureEvent, CaptureInput, EvidenceItem, ProofBundle,
     ReceiptVerification, RekorTransparencyProvider, Rfc3161HttpTimestampProvider,
-    TimestampAssuranceProfile, TimestampToken, TimestampTrustPolicy, TimestampVerification,
-    TransparencyReceipt, TransparencyTrustPolicy, anchor_bundle as anchor_bundle_receipt,
-    build_bundle, canonicalize_value, decode_private_key_pem, decode_public_key_pem,
-    sha256_prefixed, timestamp_digest, validate_bundle_integrity_fields,
-    validate_timestamp_trust_policy, validate_transparency_trust_policy, verify_receipt,
-    verify_receipt_with_policy, verify_timestamp, verify_timestamp_with_policy,
+    ScittTransparencyProvider, TimestampAssuranceProfile, TimestampToken, TimestampTrustPolicy,
+    TimestampVerification, TransparencyReceipt, TransparencyTrustPolicy,
+    anchor_bundle as anchor_bundle_receipt, build_bundle, canonicalize_value,
+    decode_private_key_pem, decode_public_key_pem, sha256_prefixed, timestamp_digest,
+    validate_bundle_integrity_fields, validate_timestamp_trust_policy,
+    validate_transparency_trust_policy, verify_receipt, verify_receipt_with_policy,
+    verify_timestamp, verify_timestamp_with_policy,
 };
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use sqlx::{
@@ -156,6 +157,8 @@ struct VaultTimestampFileConfig {
     crl_pems: Vec<String>,
     #[serde(default)]
     crl_paths: Vec<String>,
+    #[serde(default)]
+    ocsp_responder_urls: Vec<String>,
     #[serde(default)]
     qualified_signer_pems: Vec<String>,
     #[serde(default)]
@@ -551,6 +554,8 @@ struct TimestampConfig {
     trust_anchor_pems: Vec<String>,
     #[serde(default)]
     crl_pems: Vec<String>,
+    #[serde(default)]
+    ocsp_responder_urls: Vec<String>,
     #[serde(default)]
     qualified_signer_pems: Vec<String>,
     #[serde(default)]
@@ -1089,6 +1094,12 @@ fn resolve_timestamp_file_config(
             .crl_pems
             .into_iter()
             .filter(|pem| !pem.trim().is_empty()),
+    );
+    config.ocsp_responder_urls.extend(
+        file_config
+            .ocsp_responder_urls
+            .into_iter()
+            .filter(|url| !url.trim().is_empty()),
     );
     config.qualified_signer_pems.extend(
         file_config
@@ -1931,6 +1942,7 @@ async fn update_timestamp_config(
             "assurance": &config.assurance,
             "trust_anchor_count": config.trust_anchor_pems.len(),
             "crl_count": config.crl_pems.len(),
+            "ocsp_url_count": config.ocsp_responder_urls.len(),
             "qualified_signer_count": config.qualified_signer_pems.len(),
             "policy_oid_count": config.policy_oids.len(),
         }),
@@ -2128,9 +2140,10 @@ async fn anchor_bundle(
                     "transparency config enabled for rekor without url"
                 ))
             })?;
-            let provider = RekorTransparencyProvider::with_label(url, config.provider.clone());
+            let provider_label = config.provider.clone();
             let bundle_for_submission = bundle.clone();
             tokio::task::spawn_blocking(move || {
+                let provider = RekorTransparencyProvider::with_label(url, provider_label);
                 anchor_bundle_receipt(&bundle_for_submission, &provider)
             })
             .await
@@ -2138,10 +2151,20 @@ async fn anchor_bundle(
             .map_err(ApiError::internal_anyhow)?
         }
         "scitt" => {
-            return Err(ApiError {
-                status: StatusCode::NOT_IMPLEMENTED,
-                message: "scitt transparency anchoring is not implemented yet".to_string(),
-            });
+            let url = config.url.clone().ok_or_else(|| {
+                ApiError::internal_anyhow(anyhow::anyhow!(
+                    "transparency config enabled for scitt without url"
+                ))
+            })?;
+            let provider_label = config.provider.clone();
+            let bundle_for_submission = bundle.clone();
+            tokio::task::spawn_blocking(move || {
+                let provider = ScittTransparencyProvider::with_label(url, provider_label);
+                anchor_bundle_receipt(&bundle_for_submission, &provider)
+            })
+            .await
+            .map_err(ApiError::internal_anyhow)?
+            .map_err(ApiError::internal_anyhow)?
         }
         _ => {
             return Err(ApiError::conflict(
@@ -3522,6 +3545,7 @@ fn timestamp_trust_policy(config: &TimestampConfig) -> Option<TimestampTrustPoli
     let policy = TimestampTrustPolicy {
         trust_anchor_pems: config.trust_anchor_pems.clone(),
         crl_pems: config.crl_pems.clone(),
+        ocsp_responder_urls: config.ocsp_responder_urls.clone(),
         qualified_signer_pems: config.qualified_signer_pems.clone(),
         policy_oids: config.policy_oids.clone(),
         assurance_profile: parse_timestamp_assurance_profile(config.assurance.as_deref()),
@@ -3726,6 +3750,14 @@ fn validate_timestamp_config(mut config: TimestampConfig) -> Result<TimestampCon
             (!trimmed.is_empty()).then(|| trimmed.to_string())
         })
         .collect();
+    config.ocsp_responder_urls = config
+        .ocsp_responder_urls
+        .into_iter()
+        .filter_map(|url| {
+            let trimmed = url.trim();
+            (!trimmed.is_empty()).then(|| trimmed.to_string())
+        })
+        .collect();
     config.qualified_signer_pems = config
         .qualified_signer_pems
         .into_iter()
@@ -3760,6 +3792,7 @@ fn validate_timestamp_config(mut config: TimestampConfig) -> Result<TimestampCon
     validate_timestamp_trust_policy(&TimestampTrustPolicy {
         trust_anchor_pems: config.trust_anchor_pems.clone(),
         crl_pems: config.crl_pems.clone(),
+        ocsp_responder_urls: config.ocsp_responder_urls.clone(),
         qualified_signer_pems: config.qualified_signer_pems.clone(),
         policy_oids: config.policy_oids.clone(),
         assurance_profile: parse_timestamp_assurance_profile(config.assurance.as_deref()),
@@ -3843,6 +3876,7 @@ fn default_timestamp_config() -> TimestampConfig {
         assurance: None,
         trust_anchor_pems: Vec::new(),
         crl_pems: Vec::new(),
+        ocsp_responder_urls: Vec::new(),
         qualified_signer_pems: Vec::new(),
         policy_oids: Vec::new(),
     }
@@ -4921,13 +4955,18 @@ mod tests {
         asn1::rfc3161::{MessageImprint, OID_CONTENT_TYPE_TST_INFO, TstInfo},
     };
     use flate2::{Compression, read::GzDecoder, write::GzEncoder};
+    use p256::{
+        ecdsa::{Signature, SigningKey as P256SigningKey, signature::Signer},
+        elliptic_curve::rand_core::OsRng,
+        pkcs8::{EncodePublicKey, LineEnding},
+    };
     use proof_layer_core::{
         REKOR_RFC3161_API_VERSION, REKOR_RFC3161_ENTRY_KIND, REKOR_TRANSPARENCY_KIND,
-        RFC3161_TIMESTAMP_KIND, TimestampToken, TransparencyReceipt, encode_public_key_pem,
-        sha256_prefixed,
+        RFC3161_TIMESTAMP_KIND, SCITT_STATEMENT_PROFILE, SCITT_TRANSPARENCY_KIND, TimestampToken,
+        TransparencyReceipt, encode_public_key_pem, sha256_prefixed,
     };
     use sha2::{Digest, Sha256};
-    use std::io::{Read, Write};
+    use std::io::{BufRead, BufReader, Read, Write};
     use tower::ServiceExt;
     use x509_certificate::{
         CapturedX509Certificate, DigestAlgorithm, InMemorySigningKeyPair, KeyAlgorithm,
@@ -5072,6 +5111,31 @@ mod tests {
                 "log_url": "https://rekor.sigstore.dev",
                 "entry_uuid": entry_uuid,
                 "log_entry": log_entry
+            }),
+        }
+    }
+
+    fn build_test_scitt_receipt(bundle_root: &str, provider: Option<&str>) -> TransparencyReceipt {
+        let token = build_test_timestamp_token(bundle_root, provider);
+        let statement_bytes = canonicalize_value(&serde_json::json!({
+            "bundle_root": bundle_root,
+            "profile": SCITT_STATEMENT_PROFILE,
+            "timestamp": token,
+        }))
+        .unwrap();
+        let statement_hash = sha256_prefixed(&statement_bytes);
+
+        TransparencyReceipt {
+            kind: SCITT_TRANSPARENCY_KIND.to_string(),
+            provider: provider.map(str::to_string),
+            body: serde_json::json!({
+                "service_url": "https://scitt.example.test/entries",
+                "entry_id": "entry-scitt-001",
+                "service_id": "abababababababababababababababababababababababababababababababab",
+                "registered_at": "2026-03-06T13:15:00Z",
+                "statement_b64": Base64::encode_string(&statement_bytes),
+                "statement_hash": statement_hash,
+                "receipt_b64": Base64::encode_string(b"scitt-receipt"),
             }),
         }
     }
@@ -5286,6 +5350,7 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
                 trust_anchor_paths: Vec::new(),
                 crl_pems: vec![test_timestamp_crl_pem()],
                 crl_paths: Vec::new(),
+                ocsp_responder_urls: Vec::new(),
                 qualified_signer_pems: vec![tsa_certificate.encode_pem()],
                 qualified_signer_paths: Vec::new(),
                 policy_oids: vec!["1.2.3.4".to_string()],
@@ -6586,6 +6651,7 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
                 assurance: Some("qualified".to_string()),
                 trust_anchor_pems: vec![tsa_certificate.encode_pem()],
                 crl_pems: vec![test_timestamp_crl_pem()],
+                ocsp_responder_urls: Vec::new(),
                 qualified_signer_pems: vec![tsa_certificate.encode_pem()],
                 policy_oids: vec!["1.2.3.4".to_string()],
             }),
@@ -6757,6 +6823,130 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
     }
 
     #[tokio::test]
+    async fn anchor_bundle_endpoint_supports_scitt_provider() {
+        use std::{net::TcpListener, thread};
+
+        let state = test_state(DEFAULT_MAX_PAYLOAD_BYTES).await;
+        let db = state.db.clone();
+        let app = build_router(state, DEFAULT_MAX_PAYLOAD_BYTES);
+
+        let signing_key = P256SigningKey::random(&mut OsRng);
+        let public_key_pem = signing_key
+            .verifying_key()
+            .to_public_key_pem(LineEnding::LF)
+            .unwrap();
+        let service_id = hex::encode(Sha256::digest(
+            signing_key
+                .verifying_key()
+                .to_public_key_der()
+                .unwrap()
+                .as_bytes(),
+        ));
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut reader = BufReader::new(stream.try_clone().unwrap());
+            let mut request = String::new();
+            let mut content_length = 0_usize;
+
+            loop {
+                let mut line = String::new();
+                let bytes_read = reader.read_line(&mut line).unwrap();
+                if bytes_read == 0 || line == "\r\n" {
+                    break;
+                }
+                let lower = line.to_ascii_lowercase();
+                if let Some(value) = lower.strip_prefix("content-length:") {
+                    content_length = value.trim().parse::<usize>().unwrap();
+                }
+                request.push_str(&line);
+            }
+
+            let mut body = vec![0_u8; content_length];
+            reader.read_exact(&mut body).unwrap();
+            let payload: serde_json::Value = serde_json::from_slice(&body).unwrap();
+            let statement_hash = payload["statement_hash"].as_str().unwrap();
+            let response_payload = canonicalize_value(&serde_json::json!({
+                "entryId": "entry-scitt-001",
+                "registeredAt": "2026-03-06T13:15:00Z",
+                "serviceId": service_id,
+                "statementHash": statement_hash,
+            }))
+            .unwrap();
+            let signature: Signature = signing_key.sign(&response_payload);
+            let response_body = serde_json::json!({
+                "entry_id": "entry-scitt-001",
+                "service_id": service_id,
+                "registered_at": "2026-03-06T13:15:00Z",
+                "receipt_b64": Base64::encode_string(signature.to_der().as_bytes()),
+            })
+            .to_string();
+
+            write!(
+                stream,
+                "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
+                response_body.len(),
+                response_body
+            )
+            .unwrap();
+        });
+
+        upsert_service_config(
+            &db,
+            SERVICE_CONFIG_KEY_TRANSPARENCY,
+            &TransparencyConfig {
+                enabled: true,
+                provider: "scitt".to_string(),
+                url: Some(format!("http://{addr}/entries")),
+                log_public_key_pem: Some(public_key_pem),
+            },
+        )
+        .await
+        .unwrap();
+
+        let created = create_bundle_response(
+            &app,
+            &CreateBundleRequest {
+                capture: SealableCaptureInput::Legacy(sample_capture()),
+                artefacts: vec![InlineArtefact {
+                    name: "prompt.json".to_string(),
+                    content_type: "application/json".to_string(),
+                    data_base64: Base64::encode_string(br#"{"prompt":"anchor-scitt"}"#),
+                }],
+            },
+        )
+        .await;
+
+        let mut bundle = load_active_bundle(&db, &created.bundle_id)
+            .await
+            .unwrap()
+            .unwrap();
+        bundle.timestamp = Some(build_test_timestamp_token(
+            &bundle.integrity.bundle_root,
+            Some("test-tsa"),
+        ));
+        persist_bundle_timestamp(&db, &bundle).await.unwrap();
+
+        let request = Request::builder()
+            .method("POST")
+            .uri(format!("/v1/bundles/{}/anchor", created.bundle_id))
+            .body(Body::empty())
+            .unwrap();
+        let response = app.oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let anchored: AnchorBundleResponse = serde_json::from_slice(&body).unwrap();
+        assert_eq!(anchored.kind, SCITT_TRANSPARENCY_KIND);
+        assert_eq!(anchored.provider.as_deref(), Some("scitt"));
+
+        server.join().unwrap();
+    }
+
+    #[tokio::test]
     async fn apply_timestamp_token_to_bundle_persists_bundle_timestamp() {
         let state = test_state(DEFAULT_MAX_PAYLOAD_BYTES).await;
         let db = state.db.clone();
@@ -6848,6 +7038,47 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
                 .await
                 .unwrap();
         assert!(has_receipt);
+    }
+
+    #[tokio::test]
+    async fn apply_scitt_receipt_to_bundle_persists_bundle_receipt() {
+        let state = test_state(DEFAULT_MAX_PAYLOAD_BYTES).await;
+        let db = state.db.clone();
+        let app = build_router(state, DEFAULT_MAX_PAYLOAD_BYTES);
+
+        let created = create_bundle_response(
+            &app,
+            &CreateBundleRequest {
+                capture: SealableCaptureInput::Legacy(sample_capture()),
+                artefacts: vec![InlineArtefact {
+                    name: "prompt.json".to_string(),
+                    content_type: "application/json".to_string(),
+                    data_base64: Base64::encode_string(br#"{"prompt":"receipt-scitt"}"#),
+                }],
+            },
+        )
+        .await;
+
+        let mut bundle = load_active_bundle(&db, &created.bundle_id)
+            .await
+            .unwrap()
+            .unwrap();
+        bundle.timestamp = Some(build_test_timestamp_token(
+            &bundle.integrity.bundle_root,
+            Some("test-tsa"),
+        ));
+        persist_bundle_timestamp(&db, &bundle).await.unwrap();
+
+        let receipt = build_test_scitt_receipt(&bundle.integrity.bundle_root, Some("scitt"));
+        let verification = apply_receipt_to_bundle(&mut bundle, receipt, None).unwrap();
+        assert_eq!(verification.kind, SCITT_TRANSPARENCY_KIND);
+        persist_bundle_receipt(&db, &bundle).await.unwrap();
+
+        let stored = load_active_bundle(&db, &created.bundle_id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(stored.receipt.is_some());
     }
 
     #[tokio::test]
@@ -7093,6 +7324,7 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
                     assurance: Some("Qualified".to_string()),
                     trust_anchor_pems: vec![tsa_certificate_pem],
                     crl_pems: vec![test_timestamp_crl_pem()],
+                    ocsp_responder_urls: Vec::new(),
                     qualified_signer_pems: vec![expected_trust_anchor_pem.clone()],
                     policy_oids: vec!["1.2.3.4".to_string()],
                 })
@@ -7114,6 +7346,7 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
                 assurance: Some("qualified".to_string()),
                 trust_anchor_pems: vec![expected_trust_anchor_pem],
                 crl_pems: vec![test_timestamp_crl_pem().trim().to_string()],
+                ocsp_responder_urls: Vec::new(),
                 qualified_signer_pems: vec![tsa_certificate.encode_pem().trim().to_string()],
                 policy_oids: vec!["1.2.3.4".to_string()],
             }
@@ -7192,6 +7425,7 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
                     assurance: Some("qualified".to_string()),
                     trust_anchor_pems: Vec::new(),
                     crl_pems: Vec::new(),
+                    ocsp_responder_urls: Vec::new(),
                     qualified_signer_pems: Vec::new(),
                     policy_oids: Vec::new(),
                 })

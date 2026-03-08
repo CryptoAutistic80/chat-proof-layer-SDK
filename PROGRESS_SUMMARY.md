@@ -136,6 +136,11 @@ Completed:
   `proofctl create|verify --timestamp-qualified-signer`,
   persisted vault timestamp signer-pin configuration through `qualified_signer_pems` / `qualified_signer_paths`,
   and `qualified` assurance now requires the signer certificate to match that configured allowlist in addition to chain / CRL / policy checks.
+- Added the next timestamp trust-hardening slice:
+  optional live OCSP checks for TSA signer certificates in Rust core,
+  `proofctl create|verify --timestamp-ocsp-url`,
+  persisted vault timestamp OCSP configuration through `ocsp_responder_urls`,
+  and OCSP verification now checks responder signatures, current response validity, and revocation times relative to `genTime`.
 - Added the first pack export slice:
   `POST /v1/packs`,
   `GET /v1/packs/{id}`,
@@ -146,6 +151,10 @@ Completed:
   derived `obligation_ref` tagging for indexed evidence items,
   pack-type curation rules (`pack-rules-v1`) based on actor role/item type/retention class,
   and manifest-level match reasons for why each bundle was included.
+- Closed the explicit SCITT stub:
+  `crates/core/src/transparency/` now supports a bounded draft-aligned SCITT statement/receipt path,
+  `proofctl create --transparency-provider scitt --transparency-log <url>` can attach those receipts locally,
+  and vault `POST /v1/bundles/{id}/anchor` now works with `transparency.provider = "scitt"` using the same trust-policy surface.
 - Restored a clean Rust verification loop: `cargo test --workspace` and `cargo clippy --workspace --all-targets -- -D warnings` both pass.
 
 Still outstanding from `plan.md`:
@@ -154,7 +163,8 @@ Still outstanding from `plan.md`:
 - The vault now uses SQLite with legal-hold-aware retention, audit logging, file/env/runtime configuration, background retention scanning, curated pack export, and RFC 3161 bundle timestamp attachment, but PostgreSQL and redacted/Annex-complete pack assembly are not built yet.
 - The CLI now covers the main vault operational read paths, but there is still no `proofctl disclose` flow.
 - TypeScript and Python now both have native FFI bridges, local sealing paths, and higher-level `ProofLayer` facades, but there is still no shared native build/release pipeline for SDK artifacts.
-- SCITT receipts and selective disclosure CLI flows remain future phases.
-- The main remaining gaps are no longer the evidence catalog itself; they are the harder later-phase items like selective disclosure, SCITT, deeper trust policy work, and alternative storage/runtime backends.
-- RFC 3161 verification now supports signer-chain validation against configured PEM trust anchors, optional `TSTInfo.policy` OID enforcement, CRL-based revocation checking, qualified TSA signer allowlist matching, and operational `qualified` profile gating, but full eIDAS-qualified trust-list and OCSP evaluation are still outstanding.
-- Rekor verification now supports SET signature validation and `logID` binding against a configured PEM log public key; live-log consistency checks beyond the stored inclusion proof and SCITT remain future work.
+- Selective disclosure CLI flows remain a future phase.
+- The main remaining gaps are no longer the evidence catalog itself; they are the harder later-phase items like selective disclosure, deeper trust policy work, fuller SCITT interoperability, and alternative storage/runtime backends.
+- RFC 3161 verification now supports signer-chain validation against configured PEM trust anchors, optional `TSTInfo.policy` OID enforcement, CRL-based revocation checking, optional live OCSP checks, qualified TSA signer allowlist matching, and operational `qualified` profile gating, but full eIDAS-qualified trust-list evaluation and archival OCSP evidence handling are still outstanding.
+- Rekor verification now supports SET signature validation and `logID` binding against a configured PEM log public key; live-log consistency checks beyond the stored inclusion proof remain future work.
+- The current SCITT path is intentionally bounded: it verifies a draft-aligned canonical JSON statement/receipt contract, not a full interoperable COSE/CCF profile.

@@ -6,13 +6,13 @@ use ed25519_dalek::SigningKey;
 use flate2::{Compression, read::GzDecoder, write::GzEncoder};
 use proof_layer_core::{
     ArtefactInput, CaptureEvent, CaptureInput, EvidenceItem, ProofBundle, ReceiptVerification,
-    RekorTransparencyProvider, Rfc3161HttpTimestampProvider, TimestampAssuranceProfile,
-    TimestampProvider, TimestampTrustPolicy, TransparencyProvider, TransparencyTrustPolicy,
-    anchor_bundle as anchor_bundle_receipt, build_bundle, build_inclusion_proof,
-    capture_input_v01_to_event, decode_private_key_pem, decode_public_key_pem,
-    encode_private_key_pem, encode_public_key_pem, sha256_prefixed, timestamp_digest,
-    validate_bundle_integrity_fields, validate_timestamp_trust_policy, verify_receipt,
-    verify_receipt_with_policy, verify_timestamp, verify_timestamp_with_policy,
+    RekorTransparencyProvider, Rfc3161HttpTimestampProvider, SCITT_TRANSPARENCY_KIND,
+    ScittTransparencyProvider, TimestampAssuranceProfile, TimestampProvider, TimestampTrustPolicy,
+    TransparencyProvider, TransparencyTrustPolicy, anchor_bundle as anchor_bundle_receipt,
+    build_bundle, build_inclusion_proof, capture_input_v01_to_event, decode_private_key_pem,
+    decode_public_key_pem, encode_private_key_pem, encode_public_key_pem, sha256_prefixed,
+    timestamp_digest, validate_bundle_integrity_fields, validate_timestamp_trust_policy,
+    verify_receipt, verify_receipt_with_policy, verify_timestamp, verify_timestamp_with_policy,
 };
 use reqwest::{
     Url,
@@ -108,10 +108,14 @@ struct CreateArgs {
     timestamp_url: Option<String>,
     #[arg(long)]
     transparency_log: Option<String>,
+    #[arg(long = "transparency-provider", default_value = "rekor")]
+    transparency_provider: TransparencyProviderArg,
     #[arg(long = "timestamp-trust-anchor")]
     timestamp_trust_anchor: Vec<PathBuf>,
     #[arg(long = "timestamp-crl")]
     timestamp_crl: Vec<PathBuf>,
+    #[arg(long = "timestamp-ocsp-url")]
+    timestamp_ocsp_url: Vec<String>,
     #[arg(long = "timestamp-qualified-signer")]
     timestamp_qualified_signer: Vec<PathBuf>,
     #[arg(long = "timestamp-policy-oid")]
@@ -138,6 +142,8 @@ struct VerifyArgs {
     timestamp_trust_anchor: Vec<PathBuf>,
     #[arg(long = "timestamp-crl")]
     timestamp_crl: Vec<PathBuf>,
+    #[arg(long = "timestamp-ocsp-url")]
+    timestamp_ocsp_url: Vec<String>,
     #[arg(long = "timestamp-qualified-signer")]
     timestamp_qualified_signer: Vec<PathBuf>,
     #[arg(long = "timestamp-policy-oid")]
@@ -287,6 +293,13 @@ enum TimestampAssuranceArg {
     Qualified,
 }
 
+#[derive(Copy, Clone, Debug, Eq, PartialEq, ValueEnum)]
+#[value(rename_all = "snake_case")]
+enum TransparencyProviderArg {
+    Rekor,
+    Scitt,
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 struct Manifest {
     files: Vec<ManifestEntry>,
@@ -349,8 +362,10 @@ struct CreateCommandInput<'a> {
     overrides: &'a CreateOverrides,
     timestamp_url: Option<&'a str>,
     transparency_log: Option<&'a str>,
+    transparency_provider: TransparencyProviderArg,
     timestamp_trust_anchor_paths: &'a [PathBuf],
     timestamp_crl_paths: &'a [PathBuf],
+    timestamp_ocsp_urls: &'a [String],
     timestamp_qualified_signer_paths: &'a [PathBuf],
     timestamp_policy_oids: &'a [String],
     timestamp_assurance: Option<TimestampAssuranceArg>,
@@ -365,6 +380,7 @@ struct VerifyCommandInput<'a> {
     check_receipt: bool,
     timestamp_trust_anchor_paths: &'a [PathBuf],
     timestamp_crl_paths: &'a [PathBuf],
+    timestamp_ocsp_urls: &'a [String],
     timestamp_qualified_signer_paths: &'a [PathBuf],
     timestamp_policy_oids: &'a [String],
     timestamp_assurance: Option<TimestampAssuranceArg>,
@@ -564,6 +580,8 @@ struct VaultTimestampConfig {
     #[serde(default)]
     crl_pems: Vec<String>,
     #[serde(default)]
+    ocsp_responder_urls: Vec<String>,
+    #[serde(default)]
     qualified_signer_pems: Vec<String>,
     #[serde(default)]
     policy_oids: Vec<String>,
@@ -641,6 +659,7 @@ struct VaultStatusOutput {
     timestamp_provider: String,
     timestamp_assurance: Option<String>,
     timestamp_trust_anchor_count: usize,
+    timestamp_ocsp_url_count: usize,
     timestamp_policy_oid_count: usize,
     transparency_enabled: bool,
     transparency_provider: String,
@@ -761,8 +780,10 @@ fn main() -> Result<()> {
             },
             timestamp_url: args.timestamp_url.as_deref(),
             transparency_log: args.transparency_log.as_deref(),
+            transparency_provider: args.transparency_provider,
             timestamp_trust_anchor_paths: &args.timestamp_trust_anchor,
             timestamp_crl_paths: &args.timestamp_crl,
+            timestamp_ocsp_urls: &args.timestamp_ocsp_url,
             timestamp_qualified_signer_paths: &args.timestamp_qualified_signer,
             timestamp_policy_oids: &args.timestamp_policy_oid,
             timestamp_assurance: args.timestamp_assurance,
@@ -776,6 +797,7 @@ fn main() -> Result<()> {
             check_receipt: args.check_receipt,
             timestamp_trust_anchor_paths: &args.timestamp_trust_anchor,
             timestamp_crl_paths: &args.timestamp_crl,
+            timestamp_ocsp_urls: &args.timestamp_ocsp_url,
             timestamp_qualified_signer_paths: &args.timestamp_qualified_signer,
             timestamp_policy_oids: &args.timestamp_policy_oid,
             timestamp_assurance: args.timestamp_assurance,
@@ -899,6 +921,9 @@ fn cmd_create(args: CreateCommandInput<'_>) -> Result<()> {
     if !args.timestamp_crl_paths.is_empty() && args.timestamp_url.is_none() {
         bail!("--timestamp-crl requires --timestamp-url during local bundle creation");
     }
+    if !args.timestamp_ocsp_urls.is_empty() && args.timestamp_url.is_none() {
+        bail!("--timestamp-ocsp-url requires --timestamp-url during local bundle creation");
+    }
     if !args.timestamp_qualified_signer_paths.is_empty() && args.timestamp_url.is_none() {
         bail!("--timestamp-qualified-signer requires --timestamp-url during local bundle creation");
     }
@@ -938,6 +963,7 @@ fn cmd_create(args: CreateCommandInput<'_>) -> Result<()> {
     let timestamp_trust_policy = load_timestamp_trust_policy(
         args.timestamp_trust_anchor_paths,
         args.timestamp_crl_paths,
+        args.timestamp_ocsp_urls,
         args.timestamp_qualified_signer_paths,
         args.timestamp_policy_oids,
         args.timestamp_assurance,
@@ -1001,12 +1027,23 @@ fn cmd_create(args: CreateCommandInput<'_>) -> Result<()> {
         );
     }
     if let Some(transparency_log) = args.transparency_log {
-        let provider = RekorTransparencyProvider::new(transparency_log.to_string());
-        let verification =
-            attach_receipt_to_bundle(&mut bundle, &provider, transparency_trust_policy.as_ref())?;
+        let verification = match args.transparency_provider {
+            TransparencyProviderArg::Rekor => {
+                let provider = RekorTransparencyProvider::new(transparency_log.to_string());
+                attach_receipt_to_bundle(&mut bundle, &provider, transparency_trust_policy.as_ref())
+            }
+            TransparencyProviderArg::Scitt => {
+                let provider = ScittTransparencyProvider::new(transparency_log.to_string());
+                attach_receipt_to_bundle(&mut bundle, &provider, transparency_trust_policy.as_ref())
+            }
+        }?;
         info!(
-            "transparency provider={} entry_uuid={} log_index={}",
-            verification.provider.as_deref().unwrap_or("rekor"),
+            "transparency kind={} provider={} entry_uuid={} log_index={}",
+            verification.kind,
+            verification
+                .provider
+                .as_deref()
+                .unwrap_or(verification.kind.as_str()),
             abbreviate_value(&verification.entry_uuid),
             verification.log_index
         );
@@ -1070,6 +1107,7 @@ fn cmd_verify(args: VerifyCommandInput<'_>) -> Result<()> {
     let timestamp_trust_policy = load_timestamp_trust_policy(
         args.timestamp_trust_anchor_paths,
         args.timestamp_crl_paths,
+        args.timestamp_ocsp_urls,
         args.timestamp_qualified_signer_paths,
         args.timestamp_policy_oids,
         args.timestamp_assurance,
@@ -1392,6 +1430,7 @@ fn cmd_vault_status(vault_url: &str, format: OutputFormat) -> Result<()> {
         timestamp_provider: config.timestamp.provider.clone(),
         timestamp_assurance: config.timestamp.assurance.clone(),
         timestamp_trust_anchor_count: config.timestamp.trust_anchor_pems.len(),
+        timestamp_ocsp_url_count: config.timestamp.ocsp_responder_urls.len(),
         timestamp_policy_oid_count: config.timestamp.policy_oids.len(),
         transparency_enabled: config.transparency.enabled,
         transparency_provider: config.transparency.provider.clone(),
@@ -1485,11 +1524,12 @@ fn print_vault_status_human(status: &VaultStatusOutput, config: &VaultConfigResp
         status.scan_interval_hours
     );
     println!(
-        "timestamp: enabled={} provider={} assurance={} trust_anchors={} policy_oids={}",
+        "timestamp: enabled={} provider={} assurance={} trust_anchors={} ocsp_urls={} policy_oids={}",
         status.timestamp_enabled,
         status.timestamp_provider,
         status.timestamp_assurance.as_deref().unwrap_or("n/a"),
         status.timestamp_trust_anchor_count,
+        status.timestamp_ocsp_url_count,
         status.timestamp_policy_oid_count
     );
     println!(
@@ -1784,6 +1824,7 @@ fn read_text_files(paths: &[PathBuf], label: &str) -> Result<Vec<String>> {
 fn load_timestamp_trust_policy(
     trust_anchor_paths: &[PathBuf],
     crl_paths: &[PathBuf],
+    ocsp_urls: &[String],
     qualified_signer_paths: &[PathBuf],
     policy_oids: &[String],
     assurance: Option<TimestampAssuranceArg>,
@@ -1791,6 +1832,11 @@ fn load_timestamp_trust_policy(
     let policy = TimestampTrustPolicy {
         trust_anchor_pems: read_text_files(trust_anchor_paths, "timestamp trust anchor")?,
         crl_pems: read_text_files(crl_paths, "timestamp CRL")?,
+        ocsp_responder_urls: ocsp_urls
+            .iter()
+            .map(|url| url.trim().to_string())
+            .filter(|url| !url.is_empty())
+            .collect(),
         qualified_signer_pems: read_text_files(
             qualified_signer_paths,
             "qualified TSA signer certificate",
@@ -1932,15 +1978,20 @@ fn evaluate_receipt_check(
         Ok(verification) => OptionalCheckReport {
             state: OptionalCheckState::Valid,
             message: format!(
-                "Rekor receipt {} at {} with inclusion proof (log_index {}, entry {})",
+                "{} receipt {} at {} (entry {}, log_index {})",
+                if verification.kind == SCITT_TRANSPARENCY_KIND {
+                    "SCITT"
+                } else {
+                    "Rekor"
+                },
                 if verification.trusted {
                     "trusted"
                 } else {
                     "structurally valid"
                 },
                 verification.integrated_time,
-                verification.log_index,
-                abbreviate_value(&verification.entry_uuid)
+                abbreviate_value(&verification.entry_uuid),
+                verification.log_index
             ),
         },
         Err(err) => OptionalCheckReport {
@@ -2457,7 +2508,8 @@ mod tests {
     use proof_layer_core::{
         Actor, ActorRole, EncryptionPolicy, EvidenceContext, LlmInteractionEvidence, Policy,
         REKOR_RFC3161_API_VERSION, REKOR_RFC3161_ENTRY_KIND, REKOR_TRANSPARENCY_KIND,
-        RFC3161_TIMESTAMP_KIND, Subject, TimestampError, TimestampToken, TransparencyReceipt,
+        RFC3161_TIMESTAMP_KIND, SCITT_STATEMENT_PROFILE, SCITT_TRANSPARENCY_KIND, Subject,
+        TimestampError, TimestampToken, TransparencyReceipt,
     };
     use serde_json::json;
     use sha2::{Digest, Sha256};
@@ -2656,6 +2708,31 @@ mod tests {
                 "log_url": "https://rekor.sigstore.dev",
                 "entry_uuid": entry_uuid,
                 "log_entry": log_entry
+            }),
+        }
+    }
+
+    fn build_test_scitt_receipt(bundle_root: &str, provider: Option<&str>) -> TransparencyReceipt {
+        let token = build_test_timestamp_token(bundle_root, provider);
+        let statement_bytes = proof_layer_core::canonicalize_value(&json!({
+            "bundle_root": bundle_root,
+            "profile": SCITT_STATEMENT_PROFILE,
+            "timestamp": token,
+        }))
+        .unwrap();
+        let statement_hash = sha256_prefixed(&statement_bytes);
+
+        TransparencyReceipt {
+            kind: SCITT_TRANSPARENCY_KIND.to_string(),
+            provider: provider.map(str::to_string),
+            body: json!({
+                "service_url": "https://scitt.example.test/entries",
+                "entry_id": "entry-scitt-001",
+                "service_id": "abababababababababababababababababababababababababababababababab",
+                "registered_at": "2026-03-06T13:15:00Z",
+                "statement_b64": base64ct::Base64::encode_string(&statement_bytes),
+                "statement_hash": statement_hash,
+                "receipt_b64": base64ct::Base64::encode_string(b"scitt-receipt"),
             }),
         }
     }
@@ -2959,6 +3036,27 @@ mod tests {
             receipt_report
                 .message
                 .contains("Rekor receipt structurally valid")
+        );
+    }
+
+    #[test]
+    fn evaluate_receipt_check_reports_scitt_receipts() {
+        let mut bundle = sample_bundle();
+        bundle.timestamp = Some(build_test_timestamp_token(
+            &bundle.integrity.bundle_root,
+            Some("test-tsa"),
+        ));
+        bundle.receipt = Some(build_test_scitt_receipt(
+            &bundle.integrity.bundle_root,
+            Some("scitt"),
+        ));
+
+        let receipt_report = evaluate_receipt_check(&bundle, true, None);
+        assert_eq!(receipt_report.state, OptionalCheckState::Valid);
+        assert!(
+            receipt_report
+                .message
+                .contains("SCITT receipt structurally valid")
         );
     }
 

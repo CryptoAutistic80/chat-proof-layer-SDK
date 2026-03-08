@@ -157,45 +157,111 @@
       }
     },
     "receipt": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "kind",
-        "body"
-      ],
-      "properties": {
-        "kind": {
-          "const": "rekor"
-        },
-        "provider": {
-          "type": "string"
-        },
-        "body": {
+      "oneOf": [
+        {
           "type": "object",
           "additionalProperties": false,
           "required": [
-            "log_url",
-            "entry_uuid",
-            "log_entry"
+            "kind",
+            "body"
           ],
           "properties": {
-            "log_url": {
-              "type": "string",
-              "minLength": 1,
-              "description": "Base URL of the Rekor instance that integrated the receipt."
+            "kind": {
+              "const": "rekor"
             },
-            "entry_uuid": {
-              "type": "string",
-              "pattern": "^([0-9a-fA-F]{64}|[0-9a-fA-F]{80})$"
+            "provider": {
+              "type": "string"
             },
-            "log_entry": {
+            "body": {
               "type": "object",
-              "minProperties": 1,
-              "description": "Raw Rekor LogEntry response keyed by entry UUID."
+              "additionalProperties": false,
+              "required": [
+                "log_url",
+                "entry_uuid",
+                "log_entry"
+              ],
+              "properties": {
+                "log_url": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "Base URL of the Rekor instance that integrated the receipt."
+                },
+                "entry_uuid": {
+                  "type": "string",
+                  "pattern": "^([0-9a-fA-F]{64}|[0-9a-fA-F]{80})$"
+                },
+                "log_entry": {
+                  "type": "object",
+                  "minProperties": 1,
+                  "description": "Raw Rekor LogEntry response keyed by entry UUID."
+                }
+              }
             }
           }
         },
-      }
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "body"
+          ],
+          "properties": {
+            "kind": {
+              "const": "scitt"
+            },
+            "provider": {
+              "type": "string"
+            },
+            "body": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "service_url",
+                "entry_id",
+                "service_id",
+                "registered_at",
+                "statement_b64",
+                "statement_hash",
+                "receipt_b64"
+              ],
+              "properties": {
+                "service_url": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "SCITT receipt service submission endpoint that returned the receipt."
+                },
+                "entry_id": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "service_id": {
+                  "type": "string",
+                  "pattern": "^[0-9a-fA-F]{64}$"
+                },
+                "registered_at": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "statement_b64": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "Base64 of the canonical JSON statement submitted to the SCITT-style service."
+                },
+                "statement_hash": {
+                  "type": "string",
+                  "pattern": "^sha256:[0-9a-fA-F]{64}$"
+                },
+                "receipt_b64": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "Base64 of the transparency-service signature over the canonical receipt payload."
+                }
+              }
+            }
+          }
+        }
+      ]
     }
   }
 }

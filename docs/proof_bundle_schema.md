@@ -106,11 +106,19 @@ If `timestamp` is present:
 
 If `receipt` is present:
 
-- `kind` MUST be `rekor`
-- `body.log_url` MUST identify the Rekor base URL used for anchoring
-- `body.entry_uuid` MUST identify the single returned Rekor log entry
-- `body.log_entry` MUST store the raw Rekor `LogEntry` JSON object keyed by `entry_uuid`
-- the embedded Rekor entry body MUST be an `rfc3161` proposed entry whose `spec.tsr.content` is the bundle's RFC 3161 token
+- `kind` MUST be `rekor` or `scitt`
+- if `kind == "rekor"`:
+  `body.log_url` MUST identify the Rekor base URL used for anchoring,
+  `body.entry_uuid` MUST identify the single returned Rekor log entry,
+  `body.log_entry` MUST store the raw Rekor `LogEntry` JSON object keyed by `entry_uuid`,
+  and the embedded Rekor entry body MUST be an `rfc3161` proposed entry whose `spec.tsr.content` is the bundle's RFC 3161 token
+- if `kind == "scitt"`:
+  `body.service_url` MUST identify the SCITT-style receipt endpoint,
+  `body.entry_id` MUST identify the registered statement entry,
+  `body.service_id` MUST be the transparency-service public-key identifier (`sha256(SPKI_DER(public_key))` when trust material is supplied),
+  `body.statement_b64` MUST be the canonical JSON statement bytes containing `{profile, bundle_root, timestamp}`,
+  `body.statement_hash` MUST equal `sha256:<hex>` over `statement_b64`,
+  and `body.receipt_b64` MUST be the service signature over canonical `{entryId, registeredAt, serviceId, statementHash}`
 - `receipt` remains outside the canonical header projection and outside the signed payload so it can be attached after timestamping
 
 ## Field Constraints
@@ -171,10 +179,14 @@ Implementations MUST execute, in order:
 8. If expected RFC 3161 policy OIDs are supplied, additionally require `TSTInfo.policy` to match one of them.
 9. If timestamp trust anchors are supplied, additionally require the RFC 3161 signer certificate to chain to one of those anchors, to be valid at `genTime`, and to present a time-stamping-appropriate certificate profile.
 10. If timestamp CRLs are supplied, additionally require the applicable CRL to be valid at `genTime`, signed by the issuer certificate, and not to revoke the TSA signer certificate.
-11. If a timestamp assurance profile is supplied, enforce its configured requirements. In the current PoC, `qualified` means the verifier must be configured with trust anchors, expected policy OIDs, CRLs, and at least one allowed TSA signer certificate, and those checks must all succeed.
-12. If receipt verification is requested and `receipt` is present, verify the Rekor receipt structure, require inclusion-proof and signed-entry-timestamp fields, verify the entry UUID equals the RFC 6962 leaf hash of the Rekor body, recompute the Rekor root from the inclusion proof, decode the embedded `rfc3161` entry body, and verify that embedded RFC 3161 token against UTF-8 `integrity.bundle_root` bytes.
-13. If a Rekor log public key is supplied, canonicalize `{body, integratedTime, logID, logIndex}`, verify the signed-entry-timestamp signature over those canonical bytes, and require `logID == sha256(SPKI_DER(public_key))`.
-14. Report optional checks (timestamp/receipt) as skipped if absent or not requested.
+11. If timestamp OCSP responder URLs are supplied, additionally perform a live OCSP request for the RFC 3161 signer certificate, verify the OCSP response signature against the configured trust anchors, require the OCSP response to be current, and reject the timestamp when the OCSP responder reports a revocation time at or before `genTime`.
+12. If a timestamp assurance profile is supplied, enforce its configured requirements. In the current PoC, `qualified` means the verifier must be configured with trust anchors, expected policy OIDs, CRLs, and at least one allowed TSA signer certificate, and those checks must all succeed.
+13. If receipt verification is requested and `receipt` is present, branch by `receipt.kind`.
+14. For `rekor`, verify the receipt structure, require inclusion-proof and signed-entry-timestamp fields, verify the entry UUID equals the RFC 6962 leaf hash of the Rekor body, recompute the Rekor root from the inclusion proof, decode the embedded `rfc3161` entry body, and verify that embedded RFC 3161 token against UTF-8 `integrity.bundle_root` bytes.
+15. For `scitt`, verify the receipt structure, decode `statement_b64`, require `statement_hash == sha256(statement_b64)`, parse the statement, require `profile == application/vnd.proof-layer.scitt-statement.v1+json`, require `statement.bundle_root == integrity.bundle_root`, and verify the embedded RFC 3161 token against UTF-8 `integrity.bundle_root` bytes.
+16. If a transparency public key is supplied, additionally verify the provider-specific receipt signature. For `rekor`, canonicalize `{body, integratedTime, logID, logIndex}`, verify the signed-entry-timestamp signature, and require `logID == sha256(SPKI_DER(public_key))`. For `scitt`, canonicalize `{entryId, registeredAt, serviceId, statementHash}`, verify `receipt_b64`, and require `serviceId == sha256(SPKI_DER(public_key))`.
+17. The current SCITT path is a draft-aligned JSON statement/receipt contract, not a full interoperable COSE/CCF profile.
+18. Report optional checks (timestamp/receipt) as skipped if absent or not requested.
 
 Any required check failure MUST produce an invalid result.
 

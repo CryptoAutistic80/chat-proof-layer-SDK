@@ -52,7 +52,8 @@ pub use timestamp::{
 };
 pub use transparency::{
     REKOR_RFC3161_API_VERSION, REKOR_RFC3161_ENTRY_KIND, REKOR_TRANSPARENCY_KIND,
-    ReceiptVerification, RekorTransparencyProvider, SIGSTORE_REKOR_URL, TransparencyEntry,
+    ReceiptVerification, RekorTransparencyProvider, SCITT_STATEMENT_PROFILE,
+    SCITT_TRANSPARENCY_KIND, SIGSTORE_REKOR_URL, ScittTransparencyProvider, TransparencyEntry,
     TransparencyError, TransparencyProvider, TransparencyTrustPolicy, anchor_bundle,
     validate_transparency_trust_policy, verify_receipt, verify_receipt_with_policy,
 };

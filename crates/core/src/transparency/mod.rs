@@ -20,9 +20,11 @@ use std::collections::BTreeMap;
 use thiserror::Error;
 
 pub const REKOR_TRANSPARENCY_KIND: &str = "rekor";
+pub const SCITT_TRANSPARENCY_KIND: &str = "scitt";
 pub const REKOR_RFC3161_ENTRY_KIND: &str = "rfc3161";
 pub const REKOR_RFC3161_API_VERSION: &str = "0.0.1";
 pub const SIGSTORE_REKOR_URL: &str = "https://rekor.sigstore.dev";
+pub const SCITT_STATEMENT_PROFILE: &str = "application/vnd.proof-layer.scitt-statement.v1+json";
 
 pub trait TransparencyProvider {
     fn submit(&self, entry: &TransparencyEntry) -> Result<TransparencyReceipt, TransparencyError>;
@@ -66,6 +68,13 @@ impl TransparencyEntry {
 
 #[derive(Debug, Clone)]
 pub struct RekorTransparencyProvider {
+    url: String,
+    provider_label: Option<String>,
+    client: Client,
+}
+
+#[derive(Debug, Clone)]
+pub struct ScittTransparencyProvider {
     url: String,
     provider_label: Option<String>,
     client: Client,
@@ -183,6 +192,88 @@ impl TransparencyProvider for RekorTransparencyProvider {
     }
 }
 
+impl ScittTransparencyProvider {
+    pub fn new(url: impl Into<String>) -> Self {
+        Self::with_label(url, SCITT_TRANSPARENCY_KIND)
+    }
+
+    pub fn with_label(url: impl Into<String>, provider_label: impl Into<String>) -> Self {
+        let provider_label = provider_label.into();
+        Self {
+            url: normalize_url(url.into()),
+            provider_label: if provider_label.trim().is_empty() {
+                None
+            } else {
+                Some(provider_label)
+            },
+            client: Client::new(),
+        }
+    }
+
+    pub fn url(&self) -> &str {
+        &self.url
+    }
+
+    fn submit_statement(
+        &self,
+        request: &ScittSubmissionRequest,
+    ) -> Result<ScittSubmissionResponse, TransparencyError> {
+        let response = self
+            .client
+            .post(&self.url)
+            .json(request)
+            .send()
+            .map_err(TransparencyError::Transport)?;
+
+        if !response.status().is_success() {
+            return Err(TransparencyError::HttpStatus {
+                status: response.status().as_u16(),
+                body: parse_error_body(response),
+            });
+        }
+
+        response
+            .json::<ScittSubmissionResponse>()
+            .map_err(TransparencyError::Transport)
+    }
+}
+
+impl TransparencyProvider for ScittTransparencyProvider {
+    fn submit(&self, entry: &TransparencyEntry) -> Result<TransparencyReceipt, TransparencyError> {
+        let statement = ScittStatement {
+            profile: SCITT_STATEMENT_PROFILE.to_string(),
+            bundle_root: entry.bundle_root.clone(),
+            timestamp: entry.timestamp.clone(),
+        };
+        let statement_value = serde_json::to_value(&statement)
+            .map_err(|err| TransparencyError::InvalidBody(err.to_string()))?;
+        let statement_bytes = canonicalize_value(&statement_value)
+            .map_err(|err| TransparencyError::InvalidBody(err.to_string()))?;
+        let statement_b64 = Base64::encode_string(&statement_bytes);
+        let statement_hash = crate::hash::sha256_prefixed(&statement_bytes);
+        let response = self.submit_statement(&ScittSubmissionRequest {
+            statement_b64: statement_b64.clone(),
+            statement_hash: statement_hash.clone(),
+        })?;
+
+        let receipt = TransparencyReceipt {
+            kind: SCITT_TRANSPARENCY_KIND.to_string(),
+            provider: self.provider_label.clone(),
+            body: json!({
+                "service_url": self.url,
+                "entry_id": response.entry_id,
+                "service_id": response.service_id,
+                "registered_at": response.registered_at,
+                "statement_b64": statement_b64,
+                "statement_hash": statement_hash,
+                "receipt_b64": response.receipt_b64,
+            }),
+        };
+        verify_receipt(&receipt, &entry.bundle_root)?;
+        Ok(receipt)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ReceiptVerification {
     pub kind: String,
@@ -214,7 +305,9 @@ pub enum TransparencyError {
     ExistingReceipt,
     #[error("bundle must be timestamped before transparency anchoring")]
     MissingTimestamp,
-    #[error("transparency receipt kind must be {REKOR_TRANSPARENCY_KIND}, got {0}")]
+    #[error(
+        "transparency receipt kind must be {REKOR_TRANSPARENCY_KIND} or {SCITT_TRANSPARENCY_KIND}, got {0}"
+    )]
     UnsupportedReceiptKind(String),
     #[error("transparency provider request failed: {0}")]
     Transport(#[source] reqwest::Error),
@@ -224,7 +317,7 @@ pub enum TransparencyError {
     DuplicateEntryNotFound,
     #[error("transparency receipt body is invalid: {0}")]
     InvalidBody(String),
-    #[error("transparency receipt log URL must start with http:// or https://")]
+    #[error("transparency receipt URL must start with http:// or https://")]
     InvalidLogUrl,
     #[error("transparency receipt entry UUID is invalid: {0}")]
     InvalidEntryUuid(String),
@@ -236,14 +329,14 @@ pub enum TransparencyError {
     MissingInclusionProof,
     #[error("transparency receipt missing signed entry timestamp")]
     MissingSignedEntryTimestamp,
-    #[error("transparency trust policy requires a PEM Rekor log public key")]
+    #[error("transparency trust policy requires a PEM transparency public key")]
     MissingLogPublicKey,
-    #[error("transparency log public key is invalid: {0}")]
+    #[error("transparency public key is invalid: {0}")]
     InvalidLogPublicKey(String),
     #[error("transparency receipt signed entry timestamp base64 is invalid: {0}")]
     InvalidSignedEntryTimestamp(String),
-    #[error("transparency receipt log ID did not match trusted log public key")]
-    LogIdKeyMismatch { expected: String, actual: String },
+    #[error("transparency receipt service/log ID did not match trusted public key")]
+    TransparencyKeyIdMismatch { expected: String, actual: String },
     #[error("transparency receipt signed entry timestamp verification failed")]
     SignedEntryTimestampVerification,
     #[error("transparency receipt signed entry timestamp canonicalization failed: {0}")]
@@ -272,6 +365,26 @@ pub enum TransparencyError {
     UnsupportedApiVersion(String),
     #[error("transparency receipt integrated_time is invalid: {0}")]
     InvalidIntegratedTime(i64),
+    #[error("transparency receipt registered_at is invalid: {0}")]
+    InvalidRegisteredAt(String),
+    #[error("transparency receipt service entry ID must not be empty")]
+    MissingEntryId,
+    #[error("transparency receipt statement is missing")]
+    MissingStatement,
+    #[error("transparency receipt statement base64 is invalid: {0}")]
+    InvalidStatementEncoding(String),
+    #[error("transparency receipt statement hash is invalid: {0}")]
+    InvalidStatementHash(String),
+    #[error("transparency receipt service ID is invalid: {0}")]
+    InvalidServiceId(String),
+    #[error("transparency receipt statement profile is unsupported: {0}")]
+    UnsupportedScittStatementProfile(String),
+    #[error("transparency receipt service signature is missing")]
+    MissingReceiptSignature,
+    #[error("transparency receipt service signature base64 is invalid: {0}")]
+    InvalidReceiptSignature(String),
+    #[error("transparency receipt service signature verification failed")]
+    ReceiptSignatureVerification,
     #[error("embedded RFC 3161 timestamp verification failed: {0}")]
     Timestamp(#[from] TimestampError),
 }
@@ -312,7 +425,13 @@ pub fn validate_transparency_trust_policy(
         return Ok(());
     }
 
-    load_log_public_key(policy)?;
+    if policy
+        .log_public_key_pem
+        .as_deref()
+        .is_some_and(|pem| !pem.trim().is_empty())
+    {
+        load_log_public_key(policy)?;
+    }
     if !policy.timestamp.is_empty() {
         crate::timestamp::validate_timestamp_trust_policy(&policy.timestamp)
             .map_err(TransparencyError::Timestamp)?;
@@ -325,12 +444,20 @@ fn verify_receipt_internal(
     bundle_root: &str,
     policy: Option<&TransparencyTrustPolicy>,
 ) -> Result<ReceiptVerification, TransparencyError> {
-    if receipt.kind != REKOR_TRANSPARENCY_KIND {
-        return Err(TransparencyError::UnsupportedReceiptKind(
+    match receipt.kind.as_str() {
+        REKOR_TRANSPARENCY_KIND => verify_rekor_receipt(receipt, bundle_root, policy),
+        SCITT_TRANSPARENCY_KIND => verify_scitt_receipt(receipt, bundle_root, policy),
+        _ => Err(TransparencyError::UnsupportedReceiptKind(
             receipt.kind.clone(),
-        ));
+        )),
     }
+}
 
+fn verify_rekor_receipt(
+    receipt: &TransparencyReceipt,
+    bundle_root: &str,
+    policy: Option<&TransparencyTrustPolicy>,
+) -> Result<ReceiptVerification, TransparencyError> {
     let body: RekorStoredReceiptBody = serde_json::from_value(receipt.body.clone())
         .map_err(|err| TransparencyError::InvalidBody(err.to_string()))?;
     validate_http_url(&body.log_url)?;
@@ -471,6 +598,107 @@ fn verify_receipt_internal(
     })
 }
 
+fn verify_scitt_receipt(
+    receipt: &TransparencyReceipt,
+    bundle_root: &str,
+    policy: Option<&TransparencyTrustPolicy>,
+) -> Result<ReceiptVerification, TransparencyError> {
+    let body: ScittStoredReceiptBody = serde_json::from_value(receipt.body.clone())
+        .map_err(|err| TransparencyError::InvalidBody(err.to_string()))?;
+    validate_http_url(&body.service_url)?;
+    if body.entry_id.trim().is_empty() {
+        return Err(TransparencyError::MissingEntryId);
+    }
+    if !is_valid_log_id(&body.service_id) {
+        return Err(TransparencyError::InvalidServiceId(body.service_id));
+    }
+    if body.statement_b64.trim().is_empty() {
+        return Err(TransparencyError::MissingStatement);
+    }
+    if body.receipt_b64.trim().is_empty() {
+        return Err(TransparencyError::MissingReceiptSignature);
+    }
+    if crate::hash::parse_sha256_prefixed(&body.statement_hash).is_err() {
+        return Err(TransparencyError::InvalidStatementHash(body.statement_hash));
+    }
+
+    let statement_bytes = Base64::decode_vec(&body.statement_b64)
+        .map_err(|err| TransparencyError::InvalidStatementEncoding(err.to_string()))?;
+    let computed_statement_hash = crate::hash::sha256_prefixed(&statement_bytes);
+    if computed_statement_hash != body.statement_hash {
+        return Err(TransparencyError::InvalidStatementHash(format!(
+            "expected {}, got {}",
+            computed_statement_hash, body.statement_hash
+        )));
+    }
+
+    let statement: ScittStatement = serde_json::from_slice(&statement_bytes)
+        .map_err(|err| TransparencyError::InvalidBody(err.to_string()))?;
+    if statement.profile != SCITT_STATEMENT_PROFILE {
+        return Err(TransparencyError::UnsupportedScittStatementProfile(
+            statement.profile,
+        ));
+    }
+    if statement.bundle_root != bundle_root {
+        return Err(TransparencyError::InvalidBody(format!(
+            "statement bundle_root {} did not match bundle root {}",
+            statement.bundle_root, bundle_root
+        )));
+    }
+
+    let timestamp = if let Some(policy) = policy.filter(|policy| !policy.timestamp.is_empty()) {
+        verify_timestamp_with_policy(&statement.timestamp, bundle_root, &policy.timestamp)?
+    } else {
+        verify_timestamp(&statement.timestamp, bundle_root)?
+    };
+    let registered_at = chrono::DateTime::parse_from_rfc3339(&body.registered_at)
+        .map_err(|_| TransparencyError::InvalidRegisteredAt(body.registered_at.clone()))?
+        .with_timezone(&Utc)
+        .to_rfc3339();
+
+    let (signed_entry_timestamp_verified, log_id_verified, trusted) =
+        if let Some(policy) = policy.filter(|policy| !policy.is_empty()) {
+            let (signature_verified, key_id_verified, receipt_trusted) = if policy
+                .log_public_key_pem
+                .as_deref()
+                .is_some_and(|pem| !pem.trim().is_empty())
+            {
+                verify_scitt_receipt_signature(&body, policy)?
+            } else {
+                (false, false, false)
+            };
+            let timestamp_trusted = match policy.timestamp.assurance_profile {
+                Some(_) => timestamp.assurance_profile_verified,
+                None if policy.timestamp.is_empty() => true,
+                None => timestamp.trusted,
+            };
+            let trusted = receipt_trusted && timestamp_trusted;
+            (signature_verified, key_id_verified, trusted)
+        } else {
+            (false, false, false)
+        };
+
+    Ok(ReceiptVerification {
+        kind: receipt.kind.clone(),
+        provider: receipt.provider.clone(),
+        log_url: body.service_url,
+        entry_uuid: body.entry_id,
+        leaf_hash: computed_statement_hash.clone(),
+        log_id: body.service_id,
+        log_index: 0,
+        integrated_time: registered_at,
+        tree_size: 0,
+        root_hash: computed_statement_hash,
+        inclusion_proof_hashes: 0,
+        inclusion_proof_verified: false,
+        signed_entry_timestamp_present: true,
+        signed_entry_timestamp_verified,
+        log_id_verified,
+        trusted,
+        timestamp_generated_at: timestamp.generated_at,
+    })
+}
+
 fn normalize_url(url: String) -> String {
     url.trim_end_matches('/').to_string()
 }
@@ -495,9 +723,9 @@ fn verify_rekor_signed_entry_timestamp(
     policy: &TransparencyTrustPolicy,
 ) -> Result<(bool, bool, bool), TransparencyError> {
     let verifying_key = load_log_public_key(policy)?;
-    let expected_log_id = compute_rekor_log_id(&verifying_key)?;
+    let expected_log_id = compute_transparency_key_id(&verifying_key)?;
     if entry.log_id != expected_log_id {
-        return Err(TransparencyError::LogIdKeyMismatch {
+        return Err(TransparencyError::TransparencyKeyIdMismatch {
             expected: expected_log_id,
             actual: entry.log_id.clone(),
         });
@@ -515,6 +743,31 @@ fn verify_rekor_signed_entry_timestamp(
     Ok((true, true, true))
 }
 
+fn verify_scitt_receipt_signature(
+    body: &ScittStoredReceiptBody,
+    policy: &TransparencyTrustPolicy,
+) -> Result<(bool, bool, bool), TransparencyError> {
+    let verifying_key = load_log_public_key(policy)?;
+    let expected_service_id = compute_transparency_key_id(&verifying_key)?;
+    if body.service_id != expected_service_id {
+        return Err(TransparencyError::TransparencyKeyIdMismatch {
+            expected: expected_service_id,
+            actual: body.service_id.clone(),
+        });
+    }
+
+    let canonical_payload = canonicalize_scitt_receipt_payload(body)?;
+    let signature_bytes = Base64::decode_vec(&body.receipt_b64)
+        .map_err(|err| TransparencyError::InvalidReceiptSignature(err.to_string()))?;
+    let signature = Signature::from_der(&signature_bytes)
+        .map_err(|err| TransparencyError::InvalidReceiptSignature(err.to_string()))?;
+    verifying_key
+        .verify(&canonical_payload, &signature)
+        .map_err(|_| TransparencyError::ReceiptSignatureVerification)?;
+
+    Ok((true, true, true))
+}
+
 fn canonicalize_rekor_set_payload(entry: &RekorLogEntry) -> Result<Vec<u8>, TransparencyError> {
     canonicalize_value(&json!({
         "body": entry.body,
@@ -525,7 +778,19 @@ fn canonicalize_rekor_set_payload(entry: &RekorLogEntry) -> Result<Vec<u8>, Tran
     .map_err(|err| TransparencyError::SignedEntryTimestampCanonicalization(err.to_string()))
 }
 
-fn compute_rekor_log_id(verifying_key: &VerifyingKey) -> Result<String, TransparencyError> {
+fn canonicalize_scitt_receipt_payload(
+    body: &ScittStoredReceiptBody,
+) -> Result<Vec<u8>, TransparencyError> {
+    canonicalize_value(&json!({
+        "entryId": body.entry_id,
+        "registeredAt": body.registered_at,
+        "serviceId": body.service_id,
+        "statementHash": body.statement_hash,
+    }))
+    .map_err(|err| TransparencyError::SignedEntryTimestampCanonicalization(err.to_string()))
+}
+
+fn compute_transparency_key_id(verifying_key: &VerifyingKey) -> Result<String, TransparencyError> {
     let public_key_der = verifying_key
         .to_public_key_der()
         .map_err(|err| TransparencyError::InvalidLogPublicKey(err.to_string()))?;
@@ -747,6 +1012,38 @@ struct RekorInclusionProof {
     checkpoint: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct ScittStatement {
+    profile: String,
+    bundle_root: String,
+    timestamp: TimestampToken,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct ScittSubmissionRequest {
+    statement_b64: String,
+    statement_hash: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct ScittSubmissionResponse {
+    entry_id: String,
+    service_id: String,
+    registered_at: String,
+    receipt_b64: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct ScittStoredReceiptBody {
+    service_url: String,
+    entry_id: String,
+    service_id: String,
+    registered_at: String,
+    statement_b64: String,
+    statement_hash: String,
+    receipt_b64: String,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -839,7 +1136,10 @@ mod tests {
         };
 
         let err = verify_receipt_with_policy(&receipt, bundle_root, &policy).unwrap_err();
-        assert!(matches!(err, TransparencyError::LogIdKeyMismatch { .. }));
+        assert!(matches!(
+            err,
+            TransparencyError::TransparencyKeyIdMismatch { .. }
+        ));
     }
 
     #[test]
@@ -851,6 +1151,7 @@ mod tests {
             timestamp: TimestampTrustPolicy {
                 trust_anchor_pems: Vec::new(),
                 crl_pems: Vec::new(),
+                ocsp_responder_urls: Vec::new(),
                 qualified_signer_pems: Vec::new(),
                 policy_oids: Vec::new(),
                 assurance_profile: Some(crate::timestamp::TimestampAssuranceProfile::Standard),
@@ -872,6 +1173,7 @@ mod tests {
             timestamp: TimestampTrustPolicy {
                 trust_anchor_pems: Vec::new(),
                 crl_pems: Vec::new(),
+                ocsp_responder_urls: Vec::new(),
                 qualified_signer_pems: Vec::new(),
                 policy_oids: Vec::new(),
                 assurance_profile: Some(crate::timestamp::TimestampAssuranceProfile::Standard),
@@ -914,6 +1216,57 @@ mod tests {
             err,
             TransparencyError::InclusionProofRootMismatch { .. }
         ));
+    }
+
+    #[test]
+    fn verify_receipt_accepts_valid_scitt_statement() {
+        let bundle_root = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        let receipt = build_test_scitt_receipt(bundle_root, Some("scitt"));
+
+        let verification = verify_receipt(&receipt, bundle_root).unwrap();
+        assert_eq!(verification.kind, SCITT_TRANSPARENCY_KIND);
+        assert_eq!(verification.provider.as_deref(), Some("scitt"));
+        assert_eq!(verification.log_url, "https://scitt.example.test/entries");
+        assert_eq!(verification.log_index, 0);
+        assert_eq!(verification.tree_size, 0);
+        assert!(!verification.inclusion_proof_verified);
+        assert!(verification.signed_entry_timestamp_present);
+        assert!(!verification.signed_entry_timestamp_verified);
+        assert!(!verification.trusted);
+        assert!(
+            verification
+                .integrated_time
+                .starts_with("2026-03-06T13:15:00")
+        );
+        assert_eq!(verification.leaf_hash, verification.root_hash);
+    }
+
+    #[test]
+    fn verify_receipt_with_policy_accepts_trusted_scitt_key() {
+        let bundle_root = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        let (receipt, service_public_key_pem) =
+            build_trusted_scitt_receipt(bundle_root, Some("scitt"));
+        let policy = TransparencyTrustPolicy {
+            log_public_key_pem: Some(service_public_key_pem),
+            timestamp: TimestampTrustPolicy::default(),
+        };
+
+        let verification = verify_receipt_with_policy(&receipt, bundle_root, &policy).unwrap();
+        assert!(verification.signed_entry_timestamp_verified);
+        assert!(verification.log_id_verified);
+        assert!(verification.trusted);
+    }
+
+    #[test]
+    fn verify_receipt_rejects_tampered_scitt_statement_hash() {
+        let bundle_root = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        let mut receipt = build_test_scitt_receipt(bundle_root, Some("scitt"));
+        receipt.body["statement_hash"] = Value::String(
+            "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff".to_string(),
+        );
+
+        let err = verify_receipt(&receipt, bundle_root).unwrap_err();
+        assert!(matches!(err, TransparencyError::InvalidStatementHash(_)));
     }
 
     #[test]
@@ -995,6 +1348,81 @@ mod tests {
         server.join().unwrap();
     }
 
+    #[test]
+    fn scitt_provider_submits_statement_hash_payload() {
+        use std::{
+            io::{BufRead, BufReader, Read, Write},
+            net::TcpListener,
+            thread,
+        };
+
+        let bundle_root = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        let token = build_test_timestamp_token(bundle_root, Some("test-tsa"));
+        let statement = ScittStatement {
+            profile: SCITT_STATEMENT_PROFILE.to_string(),
+            bundle_root: bundle_root.to_string(),
+            timestamp: token.clone(),
+        };
+        let statement_bytes =
+            canonicalize_value(&serde_json::to_value(&statement).unwrap()).unwrap();
+        let statement_b64 = Base64::encode_string(&statement_bytes);
+        let statement_hash = crate::hash::sha256_prefixed(&statement_bytes);
+        let (response, _) = build_trusted_scitt_receipt_response(
+            &statement_hash,
+            "entry-scitt-001",
+            "2026-03-06T13:15:00Z",
+        );
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut reader = BufReader::new(stream.try_clone().unwrap());
+            let mut request = String::new();
+            let mut content_length = 0_usize;
+
+            loop {
+                let mut line = String::new();
+                let bytes_read = reader.read_line(&mut line).unwrap();
+                if bytes_read == 0 || line == "\r\n" {
+                    break;
+                }
+                let lower = line.to_ascii_lowercase();
+                if let Some(value) = lower.strip_prefix("content-length:") {
+                    content_length = value.trim().parse::<usize>().unwrap();
+                }
+                request.push_str(&line);
+            }
+
+            let mut body = vec![0_u8; content_length];
+            reader.read_exact(&mut body).unwrap();
+            request.push_str(std::str::from_utf8(&body).unwrap());
+            assert!(request.starts_with("POST /entries HTTP/1.1"));
+            assert!(request.contains(&statement_b64));
+            assert!(request.contains(&statement_hash));
+
+            let body = serde_json::to_string(&response).unwrap();
+            write!(
+                stream,
+                "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
+                body.len(),
+                body
+            )
+            .unwrap();
+        });
+
+        let provider = ScittTransparencyProvider::new(format!("http://{addr}/entries"));
+        let entry = TransparencyEntry {
+            bundle_root: bundle_root.to_string(),
+            timestamp: token,
+        };
+
+        let receipt = provider.submit(&entry).unwrap();
+        assert_eq!(receipt.kind, SCITT_TRANSPARENCY_KIND);
+        assert_eq!(receipt.provider.as_deref(), Some(SCITT_TRANSPARENCY_KIND));
+        server.join().unwrap();
+    }
+
     fn build_test_bundle() -> ProofBundle {
         ProofBundle {
             bundle_version: "1.0".to_string(),
@@ -1066,7 +1494,7 @@ mod tests {
         .unwrap();
         let leaf_hash = hex::encode(hash_rekor_leaf(&body_bytes));
         let signing_key = SigningKey::random(&mut OsRng);
-        let log_id = compute_rekor_log_id(signing_key.verifying_key()).unwrap();
+        let log_id = compute_transparency_key_id(signing_key.verifying_key()).unwrap();
         let entry = RekorLogEntry {
             body: Value::String(Base64::encode_string(&body_bytes)),
             integrated_time: 1772802000_i64,
@@ -1150,6 +1578,102 @@ mod tests {
         );
 
         (leaf_hash, Value::Object(log_entry))
+    }
+
+    fn build_test_scitt_receipt(bundle_root: &str, provider: Option<&str>) -> TransparencyReceipt {
+        let token = build_test_timestamp_token(bundle_root, provider);
+        let statement = ScittStatement {
+            profile: SCITT_STATEMENT_PROFILE.to_string(),
+            bundle_root: bundle_root.to_string(),
+            timestamp: token,
+        };
+        let statement_bytes =
+            canonicalize_value(&serde_json::to_value(&statement).unwrap()).unwrap();
+        let statement_hash = crate::hash::sha256_prefixed(&statement_bytes);
+
+        TransparencyReceipt {
+            kind: SCITT_TRANSPARENCY_KIND.to_string(),
+            provider: provider.map(str::to_string),
+            body: json!({
+                "service_url": "https://scitt.example.test/entries",
+                "entry_id": "entry-scitt-001",
+                "service_id": "abababababababababababababababababababababababababababababababab",
+                "registered_at": "2026-03-06T13:15:00Z",
+                "statement_b64": Base64::encode_string(&statement_bytes),
+                "statement_hash": statement_hash,
+                "receipt_b64": Base64::encode_string(b"scitt-receipt"),
+            }),
+        }
+    }
+
+    fn build_trusted_scitt_receipt(
+        bundle_root: &str,
+        provider: Option<&str>,
+    ) -> (TransparencyReceipt, String) {
+        let token = build_test_timestamp_token(bundle_root, provider);
+        let statement = ScittStatement {
+            profile: SCITT_STATEMENT_PROFILE.to_string(),
+            bundle_root: bundle_root.to_string(),
+            timestamp: token,
+        };
+        let statement_bytes =
+            canonicalize_value(&serde_json::to_value(&statement).unwrap()).unwrap();
+        let statement_hash = crate::hash::sha256_prefixed(&statement_bytes);
+        let (response, public_key_pem) = build_trusted_scitt_receipt_response(
+            &statement_hash,
+            "entry-scitt-001",
+            "2026-03-06T13:15:00Z",
+        );
+
+        (
+            TransparencyReceipt {
+                kind: SCITT_TRANSPARENCY_KIND.to_string(),
+                provider: provider.map(str::to_string),
+                body: json!({
+                    "service_url": "https://scitt.example.test/entries",
+                    "entry_id": response.entry_id,
+                    "service_id": response.service_id,
+                    "registered_at": response.registered_at,
+                    "statement_b64": Base64::encode_string(&statement_bytes),
+                    "statement_hash": statement_hash,
+                    "receipt_b64": response.receipt_b64,
+                }),
+            },
+            public_key_pem,
+        )
+    }
+
+    fn build_trusted_scitt_receipt_response(
+        statement_hash: &str,
+        entry_id: &str,
+        registered_at: &str,
+    ) -> (ScittSubmissionResponse, String) {
+        let signing_key = SigningKey::random(&mut OsRng);
+        let service_id = compute_transparency_key_id(signing_key.verifying_key()).unwrap();
+        let payload = canonicalize_scitt_receipt_payload(&ScittStoredReceiptBody {
+            service_url: "https://scitt.example.test/entries".to_string(),
+            entry_id: entry_id.to_string(),
+            service_id: service_id.clone(),
+            registered_at: registered_at.to_string(),
+            statement_b64: String::new(),
+            statement_hash: statement_hash.to_string(),
+            receipt_b64: String::new(),
+        })
+        .unwrap();
+        let signature: Signature = signing_key.sign(&payload);
+
+        (
+            ScittSubmissionResponse {
+                entry_id: entry_id.to_string(),
+                service_id,
+                registered_at: registered_at.to_string(),
+                receipt_b64: Base64::encode_string(signature.to_der().as_bytes()),
+            },
+            signing_key
+                .verifying_key()
+                .to_public_key_pem(LineEnding::LF)
+                .unwrap(),
+        )
     }
 
     fn build_test_timestamp_token(digest: &str, provider: Option<&str>) -> TimestampToken {

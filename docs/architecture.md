@@ -103,21 +103,22 @@ Current config behavior:
 - `GET /v1/config` also reports the bound address and retention scan interval currently active in the process.
 - `PUT /v1/config/retention` upserts retention policy rows in SQLite.
 - Retention policies now carry an `expiry_mode`; `fixed_days` computes `expires_at`, while `until_withdrawn` leaves bundles active until an explicit withdrawal/delete event.
-- `PUT /v1/config/timestamp` persists RFC 3161 provider configuration (`enabled`, `provider`, `url`, optional `assurance`) plus optional PEM trust anchors, PEM CRLs, qualified TSA signer allowlists, and expected RFC 3161 policy OIDs used for trust-aware timestamp verification.
-- `PUT /v1/config/transparency` persists transparency provider configuration (`none`, `rekor`, `scitt`) plus URL when applicable and an optional Rekor PEM public key for SET verification.
+- `PUT /v1/config/timestamp` persists RFC 3161 provider configuration (`enabled`, `provider`, `url`, optional `assurance`) plus optional PEM trust anchors, PEM CRLs, live OCSP responder URLs, qualified TSA signer allowlists, and expected RFC 3161 policy OIDs used for trust-aware timestamp verification.
+- `PUT /v1/config/transparency` persists transparency provider configuration (`none`, `rekor`, `scitt`) plus URL when applicable and an optional transparency-service PEM public key for trust-aware receipt verification.
 - Startup file config is synchronized into SQLite for retention/timestamp/transparency so the API view matches the current boot configuration.
 - `POST /v1/bundles/{id}/timestamp` loads a stored active bundle, requests an RFC 3161 token over the UTF-8 bytes of `integrity.bundle_root`, stores the token in bundle JSON, and flips `has_timestamp`.
-- `POST /v1/bundles/{id}/anchor` loads a stored active timestamped bundle, submits its RFC 3161 token to Rekor as an `rfc3161` entry, stores the returned receipt in bundle JSON, and flips `has_receipt`.
+- `POST /v1/bundles/{id}/anchor` loads a stored active timestamped bundle and submits it to the configured transparency provider. For Rekor it sends an `rfc3161` entry; for the current SCITT path it sends a canonical JSON statement containing `{profile, bundle_root, timestamp}` and stores the returned service-signed receipt in bundle JSON.
 - `POST /v1/verify/timestamp` and `POST /v1/verify/receipt` accept either direct assurance artefacts or a stored `bundle_id`, returning typed verification details without requiring full package verification.
-- Local `proofctl create --timestamp-url/--transparency-log` now uses the same trust-policy helpers as verify mode, so local assurance attachment can fail early when configured assurance profiles, anchors, CRLs, signer pins, policy OIDs, or Rekor keys do not match the returned artefacts.
+- Local `proofctl create --timestamp-url/--transparency-log` now uses the same trust-policy helpers as verify mode, and `--transparency-provider <rekor|scitt>` selects the local receipt path, so assurance attachment can fail early when configured assurance profiles, anchors, CRLs, OCSP responder URLs, signer pins, policy OIDs, or transparency public keys do not match the returned artefacts.
 - When timestamp trust anchors are configured, the vault verifies the RFC 3161 signer certificate chain against those anchors at `genTime`.
 - When timestamp CRLs are configured, the vault also verifies that the applicable CRL is valid at `genTime`, signed by the issuer certificate, and does not revoke the TSA signer certificate.
+- When timestamp OCSP responder URLs are configured, the vault also performs a live OCSP request for the TSA signer certificate, verifies the OCSP response signature against the configured trust anchors, requires the OCSP response itself to be current, and treats the signer as invalid only when the responder reports a revocation time at or before `genTime`.
 - When timestamp policy OIDs are configured, the vault also requires the token `TSTInfo.policy` OID to match one of those values.
 - When `timestamp.assurance == "qualified"`, the vault requires trust anchors, CRLs, expected policy OIDs, and a configured TSA signer allowlist to be present and satisfied, and it also enforces a TSA signer certificate profile suitable for time stamping, treating the result as a stricter qualified-profile check rather than a claim of full eIDAS qualified status.
-- When a Rekor public key is configured, the vault verifies the signed-entry-timestamp over the canonical Rekor payload and requires `logID == sha256(SPKI_DER(public_key))`.
+- When a transparency public key is configured, the vault verifies provider-specific receipt signatures. For Rekor it verifies the signed-entry-timestamp over the canonical Rekor payload and requires `logID == sha256(SPKI_DER(public_key))`. For the current SCITT path it verifies the service signature over canonical `{entryId, registeredAt, serviceId, statementHash}` and requires `serviceId == sha256(SPKI_DER(public_key))`.
 - When an updated retention policy remains active, the vault recomputes `expires_at` for existing active bundles in that class.
 - The seeded `gpai_documentation` class uses `until_withdrawn`, and the GPAI SDK builders default to that class for `model_evaluation`, `adversarial_test`, and `training_provenance`.
-- Transparency config is active for Rekor RFC 3161 anchoring; `scitt` remains an explicit stub.
+- Transparency config is active for both Rekor RFC 3161 anchoring and the current draft-aligned SCITT statement/receipt flow. Full interoperable COSE/CCF SCITT remains future work.
 - The retention engine now supports both manual `POST /v1/retention/scan` and an automatic background scan interval configured via file/env.
 - `GET /v1/systems` summarizes bundle counts per `system_id`, and `GET /v1/systems/{id}/summary` expands that into role/item/retention/assurance/model breakdowns for operator-facing inventory views.
 
@@ -154,7 +155,7 @@ Current config behavior:
 9. Sign UTF-8 bytes of `bundle_root` using Ed25519 JWS compact serialization.
 10. Persist bundle metadata + indexes in SQLite and artifact bytes on disk.
 11. Optionally request an RFC 3161 token over UTF-8 `bundle_root` bytes.
-12. Optionally submit that RFC 3161 token to Rekor as an `rfc3161` entry and store the returned receipt.
+12. Optionally submit that RFC 3161 token to the configured transparency provider and store the returned receipt.
 13. Return `bundle_id`, `bundle_root`, signature metadata, and optional assurance artefacts.
 
 ## Deterministic Byte-Level Contracts
@@ -194,7 +195,8 @@ A verifier needs only:
 
 No network calls are required for core verification.
 Timestamp and transparency checks are optional in PoC and report as skipped/missing when not requested.
-Current assurance verification checks bundle-root binding, embedded RFC 3161 token validity, optional RFC 3161 policy OID constraints, optional timestamp assurance profiles (`standard` / `qualified`), optional CRL-based TSA revocation checks, optional qualified TSA signer allowlist matching, Rekor entry UUID to leaf-hash binding, Rekor inclusion proofs against the advertised root hash, and can optionally verify TSA signer chains / Rekor SET signatures when trust material is configured.
+If OCSP responder URLs are configured, the optional timestamp trust check becomes a live networked verification step.
+Current assurance verification checks bundle-root binding, embedded RFC 3161 token validity, optional RFC 3161 policy OID constraints, optional timestamp assurance profiles (`standard` / `qualified`), optional CRL-based TSA revocation checks, optional live OCSP checks, optional qualified TSA signer allowlist matching, Rekor entry UUID to leaf-hash binding, Rekor inclusion proofs against the advertised root hash, and the current draft-aligned SCITT statement/receipt contract; it can optionally verify TSA signer chains and provider receipt signatures when trust material is configured.
 
 ## Provider-Agnostic Boundary
 
@@ -216,8 +218,8 @@ It does not claim model replay determinism.
 
 ## Out of Scope for PoC
 
-- Full eIDAS qualified trust-list and OCSP evaluation
-- SCITT receipts
+- Full eIDAS qualified trust-list evaluation and archival OCSP evidence handling
+- Full interoperable COSE/CCF SCITT
 - HSM/KMS-backed keys
 - WORM/cloud object lock
 - Policy-driven encryption/redaction enforcement

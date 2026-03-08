@@ -12,6 +12,7 @@ chrono.workspace = true
 cryptographic-message-syntax.workspace = true
 ed25519-dalek.workspace = true
 hex.workspace = true
+openssl.workspace = true
 p256.workspace = true
 reqwest.workspace = true
 serde.workspace = true

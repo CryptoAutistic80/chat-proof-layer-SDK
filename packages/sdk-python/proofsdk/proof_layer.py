@@ -146,6 +146,21 @@ class ProofLayer:
             return self.client.download_pack_export(pack_id)
         raise ValueError("underlying client does not support download_pack_export; use vault mode")
 
+    def get_vault_config(self) -> dict[str, Any]:
+        if hasattr(self.client, "get_config"):
+            return self.client.get_config()
+        raise ValueError("underlying client does not support get_vault_config; use vault mode")
+
+    def get_disclosure_config(self) -> dict[str, Any]:
+        if hasattr(self.client, "get_disclosure_config"):
+            return self.client.get_disclosure_config()
+        raise ValueError("underlying client does not support get_disclosure_config; use vault mode")
+
+    def update_disclosure_config(self, config: dict[str, Any]) -> dict[str, Any]:
+        if hasattr(self.client, "update_disclosure_config"):
+            return self.client.update_disclosure_config(config)
+        raise ValueError("underlying client does not support update_disclosure_config; use vault mode")
+
     def _submit_capture(
         self,
         request: dict[str, Any],

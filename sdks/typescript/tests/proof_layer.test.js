@@ -61,6 +61,36 @@ test("ProofLayer.disclose returns a locally verifiable redacted bundle", async (
   });
 });
 
+test("ProofLayer vault mode can update disclosure config", async () => {
+  let captured;
+  const proofLayer = new ProofLayer({
+    vaultUrl: "http://127.0.0.1:8080",
+    fetchImpl: async (url, init) => {
+      captured = { url, init };
+      return new Response(init.body, {
+        status: 200,
+        headers: { "content-type": "application/json" }
+      });
+    }
+  });
+
+  const result = await proofLayer.updateDisclosureConfig({
+    policies: [
+      {
+        name: "regulator_minimum",
+        excluded_item_types: ["tool_call"],
+        include_artefact_metadata: false,
+        include_artefact_bytes: false,
+        artefact_names: []
+      }
+    ]
+  });
+
+  assert.equal(captured.url, "http://127.0.0.1:8080/v1/config/disclosure");
+  assert.equal(captured.init.method, "PUT");
+  assert.equal(result.policies[0].name, "regulator_minimum");
+});
+
 test("withProofLayer attaches proof metadata to OpenAI-like responses", async () => {
   const signingKeyPem = await readFile(path.join(goldenDir, "signing_key.txt"), "utf8");
   const proofLayer = new ProofLayer({

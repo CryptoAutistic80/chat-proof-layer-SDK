@@ -4,12 +4,14 @@ import type {
   CreatePackRequest,
   CreateBundleRequest,
   CreateBundleResponse,
+  DisclosureConfig,
   FetchLike,
   HttpClientOptions,
   InlineArtefactRequest,
   JsonObject,
   PackManifest,
   PackSummaryResponse,
+  VaultConfigResponse,
   VerifyBundleRequest,
   VerifyBundleSummary,
   VerifyPackageRequest
@@ -113,6 +115,19 @@ export class ProofLayerClient {
     return this.#get(`/v1/packs/${encodeURIComponent(packId)}/manifest`) as Promise<PackManifest>;
   }
 
+  async getConfig(): Promise<VaultConfigResponse> {
+    return this.#get("/v1/config") as Promise<VaultConfigResponse>;
+  }
+
+  async getDisclosureConfig(): Promise<DisclosureConfig> {
+    const config = await this.getConfig();
+    return config.disclosure;
+  }
+
+  async updateDisclosureConfig(config: DisclosureConfig): Promise<DisclosureConfig> {
+    return this.#put("/v1/config/disclosure", config);
+  }
+
   async downloadPackExport(packId: string): Promise<Uint8Array> {
     const res = await this.fetchImpl(`${this.baseUrl}/v1/packs/${encodeURIComponent(packId)}/export`, {
       method: "GET",
@@ -157,15 +172,23 @@ export class ProofLayerClient {
   }
 
   async #post(path: string, payload: JsonObject): Promise<any> {
+    return this.#sendJson("POST", path, payload);
+  }
+
+  async #put(path: string, payload: JsonObject): Promise<any> {
+    return this.#sendJson("PUT", path, payload);
+  }
+
+  async #sendJson(method: "POST" | "PUT", path: string, payload: JsonObject): Promise<any> {
     const res = await this.fetchImpl(`${this.baseUrl}${path}`, {
-      method: "POST",
+      method,
       headers: {
         ...this.#headers(),
         "content-type": "application/json"
       },
       body: JSON.stringify(payload)
     });
-    return this.#jsonOrThrow(res, `POST ${path}`);
+    return this.#jsonOrThrow(res, `${method} ${path}`);
   }
 
   async #jsonOrThrow(response: Response, op: string): Promise<any> {

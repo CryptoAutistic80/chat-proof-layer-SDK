@@ -53,6 +53,39 @@ class TestProofLayer(unittest.TestCase):
             },
         )
 
+    def test_vault_mode_can_update_disclosure_config(self):
+        captured = {}
+
+        def request_fn(method, path, headers, body):
+            captured["method"] = method
+            captured["path"] = path
+            captured["headers"] = headers
+            captured["body"] = body
+            return json.loads(body.decode("utf-8"))
+
+        proof_layer = ProofLayer(
+            vault_url="http://127.0.0.1:8080",
+            request_fn=request_fn,
+        )
+
+        result = proof_layer.update_disclosure_config(
+            {
+                "policies": [
+                    {
+                        "name": "regulator_minimum",
+                        "excluded_item_types": ["tool_call"],
+                        "include_artefact_metadata": False,
+                        "include_artefact_bytes": False,
+                        "artefact_names": [],
+                    }
+                ]
+            }
+        )
+
+        self.assertEqual(captured["method"], "PUT")
+        self.assertEqual(captured["path"], "/v1/config/disclosure")
+        self.assertEqual(result["policies"][0]["name"], "regulator_minimum")
+
     def test_capture_risk_assessment_seals_lifecycle_evidence(self):
         signing_key_pem = (GOLDEN_DIR / "signing_key.txt").read_text(encoding="utf-8")
         proof_layer = ProofLayer(

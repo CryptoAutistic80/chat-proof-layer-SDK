@@ -92,6 +92,20 @@ class ProofLayerClient:
     def download_pack_export(self, pack_id: str) -> bytes:
         return self._request_bytes("GET", f"/v1/packs/{pack_id}/export", self._headers(), None)
 
+    def get_config(self) -> dict[str, Any]:
+        return self._request_fn("GET", "/v1/config", self._headers(), None)
+
+    def get_disclosure_config(self) -> dict[str, Any]:
+        return self.get_config()["disclosure"]
+
+    def update_disclosure_config(self, config: dict[str, Any]) -> dict[str, Any]:
+        return self._request_fn(
+            "PUT",
+            "/v1/config/disclosure",
+            self._headers_json(),
+            json.dumps(config).encode("utf-8"),
+        )
+
     def get_bundle(self, bundle_id: str) -> dict[str, Any]:
         return self._request_fn("GET", f"/v1/bundles/{bundle_id}", self._headers(), None)
 

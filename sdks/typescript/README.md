@@ -108,6 +108,17 @@ const pack = await proofClient.createPack({
   bundleFormat: "disclosure",
   disclosurePolicy: "annex_iv_redacted"
 });
+await proofClient.updateDisclosureConfig({
+  policies: [
+    {
+      name: "regulator_minimum",
+      excluded_item_types: ["tool_call"],
+      include_artefact_metadata: false,
+      include_artefact_bytes: false,
+      artefact_names: []
+    }
+  ]
+});
 const archive = await proofClient.downloadPackExport(pack.pack_id);
 
 const generic = withGenericProofLayer(

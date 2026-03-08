@@ -151,6 +151,9 @@
               "minLength": 1
             }
           },
+          "disclosed_artefact_bytes_included": {
+            "type": "boolean"
+          },
           "obligation_refs": {
             "type": "array",
             "items": {

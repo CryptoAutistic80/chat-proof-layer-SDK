@@ -28,6 +28,7 @@ import type {
   CreateBundleResponse,
   DataGovernanceRequestOptions,
   DeclarationRequestOptions,
+  DisclosureConfig,
   HumanOversightRequestOptions,
   IncidentReportRequestOptions,
   LiteracyAttestationRequestOptions,
@@ -46,6 +47,7 @@ import type {
   TechnicalDocRequestOptions,
   TrainingProvenanceRequestOptions,
   ToolCallRequestOptions,
+  VaultConfigResponse,
   VerifyBundleRequest,
   VerifyBundleSummary,
   VerifyRedactedBundleRequest,
@@ -185,6 +187,33 @@ export class ProofLayer implements BundleCreateClient {
       return (this.client as ProofLayerClient).downloadPackExport(packId);
     }
     throw new Error("underlying client does not support downloadPackExport; use vault mode");
+  }
+
+  async getVaultConfig(): Promise<VaultConfigResponse> {
+    if ("getConfig" in this.client && typeof this.client.getConfig === "function") {
+      return (this.client as ProofLayerClient).getConfig();
+    }
+    throw new Error("underlying client does not support getVaultConfig; use vault mode");
+  }
+
+  async getDisclosureConfig(): Promise<DisclosureConfig> {
+    if (
+      "getDisclosureConfig" in this.client &&
+      typeof this.client.getDisclosureConfig === "function"
+    ) {
+      return (this.client as ProofLayerClient).getDisclosureConfig();
+    }
+    throw new Error("underlying client does not support getDisclosureConfig; use vault mode");
+  }
+
+  async updateDisclosureConfig(config: DisclosureConfig): Promise<DisclosureConfig> {
+    if (
+      "updateDisclosureConfig" in this.client &&
+      typeof this.client.updateDisclosureConfig === "function"
+    ) {
+      return (this.client as ProofLayerClient).updateDisclosureConfig(config);
+    }
+    throw new Error("underlying client does not support updateDisclosureConfig; use vault mode");
   }
 
   async capture(options: ProofLayerCaptureOptions): Promise<ProofLayerResult> {

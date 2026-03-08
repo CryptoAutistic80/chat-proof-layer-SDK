@@ -601,6 +601,8 @@ struct DisclosurePolicyConfig {
     #[serde(default)]
     include_artefact_metadata: bool,
     #[serde(default)]
+    include_artefact_bytes: bool,
+    #[serde(default)]
     artefact_names: Vec<String>,
 }
 
@@ -714,6 +716,8 @@ struct PackBundleEntry {
     disclosed_artefact_indices: Vec<usize>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     disclosed_artefact_names: Vec<String>,
+    #[serde(default)]
+    disclosed_artefact_bytes_included: bool,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     obligation_refs: Vec<String>,
     matched_rules: Vec<String>,
@@ -808,6 +812,7 @@ struct CuratedPackBundle {
     disclosed_item_types: Vec<String>,
     disclosed_artefact_indices: Vec<usize>,
     disclosed_artefact_names: Vec<String>,
+    disclosed_artefact_bytes_included: bool,
     matched_rules: Vec<String>,
 }
 
@@ -2451,17 +2456,32 @@ async fn create_pack(
                 )
                 .map_err(ApiError::internal_anyhow)?
             }
-            PACK_BUNDLE_FORMAT_DISCLOSURE => build_disclosure_package_bytes(
-                &curated.bundle,
-                &curated.disclosed_item_indices,
-                &curated.disclosed_artefact_indices,
-            )
-            .map_err(|err| {
-                ApiError::internal_anyhow(err.context(format!(
-                    "failed to build disclosure package for bundle {}",
-                    curated.row.bundle_id
-                )))
-            })?,
+            PACK_BUNDLE_FORMAT_DISCLOSURE => {
+                let disclosed_artefacts = if curated.disclosed_artefact_bytes_included {
+                    load_selected_pack_artefacts(
+                        &state.db,
+                        &curated.bundle,
+                        &curated.row.bundle_id,
+                        &curated.disclosed_artefact_indices,
+                    )
+                    .await
+                    .map_err(ApiError::internal_anyhow)?
+                } else {
+                    Vec::new()
+                };
+                build_disclosure_package_bytes(
+                    &curated.bundle,
+                    &curated.disclosed_item_indices,
+                    &curated.disclosed_artefact_indices,
+                    &disclosed_artefacts,
+                )
+                .map_err(|err| {
+                    ApiError::internal_anyhow(err.context(format!(
+                        "failed to build disclosure package for bundle {}",
+                        curated.row.bundle_id
+                    )))
+                })?
+            }
             _ => unreachable!("bundle_format should be normalized"),
         };
 
@@ -2480,6 +2500,7 @@ async fn create_pack(
             disclosed_item_types: curated.disclosed_item_types,
             disclosed_artefact_indices: curated.disclosed_artefact_indices,
             disclosed_artefact_names: curated.disclosed_artefact_names,
+            disclosed_artefact_bytes_included: curated.disclosed_artefact_bytes_included,
             obligation_refs: curated.obligation_refs,
             matched_rules: curated.matched_rules,
         });
@@ -3451,6 +3472,10 @@ fn curate_pack_bundles(
             .iter()
             .map(|index| bundle.artefacts[*index].name.clone())
             .collect::<Vec<_>>();
+        let disclosed_artefact_bytes_included = disclosure_policy
+            .map(|policy| policy.include_artefact_bytes)
+            .unwrap_or(false)
+            && !disclosed_artefact_indices.is_empty();
 
         if disclosure_policy.is_some()
             && disclosed_item_indices.is_empty()
@@ -3486,6 +3511,7 @@ fn curate_pack_bundles(
             disclosed_item_types,
             disclosed_artefact_indices,
             disclosed_artefact_names,
+            disclosed_artefact_bytes_included,
             matched_rules,
         });
     }
@@ -3616,6 +3642,45 @@ async fn load_pack_artefacts(db: &SqlitePool, bundle_id: &str) -> Result<Vec<Pac
     Ok(artefacts)
 }
 
+async fn load_selected_pack_artefacts(
+    db: &SqlitePool,
+    bundle: &ProofBundle,
+    bundle_id: &str,
+    artefact_indices: &[usize],
+) -> Result<Vec<PackArtefactBytes>> {
+    if artefact_indices.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let artefacts = load_pack_artefacts(db, bundle_id).await?;
+    let artefacts_by_name = artefacts
+        .into_iter()
+        .map(|artefact| (artefact.name.clone(), artefact))
+        .collect::<BTreeMap<_, _>>();
+
+    let mut selected = Vec::with_capacity(artefact_indices.len());
+    for index in artefact_indices {
+        let artefact_name = &bundle
+            .artefacts
+            .get(*index)
+            .ok_or_else(|| anyhow::anyhow!("artefact index {index} out of bounds"))?
+            .name;
+        let artefact = artefacts_by_name.get(artefact_name).ok_or_else(|| {
+            anyhow::anyhow!(
+                "selected disclosure artefact {} missing from stored bundle {}",
+                artefact_name,
+                bundle_id
+            )
+        })?;
+        selected.push(PackArtefactBytes {
+            name: artefact.name.clone(),
+            bytes: artefact.bytes.clone(),
+        });
+    }
+
+    Ok(selected)
+}
+
 fn build_bundle_package_bytes(
     bundle: &ProofBundle,
     bundle_json_bytes: &[u8],
@@ -3672,6 +3737,7 @@ fn build_disclosure_package_bytes(
     bundle: &ProofBundle,
     item_indices: &[usize],
     artefact_indices: &[usize],
+    disclosed_artefacts: &[PackArtefactBytes],
 ) -> Result<Vec<u8>> {
     let redacted = redact_bundle(bundle, item_indices, artefact_indices)
         .context("failed to redact bundle for disclosure package")?;
@@ -3680,6 +3746,12 @@ fn build_disclosure_package_bytes(
         "redacted_bundle.json".to_string(),
         serde_json::to_vec_pretty(&redacted)?,
     );
+    for artefact in disclosed_artefacts {
+        package_files.insert(
+            format!("artefacts/{}", artefact.name),
+            artefact.bytes.clone(),
+        );
+    }
 
     let manifest = Manifest {
         files: package_files
@@ -4314,6 +4386,12 @@ fn validate_disclosure_config(mut config: DisclosureConfig) -> Result<Disclosure
                 policy.name
             );
         }
+        if policy.include_artefact_bytes && !policy.include_artefact_metadata {
+            bail!(
+                "disclosure policy {} cannot set include_artefact_bytes when include_artefact_metadata is false",
+                policy.name
+            );
+        }
     }
 
     Ok(config)
@@ -4433,6 +4511,7 @@ fn default_disclosure_config() -> DisclosureConfig {
                 allowed_item_types: Vec::new(),
                 excluded_item_types: Vec::new(),
                 include_artefact_metadata: false,
+                include_artefact_bytes: false,
                 artefact_names: Vec::new(),
             },
             DisclosurePolicyConfig {
@@ -4445,6 +4524,7 @@ fn default_disclosure_config() -> DisclosureConfig {
                 ],
                 excluded_item_types: Vec::new(),
                 include_artefact_metadata: true,
+                include_artefact_bytes: true,
                 artefact_names: Vec::new(),
             },
             DisclosurePolicyConfig {
@@ -4461,6 +4541,7 @@ fn default_disclosure_config() -> DisclosureConfig {
                     "tool_call".to_string(),
                 ],
                 include_artefact_metadata: false,
+                include_artefact_bytes: false,
                 artefact_names: Vec::new(),
             },
         ],
@@ -8154,6 +8235,7 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
                     allowed_item_types: Vec::new(),
                     excluded_item_types: vec!["tool_call".to_string()],
                     include_artefact_metadata: false,
+                    include_artefact_bytes: false,
                     artefact_names: Vec::new(),
                 },
                 DisclosurePolicyConfig {
@@ -8164,6 +8246,7 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
                     ],
                     excluded_item_types: Vec::new(),
                     include_artefact_metadata: true,
+                    include_artefact_bytes: true,
                     artefact_names: vec!["doc.json".to_string()],
                 },
             ],
@@ -8667,6 +8750,7 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
             manifest.bundles[0].disclosed_artefact_names,
             vec!["doc.json".to_string(), "diagram.txt".to_string()]
         );
+        assert!(manifest.bundles[0].disclosed_artefact_bytes_included);
 
         let export_req = Request::builder()
             .method("GET")
@@ -8689,6 +8773,17 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
         assert_eq!(redacted.disclosed_artefacts.len(), 2);
         assert_eq!(redacted.disclosed_artefacts[0].meta.name, "doc.json");
         assert_eq!(redacted.disclosed_artefacts[1].meta.name, "diagram.txt");
+        assert_eq!(
+            decoded.files.get("artefacts/doc.json").map(Vec::as_slice),
+            Some(br#"{"doc":"system-card"}"#.as_slice())
+        );
+        assert_eq!(
+            decoded
+                .files
+                .get("artefacts/diagram.txt")
+                .map(Vec::as_slice),
+            Some(b"annex-iv-diagram".as_slice())
+        );
 
         let verify_req = Request::builder()
             .method("POST")
@@ -8709,7 +8804,7 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
             .unwrap();
         let verify_response: VerifyResponse = serde_json::from_slice(&body).unwrap();
         assert!(verify_response.valid);
-        assert_eq!(verify_response.artefacts_verified, 0);
+        assert_eq!(verify_response.artefacts_verified, 2);
     }
 
     #[tokio::test]

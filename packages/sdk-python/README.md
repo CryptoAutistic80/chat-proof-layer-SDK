@@ -105,6 +105,19 @@ pack = proof_client.create_pack(
     bundle_format="disclosure",
     disclosure_policy="annex_iv_redacted",
 )
+proof_client.update_disclosure_config(
+    {
+        "policies": [
+            {
+                "name": "regulator_minimum",
+                "excluded_item_types": ["tool_call"],
+                "include_artefact_metadata": False,
+                "include_artefact_bytes": False,
+                "artefact_names": [],
+            }
+        ]
+    }
+)
 archive = proof_client.download_pack_export(pack["pack_id"])
 
 risk_bundle = proof_layer.capture_risk_assessment(

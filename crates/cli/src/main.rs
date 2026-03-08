@@ -172,6 +172,8 @@ struct DiscloseArgs {
     #[arg(long)]
     items: String,
     #[arg(long)]
+    artefacts: Option<String>,
+    #[arg(long)]
     out: PathBuf,
 }
 
@@ -869,7 +871,12 @@ fn main() -> Result<()> {
             timestamp_assurance: args.timestamp_assurance,
             transparency_public_key_path: args.transparency_public_key.as_deref(),
         }),
-        Commands::Disclose(args) => cmd_disclose(&args.input, &args.items, &args.out),
+        Commands::Disclose(args) => cmd_disclose(
+            &args.input,
+            &args.items,
+            args.artefacts.as_deref(),
+            &args.out,
+        ),
         Commands::Inspect {
             input,
             format,
@@ -1379,7 +1386,12 @@ fn verify_disclosure_package(
     })
 }
 
-fn cmd_disclose(input_path: &Path, items: &str, out_path: &Path) -> Result<()> {
+fn cmd_disclose(
+    input_path: &Path,
+    items: &str,
+    artefacts: Option<&str>,
+    out_path: &Path,
+) -> Result<()> {
     let max_payload_bytes = max_payload_bytes()?;
     let package_size = fs::metadata(input_path)
         .with_context(|| format!("failed to stat {}", input_path.display()))?
@@ -1395,12 +1407,34 @@ fn cmd_disclose(input_path: &Path, items: &str, out_path: &Path) -> Result<()> {
     let files = read_bundle_package(input_path)?;
     let bundle = parse_bundle_file(&files)?;
     let item_indices = parse_index_list(items)?;
-    let redacted = redact_bundle(&bundle, &item_indices, &[])
+    let artefact_indices = artefacts
+        .map(|value| parse_index_list_for("artefacts", value))
+        .transpose()?
+        .unwrap_or_default();
+    let redacted = redact_bundle(&bundle, &item_indices, &artefact_indices)
         .map_err(|err| map_disclosure_error("redact bundle", err))?;
     let redacted_bytes = serde_json::to_vec_pretty(&redacted)?;
 
     let mut package_files = BTreeMap::<String, Vec<u8>>::new();
     package_files.insert("redacted_bundle.json".to_string(), redacted_bytes);
+    let source_artefacts = extract_artefacts(&files)?;
+    for artefact_index in artefact_indices {
+        let artefact_name = &bundle
+            .artefacts
+            .get(artefact_index)
+            .ok_or_else(|| anyhow!("artefact index {artefact_index} out of bounds"))?
+            .name;
+        let artefact_bytes = source_artefacts.get(artefact_name).ok_or_else(|| {
+            anyhow!(
+                "input package missing selected artefact bytes for {}",
+                artefact_name
+            )
+        })?;
+        package_files.insert(
+            format!("artefacts/{}", artefact_name),
+            artefact_bytes.clone(),
+        );
+    }
 
     let manifest = Manifest {
         files: package_files
@@ -2643,9 +2677,13 @@ fn validate_package_member_name(name: &str) -> Result<()> {
 }
 
 fn parse_index_list(value: &str) -> Result<Vec<usize>> {
+    parse_index_list_for("items", value)
+}
+
+fn parse_index_list_for(label: &str, value: &str) -> Result<Vec<usize>> {
     let trimmed = value.trim();
     if trimmed.is_empty() {
-        bail!("items must not be empty");
+        bail!("{label} must not be empty");
     }
 
     trimmed
@@ -2653,10 +2691,10 @@ fn parse_index_list(value: &str) -> Result<Vec<usize>> {
         .map(|part| {
             let part = part.trim();
             if part.is_empty() {
-                bail!("items must not contain empty indices");
+                bail!("{label} must not contain empty indices");
             }
             part.parse::<usize>()
-                .with_context(|| format!("invalid item index {part}"))
+                .with_context(|| format!("invalid {label} index {part}"))
         })
         .collect()
 }
@@ -3355,7 +3393,7 @@ mod tests {
         let disclosure_path = tmp_dir.join("bundle.disclosure.pkg");
 
         write_bundle_package(&bundle_path, &package_files).unwrap();
-        cmd_disclose(&bundle_path, "0", &disclosure_path).unwrap();
+        cmd_disclose(&bundle_path, "0", None, &disclosure_path).unwrap();
 
         let package = read_package(&disclosure_path).unwrap();
         assert_eq!(package.format, DISCLOSURE_PACKAGE_FORMAT);
@@ -3374,6 +3412,77 @@ mod tests {
         assert!(report.canonicalization_ok);
         assert!(report.signature_ok);
         assert!(report.manifest_ok);
+        assert_eq!(report.message, "VALID");
+
+        fs::remove_dir_all(&tmp_dir).unwrap();
+    }
+
+    #[test]
+    fn disclose_roundtrip_can_include_selected_artefact_bytes() {
+        let bundle = sample_bundle();
+        let artefact_bytes = br#"{"hello":"world"}"#.to_vec();
+        let mut package_files = BTreeMap::<String, Vec<u8>>::new();
+        package_files.insert(
+            "proof_bundle.json".to_string(),
+            serde_json::to_vec_pretty(&bundle).unwrap(),
+        );
+        package_files.insert(
+            "proof_bundle.canonical.json".to_string(),
+            bundle.canonical_header_bytes().unwrap(),
+        );
+        package_files.insert(
+            "proof_bundle.sig".to_string(),
+            bundle.integrity.signature.value.as_bytes().to_vec(),
+        );
+        package_files.insert("artefacts/prompt.json".to_string(), artefact_bytes.clone());
+
+        let manifest = Manifest {
+            files: package_files
+                .iter()
+                .map(|(name, bytes)| ManifestEntry {
+                    name: name.clone(),
+                    digest: sha256_prefixed(bytes),
+                    size: bytes.len() as u64,
+                })
+                .collect(),
+        };
+        package_files.insert(
+            "manifest.json".to_string(),
+            serde_json::to_vec_pretty(&manifest).unwrap(),
+        );
+
+        let tmp_dir =
+            std::env::temp_dir().join(format!("proofctl-disclose-artefact-{}", Ulid::new()));
+        fs::create_dir_all(&tmp_dir).unwrap();
+        let bundle_path = tmp_dir.join("bundle.pkg");
+        let disclosure_path = tmp_dir.join("bundle.disclosure.pkg");
+
+        write_bundle_package(&bundle_path, &package_files).unwrap();
+        cmd_disclose(&bundle_path, "0", Some("0"), &disclosure_path).unwrap();
+
+        let package = read_package(&disclosure_path).unwrap();
+        assert_eq!(package.format, DISCLOSURE_PACKAGE_FORMAT);
+        assert_eq!(
+            package
+                .files
+                .get("artefacts/prompt.json")
+                .map(Vec::as_slice),
+            Some(artefact_bytes.as_slice())
+        );
+        let redacted = parse_redacted_bundle_file(&package.files).unwrap();
+        assert_eq!(redacted.disclosed_items.len(), 1);
+        assert_eq!(redacted.disclosed_artefacts.len(), 1);
+        assert_eq!(redacted.disclosed_artefacts[0].meta.name, "prompt.json");
+
+        let signing_key = SigningKey::from_bytes(&[7_u8; 32]);
+        let verifying_key = signing_key.verifying_key();
+        let report =
+            verify_disclosure_package(&package.files, &verifying_key, false, false, None, None)
+                .unwrap();
+        assert_eq!(report.package_kind, "disclosure");
+        assert!(report.manifest_ok);
+        assert!(report.signature_ok);
+        assert_eq!(report.artefacts_verified, 1);
         assert_eq!(report.message, "VALID");
 
         fs::remove_dir_all(&tmp_dir).unwrap();

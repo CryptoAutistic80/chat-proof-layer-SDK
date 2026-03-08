@@ -80,3 +80,64 @@ test("downloadPackExport returns raw archive bytes", async () => {
 
   assert.deepEqual(Array.from(bytes), [1, 2, 3, 4]);
 });
+
+test("getDisclosureConfig returns disclosure policies from vault config", async () => {
+  const fetchImpl = async () =>
+    new Response(
+      JSON.stringify({
+        service: { addr: "127.0.0.1:8080", max_payload_bytes: 10485760 },
+        signing: { key_id: "kid-dev-01", algorithm: "ed25519-jws" },
+        storage: { metadata_backend: "sqlite", blob_backend: "fs" },
+        retention: { grace_period_days: 30, scan_interval_hours: 24, policies: [] },
+        timestamp: { enabled: false, provider: "rfc3161", url: "https://tsa.example.test" },
+        transparency: { enabled: false, provider: "rekor" },
+        disclosure: {
+          policies: [
+            {
+              name: "annex_iv_redacted",
+              include_artefact_metadata: true,
+              include_artefact_bytes: true,
+              artefact_names: ["doc.json"]
+            }
+          ]
+        },
+        audit: { enabled: true }
+      }),
+      { status: 200, headers: { "content-type": "application/json" } }
+    );
+
+  const client = new ProofLayerClient({ baseUrl: "http://127.0.0.1:8080", fetchImpl });
+  const disclosure = await client.getDisclosureConfig();
+
+  assert.equal(disclosure.policies[0].name, "annex_iv_redacted");
+  assert.equal(disclosure.policies[0].include_artefact_bytes, true);
+});
+
+test("updateDisclosureConfig issues PUT with policy payload", async () => {
+  let captured;
+  const fetchImpl = async (url, init) => {
+    captured = { url, init };
+    return new Response(init.body, {
+      status: 200,
+      headers: { "content-type": "application/json" }
+    });
+  };
+
+  const client = new ProofLayerClient({ baseUrl: "http://127.0.0.1:8080", fetchImpl });
+  const result = await client.updateDisclosureConfig({
+    policies: [
+      {
+        name: "incident_summary",
+        allowed_item_types: ["incident_report"],
+        include_artefact_metadata: true,
+        include_artefact_bytes: false,
+        artefact_names: ["incident.json"]
+      }
+    ]
+  });
+
+  assert.equal(captured.url, "http://127.0.0.1:8080/v1/config/disclosure");
+  assert.equal(captured.init.method, "PUT");
+  assert.equal(result.policies[0].name, "incident_summary");
+  assert.equal(result.policies[0].include_artefact_metadata, true);
+});

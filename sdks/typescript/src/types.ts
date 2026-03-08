@@ -194,6 +194,7 @@ export interface PackBundleEntry extends JsonObject {
   disclosed_item_types?: string[];
   disclosed_artefact_indices?: number[];
   disclosed_artefact_names?: string[];
+  disclosed_artefact_bytes_included?: boolean;
   obligation_refs?: string[];
   matched_rules: string[];
 }
@@ -223,6 +224,54 @@ export interface PackManifest extends JsonObject {
   disclosure_policy?: string;
   bundle_ids: string[];
   bundles: PackBundleEntry[];
+}
+
+export interface DisclosurePolicyConfig extends JsonObject {
+  name: string;
+  allowed_item_types?: string[];
+  excluded_item_types?: string[];
+  include_artefact_metadata?: boolean;
+  include_artefact_bytes?: boolean;
+  artefact_names?: string[];
+}
+
+export interface DisclosureConfig extends JsonObject {
+  policies: DisclosurePolicyConfig[];
+}
+
+export interface RetentionPolicyConfig extends JsonObject {
+  retention_class: string;
+  expiry_mode?: string;
+  min_duration_days: number;
+  max_duration_days?: number;
+  legal_basis: string;
+  active: boolean;
+}
+
+export interface VaultConfigResponse extends JsonObject {
+  service: JsonObject & {
+    addr: string;
+    max_payload_bytes: number;
+  };
+  signing: JsonObject & {
+    key_id: string;
+    algorithm: string;
+  };
+  storage: JsonObject & {
+    metadata_backend: string;
+    blob_backend: string;
+  };
+  retention: JsonObject & {
+    grace_period_days: number;
+    scan_interval_hours: number;
+    policies: RetentionPolicyConfig[];
+  };
+  timestamp: JsonObject;
+  transparency: JsonObject;
+  disclosure: DisclosureConfig;
+  audit: JsonObject & {
+    enabled: boolean;
+  };
 }
 
 export interface LocalClientOptions {

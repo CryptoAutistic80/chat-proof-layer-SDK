@@ -183,10 +183,11 @@ Redacted disclosure packages are gzip-compressed JSON archives with:
 - top-level `format = "pl-bundle-disclosure-pkg-v1"`
 - `redacted_bundle.json`
 - `manifest.json`
+- optional `artefacts/<name>` members for any disclosed artefact bytes
 
 Current CLI support is:
 
-- `proofctl disclose --items ...` for item-level disclosure
+- `proofctl disclose --items ... [--artefacts ...]` for item-level disclosure plus optional artefact-byte carry-through
 - `proofctl verify` auto-detects and verifies both full packages and disclosure packages
 
 Vault-side redacted pack assembly is implemented through `/v1/packs` with `bundle_format = "disclosure"` and optional named `disclosure_policy` selection.

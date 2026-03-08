@@ -105,7 +105,8 @@ const redactedSummary = await proofLayer.verifyRedactedBundle({
 const pack = await proofClient.createPack({
   packType: "annex_iv",
   systemId: "system-123",
-  bundleFormat: "disclosure"
+  bundleFormat: "disclosure",
+  disclosurePolicy: "annex_iv_redacted"
 });
 const archive = await proofClient.downloadPackExport(pack.pack_id);
 

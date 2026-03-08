@@ -36,7 +36,11 @@ class TestProofLayerClient(unittest.TestCase):
             captured["path"] = path
             captured["headers"] = headers
             captured["body"] = body
-            return {"pack_id": "P1", "bundle_format": "disclosure"}
+            return {
+                "pack_id": "P1",
+                "bundle_format": "disclosure",
+                "disclosure_policy": "annex_iv_redacted",
+            }
 
         client = ProofLayerClient(base_url="http://127.0.0.1:8080", request_fn=request_fn)
         out = client.create_pack(
@@ -45,6 +49,7 @@ class TestProofLayerClient(unittest.TestCase):
             from_date="2026-03-01",
             to_date="2026-03-08",
             bundle_format="disclosure",
+            disclosure_policy="annex_iv_redacted",
         )
 
         self.assertEqual(out["pack_id"], "P1")
@@ -59,6 +64,7 @@ class TestProofLayerClient(unittest.TestCase):
                 "from": "2026-03-01",
                 "to": "2026-03-08",
                 "bundle_format": "disclosure",
+                "disclosure_policy": "annex_iv_redacted",
             },
         )
 

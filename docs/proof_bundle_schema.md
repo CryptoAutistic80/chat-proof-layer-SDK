@@ -189,4 +189,4 @@ Current CLI support is:
 - `proofctl disclose --items ...` for item-level disclosure
 - `proofctl verify` auto-detects and verifies both full packages and disclosure packages
 
-Vault-side redacted pack assembly is still future work.
+Vault-side redacted pack assembly is implemented through `/v1/packs` with `bundle_format = "disclosure"` and optional named `disclosure_policy` selection.

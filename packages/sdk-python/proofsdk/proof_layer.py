@@ -123,6 +123,7 @@ class ProofLayer:
         from_date: str | None = None,
         to_date: str | None = None,
         bundle_format: str | None = None,
+        disclosure_policy: str | None = None,
     ) -> dict[str, Any]:
         if hasattr(self.client, "create_pack"):
             return self.client.create_pack(
@@ -131,6 +132,7 @@ class ProofLayer:
                 from_date=from_date,
                 to_date=to_date,
                 bundle_format=bundle_format,
+                disclosure_policy=disclosure_policy,
             )
         raise ValueError("underlying client does not support create_pack; use vault mode")
 

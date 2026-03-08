@@ -125,6 +125,7 @@ cargo run -p proofctl -- pack \
 cargo run -p proofctl -- pack \
   --type runtime-logs \
   --bundle-format disclosure \
+  --disclosure-policy regulator_minimum \
   --vault-url http://127.0.0.1:8080 \
   --system-id system-123 \
   --out ./runtime-logs-disclosure.pack
@@ -191,6 +192,7 @@ Current file-config limitations:
 - `PUT /v1/config/retention`
 - `PUT /v1/config/timestamp`
 - `PUT /v1/config/transparency`
+- `PUT /v1/config/disclosure`
 - `GET /v1/systems`
 - `GET /v1/systems/{system_id}/summary`
 - `POST /v1/packs`
@@ -328,16 +330,16 @@ npm run dev
 - `proofctl verify` also supports `--timestamp-assurance <standard|qualified>`, `--timestamp-trust-anchor <pem>` (repeatable), `--timestamp-crl <pem>` (repeatable), `--timestamp-ocsp-url <url>` (repeatable), `--timestamp-qualified-signer <pem>` (repeatable), `--timestamp-policy-oid <oid>` (repeatable), and `--transparency-public-key <pem>` so optional assurance checks can move from structural validity to configured trust validation.
 - `proofctl verify` now reports the bundle assurance level as `signed`, `timestamped`, or `transparency_anchored`.
 - `proofctl disclose --items ...` now creates item-level redacted packages with Merkle inclusion proofs, and `proofctl verify` auto-detects full vs disclosure package formats.
-- The TypeScript and Python SDKs now expose local disclosure helpers plus vault pack client methods for `bundle_format = "full" | "disclosure"`, so SDK callers can request redacted exports or build/verify redacted bundles without dropping to the CLI.
+- The TypeScript and Python SDKs now expose local disclosure helpers plus vault pack client methods for `bundle_format = "full" | "disclosure"` and optional `disclosure_policy`, so SDK callers can request policy-shaped redacted exports or build/verify redacted bundles without dropping to the CLI.
 - `proofctl inspect` now supports `--show-items` and `--show-merkle`.
-- `proofctl pack` and `proofctl vault export` now support `--bundle-format <full|disclosure>` so vault exports can contain either full `bundle.pkg` members or redacted disclosure packages.
+- `proofctl pack` and `proofctl vault export` now support `--bundle-format <full|disclosure>` plus `--disclosure-policy <name>` so vault exports can contain either full `bundle.pkg` members or disclosure packages shaped by named disclosure profiles.
 - `proofctl vault status|query|retention|systems|export` now covers the main vault read/query/export flows from the plan without requiring manual `curl`.
 - The vault now persists metadata in SQLite, computes bundle expiry from seeded retention policies, derives per-item `obligation_ref` tags, exposes retention scan/status endpoints, supports legal holds, and indexes evidence items for `/v1/bundles` filtering.
 - The vault now exposes `GET /v1/systems` and `GET /v1/systems/{system_id}/summary` for system-level evidence rollups across role, item type, retention class, assurance level, and model usage.
 - `/v1/bundles` now also supports assurance-oriented filtering through `has_timestamp`, `has_receipt`, and `assurance_level=signed|timestamped|transparency_anchored`, and bundle summaries now report the computed assurance level.
 - Retention scans now soft-delete expired bundles, skip held bundles, and hard-delete previously soft-deleted bundles after the configured grace period (`PROOF_SERVICE_RETENTION_GRACE_DAYS`, default `30`).
 - The vault now keeps an append-only audit trail and exposes it via `/v1/audit-trail`; current actions include bundle create/read/verify/delete, legal hold changes, retention scans, and pack create/read/export events.
-- The vault now exposes `GET /v1/config`, `PUT /v1/config/retention`, `PUT /v1/config/timestamp`, and `PUT /v1/config/transparency`; retention, timestamp, and transparency settings are persisted in SQLite, active-bundle `expires_at` values are recalculated for updated active retention classes, and timestamp/transparency config can now carry PEM trust anchors, PEM CRLs, live OCSP responder URLs, qualified TSA signer allowlists, expected RFC 3161 policy OIDs, and transparency-service public keys for trust-aware verification.
+- The vault now exposes `GET /v1/config`, `PUT /v1/config/retention`, `PUT /v1/config/timestamp`, `PUT /v1/config/transparency`, and `PUT /v1/config/disclosure`; disclosure config persists named disclosure-policy profiles with item-type filters and artefact-metadata rules, while timestamp/transparency config carry PEM trust anchors, PEM CRLs, live OCSP responder URLs, qualified TSA signer allowlists, expected RFC 3161 policy OIDs, and transparency-service public keys for trust-aware verification.
 - Retention policies now include an `expiry_mode`; the seeded `gpai_documentation` class uses `until_withdrawn`, so GPAI documentation stays active until operator withdrawal instead of auto-expiring on a fixed date.
 - `POST /v1/bundles/{bundle_id}/timestamp` now uses the configured RFC 3161 provider to timestamp an existing stored bundle and persist the token back into bundle JSON.
 - `POST /v1/bundles/{bundle_id}/anchor` now uses the configured transparency provider to anchor an existing timestamped bundle and persist the receipt back into bundle JSON for both Rekor and the current SCITT-style receipt flow.
@@ -345,7 +347,7 @@ npm run dev
 - Timestamp verification now has six layers: structural CMS/message-imprint validation by default, optional RFC 3161 policy OID matching when configured, signer-chain validation against configured PEM trust anchors at token generation time, optional CRL-based revocation checks against configured PEM CRLs, optional live OCSP checks against configured responder URLs, and optional qualified TSA signer allowlist matching. Setting `assurance = "qualified"` still makes trust anchors, CRLs, expected policy OIDs, and at least one allowed TSA signer certificate mandatory and also requires the TSA signer certificate profile to be appropriate for time stamping. EU trusted-list ingestion and archival OCSP evidence handling are still future work.
 - Transparency verification now checks Rekor receipt structure, entry UUID to leaf-hash binding, the Merkle inclusion proof against the advertised Rekor root hash, the embedded RFC 3161 token binding to `integrity.bundle_root`, and Rekor signed-entry-timestamp signatures plus `logID` binding when a trusted public key is configured. The SCITT path verifies a draft-aligned canonical JSON statement/receipt contract with `serviceId == sha256(SPKI_DER(public_key))`; full interoperable COSE/CCF SCITT is still future work.
 - Pack assembly is now available through `/v1/packs`; packs apply an initial heuristic curation profile (`pack-rules-v1`) based on actor role, evidence item types, retention class, and derived obligation refs, then export matching bundles as either embedded full `bundle.pkg` files or redacted disclosure packages plus a manifest.
-- When `bundle_format=disclosure`, the vault emits `pl-bundle-disclosure-pkg-v1` members and discloses the item indices matched by the pack curation rules; artefact-level disclosure policy is still future work.
+- When `bundle_format=disclosure`, the vault emits `pl-bundle-disclosure-pkg-v1` members and applies a named disclosure policy (`regulator_minimum`, `annex_iv_redacted`, `incident_summary`, or operator-defined profiles) to filter disclosed item types and optionally include artefact metadata; artefact byte disclosure is still future work.
 - Vault startup now supports `vault.toml` + env override configuration and an automatic background retention scan loop; PostgreSQL/S3/TLS remain future work.
 - Canonicalization and signing semantics follow `docs/architecture.md`.
 - Verification is designed to work offline with a full or disclosure package plus the public key.

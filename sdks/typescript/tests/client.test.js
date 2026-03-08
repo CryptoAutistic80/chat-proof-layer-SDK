@@ -36,6 +36,7 @@ test("createPack posts vault pack filters including disclosure bundle_format", a
         pack_type: "annex_iv",
         created_at: "2026-03-08T12:00:00Z",
         bundle_format: "disclosure",
+        disclosure_policy: "annex_iv_redacted",
         bundle_count: 1,
         bundle_ids: ["B1"]
       }),
@@ -49,7 +50,8 @@ test("createPack posts vault pack filters including disclosure bundle_format", a
     systemId: "system-123",
     from: "2026-03-01",
     to: "2026-03-08",
-    bundleFormat: "disclosure"
+    bundleFormat: "disclosure",
+    disclosurePolicy: "annex_iv_redacted"
   });
 
   assert.equal(result.pack_id, "P1");
@@ -60,7 +62,8 @@ test("createPack posts vault pack filters including disclosure bundle_format", a
     system_id: "system-123",
     from: "2026-03-01",
     to: "2026-03-08",
-    bundle_format: "disclosure"
+    bundle_format: "disclosure",
+    disclosure_policy: "annex_iv_redacted"
   });
 });
 

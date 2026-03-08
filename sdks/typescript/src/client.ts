@@ -91,14 +91,16 @@ export class ProofLayerClient {
     systemId,
     from,
     to,
-    bundleFormat
+    bundleFormat,
+    disclosurePolicy
   }: CreatePackRequest): Promise<PackSummaryResponse> {
     const payload = {
       pack_type: packType,
       system_id: systemId,
       from,
       to,
-      ...(bundleFormat ? { bundle_format: bundleFormat } : {})
+      ...(bundleFormat ? { bundle_format: bundleFormat } : {}),
+      ...(disclosurePolicy ? { disclosure_policy: disclosurePolicy } : {})
     };
     return this.#post("/v1/packs", payload);
   }

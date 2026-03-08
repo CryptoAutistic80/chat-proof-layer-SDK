@@ -83,6 +83,8 @@ enum Commands {
         to: Option<String>,
         #[arg(long = "bundle-format", default_value = "full")]
         bundle_format: PackBundleFormatArg,
+        #[arg(long = "disclosure-policy")]
+        disclosure_policy: Option<String>,
     },
     /// Query and administer a running vault service.
     Vault {
@@ -241,6 +243,8 @@ enum VaultCommands {
         to: Option<String>,
         #[arg(long = "bundle-format", default_value = "full")]
         bundle_format: PackBundleFormatArg,
+        #[arg(long = "disclosure-policy")]
+        disclosure_policy: Option<String>,
     },
 }
 
@@ -447,6 +451,18 @@ struct VaultQueryCommandInput<'a> {
     format: OutputFormat,
 }
 
+#[derive(Clone, Copy)]
+struct PackCommandInput<'a> {
+    pack_type: PackTypeArg,
+    bundle_format: PackBundleFormatArg,
+    disclosure_policy: Option<&'a str>,
+    vault_url: &'a str,
+    out_path: &'a Path,
+    system_id: Option<&'a str>,
+    from: Option<&'a str>,
+    to: Option<&'a str>,
+}
+
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 enum OptionalCheckState {
@@ -502,6 +518,8 @@ struct CreatePackRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     to: Option<String>,
     bundle_format: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    disclosure_policy: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -513,6 +531,7 @@ struct PackSummaryResponse {
     from: Option<String>,
     to: Option<String>,
     bundle_format: String,
+    disclosure_policy: Option<String>,
     bundle_count: usize,
     bundle_ids: Vec<String>,
 }
@@ -865,15 +884,17 @@ fn main() -> Result<()> {
             from,
             to,
             bundle_format,
-        } => cmd_pack(
+            disclosure_policy,
+        } => cmd_pack(PackCommandInput {
             pack_type,
             bundle_format,
-            &vault_url,
-            &out,
-            system_id.as_deref(),
-            from.as_deref(),
-            to.as_deref(),
-        ),
+            disclosure_policy: disclosure_policy.as_deref(),
+            vault_url: &vault_url,
+            out_path: &out,
+            system_id: system_id.as_deref(),
+            from: from.as_deref(),
+            to: to.as_deref(),
+        }),
         Commands::Vault { command } => match command {
             VaultCommands::Status { vault_url, format } => cmd_vault_status(&vault_url, format),
             VaultCommands::Query {
@@ -919,15 +940,17 @@ fn main() -> Result<()> {
                 from,
                 to,
                 bundle_format,
-            } => cmd_pack(
+                disclosure_policy,
+            } => cmd_pack(PackCommandInput {
                 pack_type,
                 bundle_format,
-                &vault_url,
-                &out,
-                system_id.as_deref(),
-                from.as_deref(),
-                to.as_deref(),
-            ),
+                disclosure_policy: disclosure_policy.as_deref(),
+                vault_url: &vault_url,
+                out_path: &out,
+                system_id: system_id.as_deref(),
+                from: from.as_deref(),
+                to: to.as_deref(),
+            }),
         },
     }
 }
@@ -1484,21 +1507,17 @@ fn cmd_inspect(
     Ok(())
 }
 
-fn cmd_pack(
-    pack_type: PackTypeArg,
-    bundle_format: PackBundleFormatArg,
-    vault_url: &str,
-    out_path: &Path,
-    system_id: Option<&str>,
-    from: Option<&str>,
-    to: Option<&str>,
-) -> Result<()> {
+fn cmd_pack(input: PackCommandInput<'_>) -> Result<()> {
     let request = CreatePackRequest {
-        pack_type: pack_type.as_api_value().to_string(),
-        system_id: normalize_optional_cli_text("system_id", system_id)?,
-        from: normalize_optional_cli_datetime("from", from)?,
-        to: normalize_optional_cli_datetime("to", to)?,
-        bundle_format: bundle_format.as_api_value().to_string(),
+        pack_type: input.pack_type.as_api_value().to_string(),
+        system_id: normalize_optional_cli_text("system_id", input.system_id)?,
+        from: normalize_optional_cli_datetime("from", input.from)?,
+        to: normalize_optional_cli_datetime("to", input.to)?,
+        bundle_format: input.bundle_format.as_api_value().to_string(),
+        disclosure_policy: normalize_optional_cli_text(
+            "disclosure_policy",
+            input.disclosure_policy,
+        )?,
     };
     if let (Some(from), Some(to)) = (request.from.as_deref(), request.to.as_deref()) {
         let from = DateTime::parse_from_rfc3339(from)
@@ -1511,7 +1530,7 @@ fn cmd_pack(
     }
 
     let client = build_http_client()?;
-    let create_url = join_vault_url(vault_url, "/v1/packs");
+    let create_url = join_vault_url(input.vault_url, "/v1/packs");
     let create_response = client
         .post(&create_url)
         .json(&request)
@@ -1522,7 +1541,10 @@ fn cmd_pack(
         .json()
         .context("failed to decode pack create response")?;
 
-    let export_url = join_vault_url(vault_url, &format!("/v1/packs/{}/export", pack.pack_id));
+    let export_url = join_vault_url(
+        input.vault_url,
+        &format!("/v1/packs/{}/export", pack.pack_id),
+    );
     let export_response = client
         .get(&export_url)
         .send()
@@ -1541,16 +1563,19 @@ fn cmd_pack(
         );
     }
 
-    let parent = out_path.parent().unwrap_or_else(|| Path::new("."));
+    let parent = input.out_path.parent().unwrap_or_else(|| Path::new("."));
     fs::create_dir_all(parent)
         .with_context(|| format!("failed to create output directory {}", parent.display()))?;
-    fs::write(out_path, &export_bytes)
-        .with_context(|| format!("failed to write {}", out_path.display()))?;
+    fs::write(input.out_path, &export_bytes)
+        .with_context(|| format!("failed to write {}", input.out_path.display()))?;
 
-    info!("wrote {}", out_path.display());
+    info!("wrote {}", input.out_path.display());
     info!("pack_id={}", pack.pack_id);
     info!("pack_type={}", pack.pack_type);
     info!("bundle_format={}", pack.bundle_format);
+    if let Some(disclosure_policy) = pack.disclosure_policy.as_deref() {
+        info!("disclosure_policy={disclosure_policy}");
+    }
     info!("bundle_count={}", pack.bundle_count);
     if let Some(system_id) = pack.system_id.as_deref() {
         info!("system_id={system_id}");
@@ -3141,6 +3166,37 @@ mod tests {
     fn pack_datetime_normalization_rejects_invalid_value() {
         let err = normalize_optional_cli_datetime("from", Some("not-a-date")).unwrap_err();
         assert!(err.to_string().contains("RFC3339"));
+    }
+
+    #[test]
+    fn pack_command_accepts_disclosure_policy_arg() {
+        let cli = Cli::try_parse_from([
+            "proofctl",
+            "pack",
+            "--type",
+            "annex-iv",
+            "--vault-url",
+            "http://127.0.0.1:8080",
+            "--out",
+            "./out.pkg",
+            "--bundle-format",
+            "disclosure",
+            "--disclosure-policy",
+            "annex_iv_redacted",
+        ])
+        .unwrap();
+
+        match cli.command {
+            Commands::Pack {
+                disclosure_policy,
+                bundle_format,
+                ..
+            } => {
+                assert_eq!(bundle_format, PackBundleFormatArg::Disclosure);
+                assert_eq!(disclosure_policy.as_deref(), Some("annex_iv_redacted"));
+            }
+            _ => panic!("unexpected command parsed"),
+        }
     }
 
     #[test]

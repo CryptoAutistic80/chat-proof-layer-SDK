@@ -55,7 +55,7 @@ Core defaults:
 - Transparency operation: `POST /v1/bundles/{id}/anchor`
 - Assurance verification operations: `POST /v1/verify/timestamp`, `POST /v1/verify/receipt`
 - Audit operations: `GET /v1/audit-trail?action=&bundle_id=&pack_id=&page=&limit=`
-- Configuration operations: `GET /v1/config`, `PUT /v1/config/retention`, `PUT /v1/config/timestamp`, `PUT /v1/config/transparency`
+- Configuration operations: `GET /v1/config`, `PUT /v1/config/retention`, `PUT /v1/config/timestamp`, `PUT /v1/config/transparency`, `PUT /v1/config/disclosure`
 - Pack export operations: `POST /v1/packs`, `GET /v1/packs/{id}`, `GET /v1/packs/{id}/manifest`, `GET /v1/packs/{id}/export`
 
 Current SQLite tables:
@@ -84,7 +84,8 @@ Current pack export behavior:
 - Selection currently keys off actor role, evidence item type, retention class, and derived obligation references.
 - Implemented pack families now include `conformity` alongside the Annex/runtime/risk/GPAI slices.
 - Exported pack archives can now contain either full `bundle.pkg` members or redacted disclosure packages, selected with `bundle_format = "full" | "disclosure"` on pack creation.
-- Disclosure-pack exports currently disclose the item indices matched by the pack curation rules; artefact-level disclosure policy and richer redaction controls are still later phases.
+- Disclosure-pack exports now also accept a named `disclosure_policy`, defaulting by pack type (`regulator_minimum`, `annex_iv_redacted`, `incident_summary`) and applying item-type filters plus optional artefact-metadata inclusion during redaction.
+- Artefact byte disclosure and richer field-level redaction controls are still later phases.
 
 Current retention behavior:
 
@@ -107,6 +108,7 @@ Current config behavior:
 - Retention policies now carry an `expiry_mode`; `fixed_days` computes `expires_at`, while `until_withdrawn` leaves bundles active until an explicit withdrawal/delete event.
 - `PUT /v1/config/timestamp` persists RFC 3161 provider configuration (`enabled`, `provider`, `url`, optional `assurance`) plus optional PEM trust anchors, PEM CRLs, live OCSP responder URLs, qualified TSA signer allowlists, and expected RFC 3161 policy OIDs used for trust-aware timestamp verification.
 - `PUT /v1/config/transparency` persists transparency provider configuration (`none`, `rekor`, `scitt`) plus URL when applicable and an optional transparency-service PEM public key for trust-aware receipt verification.
+- `PUT /v1/config/disclosure` persists named disclosure-policy profiles used by disclosure-pack exports. Policies currently support allowed item types, excluded item types, `include_artefact_metadata`, and optional artefact-name allowlists.
 - Startup file config is synchronized into SQLite for retention/timestamp/transparency so the API view matches the current boot configuration.
 - `POST /v1/bundles/{id}/timestamp` loads a stored active bundle, requests an RFC 3161 token over the UTF-8 bytes of `integrity.bundle_root`, stores the token in bundle JSON, and flips `has_timestamp`.
 - `POST /v1/bundles/{id}/anchor` loads a stored active timestamped bundle and submits it to the configured transparency provider. For Rekor it sends an `rfc3161` entry; for the current SCITT path it sends a canonical JSON statement containing `{profile, bundle_root, timestamp}` and stores the returned service-signed receipt in bundle JSON.

@@ -37,6 +37,10 @@
         "disclosure"
       ]
     },
+    "disclosure_policy": {
+      "type": "string",
+      "minLength": 1
+    },
     "system_id": {
       "type": "string",
       "minLength": 1
@@ -127,6 +131,20 @@
             }
           },
           "disclosed_item_types": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "disclosed_artefact_indices": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "disclosed_artefact_names": {
             "type": "array",
             "items": {
               "type": "string",

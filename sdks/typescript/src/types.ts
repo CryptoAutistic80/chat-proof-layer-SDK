@@ -177,6 +177,7 @@ export interface CreatePackRequest {
   from?: string;
   to?: string;
   bundleFormat?: PackBundleFormat;
+  disclosurePolicy?: string;
 }
 
 export interface PackBundleEntry extends JsonObject {
@@ -191,6 +192,8 @@ export interface PackBundleEntry extends JsonObject {
   package_name?: string;
   disclosed_item_indices?: number[];
   disclosed_item_types?: string[];
+  disclosed_artefact_indices?: number[];
+  disclosed_artefact_names?: string[];
   obligation_refs?: string[];
   matched_rules: string[];
 }
@@ -203,6 +206,7 @@ export interface PackSummaryResponse extends JsonObject {
   from?: string;
   to?: string;
   bundle_format: PackBundleFormat;
+  disclosure_policy?: string;
   bundle_count: number;
   bundle_ids: string[];
 }
@@ -216,6 +220,7 @@ export interface PackManifest extends JsonObject {
   from?: string;
   to?: string;
   bundle_format: PackBundleFormat;
+  disclosure_policy?: string;
   bundle_ids: string[];
   bundles: PackBundleEntry[];
 }

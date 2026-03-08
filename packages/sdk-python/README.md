@@ -103,6 +103,7 @@ pack = proof_client.create_pack(
     pack_type="annex_iv",
     system_id="system-123",
     bundle_format="disclosure",
+    disclosure_policy="annex_iv_redacted",
 )
 archive = proof_client.download_pack_export(pack["pack_id"])
 

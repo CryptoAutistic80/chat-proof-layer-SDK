@@ -57,9 +57,13 @@ const AUDIT_ACTOR_API: &str = "api";
 const AUDIT_ACTOR_SYSTEM: &str = "system";
 const SERVICE_CONFIG_KEY_TIMESTAMP: &str = "timestamp";
 const SERVICE_CONFIG_KEY_TRANSPARENCY: &str = "transparency";
+const SERVICE_CONFIG_KEY_DISCLOSURE: &str = "disclosure";
 const DEFAULT_TIMESTAMP_PROVIDER: &str = "rfc3161";
 const DEFAULT_TIMESTAMP_URL: &str = "http://timestamp.digicert.com";
 const DEFAULT_TRANSPARENCY_PROVIDER: &str = "none";
+const DEFAULT_DISCLOSURE_POLICY_REGULATOR_MINIMUM: &str = "regulator_minimum";
+const DEFAULT_DISCLOSURE_POLICY_ANNEX_IV_REDACTED: &str = "annex_iv_redacted";
+const DEFAULT_DISCLOSURE_POLICY_INCIDENT_SUMMARY: &str = "incident_summary";
 
 #[derive(Clone)]
 struct AppState {
@@ -504,6 +508,7 @@ struct VaultConfigResponse {
     retention: RetentionConfigView,
     timestamp: TimestampConfig,
     transparency: TransparencyConfig,
+    disclosure: DisclosureConfig,
     audit: AuditConfigView,
 }
 
@@ -581,6 +586,24 @@ struct TransparencyConfig {
     log_public_key_pem: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+struct DisclosureConfig {
+    policies: Vec<DisclosurePolicyConfig>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+struct DisclosurePolicyConfig {
+    name: String,
+    #[serde(default)]
+    allowed_item_types: Vec<String>,
+    #[serde(default)]
+    excluded_item_types: Vec<String>,
+    #[serde(default)]
+    include_artefact_metadata: bool,
+    #[serde(default)]
+    artefact_names: Vec<String>,
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 struct AuditConfigView {
     enabled: bool,
@@ -625,6 +648,8 @@ struct CreatePackRequest {
     to: Option<String>,
     #[serde(default = "default_pack_bundle_format")]
     bundle_format: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    disclosure_policy: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -640,6 +665,8 @@ struct PackSummaryResponse {
     to: Option<String>,
     #[serde(default = "default_pack_bundle_format")]
     bundle_format: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    disclosure_policy: Option<String>,
     bundle_count: usize,
     bundle_ids: Vec<String>,
 }
@@ -658,6 +685,8 @@ struct PackManifest {
     to: Option<String>,
     #[serde(default = "default_pack_bundle_format")]
     bundle_format: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    disclosure_policy: Option<String>,
     bundle_ids: Vec<String>,
     bundles: Vec<PackBundleEntry>,
 }
@@ -681,6 +710,10 @@ struct PackBundleEntry {
     disclosed_item_indices: Vec<usize>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     disclosed_item_types: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    disclosed_artefact_indices: Vec<usize>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    disclosed_artefact_names: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     obligation_refs: Vec<String>,
     matched_rules: Vec<String>,
@@ -773,6 +806,8 @@ struct CuratedPackBundle {
     obligation_refs: Vec<String>,
     disclosed_item_indices: Vec<usize>,
     disclosed_item_types: Vec<String>,
+    disclosed_artefact_indices: Vec<usize>,
+    disclosed_artefact_names: Vec<String>,
     matched_rules: Vec<String>,
 }
 
@@ -795,6 +830,7 @@ async fn main() -> Result<()> {
     let db = open_sqlite_pool(&runtime_config.db_path).await?;
     initialize_sqlite_schema(&db).await?;
     seed_default_retention_policies(&db).await?;
+    seed_default_disclosure_config(&db).await?;
     apply_runtime_config_to_db(&db, &runtime_config).await?;
     backfill_bundle_expiries(&db).await?;
     backfill_item_obligation_refs(&db).await?;
@@ -859,6 +895,7 @@ fn build_router(state: AppState, max_payload_bytes: usize) -> Router {
         .route("/v1/config/retention", put(update_retention_config))
         .route("/v1/config/timestamp", put(update_timestamp_config))
         .route("/v1/config/transparency", put(update_transparency_config))
+        .route("/v1/config/disclosure", put(update_disclosure_config))
         .route("/v1/systems", get(list_systems))
         .route("/v1/systems/{system_id}/summary", get(get_system_summary))
         .route("/v1/packs", post(create_pack))
@@ -1883,6 +1920,7 @@ async fn get_config(State(state): State<AppState>) -> Result<impl IntoResponse, 
         None,
         serde_json::json!({
             "retention_policy_count": response.retention.policies.len(),
+            "disclosure_policy_count": response.disclosure.policies.len(),
             "grace_period_days": response.retention.grace_period_days,
             "scan_interval_hours": response.retention.scan_interval_hours,
             "timestamp_enabled": response.timestamp.enabled,
@@ -1998,6 +2036,36 @@ async fn update_transparency_config(
             "provider": &config.provider,
             "url": &config.url,
             "has_log_public_key": config.log_public_key_pem.is_some(),
+        }),
+    )
+    .await
+    .map_err(ApiError::internal_anyhow)?;
+
+    Ok((StatusCode::OK, Json(config)))
+}
+
+async fn update_disclosure_config(
+    State(state): State<AppState>,
+    Json(request): Json<DisclosureConfig>,
+) -> Result<impl IntoResponse, ApiError> {
+    let config = validate_disclosure_config(request).map_err(ApiError::bad_request_anyhow)?;
+    upsert_service_config(&state.db, SERVICE_CONFIG_KEY_DISCLOSURE, &config)
+        .await
+        .map_err(ApiError::internal_anyhow)?;
+
+    append_audit_log(
+        &state.db,
+        "update_disclosure_config",
+        Some(AUDIT_ACTOR_API),
+        None,
+        None,
+        serde_json::json!({
+            "policy_count": config.policies.len(),
+            "policies": config
+                .policies
+                .iter()
+                .map(|policy| policy.name.clone())
+                .collect::<Vec<_>>(),
         }),
     )
     .await
@@ -2347,19 +2415,24 @@ async fn create_pack(
 ) -> Result<impl IntoResponse, ApiError> {
     let request = normalize_create_pack_request(request).map_err(ApiError::bad_request_anyhow)?;
     let profile = pack_profile(&request.pack_type).map_err(ApiError::bad_request_anyhow)?;
+    let disclosure_policy = resolve_pack_disclosure_policy(&state.db, &request)
+        .await
+        .map_err(ApiError::bad_request_anyhow)?;
     let rows = query_pack_source_bundles(&state.db, &request)
         .await
         .map_err(ApiError::internal_anyhow)?;
-    let curated_rows = curate_pack_bundles(&profile, rows).map_err(ApiError::internal_anyhow)?;
+    let curated_rows = curate_pack_bundles(&profile, rows, disclosure_policy.as_ref())
+        .map_err(ApiError::internal_anyhow)?;
 
     if curated_rows.is_empty() {
         return Err(ApiError::bad_request(
-            "pack query matched no bundles after curation rules",
+            "pack query matched no bundles after curation/disclosure rules",
         ));
     }
 
     let pack_id = generate_bundle_id();
     let created_at = Utc::now().to_rfc3339();
+    let disclosure_policy_name = disclosure_policy.as_ref().map(|policy| policy.name.clone());
     let mut bundle_ids = Vec::with_capacity(curated_rows.len());
     let mut bundle_entries = Vec::with_capacity(curated_rows.len());
     let mut files = Vec::with_capacity(curated_rows.len());
@@ -2378,15 +2451,17 @@ async fn create_pack(
                 )
                 .map_err(ApiError::internal_anyhow)?
             }
-            PACK_BUNDLE_FORMAT_DISCLOSURE => {
-                build_disclosure_package_bytes(&curated.bundle, &curated.disclosed_item_indices)
-                    .map_err(|err| {
-                        ApiError::internal_anyhow(err.context(format!(
-                            "failed to build disclosure package for bundle {}",
-                            curated.row.bundle_id
-                        )))
-                    })?
-            }
+            PACK_BUNDLE_FORMAT_DISCLOSURE => build_disclosure_package_bytes(
+                &curated.bundle,
+                &curated.disclosed_item_indices,
+                &curated.disclosed_artefact_indices,
+            )
+            .map_err(|err| {
+                ApiError::internal_anyhow(err.context(format!(
+                    "failed to build disclosure package for bundle {}",
+                    curated.row.bundle_id
+                )))
+            })?,
             _ => unreachable!("bundle_format should be normalized"),
         };
 
@@ -2403,6 +2478,8 @@ async fn create_pack(
             package_name: Some(package_name.clone()),
             disclosed_item_indices: curated.disclosed_item_indices,
             disclosed_item_types: curated.disclosed_item_types,
+            disclosed_artefact_indices: curated.disclosed_artefact_indices,
+            disclosed_artefact_names: curated.disclosed_artefact_names,
             obligation_refs: curated.obligation_refs,
             matched_rules: curated.matched_rules,
         });
@@ -2421,6 +2498,7 @@ async fn create_pack(
         from: request.from.clone(),
         to: request.to.clone(),
         bundle_format: request.bundle_format.clone(),
+        disclosure_policy: disclosure_policy_name.clone(),
         bundle_ids,
         bundles: bundle_entries,
     };
@@ -2444,6 +2522,7 @@ async fn create_pack(
         serde_json::json!({
             "pack_type": manifest.pack_type.clone(),
             "bundle_format": manifest.bundle_format.clone(),
+            "disclosure_policy": manifest.disclosure_policy.clone(),
             "bundle_count": manifest.bundle_ids.len(),
             "system_id": manifest.system_id.clone(),
         }),
@@ -3077,6 +3156,8 @@ fn normalize_create_pack_request(mut request: CreatePackRequest) -> Result<Creat
     request.from = normalize_optional_rfc3339("from", request.from)?;
     request.to = normalize_optional_rfc3339("to", request.to)?;
     request.bundle_format = normalize_pack_bundle_format(&request.bundle_format)?;
+    request.disclosure_policy =
+        normalize_optional_nonempty("disclosure_policy", request.disclosure_policy)?;
 
     if let (Some(from), Some(to)) = (request.from.as_deref(), request.to.as_deref()) {
         let from = chrono::DateTime::parse_from_rfc3339(from)
@@ -3086,6 +3167,9 @@ fn normalize_create_pack_request(mut request: CreatePackRequest) -> Result<Creat
         if from > to {
             bail!("from must be <= to");
         }
+    }
+    if request.bundle_format == PACK_BUNDLE_FORMAT_FULL && request.disclosure_policy.is_some() {
+        bail!("disclosure_policy requires bundle_format=disclosure");
     }
 
     Ok(request)
@@ -3157,6 +3241,7 @@ fn pack_summary(manifest: &PackManifest) -> PackSummaryResponse {
         from: manifest.from.clone(),
         to: manifest.to.clone(),
         bundle_format: manifest.bundle_format.clone(),
+        disclosure_policy: manifest.disclosure_policy.clone(),
         bundle_count: manifest.bundle_ids.len(),
         bundle_ids: manifest.bundle_ids.clone(),
     }
@@ -3275,9 +3360,40 @@ fn pack_profile(pack_type: &str) -> Result<PackProfile> {
     }
 }
 
+async fn resolve_pack_disclosure_policy(
+    db: &SqlitePool,
+    request: &CreatePackRequest,
+) -> Result<Option<DisclosurePolicyConfig>> {
+    if request.bundle_format != PACK_BUNDLE_FORMAT_DISCLOSURE {
+        return Ok(None);
+    }
+
+    let config = load_disclosure_config(db).await?;
+    let policy_name = request
+        .disclosure_policy
+        .as_deref()
+        .unwrap_or_else(|| default_disclosure_policy_name(&request.pack_type));
+
+    config
+        .policies
+        .into_iter()
+        .find(|policy| policy.name == policy_name)
+        .ok_or_else(|| anyhow::anyhow!("unknown disclosure_policy {}", policy_name))
+        .map(Some)
+}
+
+fn default_disclosure_policy_name(pack_type: &str) -> &'static str {
+    match pack_type {
+        "annex_iv" => DEFAULT_DISCLOSURE_POLICY_ANNEX_IV_REDACTED,
+        "incident_response" => DEFAULT_DISCLOSURE_POLICY_INCIDENT_SUMMARY,
+        _ => DEFAULT_DISCLOSURE_POLICY_REGULATOR_MINIMUM,
+    }
+}
+
 fn curate_pack_bundles(
     profile: &PackProfile,
     rows: Vec<PackSourceBundleRow>,
+    disclosure_policy: Option<&DisclosurePolicyConfig>,
 ) -> Result<Vec<CuratedPackBundle>> {
     let mut curated = Vec::new();
 
@@ -3316,14 +3432,32 @@ fn curate_pack_bundles(
             continue;
         }
 
-        let disclosed_item_indices =
+        let candidate_disclosed_item_indices =
             select_disclosed_item_indices(profile, &bundle, &retention_class);
+        let disclosed_item_indices = apply_disclosure_policy_to_items(
+            disclosure_policy,
+            &bundle,
+            &candidate_disclosed_item_indices,
+        );
         let disclosed_item_types = disclosed_item_indices
             .iter()
             .map(|index| evidence_item_type(&bundle.items[*index]).to_string())
             .collect::<BTreeSet<_>>()
             .into_iter()
             .collect::<Vec<_>>();
+        let disclosed_artefact_indices =
+            select_disclosed_artefact_indices(disclosure_policy, &bundle);
+        let disclosed_artefact_names = disclosed_artefact_indices
+            .iter()
+            .map(|index| bundle.artefacts[*index].name.clone())
+            .collect::<Vec<_>>();
+
+        if disclosure_policy.is_some()
+            && disclosed_item_indices.is_empty()
+            && disclosed_artefact_indices.is_empty()
+        {
+            continue;
+        }
 
         let mut matched_rules = Vec::new();
         matched_rules.push(format!("pack_type:{}", profile.pack_type));
@@ -3339,6 +3473,9 @@ fn curate_pack_bundles(
         if matched_retention {
             matched_rules.push(format!("retention_class:{retention_class}"));
         }
+        if let Some(policy) = disclosure_policy {
+            matched_rules.push(format!("disclosure_policy:{}", policy.name));
+        }
 
         curated.push(CuratedPackBundle {
             row,
@@ -3347,11 +3484,72 @@ fn curate_pack_bundles(
             obligation_refs,
             disclosed_item_indices,
             disclosed_item_types,
+            disclosed_artefact_indices,
+            disclosed_artefact_names,
             matched_rules,
         });
     }
 
     Ok(curated)
+}
+
+fn apply_disclosure_policy_to_items(
+    disclosure_policy: Option<&DisclosurePolicyConfig>,
+    bundle: &ProofBundle,
+    candidate_indices: &[usize],
+) -> Vec<usize> {
+    let Some(policy) = disclosure_policy else {
+        return candidate_indices.to_vec();
+    };
+
+    let allowed = policy
+        .allowed_item_types
+        .iter()
+        .map(String::as_str)
+        .collect::<HashSet<_>>();
+    let excluded = policy
+        .excluded_item_types
+        .iter()
+        .map(String::as_str)
+        .collect::<HashSet<_>>();
+
+    candidate_indices
+        .iter()
+        .copied()
+        .filter(|index| {
+            let item_type = evidence_item_type(&bundle.items[*index]);
+            (allowed.is_empty() || allowed.contains(item_type)) && !excluded.contains(item_type)
+        })
+        .collect()
+}
+
+fn select_disclosed_artefact_indices(
+    disclosure_policy: Option<&DisclosurePolicyConfig>,
+    bundle: &ProofBundle,
+) -> Vec<usize> {
+    let Some(policy) = disclosure_policy else {
+        return Vec::new();
+    };
+    if !policy.include_artefact_metadata {
+        return Vec::new();
+    }
+
+    if policy.artefact_names.is_empty() {
+        return (0..bundle.artefacts.len()).collect();
+    }
+
+    let included = policy
+        .artefact_names
+        .iter()
+        .map(String::as_str)
+        .collect::<HashSet<_>>();
+
+    bundle
+        .artefacts
+        .iter()
+        .enumerate()
+        .filter_map(|(index, artefact)| included.contains(artefact.name.as_str()).then_some(index))
+        .collect()
 }
 
 async fn query_pack_source_bundles(
@@ -3470,8 +3668,12 @@ fn build_bundle_package_bytes(
     gzip_json_bytes(&package)
 }
 
-fn build_disclosure_package_bytes(bundle: &ProofBundle, item_indices: &[usize]) -> Result<Vec<u8>> {
-    let redacted = redact_bundle(bundle, item_indices, &[])
+fn build_disclosure_package_bytes(
+    bundle: &ProofBundle,
+    item_indices: &[usize],
+    artefact_indices: &[usize],
+) -> Result<Vec<u8>> {
+    let redacted = redact_bundle(bundle, item_indices, artefact_indices)
         .context("failed to redact bundle for disclosure package")?;
     let mut package_files = BTreeMap::<String, Vec<u8>>::new();
     package_files.insert(
@@ -3892,6 +4094,7 @@ async fn build_vault_config_response(state: &AppState) -> Result<VaultConfigResp
         },
         timestamp: load_timestamp_config(&state.db).await?,
         transparency: load_transparency_config(&state.db).await?,
+        disclosure: load_disclosure_config(&state.db).await?,
         audit: AuditConfigView { enabled: true },
     })
 }
@@ -4047,6 +4250,126 @@ fn validate_transparency_config(mut config: TransparencyConfig) -> Result<Transp
     Ok(config)
 }
 
+fn validate_disclosure_config(mut config: DisclosureConfig) -> Result<DisclosureConfig> {
+    if config.policies.is_empty() {
+        bail!("disclosure config must include at least one policy");
+    }
+
+    let mut seen_policy_names = HashSet::new();
+    for policy in &mut config.policies {
+        policy.name = policy.name.trim().to_string();
+        if policy.name.is_empty() {
+            bail!("disclosure policy name must not be empty");
+        }
+        if !seen_policy_names.insert(policy.name.clone()) {
+            bail!("duplicate disclosure policy name {}", policy.name);
+        }
+
+        policy.allowed_item_types = normalize_disclosure_item_types(
+            &policy.allowed_item_types,
+            "allowed_item_types",
+            &policy.name,
+        )?;
+        policy.excluded_item_types = normalize_disclosure_item_types(
+            &policy.excluded_item_types,
+            "excluded_item_types",
+            &policy.name,
+        )?;
+        let allowed = policy
+            .allowed_item_types
+            .iter()
+            .cloned()
+            .collect::<HashSet<_>>();
+        for item_type in &policy.excluded_item_types {
+            if allowed.contains(item_type) {
+                bail!(
+                    "disclosure policy {} includes {} in both allowed_item_types and excluded_item_types",
+                    policy.name,
+                    item_type
+                );
+            }
+        }
+
+        policy.artefact_names = policy
+            .artefact_names
+            .iter()
+            .map(|name| name.trim())
+            .filter(|name| !name.is_empty())
+            .map(str::to_string)
+            .collect::<Vec<_>>();
+        let mut seen_artefact_names = HashSet::new();
+        for name in &policy.artefact_names {
+            validate_artefact_name(name)?;
+            if !seen_artefact_names.insert(name.clone()) {
+                bail!(
+                    "disclosure policy {} includes duplicate artefact name {}",
+                    policy.name,
+                    name
+                );
+            }
+        }
+        if !policy.include_artefact_metadata && !policy.artefact_names.is_empty() {
+            bail!(
+                "disclosure policy {} cannot set artefact_names when include_artefact_metadata is false",
+                policy.name
+            );
+        }
+    }
+
+    Ok(config)
+}
+
+fn normalize_disclosure_item_types(
+    values: &[String],
+    field_name: &str,
+    policy_name: &str,
+) -> Result<Vec<String>> {
+    let mut seen = HashSet::new();
+    let mut normalized = Vec::new();
+
+    for value in values {
+        let item_type = value.trim().to_ascii_lowercase();
+        if item_type.is_empty() {
+            continue;
+        }
+        if !is_known_evidence_item_type(&item_type) {
+            bail!(
+                "disclosure policy {} has unsupported {} entry {}",
+                policy_name,
+                field_name,
+                item_type
+            );
+        }
+        if seen.insert(item_type.clone()) {
+            normalized.push(item_type);
+        }
+    }
+
+    Ok(normalized)
+}
+
+fn is_known_evidence_item_type(item_type: &str) -> bool {
+    matches!(
+        item_type,
+        "llm_interaction"
+            | "tool_call"
+            | "retrieval"
+            | "human_oversight"
+            | "policy_decision"
+            | "risk_assessment"
+            | "data_governance"
+            | "technical_doc"
+            | "model_evaluation"
+            | "adversarial_test"
+            | "training_provenance"
+            | "conformity_assessment"
+            | "declaration"
+            | "registration"
+            | "literacy_attestation"
+            | "incident_report"
+    )
+}
+
 fn validate_http_url(value: &str, field_name: &str) -> Result<()> {
     if !(value.starts_with("http://") || value.starts_with("https://")) {
         bail!("{field_name} must start with http:// or https://");
@@ -4102,6 +4425,48 @@ fn default_transparency_config() -> TransparencyConfig {
     }
 }
 
+fn default_disclosure_config() -> DisclosureConfig {
+    DisclosureConfig {
+        policies: vec![
+            DisclosurePolicyConfig {
+                name: DEFAULT_DISCLOSURE_POLICY_REGULATOR_MINIMUM.to_string(),
+                allowed_item_types: Vec::new(),
+                excluded_item_types: Vec::new(),
+                include_artefact_metadata: false,
+                artefact_names: Vec::new(),
+            },
+            DisclosurePolicyConfig {
+                name: DEFAULT_DISCLOSURE_POLICY_ANNEX_IV_REDACTED.to_string(),
+                allowed_item_types: vec![
+                    "technical_doc".to_string(),
+                    "risk_assessment".to_string(),
+                    "data_governance".to_string(),
+                    "human_oversight".to_string(),
+                ],
+                excluded_item_types: Vec::new(),
+                include_artefact_metadata: true,
+                artefact_names: Vec::new(),
+            },
+            DisclosurePolicyConfig {
+                name: DEFAULT_DISCLOSURE_POLICY_INCIDENT_SUMMARY.to_string(),
+                allowed_item_types: vec![
+                    "incident_report".to_string(),
+                    "risk_assessment".to_string(),
+                    "policy_decision".to_string(),
+                    "human_oversight".to_string(),
+                ],
+                excluded_item_types: vec![
+                    "llm_interaction".to_string(),
+                    "retrieval".to_string(),
+                    "tool_call".to_string(),
+                ],
+                include_artefact_metadata: false,
+                artefact_names: Vec::new(),
+            },
+        ],
+    }
+}
+
 async fn load_timestamp_config(db: &SqlitePool) -> Result<TimestampConfig> {
     match load_service_config::<TimestampConfig>(db, SERVICE_CONFIG_KEY_TIMESTAMP).await? {
         Some(config) => validate_timestamp_config(config),
@@ -4113,6 +4478,13 @@ async fn load_transparency_config(db: &SqlitePool) -> Result<TransparencyConfig>
     match load_service_config::<TransparencyConfig>(db, SERVICE_CONFIG_KEY_TRANSPARENCY).await? {
         Some(config) => validate_transparency_config(config),
         None => Ok(default_transparency_config()),
+    }
+}
+
+async fn load_disclosure_config(db: &SqlitePool) -> Result<DisclosureConfig> {
+    match load_service_config::<DisclosureConfig>(db, SERVICE_CONFIG_KEY_DISCLOSURE).await? {
+        Some(config) => validate_disclosure_config(config),
+        None => Ok(default_disclosure_config()),
     }
 }
 
@@ -5031,6 +5403,22 @@ async fn seed_default_retention_policies(db: &SqlitePool) -> Result<()> {
     Ok(())
 }
 
+async fn seed_default_disclosure_config(db: &SqlitePool) -> Result<()> {
+    if load_service_config::<DisclosureConfig>(db, SERVICE_CONFIG_KEY_DISCLOSURE)
+        .await?
+        .is_none()
+    {
+        upsert_service_config(
+            db,
+            SERVICE_CONFIG_KEY_DISCLOSURE,
+            &default_disclosure_config(),
+        )
+        .await?;
+    }
+
+    Ok(())
+}
+
 async fn backfill_bundle_expiries(db: &SqlitePool) -> Result<()> {
     let rows = sqlx::query(
         "SELECT bundle_id, created_at, retention_class
@@ -5258,6 +5646,7 @@ mod tests {
         let db = open_sqlite_pool(&db_path).await.unwrap();
         initialize_sqlite_schema(&db).await.unwrap();
         seed_default_retention_policies(&db).await.unwrap();
+        seed_default_disclosure_config(&db).await.unwrap();
         backfill_bundle_expiries(&db).await.unwrap();
         backfill_item_obligation_refs(&db).await.unwrap();
         let signing_key = SigningKey::from_bytes(&rand::random::<[u8; 32]>());
@@ -6830,6 +7219,14 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
         assert!(!config.transparency.enabled);
         assert_eq!(config.transparency.provider, DEFAULT_TRANSPARENCY_PROVIDER);
         assert_eq!(config.transparency.url, None);
+        assert_eq!(config.disclosure.policies.len(), 3);
+        assert!(
+            config
+                .disclosure
+                .policies
+                .iter()
+                .any(|policy| policy.name == DEFAULT_DISCLOSURE_POLICY_REGULATOR_MINIMUM)
+        );
         assert!(config.audit.enabled);
     }
 
@@ -7745,6 +8142,77 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
     }
 
     #[tokio::test]
+    async fn update_disclosure_config_persists_and_is_returned_from_get_config() {
+        let state = test_state(DEFAULT_MAX_PAYLOAD_BYTES).await;
+        let db = state.db.clone();
+        let app = build_router(state, DEFAULT_MAX_PAYLOAD_BYTES);
+
+        let request_config = DisclosureConfig {
+            policies: vec![
+                DisclosurePolicyConfig {
+                    name: "regulator_minimum".to_string(),
+                    allowed_item_types: Vec::new(),
+                    excluded_item_types: vec!["tool_call".to_string()],
+                    include_artefact_metadata: false,
+                    artefact_names: Vec::new(),
+                },
+                DisclosurePolicyConfig {
+                    name: "annex_iv_redacted".to_string(),
+                    allowed_item_types: vec![
+                        "technical_doc".to_string(),
+                        "risk_assessment".to_string(),
+                    ],
+                    excluded_item_types: Vec::new(),
+                    include_artefact_metadata: true,
+                    artefact_names: vec!["doc.json".to_string()],
+                },
+            ],
+        };
+
+        let put_req = Request::builder()
+            .method("PUT")
+            .uri("/v1/config/disclosure")
+            .header("content-type", "application/json")
+            .body(Body::from(serde_json::to_vec(&request_config).unwrap()))
+            .unwrap();
+        let put_res = app.clone().oneshot(put_req).await.unwrap();
+        assert_eq!(put_res.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(put_res.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let updated: DisclosureConfig = serde_json::from_slice(&body).unwrap();
+        assert_eq!(updated, request_config);
+
+        let get_req = Request::builder()
+            .method("GET")
+            .uri("/v1/config")
+            .body(Body::empty())
+            .unwrap();
+        let get_res = app.clone().oneshot(get_req).await.unwrap();
+        assert_eq!(get_res.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(get_res.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let config: VaultConfigResponse = serde_json::from_slice(&body).unwrap();
+        assert_eq!(config.disclosure, updated);
+
+        let update_audit_details: String = sqlx::query_scalar(
+            "SELECT details_json FROM audit_log WHERE action = ? ORDER BY id DESC LIMIT 1",
+        )
+        .bind("update_disclosure_config")
+        .fetch_one(&db)
+        .await
+        .unwrap();
+        let update_audit: serde_json::Value = serde_json::from_str(&update_audit_details).unwrap();
+        assert_eq!(
+            update_audit
+                .get("policy_count")
+                .and_then(serde_json::Value::as_u64),
+            Some(2)
+        );
+    }
+
+    #[tokio::test]
     async fn create_pack_applies_runtime_log_curation_and_exports_verifiable_bundle_packages() {
         let state = test_state(DEFAULT_MAX_PAYLOAD_BYTES).await;
         let db = state.db.clone();
@@ -7852,6 +8320,7 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
                     from: None,
                     to: None,
                     bundle_format: default_pack_bundle_format(),
+                    disclosure_policy: None,
                 })
                 .unwrap(),
             ))
@@ -8005,6 +8474,7 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
                     from: None,
                     to: None,
                     bundle_format: PACK_BUNDLE_FORMAT_DISCLOSURE.to_string(),
+                    disclosure_policy: None,
                 })
                 .unwrap(),
             ))
@@ -8017,6 +8487,10 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
         let pack: PackSummaryResponse = serde_json::from_slice(&body).unwrap();
         assert_eq!(pack.bundle_ids, vec![llm_bundle.bundle_id.clone()]);
         assert_eq!(pack.bundle_format, PACK_BUNDLE_FORMAT_DISCLOSURE);
+        assert_eq!(
+            pack.disclosure_policy.as_deref(),
+            Some(DEFAULT_DISCLOSURE_POLICY_REGULATOR_MINIMUM)
+        );
 
         let manifest_req = Request::builder()
             .method("GET")
@@ -8030,6 +8504,10 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
             .unwrap();
         let manifest: PackManifest = serde_json::from_slice(&body).unwrap();
         assert_eq!(manifest.bundle_format, PACK_BUNDLE_FORMAT_DISCLOSURE);
+        assert_eq!(
+            manifest.disclosure_policy.as_deref(),
+            Some(DEFAULT_DISCLOSURE_POLICY_REGULATOR_MINIMUM)
+        );
         assert_eq!(manifest.bundles.len(), 1);
         let expected_package_name = format!("bundles/{}.disclosure.pkg", llm_bundle.bundle_id);
         assert_eq!(
@@ -8077,6 +8555,140 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
         assert_eq!(redacted.bundle_id, llm_bundle.bundle_id);
         assert_eq!(redacted.disclosed_items.len(), 1);
         assert!(redacted.disclosed_artefacts.is_empty());
+
+        let verify_req = Request::builder()
+            .method("POST")
+            .uri("/v1/verify")
+            .header("content-type", "application/json")
+            .body(Body::from(
+                serde_json::to_vec(&VerifyRequest::Package(Box::new(PackageVerifyRequest {
+                    bundle_pkg_base64: archive.files[0].data_base64.clone(),
+                    public_key_pem,
+                })))
+                .unwrap(),
+            ))
+            .unwrap();
+        let verify_res = app.oneshot(verify_req).await.unwrap();
+        assert_eq!(verify_res.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(verify_res.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let verify_response: VerifyResponse = serde_json::from_slice(&body).unwrap();
+        assert!(verify_response.valid);
+        assert_eq!(verify_response.artefacts_verified, 0);
+    }
+
+    #[tokio::test]
+    async fn create_pack_applies_named_disclosure_policy_with_artefact_metadata() {
+        let state = test_state(DEFAULT_MAX_PAYLOAD_BYTES).await;
+        let public_key_pem = encode_public_key_pem(&state.signing_key.verifying_key());
+        let app = build_router(state, DEFAULT_MAX_PAYLOAD_BYTES);
+
+        let technical_bundle = create_bundle_response(
+            &app,
+            &CreateBundleRequest {
+                capture: SealableCaptureInput::V10(sample_event_with_profile(
+                    "system-docs",
+                    proof_layer_core::ActorRole::Provider,
+                    vec![EvidenceItem::TechnicalDoc(
+                        proof_layer_core::schema::TechnicalDocEvidence {
+                            document_ref: "annex-iv/system-card".to_string(),
+                            section: Some("safety_controls".to_string()),
+                            commitment: Some(
+                                "sha256:abababababababababababababababababababababababababababababababab"
+                                    .to_string(),
+                            ),
+                        },
+                    )],
+                    Some("technical_doc"),
+                )),
+                artefacts: vec![
+                    InlineArtefact {
+                        name: "doc.json".to_string(),
+                        content_type: "application/json".to_string(),
+                        data_base64: Base64::encode_string(br#"{"doc":"system-card"}"#),
+                    },
+                    InlineArtefact {
+                        name: "diagram.txt".to_string(),
+                        content_type: "text/plain".to_string(),
+                        data_base64: Base64::encode_string(b"annex-iv-diagram"),
+                    },
+                ],
+            },
+        )
+        .await;
+
+        let pack_req = Request::builder()
+            .method("POST")
+            .uri("/v1/packs")
+            .header("content-type", "application/json")
+            .body(Body::from(
+                serde_json::to_vec(&CreatePackRequest {
+                    pack_type: "annex_iv".to_string(),
+                    system_id: Some("system-docs".to_string()),
+                    from: None,
+                    to: None,
+                    bundle_format: PACK_BUNDLE_FORMAT_DISCLOSURE.to_string(),
+                    disclosure_policy: Some(
+                        DEFAULT_DISCLOSURE_POLICY_ANNEX_IV_REDACTED.to_string(),
+                    ),
+                })
+                .unwrap(),
+            ))
+            .unwrap();
+        let pack_res = app.clone().oneshot(pack_req).await.unwrap();
+        assert_eq!(pack_res.status(), StatusCode::CREATED);
+        let body = axum::body::to_bytes(pack_res.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let pack: PackSummaryResponse = serde_json::from_slice(&body).unwrap();
+        assert_eq!(
+            pack.disclosure_policy.as_deref(),
+            Some(DEFAULT_DISCLOSURE_POLICY_ANNEX_IV_REDACTED)
+        );
+
+        let manifest_req = Request::builder()
+            .method("GET")
+            .uri(format!("/v1/packs/{}/manifest", pack.pack_id))
+            .body(Body::empty())
+            .unwrap();
+        let manifest_res = app.clone().oneshot(manifest_req).await.unwrap();
+        assert_eq!(manifest_res.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(manifest_res.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let manifest: PackManifest = serde_json::from_slice(&body).unwrap();
+        assert_eq!(
+            manifest.disclosure_policy.as_deref(),
+            Some(DEFAULT_DISCLOSURE_POLICY_ANNEX_IV_REDACTED)
+        );
+        assert_eq!(manifest.bundles.len(), 1);
+        assert_eq!(
+            manifest.bundles[0].disclosed_artefact_names,
+            vec!["doc.json".to_string(), "diagram.txt".to_string()]
+        );
+
+        let export_req = Request::builder()
+            .method("GET")
+            .uri(format!("/v1/packs/{}/export", pack.pack_id))
+            .body(Body::empty())
+            .unwrap();
+        let export_res = app.clone().oneshot(export_req).await.unwrap();
+        assert_eq!(export_res.status(), StatusCode::OK);
+        let export_bytes = axum::body::to_bytes(export_res.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let archive = decode_pack_archive(&export_bytes);
+        let disclosure_package =
+            Base64::decode_vec(&archive.files[0].data_base64).expect("base64 disclosure package");
+        let decoded =
+            read_package_from_bytes(&disclosure_package, DEFAULT_MAX_PAYLOAD_BYTES).unwrap();
+        let redacted = parse_redacted_bundle_file(&decoded.files).unwrap();
+        assert_eq!(redacted.bundle_id, technical_bundle.bundle_id);
+        assert_eq!(redacted.disclosed_items.len(), 1);
+        assert_eq!(redacted.disclosed_artefacts.len(), 2);
+        assert_eq!(redacted.disclosed_artefacts[0].meta.name, "doc.json");
+        assert_eq!(redacted.disclosed_artefacts[1].meta.name, "diagram.txt");
 
         let verify_req = Request::builder()
             .method("POST")
@@ -8150,6 +8762,7 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
                     from: None,
                     to: None,
                     bundle_format: default_pack_bundle_format(),
+                    disclosure_policy: None,
                 })
                 .unwrap(),
             ))
@@ -8276,6 +8889,7 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
                     from: None,
                     to: None,
                     bundle_format: default_pack_bundle_format(),
+                    disclosure_policy: None,
                 })
                 .unwrap(),
             ))
@@ -8399,6 +9013,7 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
                     from: None,
                     to: None,
                     bundle_format: default_pack_bundle_format(),
+                    disclosure_policy: None,
                 })
                 .unwrap(),
             ))
@@ -8520,6 +9135,7 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
                     from: None,
                     to: None,
                     bundle_format: default_pack_bundle_format(),
+                    disclosure_policy: None,
                 })
                 .unwrap(),
             ))

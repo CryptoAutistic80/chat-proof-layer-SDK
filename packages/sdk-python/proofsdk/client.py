@@ -69,6 +69,7 @@ class ProofLayerClient:
         from_date: str | None = None,
         to_date: str | None = None,
         bundle_format: str | None = None,
+        disclosure_policy: str | None = None,
     ) -> dict[str, Any]:
         payload: dict[str, Any] = {
             "pack_type": pack_type,
@@ -78,6 +79,8 @@ class ProofLayerClient:
         }
         if bundle_format is not None:
             payload["bundle_format"] = bundle_format
+        if disclosure_policy is not None:
+            payload["disclosure_policy"] = disclosure_policy
         return self._request_fn("POST", "/v1/packs", self._headers_json(), json.dumps(payload).encode("utf-8"))
 
     def get_pack(self, pack_id: str) -> dict[str, Any]:

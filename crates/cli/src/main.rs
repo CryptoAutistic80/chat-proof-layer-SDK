@@ -81,6 +81,8 @@ enum Commands {
         from: Option<String>,
         #[arg(long)]
         to: Option<String>,
+        #[arg(long = "bundle-format", default_value = "full")]
+        bundle_format: PackBundleFormatArg,
     },
     /// Query and administer a running vault service.
     Vault {
@@ -237,6 +239,8 @@ enum VaultCommands {
         from: Option<String>,
         #[arg(long)]
         to: Option<String>,
+        #[arg(long = "bundle-format", default_value = "full")]
+        bundle_format: PackBundleFormatArg,
     },
 }
 
@@ -285,6 +289,22 @@ enum PackTypeArg {
     SystemicRisk,
     IncidentResponse,
     Conformity,
+}
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq, ValueEnum)]
+#[value(rename_all = "snake_case")]
+enum PackBundleFormatArg {
+    Full,
+    Disclosure,
+}
+
+impl PackBundleFormatArg {
+    fn as_api_value(self) -> &'static str {
+        match self {
+            Self::Full => "full",
+            Self::Disclosure => "disclosure",
+        }
+    }
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, ValueEnum)]
@@ -481,6 +501,7 @@ struct CreatePackRequest {
     from: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     to: Option<String>,
+    bundle_format: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -491,6 +512,7 @@ struct PackSummaryResponse {
     system_id: Option<String>,
     from: Option<String>,
     to: Option<String>,
+    bundle_format: String,
     bundle_count: usize,
     bundle_ids: Vec<String>,
 }
@@ -842,8 +864,10 @@ fn main() -> Result<()> {
             system_id,
             from,
             to,
+            bundle_format,
         } => cmd_pack(
             pack_type,
+            bundle_format,
             &vault_url,
             &out,
             system_id.as_deref(),
@@ -894,8 +918,10 @@ fn main() -> Result<()> {
                 system_id,
                 from,
                 to,
+                bundle_format,
             } => cmd_pack(
                 pack_type,
+                bundle_format,
                 &vault_url,
                 &out,
                 system_id.as_deref(),
@@ -1460,6 +1486,7 @@ fn cmd_inspect(
 
 fn cmd_pack(
     pack_type: PackTypeArg,
+    bundle_format: PackBundleFormatArg,
     vault_url: &str,
     out_path: &Path,
     system_id: Option<&str>,
@@ -1471,6 +1498,7 @@ fn cmd_pack(
         system_id: normalize_optional_cli_text("system_id", system_id)?,
         from: normalize_optional_cli_datetime("from", from)?,
         to: normalize_optional_cli_datetime("to", to)?,
+        bundle_format: bundle_format.as_api_value().to_string(),
     };
     if let (Some(from), Some(to)) = (request.from.as_deref(), request.to.as_deref()) {
         let from = DateTime::parse_from_rfc3339(from)
@@ -1522,6 +1550,7 @@ fn cmd_pack(
     info!("wrote {}", out_path.display());
     info!("pack_id={}", pack.pack_id);
     info!("pack_type={}", pack.pack_type);
+    info!("bundle_format={}", pack.bundle_format);
     info!("bundle_count={}", pack.bundle_count);
     if let Some(system_id) = pack.system_id.as_deref() {
         info!("system_id={system_id}");

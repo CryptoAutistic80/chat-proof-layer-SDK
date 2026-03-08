@@ -121,6 +121,14 @@ cargo run -p proofctl -- pack \
   --system-id system-123 \
   --out ./runtime-logs.pack
 
+# Optional: ask the vault to export redacted disclosure packages instead of full bundle.pkg members
+cargo run -p proofctl -- pack \
+  --type runtime-logs \
+  --bundle-format disclosure \
+  --vault-url http://127.0.0.1:8080 \
+  --system-id system-123 \
+  --out ./runtime-logs-disclosure.pack
+
 # Query vault bundle inventory
 cargo run -p proofctl -- vault query \
   --vault-url http://127.0.0.1:8080 \
@@ -321,7 +329,7 @@ npm run dev
 - `proofctl verify` now reports the bundle assurance level as `signed`, `timestamped`, or `transparency_anchored`.
 - `proofctl disclose --items ...` now creates item-level redacted packages with Merkle inclusion proofs, and `proofctl verify` auto-detects full vs disclosure package formats.
 - `proofctl inspect` now supports `--show-items` and `--show-merkle`.
-- `proofctl pack` now requests pack assembly from the vault and downloads the resulting `pl-evidence-pack-v1` archive.
+- `proofctl pack` and `proofctl vault export` now support `--bundle-format <full|disclosure>` so vault exports can contain either full `bundle.pkg` members or redacted disclosure packages.
 - `proofctl vault status|query|retention|systems|export` now covers the main vault read/query/export flows from the plan without requiring manual `curl`.
 - The vault now persists metadata in SQLite, computes bundle expiry from seeded retention policies, derives per-item `obligation_ref` tags, exposes retention scan/status endpoints, supports legal holds, and indexes evidence items for `/v1/bundles` filtering.
 - The vault now exposes `GET /v1/systems` and `GET /v1/systems/{system_id}/summary` for system-level evidence rollups across role, item type, retention class, assurance level, and model usage.
@@ -335,8 +343,8 @@ npm run dev
 - `POST /v1/verify/timestamp` and `POST /v1/verify/receipt` now verify assurance artefacts either directly (`bundle_root` + token/receipt) or by stored `bundle_id`, and they automatically use configured trust anchors / transparency public keys when present.
 - Timestamp verification now has six layers: structural CMS/message-imprint validation by default, optional RFC 3161 policy OID matching when configured, signer-chain validation against configured PEM trust anchors at token generation time, optional CRL-based revocation checks against configured PEM CRLs, optional live OCSP checks against configured responder URLs, and optional qualified TSA signer allowlist matching. Setting `assurance = "qualified"` still makes trust anchors, CRLs, expected policy OIDs, and at least one allowed TSA signer certificate mandatory and also requires the TSA signer certificate profile to be appropriate for time stamping. EU trusted-list ingestion and archival OCSP evidence handling are still future work.
 - Transparency verification now checks Rekor receipt structure, entry UUID to leaf-hash binding, the Merkle inclusion proof against the advertised Rekor root hash, the embedded RFC 3161 token binding to `integrity.bundle_root`, and Rekor signed-entry-timestamp signatures plus `logID` binding when a trusted public key is configured. The SCITT path verifies a draft-aligned canonical JSON statement/receipt contract with `serviceId == sha256(SPKI_DER(public_key))`; full interoperable COSE/CCF SCITT is still future work.
-- Pack assembly is now available through `/v1/packs`; packs apply an initial heuristic curation profile (`pack-rules-v1`) based on actor role, evidence item types, retention class, and derived obligation refs, then export matching bundles as embedded `bundle.pkg` files plus a manifest.
-- Vault pack redaction is still not implemented; current exports remain full `bundle.pkg` members even though local `proofctl disclose` selective disclosure is now available.
+- Pack assembly is now available through `/v1/packs`; packs apply an initial heuristic curation profile (`pack-rules-v1`) based on actor role, evidence item types, retention class, and derived obligation refs, then export matching bundles as either embedded full `bundle.pkg` files or redacted disclosure packages plus a manifest.
+- When `bundle_format=disclosure`, the vault emits `pl-bundle-disclosure-pkg-v1` members and discloses the item indices matched by the pack curation rules; artefact-level disclosure policy is still future work.
 - Vault startup now supports `vault.toml` + env override configuration and an automatic background retention scan loop; PostgreSQL/S3/TLS remain future work.
 - Canonicalization and signing semantics follow `docs/architecture.md`.
 - Verification is designed to work offline with a full or disclosure package plus the public key.

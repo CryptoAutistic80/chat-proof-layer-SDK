@@ -30,6 +30,13 @@
       "type": "string",
       "format": "date-time"
     },
+    "bundle_format": {
+      "type": "string",
+      "enum": [
+        "full",
+        "disclosure"
+      ]
+    },
     "system_id": {
       "type": "string",
       "minLength": 1
@@ -93,9 +100,34 @@
             "type": "string",
             "minLength": 1
           },
+          "bundle_format": {
+            "type": "string",
+            "enum": [
+              "full",
+              "disclosure"
+            ]
+          },
+          "package_name": {
+            "type": "string",
+            "minLength": 1
+          },
           "item_types": {
             "type": "array",
             "minItems": 1,
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "disclosed_item_indices": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "disclosed_item_types": {
+            "type": "array",
             "items": {
               "type": "string",
               "minLength": 1

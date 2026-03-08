@@ -12,14 +12,14 @@ use ed25519_dalek::SigningKey;
 use flate2::{Compression, read::GzDecoder, write::GzEncoder};
 use proof_layer_core::{
     ArtefactInput, BuildBundleError, CaptureEvent, CaptureInput, EvidenceItem, ProofBundle,
-    ReceiptVerification, RekorTransparencyProvider, Rfc3161HttpTimestampProvider,
+    ReceiptVerification, RedactedBundle, RekorTransparencyProvider, Rfc3161HttpTimestampProvider,
     ScittTransparencyProvider, TimestampAssuranceProfile, TimestampToken, TimestampTrustPolicy,
     TimestampVerification, TransparencyReceipt, TransparencyTrustPolicy,
     anchor_bundle as anchor_bundle_receipt, build_bundle, canonicalize_value,
-    decode_private_key_pem, decode_public_key_pem, sha256_prefixed, timestamp_digest,
-    validate_bundle_integrity_fields, validate_timestamp_trust_policy,
+    decode_private_key_pem, decode_public_key_pem, redact_bundle, sha256_prefixed,
+    timestamp_digest, validate_bundle_integrity_fields, validate_timestamp_trust_policy,
     validate_transparency_trust_policy, verify_receipt, verify_receipt_with_policy,
-    verify_timestamp, verify_timestamp_with_policy,
+    verify_redacted_bundle, verify_timestamp, verify_timestamp_with_policy,
 };
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use sqlx::{
@@ -47,9 +47,12 @@ const DEFAULT_RETENTION_GRACE_PERIOD_DAYS: i64 = 30;
 const DEFAULT_RETENTION_SCAN_INTERVAL_HOURS: i64 = 24;
 const DEFAULT_CONFIG_PATH: &str = "./vault.toml";
 const PACKAGE_FORMAT: &str = "pl-bundle-pkg-v1";
+const DISCLOSURE_PACKAGE_FORMAT: &str = "pl-bundle-disclosure-pkg-v1";
 const PACK_EXPORT_FORMAT: &str = "pl-evidence-pack-v1";
 const PACK_EXPORT_FILE_NAME: &str = "evidence_pack.pkg";
 const PACK_CURATION_PROFILE: &str = "pack-rules-v1";
+const PACK_BUNDLE_FORMAT_FULL: &str = "full";
+const PACK_BUNDLE_FORMAT_DISCLOSURE: &str = "disclosure";
 const AUDIT_ACTOR_API: &str = "api";
 const AUDIT_ACTOR_SYSTEM: &str = "system";
 const SERVICE_CONFIG_KEY_TIMESTAMP: &str = "timestamp";
@@ -231,6 +234,12 @@ struct InlineVerifyRequest {
 struct PackageVerifyRequest {
     bundle_pkg_base64: String,
     public_key_pem: String,
+}
+
+#[derive(Debug)]
+struct DecodedPackage {
+    format: String,
+    files: BTreeMap<String, Vec<u8>>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -614,6 +623,8 @@ struct CreatePackRequest {
     from: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     to: Option<String>,
+    #[serde(default = "default_pack_bundle_format")]
+    bundle_format: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -627,6 +638,8 @@ struct PackSummaryResponse {
     from: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     to: Option<String>,
+    #[serde(default = "default_pack_bundle_format")]
+    bundle_format: String,
     bundle_count: usize,
     bundle_ids: Vec<String>,
 }
@@ -643,6 +656,8 @@ struct PackManifest {
     from: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     to: Option<String>,
+    #[serde(default = "default_pack_bundle_format")]
+    bundle_format: String,
     bundle_ids: Vec<String>,
     bundles: Vec<PackBundleEntry>,
 }
@@ -658,6 +673,14 @@ struct PackBundleEntry {
     model_id: Option<String>,
     retention_class: String,
     item_types: Vec<String>,
+    #[serde(default = "default_pack_bundle_format")]
+    bundle_format: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    package_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    disclosed_item_indices: Vec<usize>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    disclosed_item_types: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     obligation_refs: Vec<String>,
     matched_rules: Vec<String>,
@@ -748,6 +771,8 @@ struct CuratedPackBundle {
     bundle: ProofBundle,
     item_types: Vec<String>,
     obligation_refs: Vec<String>,
+    disclosed_item_indices: Vec<usize>,
+    disclosed_item_types: Vec<String>,
     matched_rules: Vec<String>,
 }
 
@@ -2340,15 +2365,30 @@ async fn create_pack(
     let mut files = Vec::with_capacity(curated_rows.len());
 
     for curated in curated_rows {
-        let artefacts = load_pack_artefacts(&state.db, &curated.bundle.bundle_id)
-            .await
-            .map_err(ApiError::internal_anyhow)?;
-        let package_bytes = build_bundle_package_bytes(
-            &curated.bundle,
-            curated.row.bundle_json.as_bytes(),
-            &artefacts,
-        )
-        .map_err(ApiError::internal_anyhow)?;
+        let package_name = pack_bundle_file_name(&curated.row.bundle_id, &request.bundle_format);
+        let package_bytes = match request.bundle_format.as_str() {
+            PACK_BUNDLE_FORMAT_FULL => {
+                let artefacts = load_pack_artefacts(&state.db, &curated.bundle.bundle_id)
+                    .await
+                    .map_err(ApiError::internal_anyhow)?;
+                build_bundle_package_bytes(
+                    &curated.bundle,
+                    curated.row.bundle_json.as_bytes(),
+                    &artefacts,
+                )
+                .map_err(ApiError::internal_anyhow)?
+            }
+            PACK_BUNDLE_FORMAT_DISCLOSURE => {
+                build_disclosure_package_bytes(&curated.bundle, &curated.disclosed_item_indices)
+                    .map_err(|err| {
+                        ApiError::internal_anyhow(err.context(format!(
+                            "failed to build disclosure package for bundle {}",
+                            curated.row.bundle_id
+                        )))
+                    })?
+            }
+            _ => unreachable!("bundle_format should be normalized"),
+        };
 
         bundle_ids.push(curated.row.bundle_id.clone());
         bundle_entries.push(PackBundleEntry {
@@ -2359,11 +2399,15 @@ async fn create_pack(
             model_id: curated.row.model_id,
             retention_class: curated.row.retention_class,
             item_types: curated.item_types,
+            bundle_format: request.bundle_format.clone(),
+            package_name: Some(package_name.clone()),
+            disclosed_item_indices: curated.disclosed_item_indices,
+            disclosed_item_types: curated.disclosed_item_types,
             obligation_refs: curated.obligation_refs,
             matched_rules: curated.matched_rules,
         });
         files.push(PackagedFile {
-            name: format!("bundles/{}.pkg", curated.row.bundle_id),
+            name: package_name,
             data_base64: Base64::encode_string(&package_bytes),
         });
     }
@@ -2376,6 +2420,7 @@ async fn create_pack(
         system_id: request.system_id.clone(),
         from: request.from.clone(),
         to: request.to.clone(),
+        bundle_format: request.bundle_format.clone(),
         bundle_ids,
         bundles: bundle_entries,
     };
@@ -2398,6 +2443,7 @@ async fn create_pack(
         Some(&pack_id),
         serde_json::json!({
             "pack_type": manifest.pack_type.clone(),
+            "bundle_format": manifest.bundle_format.clone(),
             "bundle_count": manifest.bundle_ids.len(),
             "system_id": manifest.system_id.clone(),
         }),
@@ -2756,12 +2802,28 @@ fn verify_package_request(
         )));
     }
 
-    let files = read_bundle_package_from_bytes(&package_bytes, max_payload_bytes)
-        .map_err(ApiError::bad_request_anyhow)?;
-    let bundle = parse_bundle_file(&files).map_err(ApiError::bad_request_anyhow)?;
-    validate_bundle_integrity_fields(&bundle).map_err(ApiError::bad_request_anyhow)?;
     let verifying_key = decode_public_key_pem(&request.public_key_pem)
         .map_err(|err| ApiError::bad_request(format!("invalid public key: {err}")))?;
+    let package = read_package_from_bytes(&package_bytes, max_payload_bytes)
+        .map_err(ApiError::bad_request_anyhow)?;
+
+    match package.format.as_str() {
+        PACKAGE_FORMAT => verify_full_package_request(&package.files, &verifying_key),
+        DISCLOSURE_PACKAGE_FORMAT => {
+            verify_disclosure_package_request(&package.files, &verifying_key)
+        }
+        other => Err(ApiError::bad_request(format!(
+            "unsupported package format {other}"
+        ))),
+    }
+}
+
+fn verify_full_package_request(
+    files: &BTreeMap<String, Vec<u8>>,
+    verifying_key: &ed25519_dalek::VerifyingKey,
+) -> Result<VerifyResponse, ApiError> {
+    let bundle = parse_bundle_file(files).map_err(ApiError::bad_request_anyhow)?;
+    validate_bundle_integrity_fields(&bundle).map_err(ApiError::bad_request_anyhow)?;
 
     let recomputed_canonical = bundle
         .canonical_header_bytes()
@@ -2776,9 +2838,9 @@ fn verify_package_request(
         .ok_or_else(|| ApiError::bad_request("package missing proof_bundle.sig"))?;
     let signature_file_ok = signature_file == bundle.integrity.signature.value.as_bytes();
 
-    let manifest_ok = verify_manifest(&files).map_err(ApiError::bad_request_anyhow)?;
-    let artefacts = extract_artefacts(&files).map_err(ApiError::bad_request_anyhow)?;
-    let core_outcome = bundle.verify_with_artefacts(&artefacts, &verifying_key);
+    let manifest_ok = verify_manifest(files).map_err(ApiError::bad_request_anyhow)?;
+    let artefacts = extract_artefacts(files).map_err(ApiError::bad_request_anyhow)?;
+    let core_outcome = bundle.verify_with_artefacts(&artefacts, verifying_key);
 
     let mut failures = Vec::new();
     if !canonicalization_ok {
@@ -2800,6 +2862,42 @@ fn verify_package_request(
     };
 
     let valid = canonicalization_ok && signature_file_ok && manifest_ok && core_ok;
+    let message = if valid {
+        "VALID".to_string()
+    } else {
+        format!("INVALID: {}", failures.join("; "))
+    };
+
+    Ok(VerifyResponse {
+        valid,
+        message,
+        artefacts_verified,
+    })
+}
+
+fn verify_disclosure_package_request(
+    files: &BTreeMap<String, Vec<u8>>,
+    verifying_key: &ed25519_dalek::VerifyingKey,
+) -> Result<VerifyResponse, ApiError> {
+    let bundle = parse_redacted_bundle_file(files).map_err(ApiError::bad_request_anyhow)?;
+    let manifest_ok = verify_manifest(files).map_err(ApiError::bad_request_anyhow)?;
+    let artefacts = extract_artefacts(files).map_err(ApiError::bad_request_anyhow)?;
+    let core_outcome = verify_redacted_bundle(&bundle, &artefacts, verifying_key);
+
+    let mut failures = Vec::new();
+    if !manifest_ok {
+        failures.push("manifest mismatch".to_string());
+    }
+
+    let (core_ok, artefacts_verified) = match core_outcome {
+        Ok(summary) => (true, summary.disclosed_artefact_count.min(artefacts.len())),
+        Err(err) => {
+            failures.push(format!("disclosure verification failed: {err}"));
+            (false, 0)
+        }
+    };
+
+    let valid = manifest_ok && core_ok;
     let message = if valid {
         "VALID".to_string()
     } else {
@@ -2855,10 +2953,10 @@ async fn resolve_receipt_verification_target(
     }
 }
 
-fn read_bundle_package_from_bytes(
+fn read_package_from_bytes(
     package_bytes: &[u8],
     max_payload_bytes: usize,
-) -> Result<BTreeMap<String, Vec<u8>>> {
+) -> Result<DecodedPackage> {
     let decoder = GzDecoder::new(std::io::Cursor::new(package_bytes));
     let mut limited_reader = decoder.take(
         max_payload_bytes
@@ -2880,9 +2978,6 @@ fn read_bundle_package_from_bytes(
 
     let package: BundlePackage =
         serde_json::from_slice(&json_bytes).context("failed to parse package JSON")?;
-    if package.format != PACKAGE_FORMAT {
-        bail!("unsupported package format {}", package.format);
-    }
 
     let mut files = BTreeMap::new();
     for file in package.files {
@@ -2903,7 +2998,10 @@ fn read_bundle_package_from_bytes(
         }
         files.insert(file.name, bytes);
     }
-    Ok(files)
+    Ok(DecodedPackage {
+        format: package.format,
+        files,
+    })
 }
 
 fn parse_bundle_file(files: &BTreeMap<String, Vec<u8>>) -> Result<ProofBundle> {
@@ -2912,6 +3010,15 @@ fn parse_bundle_file(files: &BTreeMap<String, Vec<u8>>) -> Result<ProofBundle> {
         .ok_or_else(|| anyhow::anyhow!("package missing proof_bundle.json"))?;
     let bundle: ProofBundle =
         serde_json::from_slice(bundle_json).context("failed to parse proof_bundle.json")?;
+    Ok(bundle)
+}
+
+fn parse_redacted_bundle_file(files: &BTreeMap<String, Vec<u8>>) -> Result<RedactedBundle> {
+    let bundle_json = files
+        .get("redacted_bundle.json")
+        .ok_or_else(|| anyhow::anyhow!("package missing redacted_bundle.json"))?;
+    let bundle: RedactedBundle =
+        serde_json::from_slice(bundle_json).context("failed to parse redacted_bundle.json")?;
     Ok(bundle)
 }
 
@@ -2969,6 +3076,7 @@ fn normalize_create_pack_request(mut request: CreatePackRequest) -> Result<Creat
     request.system_id = normalize_optional_nonempty("system_id", request.system_id)?;
     request.from = normalize_optional_rfc3339("from", request.from)?;
     request.to = normalize_optional_rfc3339("to", request.to)?;
+    request.bundle_format = normalize_pack_bundle_format(&request.bundle_format)?;
 
     if let (Some(from), Some(to)) = (request.from.as_deref(), request.to.as_deref()) {
         let from = chrono::DateTime::parse_from_rfc3339(from)
@@ -2981,6 +3089,22 @@ fn normalize_create_pack_request(mut request: CreatePackRequest) -> Result<Creat
     }
 
     Ok(request)
+}
+
+fn normalize_pack_bundle_format(raw: &str) -> Result<String> {
+    let normalized = raw.trim().replace('-', "_");
+    if normalized.is_empty() {
+        bail!("bundle_format must not be empty");
+    }
+
+    match normalized.as_str() {
+        PACK_BUNDLE_FORMAT_FULL | PACK_BUNDLE_FORMAT_DISCLOSURE => Ok(normalized),
+        _ => bail!("unsupported bundle_format {}", raw.trim()),
+    }
+}
+
+fn default_pack_bundle_format() -> String {
+    PACK_BUNDLE_FORMAT_FULL.to_string()
 }
 
 fn normalize_pack_type(raw: &str) -> Result<String> {
@@ -3032,6 +3156,7 @@ fn pack_summary(manifest: &PackManifest) -> PackSummaryResponse {
         system_id: manifest.system_id.clone(),
         from: manifest.from.clone(),
         to: manifest.to.clone(),
+        bundle_format: manifest.bundle_format.clone(),
         bundle_count: manifest.bundle_ids.len(),
         bundle_ids: manifest.bundle_ids.clone(),
     }
@@ -3191,6 +3316,15 @@ fn curate_pack_bundles(
             continue;
         }
 
+        let disclosed_item_indices =
+            select_disclosed_item_indices(profile, &bundle, &retention_class);
+        let disclosed_item_types = disclosed_item_indices
+            .iter()
+            .map(|index| evidence_item_type(&bundle.items[*index]).to_string())
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect::<Vec<_>>();
+
         let mut matched_rules = Vec::new();
         matched_rules.push(format!("pack_type:{}", profile.pack_type));
         if !profile.allowed_roles.is_empty() {
@@ -3211,6 +3345,8 @@ fn curate_pack_bundles(
             bundle,
             item_types,
             obligation_refs,
+            disclosed_item_indices,
+            disclosed_item_types,
             matched_rules,
         });
     }
@@ -3334,6 +3470,44 @@ fn build_bundle_package_bytes(
     gzip_json_bytes(&package)
 }
 
+fn build_disclosure_package_bytes(bundle: &ProofBundle, item_indices: &[usize]) -> Result<Vec<u8>> {
+    let redacted = redact_bundle(bundle, item_indices, &[])
+        .context("failed to redact bundle for disclosure package")?;
+    let mut package_files = BTreeMap::<String, Vec<u8>>::new();
+    package_files.insert(
+        "redacted_bundle.json".to_string(),
+        serde_json::to_vec_pretty(&redacted)?,
+    );
+
+    let manifest = Manifest {
+        files: package_files
+            .iter()
+            .map(|(name, bytes)| ManifestEntry {
+                name: name.clone(),
+                digest: sha256_prefixed(bytes),
+                size: bytes.len() as u64,
+            })
+            .collect(),
+    };
+    package_files.insert(
+        "manifest.json".to_string(),
+        serde_json::to_vec_pretty(&manifest)?,
+    );
+
+    let package = BundlePackage {
+        format: DISCLOSURE_PACKAGE_FORMAT.to_string(),
+        files: package_files
+            .into_iter()
+            .map(|(name, bytes)| PackagedFile {
+                name,
+                data_base64: Base64::encode_string(&bytes),
+            })
+            .collect(),
+    };
+
+    gzip_json_bytes(&package)
+}
+
 fn gzip_json_bytes<T: Serialize>(value: &T) -> Result<Vec<u8>> {
     let json_bytes = serde_json::to_vec_pretty(value)?;
     let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
@@ -3351,6 +3525,36 @@ fn bundle_obligation_refs(bundle: &ProofBundle) -> Vec<String> {
         }
     }
     refs.into_iter().collect()
+}
+
+fn select_disclosed_item_indices(
+    profile: &PackProfile,
+    bundle: &ProofBundle,
+    retention_class: &str,
+) -> Vec<usize> {
+    let mut indices = bundle
+        .items
+        .iter()
+        .enumerate()
+        .filter_map(|(index, item)| {
+            let item_type = evidence_item_type(item);
+            let item_matches = profile.item_types.contains(&item_type);
+            let obligation_matches = evidence_item_obligation_ref(bundle, item)
+                .map(|obligation_ref| profile.obligation_refs.contains(&obligation_ref))
+                .unwrap_or(false);
+            if item_matches || obligation_matches {
+                Some(index)
+            } else {
+                None
+            }
+        })
+        .collect::<Vec<_>>();
+
+    if indices.is_empty() && profile.retention_classes.contains(&retention_class) {
+        indices.extend(0..bundle.items.len());
+    }
+
+    indices
 }
 
 fn evidence_item_obligation_ref(bundle: &ProofBundle, item: &EvidenceItem) -> Option<&'static str> {
@@ -3388,6 +3592,13 @@ fn bundle_item_types(bundle: &ProofBundle) -> Vec<String> {
         types.insert(evidence_item_type(item).to_string());
     }
     types.into_iter().collect()
+}
+
+fn pack_bundle_file_name(bundle_id: &str, bundle_format: &str) -> String {
+    match bundle_format {
+        PACK_BUNDLE_FORMAT_DISCLOSURE => format!("bundles/{bundle_id}.disclosure.pkg"),
+        _ => format!("bundles/{bundle_id}.pkg"),
+    }
 }
 
 fn pack_export_path(base: &FsPath, pack_id: &str) -> PathBuf {
@@ -4568,6 +4779,7 @@ fn validate_package_member_name(name: &str) -> Result<()> {
         "proof_bundle.json"
         | "proof_bundle.canonical.json"
         | "proof_bundle.sig"
+        | "redacted_bundle.json"
         | "manifest.json" => Ok(()),
         _ => {
             if let Some(stripped) = name.strip_prefix("artefacts/") {
@@ -7639,6 +7851,7 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
                     system_id: Some("system-a".to_string()),
                     from: None,
                     to: None,
+                    bundle_format: default_pack_bundle_format(),
                 })
                 .unwrap(),
             ))
@@ -7650,6 +7863,7 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
             .unwrap();
         let pack: PackSummaryResponse = serde_json::from_slice(&body).unwrap();
         assert_eq!(pack.pack_type, "runtime_logs");
+        assert_eq!(pack.bundle_format, PACK_BUNDLE_FORMAT_FULL);
         assert_eq!(pack.bundle_count, 1);
         assert_eq!(pack.bundle_ids.len(), 1);
 
@@ -7680,7 +7894,14 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
         assert_eq!(manifest.bundle_ids, pack.bundle_ids);
         assert_eq!(manifest.bundles.len(), 1);
         assert_eq!(manifest.curation_profile, PACK_CURATION_PROFILE);
+        assert_eq!(manifest.bundle_format, PACK_BUNDLE_FORMAT_FULL);
         assert_eq!(manifest.bundles[0].system_id.as_deref(), Some("system-a"));
+        assert_eq!(manifest.bundles[0].bundle_format, PACK_BUNDLE_FORMAT_FULL);
+        let expected_package_name = format!("bundles/{}.pkg", pack.bundle_ids[0]);
+        assert_eq!(
+            manifest.bundles[0].package_name.as_deref(),
+            Some(expected_package_name.as_str())
+        );
         assert_eq!(manifest.bundles[0].item_types, vec!["llm_interaction"]);
         assert_eq!(manifest.bundles[0].obligation_refs, vec!["art12_19_26"]);
         assert!(
@@ -7749,6 +7970,137 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
     }
 
     #[tokio::test]
+    async fn create_pack_supports_disclosure_bundle_format_and_exports_verifiable_redacted_packages()
+     {
+        let state = test_state(DEFAULT_MAX_PAYLOAD_BYTES).await;
+        let public_key_pem = encode_public_key_pem(&state.signing_key.verifying_key());
+        let app = build_router(state, DEFAULT_MAX_PAYLOAD_BYTES);
+
+        let llm_bundle = create_bundle_response(
+            &app,
+            &CreateBundleRequest {
+                capture: SealableCaptureInput::V10(sample_event_with_profile(
+                    "system-a",
+                    proof_layer_core::ActorRole::Provider,
+                    sample_event_with_system("system-a").items,
+                    Some("runtime_logs"),
+                )),
+                artefacts: vec![InlineArtefact {
+                    name: "prompt.json".to_string(),
+                    content_type: "application/json".to_string(),
+                    data_base64: Base64::encode_string(br#"{"prompt":"hello"}"#),
+                }],
+            },
+        )
+        .await;
+
+        let pack_req = Request::builder()
+            .method("POST")
+            .uri("/v1/packs")
+            .header("content-type", "application/json")
+            .body(Body::from(
+                serde_json::to_vec(&CreatePackRequest {
+                    pack_type: "runtime_logs".to_string(),
+                    system_id: Some("system-a".to_string()),
+                    from: None,
+                    to: None,
+                    bundle_format: PACK_BUNDLE_FORMAT_DISCLOSURE.to_string(),
+                })
+                .unwrap(),
+            ))
+            .unwrap();
+        let pack_res = app.clone().oneshot(pack_req).await.unwrap();
+        assert_eq!(pack_res.status(), StatusCode::CREATED);
+        let body = axum::body::to_bytes(pack_res.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let pack: PackSummaryResponse = serde_json::from_slice(&body).unwrap();
+        assert_eq!(pack.bundle_ids, vec![llm_bundle.bundle_id.clone()]);
+        assert_eq!(pack.bundle_format, PACK_BUNDLE_FORMAT_DISCLOSURE);
+
+        let manifest_req = Request::builder()
+            .method("GET")
+            .uri(format!("/v1/packs/{}/manifest", pack.pack_id))
+            .body(Body::empty())
+            .unwrap();
+        let manifest_res = app.clone().oneshot(manifest_req).await.unwrap();
+        assert_eq!(manifest_res.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(manifest_res.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let manifest: PackManifest = serde_json::from_slice(&body).unwrap();
+        assert_eq!(manifest.bundle_format, PACK_BUNDLE_FORMAT_DISCLOSURE);
+        assert_eq!(manifest.bundles.len(), 1);
+        let expected_package_name = format!("bundles/{}.disclosure.pkg", llm_bundle.bundle_id);
+        assert_eq!(
+            manifest.bundles[0].package_name.as_deref(),
+            Some(expected_package_name.as_str())
+        );
+        assert_eq!(
+            manifest.bundles[0].bundle_format,
+            PACK_BUNDLE_FORMAT_DISCLOSURE
+        );
+        assert_eq!(manifest.bundles[0].disclosed_item_indices, vec![0]);
+        assert_eq!(
+            manifest.bundles[0].disclosed_item_types,
+            vec!["llm_interaction"]
+        );
+
+        let export_req = Request::builder()
+            .method("GET")
+            .uri(format!("/v1/packs/{}/export", pack.pack_id))
+            .body(Body::empty())
+            .unwrap();
+        let export_res = app.clone().oneshot(export_req).await.unwrap();
+        assert_eq!(export_res.status(), StatusCode::OK);
+        let export_bytes = axum::body::to_bytes(export_res.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let archive = decode_pack_archive(&export_bytes);
+        assert_eq!(archive.format, PACK_EXPORT_FORMAT);
+        assert_eq!(
+            archive.manifest.bundle_format,
+            PACK_BUNDLE_FORMAT_DISCLOSURE
+        );
+        assert_eq!(archive.files.len(), 1);
+        assert_eq!(
+            archive.files[0].name,
+            format!("bundles/{}.disclosure.pkg", llm_bundle.bundle_id)
+        );
+
+        let disclosure_package =
+            Base64::decode_vec(&archive.files[0].data_base64).expect("base64 disclosure package");
+        let decoded =
+            read_package_from_bytes(&disclosure_package, DEFAULT_MAX_PAYLOAD_BYTES).unwrap();
+        assert_eq!(decoded.format, DISCLOSURE_PACKAGE_FORMAT);
+        let redacted = parse_redacted_bundle_file(&decoded.files).unwrap();
+        assert_eq!(redacted.bundle_id, llm_bundle.bundle_id);
+        assert_eq!(redacted.disclosed_items.len(), 1);
+        assert!(redacted.disclosed_artefacts.is_empty());
+
+        let verify_req = Request::builder()
+            .method("POST")
+            .uri("/v1/verify")
+            .header("content-type", "application/json")
+            .body(Body::from(
+                serde_json::to_vec(&VerifyRequest::Package(Box::new(PackageVerifyRequest {
+                    bundle_pkg_base64: archive.files[0].data_base64.clone(),
+                    public_key_pem,
+                })))
+                .unwrap(),
+            ))
+            .unwrap();
+        let verify_res = app.oneshot(verify_req).await.unwrap();
+        assert_eq!(verify_res.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(verify_res.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let verify_response: VerifyResponse = serde_json::from_slice(&body).unwrap();
+        assert!(verify_response.valid);
+        assert_eq!(verify_response.artefacts_verified, 0);
+    }
+
+    #[tokio::test]
     async fn incident_response_pack_curates_incident_reports_and_indexes_obligation_ref() {
         let state = test_state(DEFAULT_MAX_PAYLOAD_BYTES).await;
         let db = state.db.clone();
@@ -7797,6 +8149,7 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
                     system_id: Some("system-incident".to_string()),
                     from: None,
                     to: None,
+                    bundle_format: default_pack_bundle_format(),
                 })
                 .unwrap(),
             ))
@@ -7922,6 +8275,7 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
                     system_id: Some("system-z".to_string()),
                     from: None,
                     to: None,
+                    bundle_format: default_pack_bundle_format(),
                 })
                 .unwrap(),
             ))
@@ -8044,6 +8398,7 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
                     system_id: Some("system-risk".to_string()),
                     from: None,
                     to: None,
+                    bundle_format: default_pack_bundle_format(),
                 })
                 .unwrap(),
             ))
@@ -8164,6 +8519,7 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
                     system_id: Some("system-conformity".to_string()),
                     from: None,
                     to: None,
+                    bundle_format: default_pack_bundle_format(),
                 })
                 .unwrap(),
             ))

@@ -160,15 +160,20 @@ Completed:
   legacy `pl-merkle-sha256-v1` verification compatibility,
   core redacted-bundle verification with Merkle inclusion proofs,
   and `proofctl disclose --items ...` plus `proofctl verify` auto-detection for disclosure packages.
+- Extended pack export into the selective-disclosure path:
+  `POST /v1/packs` now accepts `bundle_format = "full" | "disclosure"`,
+  vault `GET /v1/packs/{id}/export` can emit redacted disclosure-package members selected by pack curation rules,
+  vault `POST /v1/verify` now accepts those disclosure packages,
+  and `proofctl pack` / `proofctl vault export` now expose `--bundle-format <full|disclosure>`.
 - Restored a clean Rust verification loop: `cargo test --workspace` and `cargo clippy --workspace --all-targets -- -D warnings` both pass.
 
 Still outstanding from `plan.md`:
 
 - JSON schema coverage is now started, with timestamp and Rekor transparency receipt coverage added, but richer export/archive schemas are still incomplete.
-- The vault now uses SQLite with legal-hold-aware retention, audit logging, file/env/runtime configuration, background retention scanning, curated pack export, RFC 3161 bundle timestamp attachment, and transparency anchoring, but PostgreSQL and redacted/Annex-complete pack assembly are not built yet.
+- The vault now uses SQLite with legal-hold-aware retention, audit logging, file/env/runtime configuration, background retention scanning, curated pack export, redacted disclosure-pack export, RFC 3161 bundle timestamp attachment, and transparency anchoring, but PostgreSQL and Annex-complete artefact/redaction policy assembly are not built yet.
 - TypeScript and Python now both have native FFI bridges, local sealing paths, and higher-level `ProofLayer` facades, but there is still no shared native build/release pipeline for SDK artifacts.
-- Selective disclosure now exists locally via `proofctl disclose` for item-level redacted packages, but vault-side redacted pack assembly and higher-level disclosure policy tooling are still future phases.
-- The main remaining gaps are no longer the evidence catalog itself; they are the harder later-phase items like deeper trust policy work, fuller SCITT interoperability, redacted vault export flows, and alternative storage/runtime backends.
+- Selective disclosure now exists locally via `proofctl disclose` and in vault export packs for item-level redacted packages, but higher-level disclosure policy tooling, artefact-level disclosure, and SDK disclosure helpers are still future phases.
+- The main remaining gaps are no longer the evidence catalog itself; they are the harder later-phase items like deeper trust policy work, fuller SCITT interoperability, richer disclosure policy control, and alternative storage/runtime backends.
 - RFC 3161 verification now supports signer-chain validation against configured PEM trust anchors, optional `TSTInfo.policy` OID enforcement, CRL-based revocation checking, optional live OCSP checks, qualified TSA signer allowlist matching, and operational `qualified` profile gating, but full eIDAS-qualified trust-list evaluation and archival OCSP evidence handling are still outstanding.
 - Rekor verification now supports SET signature validation and `logID` binding against a configured PEM log public key; live-log consistency checks beyond the stored inclusion proof remain future work.
 - The current SCITT path is intentionally bounded: it verifies a draft-aligned canonical JSON statement/receipt contract, not a full interoperable COSE/CCF profile.

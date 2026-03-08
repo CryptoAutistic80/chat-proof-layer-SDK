@@ -75,7 +75,7 @@ Current SQLite tables:
 - `disclose`: build item-level redacted disclosure packages with Merkle proofs
 - `verify`: offline integrity and signature verification for full and disclosure packages
 - `inspect`: human/JSON diagnostics
-- `pack`: request a vault export pack and write the archive locally
+- `pack`: request a vault export pack and write the archive locally, with `full` or `disclosure` bundle members
 - `vault status|query|retention|systems|export`: thin CLI wrappers over the vault HTTP query/export surfaces
 
 Current pack export behavior:
@@ -83,8 +83,8 @@ Current pack export behavior:
 - Vault pack assembly uses a heuristic curation profile (`pack-rules-v1`).
 - Selection currently keys off actor role, evidence item type, retention class, and derived obligation references.
 - Implemented pack families now include `conformity` alongside the Annex/runtime/risk/GPAI slices.
-- Exported pack archives still contain full `bundle.pkg` members.
-- Local `proofctl disclose` now supports item-level selective disclosure for v2 bundles, but vault-side redacted pack assembly is still a later phase.
+- Exported pack archives can now contain either full `bundle.pkg` members or redacted disclosure packages, selected with `bundle_format = "full" | "disclosure"` on pack creation.
+- Disclosure-pack exports currently disclose the item indices matched by the pack curation rules; artefact-level disclosure policy and richer redaction controls are still later phases.
 
 Current retention behavior:
 

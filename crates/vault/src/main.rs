@@ -157,6 +157,10 @@ struct VaultTimestampFileConfig {
     #[serde(default)]
     crl_paths: Vec<String>,
     #[serde(default)]
+    qualified_signer_pems: Vec<String>,
+    #[serde(default)]
+    qualified_signer_paths: Vec<String>,
+    #[serde(default)]
     policy_oids: Vec<String>,
 }
 
@@ -547,6 +551,8 @@ struct TimestampConfig {
     trust_anchor_pems: Vec<String>,
     #[serde(default)]
     crl_pems: Vec<String>,
+    #[serde(default)]
+    qualified_signer_pems: Vec<String>,
     #[serde(default)]
     policy_oids: Vec<String>,
 }
@@ -1084,6 +1090,12 @@ fn resolve_timestamp_file_config(
             .into_iter()
             .filter(|pem| !pem.trim().is_empty()),
     );
+    config.qualified_signer_pems.extend(
+        file_config
+            .qualified_signer_pems
+            .into_iter()
+            .filter(|pem| !pem.trim().is_empty()),
+    );
     config.policy_oids.extend(
         file_config
             .policy_oids
@@ -1101,6 +1113,13 @@ fn resolve_timestamp_file_config(
         config
             .crl_pems
             .push(read_config_text_file(base_dir, &path, "timestamp CRL")?);
+    }
+    for path in file_config.qualified_signer_paths {
+        config.qualified_signer_pems.push(read_config_text_file(
+            base_dir,
+            &path,
+            "qualified TSA signer certificate",
+        )?);
     }
 
     validate_timestamp_config(config).map(Some)
@@ -1912,6 +1931,7 @@ async fn update_timestamp_config(
             "assurance": &config.assurance,
             "trust_anchor_count": config.trust_anchor_pems.len(),
             "crl_count": config.crl_pems.len(),
+            "qualified_signer_count": config.qualified_signer_pems.len(),
             "policy_oid_count": config.policy_oids.len(),
         }),
     )
@@ -3502,6 +3522,7 @@ fn timestamp_trust_policy(config: &TimestampConfig) -> Option<TimestampTrustPoli
     let policy = TimestampTrustPolicy {
         trust_anchor_pems: config.trust_anchor_pems.clone(),
         crl_pems: config.crl_pems.clone(),
+        qualified_signer_pems: config.qualified_signer_pems.clone(),
         policy_oids: config.policy_oids.clone(),
         assurance_profile: parse_timestamp_assurance_profile(config.assurance.as_deref()),
     };
@@ -3705,6 +3726,14 @@ fn validate_timestamp_config(mut config: TimestampConfig) -> Result<TimestampCon
             (!trimmed.is_empty()).then(|| trimmed.to_string())
         })
         .collect();
+    config.qualified_signer_pems = config
+        .qualified_signer_pems
+        .into_iter()
+        .filter_map(|pem| {
+            let trimmed = pem.trim();
+            (!trimmed.is_empty()).then(|| trimmed.to_string())
+        })
+        .collect();
     config.policy_oids = config
         .policy_oids
         .into_iter()
@@ -3731,6 +3760,7 @@ fn validate_timestamp_config(mut config: TimestampConfig) -> Result<TimestampCon
     validate_timestamp_trust_policy(&TimestampTrustPolicy {
         trust_anchor_pems: config.trust_anchor_pems.clone(),
         crl_pems: config.crl_pems.clone(),
+        qualified_signer_pems: config.qualified_signer_pems.clone(),
         policy_oids: config.policy_oids.clone(),
         assurance_profile: parse_timestamp_assurance_profile(config.assurance.as_deref()),
     })
@@ -3813,6 +3843,7 @@ fn default_timestamp_config() -> TimestampConfig {
         assurance: None,
         trust_anchor_pems: Vec::new(),
         crl_pems: Vec::new(),
+        qualified_signer_pems: Vec::new(),
         policy_oids: Vec::new(),
     }
 }
@@ -5255,6 +5286,8 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
                 trust_anchor_paths: Vec::new(),
                 crl_pems: vec![test_timestamp_crl_pem()],
                 crl_paths: Vec::new(),
+                qualified_signer_pems: vec![tsa_certificate.encode_pem()],
+                qualified_signer_paths: Vec::new(),
                 policy_oids: vec!["1.2.3.4".to_string()],
             }),
             transparency: Some(VaultTransparencyFileConfig {
@@ -6553,6 +6586,7 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
                 assurance: Some("qualified".to_string()),
                 trust_anchor_pems: vec![tsa_certificate.encode_pem()],
                 crl_pems: vec![test_timestamp_crl_pem()],
+                qualified_signer_pems: vec![tsa_certificate.encode_pem()],
                 policy_oids: vec!["1.2.3.4".to_string()],
             }),
             transparency_config: Some(TransparencyConfig {
@@ -7059,6 +7093,7 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
                     assurance: Some("Qualified".to_string()),
                     trust_anchor_pems: vec![tsa_certificate_pem],
                     crl_pems: vec![test_timestamp_crl_pem()],
+                    qualified_signer_pems: vec![expected_trust_anchor_pem.clone()],
                     policy_oids: vec!["1.2.3.4".to_string()],
                 })
                 .unwrap(),
@@ -7079,6 +7114,7 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
                 assurance: Some("qualified".to_string()),
                 trust_anchor_pems: vec![expected_trust_anchor_pem],
                 crl_pems: vec![test_timestamp_crl_pem().trim().to_string()],
+                qualified_signer_pems: vec![tsa_certificate.encode_pem().trim().to_string()],
                 policy_oids: vec!["1.2.3.4".to_string()],
             }
         );
@@ -7156,6 +7192,7 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
                     assurance: Some("qualified".to_string()),
                     trust_anchor_pems: Vec::new(),
                     crl_pems: Vec::new(),
+                    qualified_signer_pems: Vec::new(),
                     policy_oids: Vec::new(),
                 })
                 .unwrap(),

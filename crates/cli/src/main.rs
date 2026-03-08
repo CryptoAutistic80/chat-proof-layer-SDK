@@ -112,6 +112,8 @@ struct CreateArgs {
     timestamp_trust_anchor: Vec<PathBuf>,
     #[arg(long = "timestamp-crl")]
     timestamp_crl: Vec<PathBuf>,
+    #[arg(long = "timestamp-qualified-signer")]
+    timestamp_qualified_signer: Vec<PathBuf>,
     #[arg(long = "timestamp-policy-oid")]
     timestamp_policy_oid: Vec<String>,
     #[arg(long = "timestamp-assurance")]
@@ -136,6 +138,8 @@ struct VerifyArgs {
     timestamp_trust_anchor: Vec<PathBuf>,
     #[arg(long = "timestamp-crl")]
     timestamp_crl: Vec<PathBuf>,
+    #[arg(long = "timestamp-qualified-signer")]
+    timestamp_qualified_signer: Vec<PathBuf>,
     #[arg(long = "timestamp-policy-oid")]
     timestamp_policy_oid: Vec<String>,
     #[arg(long = "timestamp-assurance")]
@@ -347,6 +351,7 @@ struct CreateCommandInput<'a> {
     transparency_log: Option<&'a str>,
     timestamp_trust_anchor_paths: &'a [PathBuf],
     timestamp_crl_paths: &'a [PathBuf],
+    timestamp_qualified_signer_paths: &'a [PathBuf],
     timestamp_policy_oids: &'a [String],
     timestamp_assurance: Option<TimestampAssuranceArg>,
     transparency_public_key_path: Option<&'a Path>,
@@ -360,6 +365,7 @@ struct VerifyCommandInput<'a> {
     check_receipt: bool,
     timestamp_trust_anchor_paths: &'a [PathBuf],
     timestamp_crl_paths: &'a [PathBuf],
+    timestamp_qualified_signer_paths: &'a [PathBuf],
     timestamp_policy_oids: &'a [String],
     timestamp_assurance: Option<TimestampAssuranceArg>,
     transparency_public_key_path: Option<&'a Path>,
@@ -558,6 +564,8 @@ struct VaultTimestampConfig {
     #[serde(default)]
     crl_pems: Vec<String>,
     #[serde(default)]
+    qualified_signer_pems: Vec<String>,
+    #[serde(default)]
     policy_oids: Vec<String>,
 }
 
@@ -755,6 +763,7 @@ fn main() -> Result<()> {
             transparency_log: args.transparency_log.as_deref(),
             timestamp_trust_anchor_paths: &args.timestamp_trust_anchor,
             timestamp_crl_paths: &args.timestamp_crl,
+            timestamp_qualified_signer_paths: &args.timestamp_qualified_signer,
             timestamp_policy_oids: &args.timestamp_policy_oid,
             timestamp_assurance: args.timestamp_assurance,
             transparency_public_key_path: args.transparency_public_key.as_deref(),
@@ -767,6 +776,7 @@ fn main() -> Result<()> {
             check_receipt: args.check_receipt,
             timestamp_trust_anchor_paths: &args.timestamp_trust_anchor,
             timestamp_crl_paths: &args.timestamp_crl,
+            timestamp_qualified_signer_paths: &args.timestamp_qualified_signer,
             timestamp_policy_oids: &args.timestamp_policy_oid,
             timestamp_assurance: args.timestamp_assurance,
             transparency_public_key_path: args.transparency_public_key.as_deref(),
@@ -889,6 +899,9 @@ fn cmd_create(args: CreateCommandInput<'_>) -> Result<()> {
     if !args.timestamp_crl_paths.is_empty() && args.timestamp_url.is_none() {
         bail!("--timestamp-crl requires --timestamp-url during local bundle creation");
     }
+    if !args.timestamp_qualified_signer_paths.is_empty() && args.timestamp_url.is_none() {
+        bail!("--timestamp-qualified-signer requires --timestamp-url during local bundle creation");
+    }
     if !args.timestamp_policy_oids.is_empty() && args.timestamp_url.is_none() {
         bail!("--timestamp-policy-oid requires --timestamp-url during local bundle creation");
     }
@@ -925,6 +938,7 @@ fn cmd_create(args: CreateCommandInput<'_>) -> Result<()> {
     let timestamp_trust_policy = load_timestamp_trust_policy(
         args.timestamp_trust_anchor_paths,
         args.timestamp_crl_paths,
+        args.timestamp_qualified_signer_paths,
         args.timestamp_policy_oids,
         args.timestamp_assurance,
     )?;
@@ -1056,6 +1070,7 @@ fn cmd_verify(args: VerifyCommandInput<'_>) -> Result<()> {
     let timestamp_trust_policy = load_timestamp_trust_policy(
         args.timestamp_trust_anchor_paths,
         args.timestamp_crl_paths,
+        args.timestamp_qualified_signer_paths,
         args.timestamp_policy_oids,
         args.timestamp_assurance,
     )?;
@@ -1769,12 +1784,17 @@ fn read_text_files(paths: &[PathBuf], label: &str) -> Result<Vec<String>> {
 fn load_timestamp_trust_policy(
     trust_anchor_paths: &[PathBuf],
     crl_paths: &[PathBuf],
+    qualified_signer_paths: &[PathBuf],
     policy_oids: &[String],
     assurance: Option<TimestampAssuranceArg>,
 ) -> Result<Option<TimestampTrustPolicy>> {
     let policy = TimestampTrustPolicy {
         trust_anchor_pems: read_text_files(trust_anchor_paths, "timestamp trust anchor")?,
         crl_pems: read_text_files(crl_paths, "timestamp CRL")?,
+        qualified_signer_pems: read_text_files(
+            qualified_signer_paths,
+            "qualified TSA signer certificate",
+        )?,
         policy_oids: policy_oids
             .iter()
             .map(|policy_oid| policy_oid.trim().to_string())

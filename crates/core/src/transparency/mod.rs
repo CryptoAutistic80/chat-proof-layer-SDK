@@ -851,6 +851,7 @@ mod tests {
             timestamp: TimestampTrustPolicy {
                 trust_anchor_pems: Vec::new(),
                 crl_pems: Vec::new(),
+                qualified_signer_pems: Vec::new(),
                 policy_oids: Vec::new(),
                 assurance_profile: Some(crate::timestamp::TimestampAssuranceProfile::Standard),
             },
@@ -871,6 +872,7 @@ mod tests {
             timestamp: TimestampTrustPolicy {
                 trust_anchor_pems: Vec::new(),
                 crl_pems: Vec::new(),
+                qualified_signer_pems: Vec::new(),
                 policy_oids: Vec::new(),
                 assurance_profile: Some(crate::timestamp::TimestampAssuranceProfile::Standard),
             },

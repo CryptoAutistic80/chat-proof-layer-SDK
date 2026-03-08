@@ -103,17 +103,17 @@ Current config behavior:
 - `GET /v1/config` also reports the bound address and retention scan interval currently active in the process.
 - `PUT /v1/config/retention` upserts retention policy rows in SQLite.
 - Retention policies now carry an `expiry_mode`; `fixed_days` computes `expires_at`, while `until_withdrawn` leaves bundles active until an explicit withdrawal/delete event.
-- `PUT /v1/config/timestamp` persists RFC 3161 provider configuration (`enabled`, `provider`, `url`, optional `assurance`) plus optional PEM trust anchors, PEM CRLs, and expected RFC 3161 policy OIDs used for trust-aware timestamp verification.
+- `PUT /v1/config/timestamp` persists RFC 3161 provider configuration (`enabled`, `provider`, `url`, optional `assurance`) plus optional PEM trust anchors, PEM CRLs, qualified TSA signer allowlists, and expected RFC 3161 policy OIDs used for trust-aware timestamp verification.
 - `PUT /v1/config/transparency` persists transparency provider configuration (`none`, `rekor`, `scitt`) plus URL when applicable and an optional Rekor PEM public key for SET verification.
 - Startup file config is synchronized into SQLite for retention/timestamp/transparency so the API view matches the current boot configuration.
 - `POST /v1/bundles/{id}/timestamp` loads a stored active bundle, requests an RFC 3161 token over the UTF-8 bytes of `integrity.bundle_root`, stores the token in bundle JSON, and flips `has_timestamp`.
 - `POST /v1/bundles/{id}/anchor` loads a stored active timestamped bundle, submits its RFC 3161 token to Rekor as an `rfc3161` entry, stores the returned receipt in bundle JSON, and flips `has_receipt`.
 - `POST /v1/verify/timestamp` and `POST /v1/verify/receipt` accept either direct assurance artefacts or a stored `bundle_id`, returning typed verification details without requiring full package verification.
-- Local `proofctl create --timestamp-url/--transparency-log` now uses the same trust-policy helpers as verify mode, so local assurance attachment can fail early when configured assurance profiles, anchors, policy OIDs, or Rekor keys do not match the returned artefacts.
+- Local `proofctl create --timestamp-url/--transparency-log` now uses the same trust-policy helpers as verify mode, so local assurance attachment can fail early when configured assurance profiles, anchors, CRLs, signer pins, policy OIDs, or Rekor keys do not match the returned artefacts.
 - When timestamp trust anchors are configured, the vault verifies the RFC 3161 signer certificate chain against those anchors at `genTime`.
 - When timestamp CRLs are configured, the vault also verifies that the applicable CRL is valid at `genTime`, signed by the issuer certificate, and does not revoke the TSA signer certificate.
 - When timestamp policy OIDs are configured, the vault also requires the token `TSTInfo.policy` OID to match one of those values.
-- When `timestamp.assurance == "qualified"`, the vault requires trust anchors, CRLs, and expected policy OIDs to be configured and satisfied, and it also enforces a TSA signer certificate profile suitable for time stamping, treating the result as a stricter qualified-profile check rather than a claim of full eIDAS qualified status.
+- When `timestamp.assurance == "qualified"`, the vault requires trust anchors, CRLs, expected policy OIDs, and a configured TSA signer allowlist to be present and satisfied, and it also enforces a TSA signer certificate profile suitable for time stamping, treating the result as a stricter qualified-profile check rather than a claim of full eIDAS qualified status.
 - When a Rekor public key is configured, the vault verifies the signed-entry-timestamp over the canonical Rekor payload and requires `logID == sha256(SPKI_DER(public_key))`.
 - When an updated retention policy remains active, the vault recomputes `expires_at` for existing active bundles in that class.
 - The seeded `gpai_documentation` class uses `until_withdrawn`, and the GPAI SDK builders default to that class for `model_evaluation`, `adversarial_test`, and `training_provenance`.
@@ -194,7 +194,7 @@ A verifier needs only:
 
 No network calls are required for core verification.
 Timestamp and transparency checks are optional in PoC and report as skipped/missing when not requested.
-Current assurance verification checks bundle-root binding, embedded RFC 3161 token validity, optional RFC 3161 policy OID constraints, optional timestamp assurance profiles (`standard` / `qualified`), optional CRL-based TSA revocation checks, Rekor entry UUID to leaf-hash binding, Rekor inclusion proofs against the advertised root hash, and can optionally verify TSA signer chains / Rekor SET signatures when trust material is configured.
+Current assurance verification checks bundle-root binding, embedded RFC 3161 token validity, optional RFC 3161 policy OID constraints, optional timestamp assurance profiles (`standard` / `qualified`), optional CRL-based TSA revocation checks, optional qualified TSA signer allowlist matching, Rekor entry UUID to leaf-hash binding, Rekor inclusion proofs against the advertised root hash, and can optionally verify TSA signer chains / Rekor SET signatures when trust material is configured.
 
 ## Provider-Agnostic Boundary
 

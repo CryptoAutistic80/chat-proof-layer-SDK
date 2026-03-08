@@ -20,6 +20,7 @@ url = "http://timestamp.digicert.com"
 # assurance = "qualified"
 # trust_anchor_paths = ["./trust/tsa-root.pem"]
 # crl_paths = ["./trust/tsa.crl.pem"]
+# qualified_signer_paths = ["./trust/tsa-signer.pem"]
 # policy_oids = ["1.2.3.4"]
 
 [transparency]

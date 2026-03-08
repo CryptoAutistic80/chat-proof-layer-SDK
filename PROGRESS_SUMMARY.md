@@ -124,13 +124,18 @@ Completed:
 - Added the next qualified-assurance slice:
   operational `standard` / `qualified` timestamp assurance profiles in Rust core,
   `proofctl create|verify --timestamp-assurance`,
-  vault enforcement of `timestamp.assurance = "qualified"` via trust anchors plus policy OIDs,
+  vault enforcement of `timestamp.assurance = "qualified"` via trust anchors, policy OIDs, CRLs, and TSA signer checks,
   and receipt verification updates so timestamp-profile checks do not incorrectly require a Rekor log key.
 - Added the next timestamp trust-hardening slice:
   CRL-backed TSA revocation checks in Rust core,
   TSA signer certificate-profile enforcement for time stamping,
   `proofctl create|verify --timestamp-crl`,
   and persisted vault timestamp CRL configuration through `crl_pems` / `crl_paths`.
+- Added the next qualified TSA pinning slice:
+  operator-supplied TSA signer allowlists in Rust core,
+  `proofctl create|verify --timestamp-qualified-signer`,
+  persisted vault timestamp signer-pin configuration through `qualified_signer_pems` / `qualified_signer_paths`,
+  and `qualified` assurance now requires the signer certificate to match that configured allowlist in addition to chain / CRL / policy checks.
 - Added the first pack export slice:
   `POST /v1/packs`,
   `GET /v1/packs/{id}`,
@@ -151,5 +156,5 @@ Still outstanding from `plan.md`:
 - TypeScript and Python now both have native FFI bridges, local sealing paths, and higher-level `ProofLayer` facades, but there is still no shared native build/release pipeline for SDK artifacts.
 - SCITT receipts and selective disclosure CLI flows remain future phases.
 - The main remaining gaps are no longer the evidence catalog itself; they are the harder later-phase items like selective disclosure, SCITT, deeper trust policy work, and alternative storage/runtime backends.
-- RFC 3161 verification now supports signer-chain validation against configured PEM trust anchors, optional `TSTInfo.policy` OID enforcement, CRL-based revocation checking, and operational `qualified` profile gating, but full eIDAS-qualified trust-list and OCSP evaluation are still outstanding.
+- RFC 3161 verification now supports signer-chain validation against configured PEM trust anchors, optional `TSTInfo.policy` OID enforcement, CRL-based revocation checking, qualified TSA signer allowlist matching, and operational `qualified` profile gating, but full eIDAS-qualified trust-list and OCSP evaluation are still outstanding.
 - Rekor verification now supports SET signature validation and `logID` binding against a configured PEM log public key; live-log consistency checks beyond the stored inclusion proof and SCITT remain future work.

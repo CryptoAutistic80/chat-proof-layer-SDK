@@ -40,6 +40,8 @@ pub struct TimestampTrustPolicy {
     #[serde(default)]
     pub crl_pems: Vec<String>,
     #[serde(default)]
+    pub qualified_signer_pems: Vec<String>,
+    #[serde(default)]
     pub policy_oids: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub assurance_profile: Option<TimestampAssuranceProfile>,
@@ -51,6 +53,10 @@ impl TimestampTrustPolicy {
             .iter()
             .all(|pem| pem.trim().is_empty())
             && self.crl_pems.iter().all(|pem| pem.trim().is_empty())
+            && self
+                .qualified_signer_pems
+                .iter()
+                .all(|pem| pem.trim().is_empty())
             && self
                 .policy_oids
                 .iter()
@@ -150,6 +156,8 @@ pub struct TimestampVerification {
     pub certificate_profile_verified: bool,
     #[serde(default, skip_serializing_if = "is_false")]
     pub revocation_checked: bool,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub qualified_signer_verified: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub signer_subject: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -194,6 +202,8 @@ pub enum TimestampError {
     QualifiedAssuranceRequiresTrustAnchors,
     #[error("qualified timestamp assurance requires at least one PEM X509 CRL")]
     QualifiedAssuranceRequiresCrls,
+    #[error("qualified timestamp assurance requires at least one qualified TSA signer certificate")]
+    QualifiedAssuranceRequiresQualifiedSigners,
     #[error("timestamp trust policy requires at least one PEM trust anchor certificate")]
     MissingTrustAnchors,
     #[error("timestamp revocation checking requires at least one PEM trust anchor certificate")]
@@ -202,6 +212,8 @@ pub enum TimestampError {
     InvalidTrustAnchor(String),
     #[error("timestamp CRL is invalid: {0}")]
     InvalidCrl(String),
+    #[error("qualified TSA signer certificate is invalid: {0}")]
+    InvalidQualifiedSigner(String),
     #[error("timestamp signer certificate was not found in the CMS certificate set")]
     MissingSignerCertificate,
     #[error("timestamp certificate {subject} was not valid at {generated_at}")]
@@ -230,6 +242,10 @@ pub enum TimestampError {
     CrlSignatureVerification { subject: String },
     #[error("timestamp signer certificate {subject} was revoked at {revoked_at}")]
     SignerCertificateRevoked { subject: String, revoked_at: String },
+    #[error(
+        "timestamp signer certificate {subject} did not match the configured qualified TSA signer allowlist"
+    )]
+    UnexpectedQualifiedSigner { subject: String },
     #[error("timestamp signer certificate {subject} did not chain to a trusted anchor")]
     SignerCertificateNotTrusted { subject: String },
 }
@@ -274,6 +290,9 @@ pub fn validate_timestamp_trust_policy(
         if !has_crls(policy) {
             return Err(TimestampError::QualifiedAssuranceRequiresCrls);
         }
+        if !has_qualified_signers(policy) {
+            return Err(TimestampError::QualifiedAssuranceRequiresQualifiedSigners);
+        }
     }
     if has_crls(policy) && !has_trust_anchors(policy) {
         return Err(TimestampError::RevocationRequiresTrustAnchors);
@@ -286,6 +305,9 @@ pub fn validate_timestamp_trust_policy(
     }
     if has_crls(policy) {
         load_crls(policy).map(|_| ())?;
+    }
+    if has_qualified_signers(policy) {
+        load_qualified_signers(policy).map(|_| ())?;
     }
     Ok(())
 }
@@ -368,6 +390,7 @@ fn verify_timestamp_internal(
         chain_verified,
         certificate_profile_verified,
         revocation_checked,
+        qualified_signer_verified,
         signer_subject,
         trust_anchor_subject,
     ) = if let Some(policy) = policy.filter(|policy| has_trust_anchors(policy)) {
@@ -377,23 +400,38 @@ fn verify_timestamp_internal(
         } else {
             Vec::new()
         };
-        let trust_result =
-            verify_timestamp_trust(&signed_data, generated_at_time, &trust_anchors, &crls)?;
+        let qualified_signers = if has_qualified_signers(policy) {
+            load_qualified_signers(policy)?
+        } else {
+            Vec::new()
+        };
+        let trust_result = verify_timestamp_trust(
+            &signed_data,
+            generated_at_time,
+            &trust_anchors,
+            &crls,
+            &qualified_signers,
+        )?;
         (
             true,
             true,
             trust_result.certificate_profile_verified,
             trust_result.revocation_checked,
+            trust_result.qualified_signer_verified,
             Some(trust_result.signer_subject),
             Some(trust_result.trust_anchor_subject),
         )
     } else {
-        (false, false, false, false, None, None)
+        (false, false, false, false, false, None, None)
     };
     let assurance_profile_verified = match assurance_profile {
         Some(TimestampAssuranceProfile::Standard) => true,
         Some(TimestampAssuranceProfile::Qualified) => {
-            policy_oid_verified && trusted && certificate_profile_verified && revocation_checked
+            policy_oid_verified
+                && trusted
+                && certificate_profile_verified
+                && revocation_checked
+                && qualified_signer_verified
         }
         None => false,
     };
@@ -414,6 +452,7 @@ fn verify_timestamp_internal(
         chain_verified,
         certificate_profile_verified,
         revocation_checked,
+        qualified_signer_verified,
         signer_subject,
         trust_anchor_subject,
     })
@@ -478,6 +517,30 @@ fn load_crls(policy: &TimestampTrustPolicy) -> Result<Vec<Vec<u8>>, TimestampErr
     Ok(crls)
 }
 
+fn load_qualified_signers(
+    policy: &TimestampTrustPolicy,
+) -> Result<Vec<CapturedX509Certificate>, TimestampError> {
+    let mut signers = Vec::new();
+
+    for pem in &policy.qualified_signer_pems {
+        let trimmed = pem.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        let certificates = CapturedX509Certificate::from_pem_multiple(trimmed.as_bytes())
+            .map_err(|err| TimestampError::InvalidQualifiedSigner(err.to_string()))?;
+        signers.extend(certificates);
+    }
+
+    if signers.is_empty() {
+        return Err(TimestampError::InvalidQualifiedSigner(
+            "expected at least one PEM certificate".to_string(),
+        ));
+    }
+
+    Ok(signers)
+}
+
 fn has_trust_anchors(policy: &TimestampTrustPolicy) -> bool {
     policy
         .trust_anchor_pems
@@ -487,6 +550,13 @@ fn has_trust_anchors(policy: &TimestampTrustPolicy) -> bool {
 
 fn has_crls(policy: &TimestampTrustPolicy) -> bool {
     policy.crl_pems.iter().any(|pem| !pem.trim().is_empty())
+}
+
+fn has_qualified_signers(policy: &TimestampTrustPolicy) -> bool {
+    policy
+        .qualified_signer_pems
+        .iter()
+        .any(|pem| !pem.trim().is_empty())
 }
 
 fn has_expected_policy_oids(policy: &TimestampTrustPolicy) -> bool {
@@ -501,6 +571,7 @@ struct TimestampTrustResult {
     trust_anchor_subject: String,
     certificate_profile_verified: bool,
     revocation_checked: bool,
+    qualified_signer_verified: bool,
 }
 
 fn verify_timestamp_trust(
@@ -508,12 +579,14 @@ fn verify_timestamp_trust(
     generated_at: DateTime<Utc>,
     trust_anchors: &[CapturedX509Certificate],
     crls: &[Vec<u8>],
+    qualified_signers: &[CapturedX509Certificate],
 ) -> Result<TimestampTrustResult, TimestampError> {
     let embedded_certificates = signed_data.certificates().collect::<Vec<_>>();
     let mut signer_subject = None;
     let mut trust_anchor_subject = None;
     let mut certificate_profile_verified = false;
     let revocation_required = !crls.is_empty();
+    let qualified_signer_required = !qualified_signers.is_empty();
 
     for signer in signed_data.signers() {
         let signer_certificate = find_signer_certificate(&embedded_certificates, signer)?;
@@ -531,6 +604,9 @@ fn verify_timestamp_trust(
             let issuer_certificate = chain.get(1).copied().unwrap_or(signer_certificate);
             ensure_signer_not_revoked(signer_certificate, issuer_certificate, generated_at, crls)?;
         }
+        if qualified_signer_required {
+            ensure_qualified_signer_match(signer_certificate, qualified_signers)?;
+        }
 
         if signer_subject.is_none() {
             signer_subject = Some(certificate_display_name(signer_certificate));
@@ -547,6 +623,7 @@ fn verify_timestamp_trust(
             .unwrap_or_else(|| "unnamed-certificate".to_string()),
         certificate_profile_verified,
         revocation_checked: revocation_required,
+        qualified_signer_verified: qualified_signer_required,
     })
 }
 
@@ -742,6 +819,22 @@ fn ensure_signer_not_revoked(
     Err(TimestampError::MissingApplicableCrl { subject })
 }
 
+fn ensure_qualified_signer_match(
+    signer_certificate: &CapturedX509Certificate,
+    qualified_signers: &[CapturedX509Certificate],
+) -> Result<(), TimestampError> {
+    if qualified_signers
+        .iter()
+        .any(|candidate| certificates_match(candidate, signer_certificate))
+    {
+        Ok(())
+    } else {
+        Err(TimestampError::UnexpectedQualifiedSigner {
+            subject: certificate_display_name(signer_certificate),
+        })
+    }
+}
+
 fn certificate_display_name(certificate: &CapturedX509Certificate) -> String {
     certificate
         .subject_common_name()
@@ -917,6 +1010,7 @@ QAIgPxprcGWSAwfCXug9lIZY8wlqWqLLMKxkWpyq3B/Rp6g=
         let policy = TimestampTrustPolicy {
             trust_anchor_pems: vec![certificate.encode_pem()],
             crl_pems: Vec::new(),
+            qualified_signer_pems: Vec::new(),
             policy_oids: Vec::new(),
             assurance_profile: None,
         };
@@ -944,6 +1038,7 @@ QAIgPxprcGWSAwfCXug9lIZY8wlqWqLLMKxkWpyq3B/Rp6g=
         let policy = TimestampTrustPolicy {
             trust_anchor_pems: Vec::new(),
             crl_pems: Vec::new(),
+            qualified_signer_pems: Vec::new(),
             policy_oids: vec!["1.2.3.4".to_string()],
             assurance_profile: None,
         };
@@ -968,6 +1063,7 @@ QAIgPxprcGWSAwfCXug9lIZY8wlqWqLLMKxkWpyq3B/Rp6g=
         let policy = TimestampTrustPolicy {
             trust_anchor_pems: vec![untrusted_anchor.encode_pem()],
             crl_pems: Vec::new(),
+            qualified_signer_pems: Vec::new(),
             policy_oids: Vec::new(),
             assurance_profile: None,
         };
@@ -992,6 +1088,7 @@ QAIgPxprcGWSAwfCXug9lIZY8wlqWqLLMKxkWpyq3B/Rp6g=
         let policy = TimestampTrustPolicy {
             trust_anchor_pems: vec![certificate.encode_pem()],
             crl_pems: Vec::new(),
+            qualified_signer_pems: Vec::new(),
             policy_oids: Vec::new(),
             assurance_profile: None,
         };
@@ -1010,6 +1107,7 @@ QAIgPxprcGWSAwfCXug9lIZY8wlqWqLLMKxkWpyq3B/Rp6g=
         let policy = TimestampTrustPolicy {
             trust_anchor_pems: Vec::new(),
             crl_pems: Vec::new(),
+            qualified_signer_pems: Vec::new(),
             policy_oids: vec!["1.2.3.5".to_string()],
             assurance_profile: None,
         };
@@ -1029,6 +1127,7 @@ QAIgPxprcGWSAwfCXug9lIZY8wlqWqLLMKxkWpyq3B/Rp6g=
         let policy = TimestampTrustPolicy {
             trust_anchor_pems: vec![certificate.encode_pem()],
             crl_pems: Vec::new(),
+            qualified_signer_pems: Vec::new(),
             policy_oids: Vec::new(),
             assurance_profile: Some(TimestampAssuranceProfile::Qualified),
         };
@@ -1045,6 +1144,7 @@ QAIgPxprcGWSAwfCXug9lIZY8wlqWqLLMKxkWpyq3B/Rp6g=
         let policy = TimestampTrustPolicy {
             trust_anchor_pems: Vec::new(),
             crl_pems: Vec::new(),
+            qualified_signer_pems: Vec::new(),
             policy_oids: vec!["1.2.3.4".to_string()],
             assurance_profile: Some(TimestampAssuranceProfile::Qualified),
         };
@@ -1067,6 +1167,7 @@ QAIgPxprcGWSAwfCXug9lIZY8wlqWqLLMKxkWpyq3B/Rp6g=
         let policy = TimestampTrustPolicy {
             trust_anchor_pems: vec![certificate.encode_pem()],
             crl_pems: Vec::new(),
+            qualified_signer_pems: Vec::new(),
             policy_oids: vec!["1.2.3.4".to_string()],
             assurance_profile: Some(TimestampAssuranceProfile::Qualified),
         };
@@ -1083,6 +1184,7 @@ QAIgPxprcGWSAwfCXug9lIZY8wlqWqLLMKxkWpyq3B/Rp6g=
         let policy = TimestampTrustPolicy {
             trust_anchor_pems: Vec::new(),
             crl_pems: vec![FIXTURE_EMPTY_CRL_PEM.to_string()],
+            qualified_signer_pems: Vec::new(),
             policy_oids: Vec::new(),
             assurance_profile: None,
         };
@@ -1091,6 +1193,29 @@ QAIgPxprcGWSAwfCXug9lIZY8wlqWqLLMKxkWpyq3B/Rp6g=
         assert!(matches!(
             err,
             TimestampError::RevocationRequiresTrustAnchors
+        ));
+    }
+
+    #[test]
+    fn validate_timestamp_trust_policy_rejects_qualified_without_signer_allowlist() {
+        let (_, certificate) = build_timestamp_token_fixture(
+            "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            Some("test-tsa"),
+            Utc::now(),
+            Duration::hours(6),
+        );
+        let policy = TimestampTrustPolicy {
+            trust_anchor_pems: vec![certificate.encode_pem()],
+            crl_pems: vec![FIXTURE_EMPTY_CRL_PEM.to_string()],
+            qualified_signer_pems: Vec::new(),
+            policy_oids: vec!["1.2.3.4".to_string()],
+            assurance_profile: Some(TimestampAssuranceProfile::Qualified),
+        };
+
+        let err = validate_timestamp_trust_policy(&policy).unwrap_err();
+        assert!(matches!(
+            err,
+            TimestampError::QualifiedAssuranceRequiresQualifiedSigners
         ));
     }
 
@@ -1111,6 +1236,7 @@ QAIgPxprcGWSAwfCXug9lIZY8wlqWqLLMKxkWpyq3B/Rp6g=
         let policy = TimestampTrustPolicy {
             trust_anchor_pems: vec![certificate.encode_pem()],
             crl_pems: Vec::new(),
+            qualified_signer_pems: Vec::new(),
             policy_oids: Vec::new(),
             assurance_profile: None,
         };
@@ -1119,6 +1245,29 @@ QAIgPxprcGWSAwfCXug9lIZY8wlqWqLLMKxkWpyq3B/Rp6g=
         assert!(matches!(
             err,
             TimestampError::SignerCertificateInvalidExtendedKeyUsage { .. }
+        ));
+    }
+
+    #[test]
+    fn verify_timestamp_with_policy_rejects_unexpected_qualified_signer() {
+        let digest = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        let generated_at = chrono::DateTime::parse_from_rfc3339("2026-03-07T21:51:27Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        let token = build_crl_backed_timestamp_token(digest, Some("test-tsa"), generated_at);
+        let (unexpected_signer, _) = build_test_certificate(Duration::hours(6));
+        let policy = TimestampTrustPolicy {
+            trust_anchor_pems: vec![FIXTURE_ROOT_CERT_PEM.to_string()],
+            crl_pems: vec![FIXTURE_EMPTY_CRL_PEM.to_string()],
+            qualified_signer_pems: vec![unexpected_signer.encode_pem()],
+            policy_oids: vec!["1.2.3.4".to_string()],
+            assurance_profile: Some(TimestampAssuranceProfile::Qualified),
+        };
+
+        let err = verify_timestamp_with_policy(&token, digest, &policy).unwrap_err();
+        assert!(matches!(
+            err,
+            TimestampError::UnexpectedQualifiedSigner { .. }
         ));
     }
 
@@ -1132,6 +1281,7 @@ QAIgPxprcGWSAwfCXug9lIZY8wlqWqLLMKxkWpyq3B/Rp6g=
         let policy = TimestampTrustPolicy {
             trust_anchor_pems: vec![FIXTURE_ROOT_CERT_PEM.to_string()],
             crl_pems: vec![FIXTURE_EMPTY_CRL_PEM.to_string()],
+            qualified_signer_pems: vec![FIXTURE_TSA_CERT_PEM.to_string()],
             policy_oids: vec!["1.2.3.4".to_string()],
             assurance_profile: Some(TimestampAssuranceProfile::Qualified),
         };
@@ -1158,6 +1308,7 @@ QAIgPxprcGWSAwfCXug9lIZY8wlqWqLLMKxkWpyq3B/Rp6g=
         let policy = TimestampTrustPolicy {
             trust_anchor_pems: vec![FIXTURE_ROOT_CERT_PEM.to_string()],
             crl_pems: vec![FIXTURE_REVOKED_CRL_PEM.to_string()],
+            qualified_signer_pems: vec![FIXTURE_TSA_CERT_PEM.to_string()],
             policy_oids: vec!["1.2.3.4".to_string()],
             assurance_profile: Some(TimestampAssuranceProfile::Qualified),
         };
@@ -1182,6 +1333,7 @@ QAIgPxprcGWSAwfCXug9lIZY8wlqWqLLMKxkWpyq3B/Rp6g=
         let policy = TimestampTrustPolicy {
             trust_anchor_pems: vec![certificate.encode_pem()],
             crl_pems: vec![FIXTURE_EMPTY_CRL_PEM.to_string()],
+            qualified_signer_pems: vec![certificate.encode_pem()],
             policy_oids: vec!["1.2.3.4".to_string()],
             assurance_profile: Some(TimestampAssuranceProfile::Qualified),
         };
@@ -1200,6 +1352,7 @@ QAIgPxprcGWSAwfCXug9lIZY8wlqWqLLMKxkWpyq3B/Rp6g=
         let policy = TimestampTrustPolicy {
             trust_anchor_pems: vec![FIXTURE_ROOT_CERT_PEM.to_string()],
             crl_pems: vec![FIXTURE_EMPTY_CRL_PEM.to_string()],
+            qualified_signer_pems: vec![FIXTURE_TSA_CERT_PEM.to_string()],
             policy_oids: vec!["1.2.3.4".to_string()],
             assurance_profile: Some(TimestampAssuranceProfile::Qualified),
         };

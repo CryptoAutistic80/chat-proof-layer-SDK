@@ -1,0 +1,66 @@
+name: SDK Release Artifacts
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "sdk-v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build Release Artifacts (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: linux-x86_64
+          - os: macos-latest
+            target: macos-universal
+          - os: windows-latest
+            target: windows-x86_64
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: sdks/typescript/package-lock.json
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install OpenSSL (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./scripts/setup_openssl_windows.ps1
+      - name: Install TypeScript SDK dependencies
+        working-directory: sdks/typescript
+        run: npm ci
+      - name: Install Python wheel build dependencies
+        run: python -m pip install --upgrade build wheel setuptools
+      - name: Build checked SDK artifacts
+        env:
+          PROOF_SDK_NATIVE_PROFILE: release
+        run: python ./scripts/build_sdk_artifacts.py --profile release
+      - name: Stage release assets
+        shell: bash
+        run: |
+          mkdir -p release-assets
+          cp sdks/typescript/dist/artifacts/*.tgz "release-assets/proof-layer-sdk-${{ matrix.target }}.tgz"
+          cp packages/sdk-python/dist/*.whl release-assets/
+      - name: Upload release candidate artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: sdk-release-assets-${{ matrix.target }}
+          path: release-assets/*
+          if-no-files-found: error
+      - name: Upload GitHub release assets
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release-assets/*

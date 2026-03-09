@@ -1,0 +1,186 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://proof-layer.dev/schemas/evidence_pack.schema.json",
+  "title": "Evidence Pack",
+  "description": "Manifest embedded in vault-generated `pl-evidence-pack-v1` archives.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "pack_id",
+    "pack_type",
+    "curation_profile",
+    "generated_at",
+    "bundle_ids",
+    "bundles"
+  ],
+  "properties": {
+    "pack_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "pack_type": {
+      "type": "string",
+      "minLength": 1
+    },
+    "curation_profile": {
+      "type": "string",
+      "const": "pack-rules-v1"
+    },
+    "generated_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "bundle_format": {
+      "type": "string",
+      "enum": [
+        "full",
+        "disclosure"
+      ]
+    },
+    "disclosure_policy": {
+      "type": "string",
+      "minLength": 1
+    },
+    "system_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "from": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "to": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "bundle_ids": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "bundles": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "bundle_id",
+          "created_at",
+          "actor_role",
+          "retention_class",
+          "item_types",
+          "matched_rules"
+        ],
+        "properties": {
+          "bundle_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "actor_role": {
+            "type": "string",
+            "enum": [
+              "provider",
+              "deployer",
+              "integrator"
+            ]
+          },
+          "system_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "model_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "retention_class": {
+            "type": "string",
+            "minLength": 1
+          },
+          "bundle_format": {
+            "type": "string",
+            "enum": [
+              "full",
+              "disclosure"
+            ]
+          },
+          "package_name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "item_types": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "disclosed_item_indices": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "disclosed_item_types": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "disclosed_item_field_redactions": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          },
+          "disclosed_artefact_indices": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "disclosed_artefact_names": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "disclosed_artefact_bytes_included": {
+            "type": "boolean"
+          },
+          "obligation_refs": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "matched_rules": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        }
+      }
+    }
+  }
+}

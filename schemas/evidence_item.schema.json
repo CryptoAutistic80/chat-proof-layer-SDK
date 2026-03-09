@@ -1,0 +1,652 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://proof-layer.dev/schemas/evidence_item.schema.json",
+  "title": "Evidence Item",
+  "description": "Typed evidence item stored inside a v1.0 EvidenceBundle.",
+  "oneOf": [
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "llm_interaction"
+        },
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "provider",
+            "model",
+            "input_commitment",
+            "output_commitment"
+          ],
+          "properties": {
+            "provider": {
+              "type": "string",
+              "minLength": 1
+            },
+            "model": {
+              "type": "string",
+              "minLength": 1
+            },
+            "parameters": true,
+            "input_commitment": {
+              "$ref": "#/$defs/sha256Digest"
+            },
+            "retrieval_commitment": {
+              "$ref": "#/$defs/sha256Digest"
+            },
+            "output_commitment": {
+              "$ref": "#/$defs/sha256Digest"
+            },
+            "tool_outputs_commitment": {
+              "$ref": "#/$defs/sha256Digest"
+            },
+            "token_usage": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "input_tokens": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "output_tokens": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "total_tokens": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              }
+            },
+            "latency_ms": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "trace_commitment": {
+              "$ref": "#/$defs/sha256Digest"
+            },
+            "trace_semconv_version": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "required": [
+        "type",
+        "data"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "conformity_assessment"
+        },
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "assessment_id",
+            "procedure",
+            "status"
+          ],
+          "properties": {
+            "assessment_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "procedure": {
+              "type": "string",
+              "minLength": 1
+            },
+            "status": {
+              "type": "string",
+              "minLength": 1
+            },
+            "report_commitment": {
+              "$ref": "#/$defs/sha256Digest"
+            },
+            "metadata": true
+          }
+        }
+      },
+      "required": [
+        "type",
+        "data"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "declaration"
+        },
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "declaration_id",
+            "jurisdiction",
+            "status"
+          ],
+          "properties": {
+            "declaration_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "jurisdiction": {
+              "type": "string",
+              "minLength": 1
+            },
+            "status": {
+              "type": "string",
+              "minLength": 1
+            },
+            "document_commitment": {
+              "$ref": "#/$defs/sha256Digest"
+            },
+            "metadata": true
+          }
+        }
+      },
+      "required": [
+        "type",
+        "data"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "registration"
+        },
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "registration_id",
+            "authority",
+            "status"
+          ],
+          "properties": {
+            "registration_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "authority": {
+              "type": "string",
+              "minLength": 1
+            },
+            "status": {
+              "type": "string",
+              "minLength": 1
+            },
+            "receipt_commitment": {
+              "$ref": "#/$defs/sha256Digest"
+            },
+            "metadata": true
+          }
+        }
+      },
+      "required": [
+        "type",
+        "data"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "model_evaluation"
+        },
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "evaluation_id",
+            "benchmark",
+            "status"
+          ],
+          "properties": {
+            "evaluation_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "benchmark": {
+              "type": "string",
+              "minLength": 1
+            },
+            "status": {
+              "type": "string",
+              "minLength": 1
+            },
+            "summary": {
+              "type": "string"
+            },
+            "report_commitment": {
+              "$ref": "#/$defs/sha256Digest"
+            },
+            "metadata": true
+          }
+        }
+      },
+      "required": [
+        "type",
+        "data"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "adversarial_test"
+        },
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "test_id",
+            "focus",
+            "status"
+          ],
+          "properties": {
+            "test_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "focus": {
+              "type": "string",
+              "minLength": 1
+            },
+            "status": {
+              "type": "string",
+              "minLength": 1
+            },
+            "finding_severity": {
+              "type": "string"
+            },
+            "report_commitment": {
+              "$ref": "#/$defs/sha256Digest"
+            },
+            "metadata": true
+          }
+        }
+      },
+      "required": [
+        "type",
+        "data"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "training_provenance"
+        },
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "dataset_ref",
+            "stage"
+          ],
+          "properties": {
+            "dataset_ref": {
+              "type": "string",
+              "minLength": 1
+            },
+            "stage": {
+              "type": "string",
+              "minLength": 1
+            },
+            "lineage_ref": {
+              "type": "string"
+            },
+            "record_commitment": {
+              "$ref": "#/$defs/sha256Digest"
+            },
+            "metadata": true
+          }
+        }
+      },
+      "required": [
+        "type",
+        "data"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "tool_call"
+        },
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "tool_name"
+          ],
+          "properties": {
+            "tool_name": {
+              "type": "string",
+              "minLength": 1
+            },
+            "input_commitment": {
+              "$ref": "#/$defs/sha256Digest"
+            },
+            "output_commitment": {
+              "$ref": "#/$defs/sha256Digest"
+            },
+            "metadata": true
+          }
+        }
+      },
+      "required": [
+        "type",
+        "data"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "retrieval"
+        },
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "corpus",
+            "result_commitment"
+          ],
+          "properties": {
+            "corpus": {
+              "type": "string",
+              "minLength": 1
+            },
+            "result_commitment": {
+              "$ref": "#/$defs/sha256Digest"
+            },
+            "query_commitment": {
+              "$ref": "#/$defs/sha256Digest"
+            },
+            "metadata": true
+          }
+        }
+      },
+      "required": [
+        "type",
+        "data"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "human_oversight"
+        },
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "action"
+          ],
+          "properties": {
+            "action": {
+              "type": "string",
+              "minLength": 1
+            },
+            "reviewer": {
+              "type": "string"
+            },
+            "notes_commitment": {
+              "$ref": "#/$defs/sha256Digest"
+            }
+          }
+        }
+      },
+      "required": [
+        "type",
+        "data"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "policy_decision"
+        },
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "policy_name",
+            "decision"
+          ],
+          "properties": {
+            "policy_name": {
+              "type": "string",
+              "minLength": 1
+            },
+            "decision": {
+              "type": "string",
+              "minLength": 1
+            },
+            "rationale_commitment": {
+              "$ref": "#/$defs/sha256Digest"
+            },
+            "metadata": true
+          }
+        }
+      },
+      "required": [
+        "type",
+        "data"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "risk_assessment"
+        },
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "risk_id",
+            "severity",
+            "status"
+          ],
+          "properties": {
+            "risk_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "severity": {
+              "type": "string",
+              "minLength": 1
+            },
+            "status": {
+              "type": "string",
+              "minLength": 1
+            },
+            "summary": {
+              "type": "string"
+            },
+            "metadata": true
+          }
+        }
+      },
+      "required": [
+        "type",
+        "data"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "data_governance"
+        },
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "decision"
+          ],
+          "properties": {
+            "decision": {
+              "type": "string",
+              "minLength": 1
+            },
+            "dataset_ref": {
+              "type": "string"
+            },
+            "metadata": true
+          }
+        }
+      },
+      "required": [
+        "type",
+        "data"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "technical_doc"
+        },
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "document_ref"
+          ],
+          "properties": {
+            "document_ref": {
+              "type": "string",
+              "minLength": 1
+            },
+            "section": {
+              "type": "string"
+            },
+            "commitment": {
+              "$ref": "#/$defs/sha256Digest"
+            }
+          }
+        }
+      },
+      "required": [
+        "type",
+        "data"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "literacy_attestation"
+        },
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "attested_role",
+            "status"
+          ],
+          "properties": {
+            "attested_role": {
+              "type": "string",
+              "minLength": 1
+            },
+            "status": {
+              "type": "string",
+              "minLength": 1
+            },
+            "training_ref": {
+              "type": "string"
+            },
+            "attestation_commitment": {
+              "$ref": "#/$defs/sha256Digest"
+            },
+            "metadata": true
+          }
+        }
+      },
+      "required": [
+        "type",
+        "data"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "incident_report"
+        },
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "incident_id",
+            "severity",
+            "status"
+          ],
+          "properties": {
+            "incident_id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "severity": {
+              "type": "string",
+              "minLength": 1
+            },
+            "status": {
+              "type": "string",
+              "minLength": 1
+            },
+            "occurred_at": {
+              "type": "string"
+            },
+            "summary": {
+              "type": "string"
+            },
+            "report_commitment": {
+              "$ref": "#/$defs/sha256Digest"
+            },
+            "metadata": true
+          }
+        }
+      },
+      "required": [
+        "type",
+        "data"
+      ]
+    }
+  ],
+  "$defs": {
+    "sha256Digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    }
+  }
+}

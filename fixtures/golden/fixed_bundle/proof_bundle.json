@@ -1,36 +1,47 @@
 {
-  "bundle_version": "0.1",
+  "bundle_version": "1.0",
   "bundle_id": "PLFIXEDGOLDEN000000000000000001",
   "created_at": "2026-03-02T00:00:00+00:00",
   "actor": {
     "issuer": "proof-layer-local",
     "app_id": "demo",
     "env": "dev",
-    "signing_key_id": "kid-dev-01"
+    "signing_key_id": "kid-dev-01",
+    "role": "provider"
   },
   "subject": {
     "request_id": "req_fixture_001",
     "thread_id": "thr_fixture_001",
-    "user_ref": "hmac_sha256:fixture"
+    "user_ref": "hmac_sha256:fixture",
+    "model_id": "anthropic:claude-sonnet-4-6"
   },
-  "model": {
+  "context": {
     "provider": "anthropic",
     "model": "claude-sonnet-4-6",
     "parameters": {
       "max_tokens": 256,
       "temperature": 0.2
+    },
+    "trace_commitment": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+    "otel_genai_semconv_version": "1.0.0"
+  },
+  "items": [
+    {
+      "type": "llm_interaction",
+      "data": {
+        "provider": "anthropic",
+        "model": "claude-sonnet-4-6",
+        "parameters": {
+          "max_tokens": 256,
+          "temperature": 0.2
+        },
+        "input_commitment": "sha256:01f53d6229f0e4a60d3da9d3064a4daa007c0ea5d56b49f620d82a65309c0e94",
+        "output_commitment": "sha256:5f801b1af400da4c8f8c0050fc308bda4545d662a1fd0c32e60d1cb6f95cd06a",
+        "trace_commitment": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+        "trace_semconv_version": "1.0.0"
+      }
     }
-  },
-  "inputs": {
-    "messages_commitment": "sha256:01f53d6229f0e4a60d3da9d3064a4daa007c0ea5d56b49f620d82a65309c0e94"
-  },
-  "outputs": {
-    "assistant_text_commitment": "sha256:5f801b1af400da4c8f8c0050fc308bda4545d662a1fd0c32e60d1cb6f95cd06a"
-  },
-  "trace": {
-    "otel_genai_semconv_version": "1.0.0",
-    "trace_commitment": "sha256:1111111111111111111111111111111111111111111111111111111111111111"
-  },
+  ],
   "artefacts": [
     {
       "name": "prompt.json",
@@ -54,14 +65,14 @@
   "integrity": {
     "canonicalization": "RFC8785-JCS",
     "hash": "SHA-256",
-    "header_digest": "sha256:a6542c647a6c7f5b866c00295ace8d941a47ef373b5c54c180702933e3f30c9a",
-    "bundle_root_algorithm": "pl-merkle-sha256-v1",
-    "bundle_root": "sha256:75d0508dbf9e3f88f3e1b8e8723c893533f422a181ace3ea83c24549a4014f29",
+    "header_digest": "sha256:164b2fe2c29228c26534b3ecc1c4b90fece23e6c9e675991a7d19f73cb8bab88",
+    "bundle_root_algorithm": "pl-merkle-sha256-v4",
+    "bundle_root": "sha256:ddc1baf36b18fef60a6d8d79976efeb37b4efc42ea134a2588cb82bda3df4150",
     "signature": {
       "format": "JWS",
       "alg": "EdDSA",
       "kid": "kid-dev-01",
-      "value": "eyJhbGciOiJFZERTQSIsImtpZCI6ImtpZC1kZXYtMDEifQ.c2hhMjU2Ojc1ZDA1MDhkYmY5ZTNmODhmM2UxYjhlODcyM2M4OTM1MzNmNDIyYTE4MWFjZTNlYTgzYzI0NTQ5YTQwMTRmMjk.oU85_eT8d_y-HWZb5lXCRXdZj-jUG69FiylHKsD8mMdWp-kDW5QN9d4L9E7OWUKVXtoOJUJ_5qpog4C6RmnpAw"
+      "value": "eyJhbGciOiJFZERTQSIsImtpZCI6ImtpZC1kZXYtMDEifQ.c2hhMjU2OmRkYzFiYWYzNmIxOGZlZjYwYTZkOGQ3OTk3NmVmZWIzN2I0ZWZjNDJlYTEzNGEyNTg4Y2I4MmJkYTNkZjQxNTA.b8T15whUgvlo8KvKCSGq4SqnDd9c-4hNbS-6dkcyX9CkRH1isq_CVxe2179GUP_FvQfDKqwLIbFer7BzYAtbCw"
     }
   }
 }

@@ -1,0 +1,37 @@
+[package]
+name = "proof-service"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+axum.workspace = true
+axum-server.workspace = true
+base64ct.workspace = true
+chrono.workspace = true
+ed25519-dalek.workspace = true
+flate2.workspace = true
+hex.workspace = true
+rand.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sqlx.workspace = true
+tar.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tower-http.workspace = true
+toml.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+proof-layer-core = { path = "../core" }
+ulid.workspace = true
+
+[dev-dependencies]
+bcder.workspace = true
+cryptographic-message-syntax.workspace = true
+p256.workspace = true
+sha2.workspace = true
+tower = { version = "0.5.3", features = ["util"] }
+x509-certificate.workspace = true

@@ -17,6 +17,9 @@ node_modules/
 dist/
 build/
 .turbo/
+sdks/typescript/native/
+packages/sdk-python/proofsdk/_native*.so
+packages/sdk-python/proofsdk/_native*.pyd
 *.tsbuildinfo
 *.js.map
 *.d.ts.map

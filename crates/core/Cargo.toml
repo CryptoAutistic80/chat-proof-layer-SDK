@@ -1,0 +1,29 @@
+[package]
+name = "proof-layer-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+base64ct.workspace = true
+bcder.workspace = true
+chacha20poly1305.workspace = true
+chrono.workspace = true
+cryptographic-message-syntax.workspace = true
+ed25519-dalek.workspace = true
+hex.workspace = true
+openssl.workspace = true
+p256.workspace = true
+rand.workspace = true
+reqwest.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+serde_json_canonicalizer.workspace = true
+sha2.workspace = true
+thiserror.workspace = true
+ulid.workspace = true
+x509-certificate.workspace = true
+x509-parser.workspace = true
+
+[dev-dependencies]

@@ -1,14 +1,11 @@
 from __future__ import annotations
 
 import functools
-import hashlib
-import json
 import uuid
 from typing import Any, Callable
 
-
-def _sha256_prefixed(data: bytes) -> str:
-    return "sha256:" + hashlib.sha256(data).hexdigest()
+from proofsdk.evidence import create_llm_interaction_request
+from proofsdk.providers.openai_like import _submit_bundle
 
 
 def prove_llm_call(proof_client, provider: str, capture_options: dict[str, Any] | None = None):
@@ -20,51 +17,34 @@ def prove_llm_call(proof_client, provider: str, capture_options: dict[str, Any] 
             result = func(*args, **kwargs)
 
             prompt_payload = {"args": args, "kwargs": kwargs}
-            prompt_bytes = json.dumps(prompt_payload, default=str).encode("utf-8")
-            response_bytes = json.dumps(result, default=str).encode("utf-8")
-
-            capture = {
-                "actor": {
-                    "issuer": capture_options.get("issuer", "proof-layer-python"),
-                    "app_id": capture_options.get("app_id", "python-demo"),
-                    "env": capture_options.get("env", "dev"),
-                    "signing_key_id": capture_options.get("signing_key_id", "kid-dev-01"),
-                },
-                "subject": {
-                    "request_id": capture_options.get("request_id", str(uuid.uuid4())),
-                    "thread_id": capture_options.get("thread_id"),
-                    "user_ref": capture_options.get("user_ref"),
-                },
-                "model": {
-                    "provider": provider,
-                    "model": capture_options.get("model", "decorated-call"),
-                    "parameters": capture_options.get("model_parameters", {}),
-                },
-                "inputs": {
-                    "messages_commitment": _sha256_prefixed(prompt_bytes),
-                    "retrieval_commitment": capture_options.get("retrieval_commitment"),
-                },
-                "outputs": {
-                    "assistant_text_commitment": _sha256_prefixed(response_bytes),
-                    "tool_outputs_commitment": capture_options.get("tool_outputs_commitment"),
-                },
-                "trace": {
-                    "otel_genai_semconv_version": capture_options.get("otel_semconv_version", "1.0.0"),
-                    "trace_commitment": _sha256_prefixed(response_bytes),
-                },
-                "policy": {
-                    "redactions": capture_options.get("redactions", []),
-                    "encryption": {"enabled": bool(capture_options.get("encryption_enabled", False))},
-                },
-            }
-
-            proof = proof_client.create_bundle(
-                capture,
-                [
-                    {"name": "prompt.json", "content_type": "application/json", "data": prompt_bytes},
-                    {"name": "response.json", "content_type": "application/json", "data": response_bytes},
-                ],
+            request = create_llm_interaction_request(
+                key_id=capture_options.get("signing_key_id", "kid-dev-01"),
+                role=capture_options.get("role", "provider"),
+                issuer=capture_options.get("issuer", "proof-layer-python"),
+                app_id=capture_options.get("app_id", "python-sdk"),
+                env=capture_options.get("env", "dev"),
+                system_id=capture_options.get("system_id"),
+                provider=provider,
+                model=capture_options.get("model", "decorated-call"),
+                input=prompt_payload,
+                output=result,
+                request_id=capture_options.get("request_id", str(uuid.uuid4())),
+                thread_id=capture_options.get("thread_id"),
+                user_ref=capture_options.get("user_ref"),
+                model_parameters=capture_options.get("model_parameters", {}),
+                retrieval_commitment=capture_options.get("retrieval_commitment"),
+                tool_outputs_commitment=capture_options.get("tool_outputs_commitment"),
+                trace=capture_options.get(
+                    "trace",
+                    {"provider": provider, "decorated": True},
+                ),
+                otel_semconv_version=capture_options.get("otel_semconv_version"),
+                redactions=capture_options.get("redactions"),
+                encryption_enabled=bool(capture_options.get("encryption_enabled", False)),
+                retention_class=capture_options.get("retention_class"),
+                artefacts=capture_options.get("artefacts"),
             )
+            proof = _submit_bundle(proof_client, request, capture_options)
             return {"result": result, "proof": proof}
 
         return wrapper

@@ -1,4 +1,75 @@
 from .client import ProofLayerClient
 from .decorators import prove_llm_call
+from .disclosure_policy import (
+    DISCLOSURE_POLICY_TEMPLATE_NAMES,
+    DISCLOSURE_REDACTION_GROUPS,
+    create_disclosure_policy,
+    create_disclosure_policy_template,
+)
+from .evidence import (
+    create_adversarial_test_request,
+    create_conformity_assessment_request,
+    create_data_governance_request,
+    create_declaration_request,
+    create_human_oversight_request,
+    create_incident_report_request,
+    create_literacy_attestation_request,
+    create_llm_interaction_request,
+    create_model_evaluation_request,
+    create_policy_decision_request,
+    create_registration_request,
+    create_retrieval_request,
+    create_risk_assessment_request,
+    create_technical_doc_request,
+    create_training_provenance_request,
+    create_tool_call_request,
+)
+from .local_client import LocalProofLayerClient
+from .native import (
+    build_bundle,
+    canonicalize_json,
+    compute_merkle_root,
+    hash_sha256,
+    redact_bundle,
+    sign_bundle_root,
+    verify_bundle,
+    verify_redacted_bundle,
+    verify_bundle_root,
+)
+from .proof_layer import ProofLayer
 
-__all__ = ["ProofLayerClient", "prove_llm_call"]
+__all__ = [
+    "LocalProofLayerClient",
+    "ProofLayer",
+    "ProofLayerClient",
+    "build_bundle",
+    "canonicalize_json",
+    "compute_merkle_root",
+    "DISCLOSURE_POLICY_TEMPLATE_NAMES",
+    "DISCLOSURE_REDACTION_GROUPS",
+    "create_disclosure_policy",
+    "create_disclosure_policy_template",
+    "create_adversarial_test_request",
+    "create_conformity_assessment_request",
+    "create_data_governance_request",
+    "create_declaration_request",
+    "create_human_oversight_request",
+    "create_incident_report_request",
+    "create_literacy_attestation_request",
+    "create_llm_interaction_request",
+    "create_model_evaluation_request",
+    "create_policy_decision_request",
+    "create_registration_request",
+    "create_retrieval_request",
+    "create_risk_assessment_request",
+    "create_technical_doc_request",
+    "create_training_provenance_request",
+    "create_tool_call_request",
+    "hash_sha256",
+    "prove_llm_call",
+    "redact_bundle",
+    "sign_bundle_root",
+    "verify_bundle",
+    "verify_redacted_bundle",
+    "verify_bundle_root",
+]

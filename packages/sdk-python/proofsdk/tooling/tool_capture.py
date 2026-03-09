@@ -1,15 +1,11 @@
 from __future__ import annotations
 
-import hashlib
 import json
 import uuid
 from datetime import datetime, timezone
 from typing import Any
 
-
-def _sha256_prefixed(value: Any) -> str:
-    encoded = json.dumps(value, sort_keys=True).encode("utf-8")
-    return "sha256:" + hashlib.sha256(encoded).hexdigest()
+from proofsdk.native import hash_sha256
 
 
 def capture_tool_call(name: str, input: Any, output: Any) -> dict[str, Any]:
@@ -19,6 +15,6 @@ def capture_tool_call(name: str, input: Any, output: Any) -> dict[str, Any]:
         "name": name,
         "input": input,
         "output": output,
-        "input_commitment": _sha256_prefixed(input),
-        "output_commitment": _sha256_prefixed(output),
+        "input_commitment": hash_sha256(json.dumps(input, sort_keys=True).encode("utf-8")),
+        "output_commitment": hash_sha256(json.dumps(output, sort_keys=True).encode("utf-8")),
     }

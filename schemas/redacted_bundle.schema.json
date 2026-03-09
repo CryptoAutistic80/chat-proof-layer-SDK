@@ -1,0 +1,322 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://proof-layer.dev/schemas/redacted_bundle.schema.json",
+  "title": "Redacted Evidence Bundle",
+  "description": "Selective-disclosure bundle carrying Merkle inclusion proofs for a v2, v3, or v4 evidence bundle.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "bundle_version",
+    "bundle_id",
+    "created_at",
+    "actor",
+    "subject",
+    "policy",
+    "integrity",
+    "total_items",
+    "total_artefacts",
+    "header_proof",
+    "disclosed_items",
+    "disclosed_artefacts"
+  ],
+  "properties": {
+    "bundle_version": {
+      "const": "1.0"
+    },
+    "bundle_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "actor": {
+      "$ref": "./capture_event.schema.json#/properties/actor"
+    },
+    "subject": {
+      "$ref": "./capture_event.schema.json#/properties/subject"
+    },
+    "context": {
+      "$ref": "./capture_event.schema.json#/properties/context"
+    },
+    "policy": {
+      "$ref": "./capture_event.schema.json#/properties/policy"
+    },
+    "integrity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "canonicalization",
+        "hash",
+        "header_digest",
+        "bundle_root_algorithm",
+        "bundle_root",
+        "signature"
+      ],
+      "properties": {
+        "canonicalization": {
+          "const": "RFC8785-JCS"
+        },
+        "hash": {
+          "const": "SHA-256"
+        },
+        "header_digest": {
+          "$ref": "#/$defs/sha256Digest"
+        },
+        "bundle_root_algorithm": {
+          "enum": [
+            "pl-merkle-sha256-v2",
+            "pl-merkle-sha256-v3",
+            "pl-merkle-sha256-v4"
+          ]
+        },
+        "bundle_root": {
+          "$ref": "#/$defs/sha256Digest"
+        },
+        "signature": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "format",
+            "alg",
+            "kid",
+            "value"
+          ],
+          "properties": {
+            "format": {
+              "const": "JWS"
+            },
+            "alg": {
+              "const": "EdDSA"
+            },
+            "kid": {
+              "type": "string",
+              "minLength": 1
+            },
+            "value": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        }
+      }
+    },
+    "timestamp": {
+      "$ref": "./evidence_bundle.schema.json#/properties/timestamp"
+    },
+    "receipt": {
+      "$ref": "./evidence_bundle.schema.json#/properties/receipt"
+    },
+    "total_items": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "total_artefacts": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "header_proof": {
+      "$ref": "#/$defs/inclusionProof"
+    },
+    "disclosed_items": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "index",
+          "proof"
+        ],
+        "oneOf": [
+          {
+            "required": [
+              "item"
+            ]
+          },
+          {
+            "required": [
+              "field_redacted_item"
+            ]
+          }
+        ],
+        "properties": {
+          "index": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "item": {
+            "$ref": "./evidence_item.schema.json"
+          },
+          "field_redacted_item": {
+            "$ref": "#/$defs/fieldRedactedItem"
+          },
+          "proof": {
+            "$ref": "#/$defs/inclusionProof"
+          }
+        }
+      }
+    },
+    "disclosed_artefacts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "index",
+          "meta",
+          "proof"
+        ],
+        "properties": {
+          "index": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "meta": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "name",
+              "digest",
+              "size",
+              "content_type"
+            ],
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 1
+              },
+              "digest": {
+                "$ref": "#/$defs/sha256Digest"
+              },
+              "size": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "content_type": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          },
+          "proof": {
+            "$ref": "#/$defs/inclusionProof"
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "sha256Digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "fieldRedactedItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "item_type"
+      ],
+      "properties": {
+        "item_type": {
+          "type": "string",
+          "minLength": 1
+        },
+        "revealed_data": {
+          "type": "object"
+        },
+        "field_digests": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/sha256Digest"
+          }
+        },
+        "redacted_fields": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "container_kinds": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string",
+            "enum": [
+              "object",
+              "array"
+            ]
+          }
+        },
+        "revealed_paths": {
+          "type": "object"
+        },
+        "path_digests": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/sha256Digest"
+          }
+        },
+        "redacted_paths": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    "proofStep": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "sibling",
+        "position"
+      ],
+      "properties": {
+        "sibling": {
+          "$ref": "#/$defs/sha256Digest"
+        },
+        "position": {
+          "type": "string",
+          "enum": [
+            "left",
+            "right"
+          ]
+        }
+      }
+    },
+    "inclusionProof": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "algorithm",
+        "root",
+        "leaf",
+        "index",
+        "path"
+      ],
+      "properties": {
+        "algorithm": {
+          "const": "pl-merkle-sha256-v1"
+        },
+        "root": {
+          "$ref": "#/$defs/sha256Digest"
+        },
+        "leaf": {
+          "$ref": "#/$defs/sha256Digest"
+        },
+        "index": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "path": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/proofStep"
+          }
+        }
+      }
+    }
+  }
+}

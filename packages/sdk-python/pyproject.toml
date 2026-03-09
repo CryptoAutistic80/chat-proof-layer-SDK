@@ -6,12 +6,15 @@ build-backend = "setuptools.build_meta"
 name = "proof-layer-sdk-python"
 version = "0.1.0"
 description = "PoC Python SDK for Proof Layer"
+readme = "README.md"
 requires-python = ">=3.10"
-dependencies = [
-  "cryptography>=42,<47",
-  "rfc8785>=0.1.4,<0.2",
-]
+
+[tool.setuptools]
+include-package-data = true
 
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["proofsdk*"]
+
+[tool.setuptools.package-data]
+proofsdk = ["_native*.so", "_native*.pyd", "py.typed"]

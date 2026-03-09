@@ -61,6 +61,115 @@ class ProofLayerClient:
         }
         return self._request_fn("POST", "/v1/verify", self._headers_json(), json.dumps(payload).encode("utf-8"))
 
+    def create_pack(
+        self,
+        *,
+        pack_type: str,
+        system_id: str | None = None,
+        from_date: str | None = None,
+        to_date: str | None = None,
+        bundle_format: str | None = None,
+        disclosure_policy: str | None = None,
+        disclosure_template: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        if disclosure_policy is not None and disclosure_template is not None:
+            raise ValueError("provide either disclosure_policy or disclosure_template, not both")
+        payload: dict[str, Any] = {
+            "pack_type": pack_type,
+            "system_id": system_id,
+            "from": from_date,
+            "to": to_date,
+        }
+        if bundle_format is not None:
+            payload["bundle_format"] = bundle_format
+        if disclosure_policy is not None:
+            payload["disclosure_policy"] = disclosure_policy
+        if disclosure_template is not None:
+            payload["disclosure_template"] = disclosure_template
+        return self._request_fn("POST", "/v1/packs", self._headers_json(), json.dumps(payload).encode("utf-8"))
+
+    def get_pack(self, pack_id: str) -> dict[str, Any]:
+        return self._request_fn("GET", f"/v1/packs/{pack_id}", self._headers(), None)
+
+    def get_pack_manifest(self, pack_id: str) -> dict[str, Any]:
+        return self._request_fn("GET", f"/v1/packs/{pack_id}/manifest", self._headers(), None)
+
+    def download_pack_export(self, pack_id: str) -> bytes:
+        return self._request_bytes("GET", f"/v1/packs/{pack_id}/export", self._headers(), None)
+
+    def get_config(self) -> dict[str, Any]:
+        return self._request_fn("GET", "/v1/config", self._headers(), None)
+
+    def get_disclosure_config(self) -> dict[str, Any]:
+        return self.get_config()["disclosure"]
+
+    def get_disclosure_templates(self) -> dict[str, Any]:
+        return self._request_fn("GET", "/v1/disclosure/templates", self._headers(), None)
+
+    def render_disclosure_template(
+        self,
+        *,
+        profile: str,
+        name: str | None = None,
+        redaction_groups: list[str] | None = None,
+        redacted_fields_by_item_type: dict[str, list[str]] | None = None,
+    ) -> dict[str, Any]:
+        payload: dict[str, Any] = {"profile": profile}
+        if name is not None:
+            payload["name"] = name
+        if redaction_groups:
+            payload["redaction_groups"] = redaction_groups
+        if redacted_fields_by_item_type:
+            payload["redacted_fields_by_item_type"] = redacted_fields_by_item_type
+        return self._request_fn(
+            "POST",
+            "/v1/disclosure/templates/render",
+            self._headers_json(),
+            json.dumps(payload).encode("utf-8"),
+        )
+
+    def update_disclosure_config(self, config: dict[str, Any]) -> dict[str, Any]:
+        return self._request_fn(
+            "PUT",
+            "/v1/config/disclosure",
+            self._headers_json(),
+            json.dumps(config).encode("utf-8"),
+        )
+
+    def preview_disclosure(
+        self,
+        *,
+        bundle_id: str,
+        pack_type: str | None = None,
+        disclosure_policy: str | None = None,
+        policy: dict[str, Any] | None = None,
+        disclosure_template: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        selection_count = sum(
+            1
+            for value in (disclosure_policy, policy, disclosure_template)
+            if value is not None
+        )
+        if selection_count > 1:
+            raise ValueError(
+                "provide only one of disclosure_policy, policy, or disclosure_template"
+            )
+        payload: dict[str, Any] = {"bundle_id": bundle_id}
+        if pack_type is not None:
+            payload["pack_type"] = pack_type
+        if disclosure_policy is not None:
+            payload["disclosure_policy"] = disclosure_policy
+        if policy is not None:
+            payload["policy"] = policy
+        if disclosure_template is not None:
+            payload["disclosure_template"] = disclosure_template
+        return self._request_fn(
+            "POST",
+            "/v1/disclosure/preview",
+            self._headers_json(),
+            json.dumps(payload).encode("utf-8"),
+        )
+
     def get_bundle(self, bundle_id: str) -> dict[str, Any]:
         return self._request_fn("GET", f"/v1/bundles/{bundle_id}", self._headers(), None)
 

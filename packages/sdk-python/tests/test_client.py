@@ -132,6 +132,45 @@ class TestProofLayerClient(unittest.TestCase):
         self.assertEqual(out["policies"][0]["name"], "incident_summary")
         self.assertTrue(out["policies"][0]["include_artefact_metadata"])
 
+    def test_preview_disclosure_posts_inline_policy(self):
+        captured = {}
+
+        def request_fn(method, path, headers, body):
+            captured["method"] = method
+            captured["path"] = path
+            captured["headers"] = headers
+            captured["body"] = body
+            return {
+                "bundle_id": "B1",
+                "policy_name": "risk_only",
+                "disclosed_item_indices": [1],
+                "disclosed_item_types": ["risk_assessment"],
+                "disclosed_item_obligation_refs": ["art9"],
+                "disclosed_artefact_indices": [],
+                "disclosed_artefact_names": [],
+                "disclosed_artefact_bytes_included": False,
+            }
+
+        client = ProofLayerClient(base_url="http://127.0.0.1:8080", request_fn=request_fn)
+        out = client.preview_disclosure(
+            bundle_id="B1",
+            pack_type="annex_iv",
+            policy={
+                "name": "risk_only",
+                "allowed_obligation_refs": ["art9"],
+                "include_artefact_metadata": False,
+                "include_artefact_bytes": False,
+            },
+        )
+
+        self.assertEqual(captured["method"], "POST")
+        self.assertEqual(captured["path"], "/v1/disclosure/preview")
+        payload = json.loads(captured["body"].decode("utf-8"))
+        self.assertEqual(payload["bundle_id"], "B1")
+        self.assertEqual(payload["pack_type"], "annex_iv")
+        self.assertEqual(payload["policy"]["allowed_obligation_refs"], ["art9"])
+        self.assertEqual(out["disclosed_item_types"], ["risk_assessment"])
+
 
 if __name__ == "__main__":
     unittest.main()

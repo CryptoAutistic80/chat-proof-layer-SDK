@@ -29,6 +29,8 @@ import type {
   DataGovernanceRequestOptions,
   DeclarationRequestOptions,
   DisclosureConfig,
+  DisclosurePreviewRequest,
+  DisclosurePreviewResponse,
   HumanOversightRequestOptions,
   IncidentReportRequestOptions,
   LiteracyAttestationRequestOptions,
@@ -214,6 +216,13 @@ export class ProofLayer implements BundleCreateClient {
       return (this.client as ProofLayerClient).updateDisclosureConfig(config);
     }
     throw new Error("underlying client does not support updateDisclosureConfig; use vault mode");
+  }
+
+  async previewDisclosure(request: DisclosurePreviewRequest): Promise<DisclosurePreviewResponse> {
+    if ("previewDisclosure" in this.client && typeof this.client.previewDisclosure === "function") {
+      return (this.client as ProofLayerClient).previewDisclosure(request);
+    }
+    throw new Error("underlying client does not support previewDisclosure; use vault mode");
   }
 
   async capture(options: ProofLayerCaptureOptions): Promise<ProofLayerResult> {

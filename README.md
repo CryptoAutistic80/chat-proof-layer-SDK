@@ -130,6 +130,13 @@ cargo run -p proofctl -- pack \
   --system-id system-123 \
   --out ./runtime-logs-disclosure.pack
 
+# Preview how a named disclosure policy would select items before export
+cargo run -p proofctl -- vault disclosure-preview \
+  --vault-url http://127.0.0.1:8080 \
+  --bundle-id BUNDLE_ID \
+  --type annex-iv \
+  --disclosure-policy annex_iv_redacted
+
 # Query vault bundle inventory
 cargo run -p proofctl -- vault query \
   --vault-url http://127.0.0.1:8080 \
@@ -331,6 +338,7 @@ npm run dev
 - `proofctl verify` now reports the bundle assurance level as `signed`, `timestamped`, or `transparency_anchored`.
 - `proofctl disclose --items ...` now creates item-level redacted packages with Merkle inclusion proofs, and `--artefacts ...` can carry selected artefact bytes into that disclosure package; `proofctl verify` auto-detects full vs disclosure package formats.
 - The TypeScript and Python SDKs now expose local disclosure helpers, vault pack client methods for `bundle_format = "full" | "disclosure"` and optional `disclosure_policy`, and vault disclosure-config helpers, so SDK callers can request policy-shaped redacted exports or manage disclosure profiles without dropping to raw HTTP.
+- `proofctl vault disclosure-preview` and the TypeScript/Python SDK clients can now preview named or inline disclosure policies against a stored bundle before export, and disclosure policies can now filter by obligation refs as well as evidence item types.
 - `proofctl inspect` now supports `--show-items` and `--show-merkle`.
 - `proofctl pack` and `proofctl vault export` now support `--bundle-format <full|disclosure>` plus `--disclosure-policy <name>` so vault exports can contain either full `bundle.pkg` members or disclosure packages shaped by named disclosure profiles.
 - `proofctl vault status|query|retention|systems|export` now covers the main vault read/query/export flows from the plan without requiring manual `curl`.
@@ -339,7 +347,7 @@ npm run dev
 - `/v1/bundles` now also supports assurance-oriented filtering through `has_timestamp`, `has_receipt`, and `assurance_level=signed|timestamped|transparency_anchored`, and bundle summaries now report the computed assurance level.
 - Retention scans now soft-delete expired bundles, skip held bundles, and hard-delete previously soft-deleted bundles after the configured grace period (`PROOF_SERVICE_RETENTION_GRACE_DAYS`, default `30`).
 - The vault now keeps an append-only audit trail and exposes it via `/v1/audit-trail`; current actions include bundle create/read/verify/delete, legal hold changes, retention scans, and pack create/read/export events.
-- The vault now exposes `GET /v1/config`, `PUT /v1/config/retention`, `PUT /v1/config/timestamp`, `PUT /v1/config/transparency`, and `PUT /v1/config/disclosure`; disclosure config persists named disclosure-policy profiles with item-type filters, artefact-metadata rules, and optional artefact-byte inclusion, while timestamp/transparency config carry PEM trust anchors, PEM CRLs, live OCSP responder URLs, qualified TSA signer allowlists, expected RFC 3161 policy OIDs, and transparency-service public keys for trust-aware verification.
+- The vault now exposes `GET /v1/config`, `PUT /v1/config/retention`, `PUT /v1/config/timestamp`, `PUT /v1/config/transparency`, `PUT /v1/config/disclosure`, and `POST /v1/disclosure/preview`; disclosure config persists named disclosure-policy profiles with item-type filters, obligation-ref filters, artefact-metadata rules, and optional artefact-byte inclusion, while timestamp/transparency config carry PEM trust anchors, PEM CRLs, live OCSP responder URLs, qualified TSA signer allowlists, expected RFC 3161 policy OIDs, and transparency-service public keys for trust-aware verification.
 - Retention policies now include an `expiry_mode`; the seeded `gpai_documentation` class uses `until_withdrawn`, so GPAI documentation stays active until operator withdrawal instead of auto-expiring on a fixed date.
 - `POST /v1/bundles/{bundle_id}/timestamp` now uses the configured RFC 3161 provider to timestamp an existing stored bundle and persist the token back into bundle JSON.
 - `POST /v1/bundles/{bundle_id}/anchor` now uses the configured transparency provider to anchor an existing timestamped bundle and persist the receipt back into bundle JSON for both Rekor and the current SCITT-style receipt flow.

@@ -5,6 +5,8 @@ import type {
   CreateBundleRequest,
   CreateBundleResponse,
   DisclosureConfig,
+  DisclosurePreviewRequest,
+  DisclosurePreviewResponse,
   FetchLike,
   HttpClientOptions,
   InlineArtefactRequest,
@@ -126,6 +128,21 @@ export class ProofLayerClient {
 
   async updateDisclosureConfig(config: DisclosureConfig): Promise<DisclosureConfig> {
     return this.#put("/v1/config/disclosure", config);
+  }
+
+  async previewDisclosure({
+    bundleId,
+    packType,
+    disclosurePolicy,
+    policy
+  }: DisclosurePreviewRequest): Promise<DisclosurePreviewResponse> {
+    const payload = {
+      bundle_id: bundleId,
+      ...(packType ? { pack_type: packType } : {}),
+      ...(disclosurePolicy ? { disclosure_policy: disclosurePolicy } : {}),
+      ...(policy ? { policy } : {})
+    };
+    return this.#post("/v1/disclosure/preview", payload);
   }
 
   async downloadPackExport(packId: string): Promise<Uint8Array> {

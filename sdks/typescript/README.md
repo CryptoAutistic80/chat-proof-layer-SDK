@@ -119,6 +119,14 @@ await proofClient.updateDisclosureConfig({
     }
   ]
 });
+const preview = await proofClient.previewDisclosure({
+  bundleId: "BUNDLE_ID",
+  packType: "annex_iv",
+  policy: {
+    name: "risk_only",
+    allowed_obligation_refs: ["art9"]
+  }
+});
 const archive = await proofClient.downloadPackExport(pack.pack_id);
 
 const generic = withGenericProofLayer(
@@ -144,4 +152,5 @@ const riskBundle = await proofLayer.captureRiskAssessment({
 
 console.log(riskBundle.bundle?.items[0].type);
 console.log(redactedSummary.disclosed_item_count, archive.length);
+console.log(preview.disclosed_item_types);
 ```

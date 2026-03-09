@@ -230,6 +230,8 @@ export interface DisclosurePolicyConfig extends JsonObject {
   name: string;
   allowed_item_types?: string[];
   excluded_item_types?: string[];
+  allowed_obligation_refs?: string[];
+  excluded_obligation_refs?: string[];
   include_artefact_metadata?: boolean;
   include_artefact_bytes?: boolean;
   artefact_names?: string[];
@@ -237,6 +239,26 @@ export interface DisclosurePolicyConfig extends JsonObject {
 
 export interface DisclosureConfig extends JsonObject {
   policies: DisclosurePolicyConfig[];
+}
+
+export interface DisclosurePreviewRequest extends JsonObject {
+  bundleId: string;
+  packType?: string;
+  disclosurePolicy?: string;
+  policy?: DisclosurePolicyConfig;
+}
+
+export interface DisclosurePreviewResponse extends JsonObject {
+  bundle_id: string;
+  policy_name: string;
+  pack_type?: string;
+  candidate_item_indices?: number[];
+  disclosed_item_indices?: number[];
+  disclosed_item_types?: string[];
+  disclosed_item_obligation_refs?: string[];
+  disclosed_artefact_indices?: number[];
+  disclosed_artefact_names?: string[];
+  disclosed_artefact_bytes_included?: boolean;
 }
 
 export interface RetentionPolicyConfig extends JsonObject {

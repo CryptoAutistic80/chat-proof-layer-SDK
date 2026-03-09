@@ -118,6 +118,14 @@ proof_client.update_disclosure_config(
         ]
     }
 )
+preview = proof_client.preview_disclosure(
+    bundle_id="BUNDLE_ID",
+    pack_type="annex_iv",
+    policy={
+        "name": "risk_only",
+        "allowed_obligation_refs": ["art9"],
+    },
+)
 archive = proof_client.download_pack_export(pack["pack_id"])
 
 risk_bundle = proof_layer.capture_risk_assessment(
@@ -129,4 +137,5 @@ risk_bundle = proof_layer.capture_risk_assessment(
 
 print(risk_bundle["bundle"]["items"][0]["type"])
 print(redacted_summary["disclosed_item_count"], len(archive))
+print(preview["disclosed_item_types"])
 ```

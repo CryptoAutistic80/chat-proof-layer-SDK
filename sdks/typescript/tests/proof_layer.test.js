@@ -91,6 +91,41 @@ test("ProofLayer vault mode can update disclosure config", async () => {
   assert.equal(result.policies[0].name, "regulator_minimum");
 });
 
+test("ProofLayer vault mode can preview disclosure selection", async () => {
+  let captured;
+  const proofLayer = new ProofLayer({
+    vaultUrl: "http://127.0.0.1:8080",
+    fetchImpl: async (url, init) => {
+      captured = { url, init };
+      return new Response(
+        JSON.stringify({
+          bundle_id: "B1",
+          policy_name: "risk_only",
+          disclosed_item_indices: [1],
+          disclosed_item_types: ["risk_assessment"],
+          disclosed_item_obligation_refs: ["art9"],
+          disclosed_artefact_indices: [],
+          disclosed_artefact_names: [],
+          disclosed_artefact_bytes_included: false
+        }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      );
+    }
+  });
+
+  const result = await proofLayer.previewDisclosure({
+    bundleId: "B1",
+    policy: {
+      name: "risk_only",
+      allowed_obligation_refs: ["art9"]
+    }
+  });
+
+  assert.equal(captured.url, "http://127.0.0.1:8080/v1/disclosure/preview");
+  assert.equal(captured.init.method, "POST");
+  assert.deepEqual(result.disclosed_item_types, ["risk_assessment"]);
+});
+
 test("withProofLayer attaches proof metadata to OpenAI-like responses", async () => {
   const signingKeyPem = await readFile(path.join(goldenDir, "signing_key.txt"), "utf8");
   const proofLayer = new ProofLayer({

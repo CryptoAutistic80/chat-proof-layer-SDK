@@ -141,3 +141,52 @@ test("updateDisclosureConfig issues PUT with policy payload", async () => {
   assert.equal(result.policies[0].name, "incident_summary");
   assert.equal(result.policies[0].include_artefact_metadata, true);
 });
+
+test("previewDisclosure posts named or inline disclosure policy selection", async () => {
+  let captured;
+  const fetchImpl = async (url, init) => {
+    captured = { url, init };
+    return new Response(
+      JSON.stringify({
+        bundle_id: "B1",
+        policy_name: "risk_only",
+        pack_type: "annex_iv",
+        candidate_item_indices: [0, 1],
+        disclosed_item_indices: [1],
+        disclosed_item_types: ["risk_assessment"],
+        disclosed_item_obligation_refs: ["art9"],
+        disclosed_artefact_indices: [],
+        disclosed_artefact_names: [],
+        disclosed_artefact_bytes_included: false
+      }),
+      { status: 200, headers: { "content-type": "application/json" } }
+    );
+  };
+
+  const client = new ProofLayerClient({ baseUrl: "http://127.0.0.1:8080", fetchImpl });
+  const result = await client.previewDisclosure({
+    bundleId: "B1",
+    packType: "annex_iv",
+    policy: {
+      name: "risk_only",
+      allowed_obligation_refs: ["art9"],
+      include_artefact_metadata: false,
+      include_artefact_bytes: false
+    }
+  });
+
+  assert.equal(captured.url, "http://127.0.0.1:8080/v1/disclosure/preview");
+  assert.equal(captured.init.method, "POST");
+  const body = JSON.parse(captured.init.body);
+  assert.deepEqual(body, {
+    bundle_id: "B1",
+    pack_type: "annex_iv",
+    policy: {
+      name: "risk_only",
+      allowed_obligation_refs: ["art9"],
+      include_artefact_metadata: false,
+      include_artefact_bytes: false
+    }
+  });
+  assert.deepEqual(result.disclosed_item_indices, [1]);
+});

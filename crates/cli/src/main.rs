@@ -248,6 +248,21 @@ enum VaultCommands {
         #[arg(long = "disclosure-policy")]
         disclosure_policy: Option<String>,
     },
+    /// Preview how a named or inline disclosure policy would redact a stored bundle.
+    DisclosurePreview {
+        #[arg(long)]
+        vault_url: String,
+        #[arg(long)]
+        bundle_id: String,
+        #[arg(long = "type")]
+        pack_type: Option<PackTypeArg>,
+        #[arg(long = "disclosure-policy")]
+        disclosure_policy: Option<String>,
+        #[arg(long = "disclosure-policy-file")]
+        disclosure_policy_file: Option<PathBuf>,
+        #[arg(long, default_value = "human")]
+        format: OutputFormat,
+    },
 }
 
 #[derive(Clone, Debug)]
@@ -522,6 +537,57 @@ struct CreatePackRequest {
     bundle_format: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     disclosure_policy: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+struct DisclosurePolicyConfig {
+    name: String,
+    #[serde(default)]
+    allowed_item_types: Vec<String>,
+    #[serde(default)]
+    excluded_item_types: Vec<String>,
+    #[serde(default)]
+    allowed_obligation_refs: Vec<String>,
+    #[serde(default)]
+    excluded_obligation_refs: Vec<String>,
+    #[serde(default)]
+    include_artefact_metadata: bool,
+    #[serde(default)]
+    include_artefact_bytes: bool,
+    #[serde(default)]
+    artefact_names: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct DisclosurePreviewRequest {
+    bundle_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pack_type: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    disclosure_policy: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    policy: Option<DisclosurePolicyConfig>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct DisclosurePreviewResponse {
+    bundle_id: String,
+    policy_name: String,
+    pack_type: Option<String>,
+    #[serde(default)]
+    candidate_item_indices: Vec<usize>,
+    #[serde(default)]
+    disclosed_item_indices: Vec<usize>,
+    #[serde(default)]
+    disclosed_item_types: Vec<String>,
+    #[serde(default)]
+    disclosed_item_obligation_refs: Vec<String>,
+    #[serde(default)]
+    disclosed_artefact_indices: Vec<usize>,
+    #[serde(default)]
+    disclosed_artefact_names: Vec<String>,
+    #[serde(default)]
+    disclosed_artefact_bytes_included: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -958,6 +1024,21 @@ fn main() -> Result<()> {
                 from: from.as_deref(),
                 to: to.as_deref(),
             }),
+            VaultCommands::DisclosurePreview {
+                vault_url,
+                bundle_id,
+                pack_type,
+                disclosure_policy,
+                disclosure_policy_file,
+                format,
+            } => cmd_vault_disclosure_preview(
+                &vault_url,
+                &bundle_id,
+                pack_type,
+                disclosure_policy.as_deref(),
+                disclosure_policy_file.as_deref(),
+                format,
+            ),
         },
     }
 }
@@ -1626,6 +1707,47 @@ fn cmd_pack(input: PackCommandInput<'_>) -> Result<()> {
     Ok(())
 }
 
+fn cmd_vault_disclosure_preview(
+    vault_url: &str,
+    bundle_id: &str,
+    pack_type: Option<PackTypeArg>,
+    disclosure_policy: Option<&str>,
+    disclosure_policy_file: Option<&Path>,
+    format: OutputFormat,
+) -> Result<()> {
+    if disclosure_policy.is_some() && disclosure_policy_file.is_some() {
+        bail!("provide either --disclosure-policy or --disclosure-policy-file, not both");
+    }
+
+    let request = DisclosurePreviewRequest {
+        bundle_id: normalize_required_cli_text("bundle_id", bundle_id)?,
+        pack_type: pack_type.map(|value| value.as_api_value().to_string()),
+        disclosure_policy: normalize_optional_cli_text("disclosure_policy", disclosure_policy)?,
+        policy: disclosure_policy_file
+            .map(load_disclosure_policy_file)
+            .transpose()?,
+    };
+
+    let client = build_http_client()?;
+    let url = join_vault_url(vault_url, "/v1/disclosure/preview");
+    let response = client
+        .post(&url)
+        .json(&request)
+        .send()
+        .with_context(|| format!("failed to call {url}"))?;
+    let response = ensure_success(response, "disclosure preview")?;
+    let preview: DisclosurePreviewResponse = response
+        .json()
+        .context("failed to decode disclosure preview response")?;
+
+    match format {
+        OutputFormat::Human => print_disclosure_preview_human(&preview),
+        OutputFormat::Json => println!("{}", serde_json::to_string_pretty(&preview)?),
+    }
+
+    Ok(())
+}
+
 fn cmd_vault_status(vault_url: &str, format: OutputFormat) -> Result<()> {
     let client = build_http_client()?;
     require_vault_ready(&client, vault_url)?;
@@ -1695,6 +1817,43 @@ fn cmd_vault_status(vault_url: &str, format: OutputFormat) -> Result<()> {
     }
 
     Ok(())
+}
+
+fn print_disclosure_preview_human(response: &DisclosurePreviewResponse) {
+    println!("bundle_id: {}", response.bundle_id);
+    println!("policy: {}", response.policy_name);
+    println!(
+        "pack_type: {}",
+        response.pack_type.as_deref().unwrap_or("none")
+    );
+    println!(
+        "candidate_items: {}",
+        format_indices(&response.candidate_item_indices)
+    );
+    println!(
+        "disclosed_items: {}",
+        format_indices(&response.disclosed_item_indices)
+    );
+    println!(
+        "disclosed_item_types: {}",
+        format_csv(&response.disclosed_item_types)
+    );
+    println!(
+        "disclosed_obligation_refs: {}",
+        format_csv(&response.disclosed_item_obligation_refs)
+    );
+    println!(
+        "disclosed_artefacts: {}",
+        format_csv(&response.disclosed_artefact_names)
+    );
+    println!(
+        "artefact_bytes_included: {}",
+        if response.disclosed_artefact_bytes_included {
+            "yes"
+        } else {
+            "no"
+        }
+    );
 }
 
 fn cmd_vault_query(args: VaultQueryCommandInput<'_>) -> Result<()> {
@@ -2716,6 +2875,14 @@ fn normalize_optional_cli_text(label: &str, value: Option<&str>) -> Result<Optio
     }
 }
 
+fn normalize_required_cli_text(label: &str, value: &str) -> Result<String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        bail!("{label} must not be empty");
+    }
+    Ok(trimmed.to_string())
+}
+
 fn normalize_optional_cli_datetime(label: &str, value: Option<&str>) -> Result<Option<String>> {
     match value {
         Some(value) => {
@@ -2728,6 +2895,33 @@ fn normalize_optional_cli_datetime(label: &str, value: Option<&str>) -> Result<O
             Ok(Some(parsed.with_timezone(&Utc).to_rfc3339()))
         }
         None => Ok(None),
+    }
+}
+
+fn load_disclosure_policy_file(path: &Path) -> Result<DisclosurePolicyConfig> {
+    let raw = fs::read_to_string(path)
+        .with_context(|| format!("failed to read disclosure policy file {}", path.display()))?;
+    serde_json::from_str(&raw)
+        .with_context(|| format!("failed to parse disclosure policy file {}", path.display()))
+}
+
+fn format_csv(values: &[String]) -> String {
+    if values.is_empty() {
+        "none".to_string()
+    } else {
+        values.join(",")
+    }
+}
+
+fn format_indices(values: &[usize]) -> String {
+    if values.is_empty() {
+        "none".to_string()
+    } else {
+        values
+            .iter()
+            .map(usize::to_string)
+            .collect::<Vec<_>>()
+            .join(",")
     }
 }
 
@@ -3231,6 +3425,41 @@ mod tests {
                 ..
             } => {
                 assert_eq!(bundle_format, PackBundleFormatArg::Disclosure);
+                assert_eq!(disclosure_policy.as_deref(), Some("annex_iv_redacted"));
+            }
+            _ => panic!("unexpected command parsed"),
+        }
+    }
+
+    #[test]
+    fn vault_disclosure_preview_command_accepts_named_policy_arg() {
+        let cli = Cli::try_parse_from([
+            "proofctl",
+            "vault",
+            "disclosure-preview",
+            "--vault-url",
+            "http://127.0.0.1:8080",
+            "--bundle-id",
+            "B1",
+            "--type",
+            "annex-iv",
+            "--disclosure-policy",
+            "annex_iv_redacted",
+        ])
+        .unwrap();
+
+        match cli.command {
+            Commands::Vault {
+                command:
+                    VaultCommands::DisclosurePreview {
+                        bundle_id,
+                        pack_type,
+                        disclosure_policy,
+                        ..
+                    },
+            } => {
+                assert_eq!(bundle_id, "B1");
+                assert_eq!(pack_type, Some(PackTypeArg::AnnexIv));
                 assert_eq!(disclosure_policy.as_deref(), Some("annex_iv_redacted"));
             }
             _ => panic!("unexpected command parsed"),

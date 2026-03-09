@@ -106,6 +106,28 @@ class ProofLayerClient:
             json.dumps(config).encode("utf-8"),
         )
 
+    def preview_disclosure(
+        self,
+        *,
+        bundle_id: str,
+        pack_type: str | None = None,
+        disclosure_policy: str | None = None,
+        policy: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        payload: dict[str, Any] = {"bundle_id": bundle_id}
+        if pack_type is not None:
+            payload["pack_type"] = pack_type
+        if disclosure_policy is not None:
+            payload["disclosure_policy"] = disclosure_policy
+        if policy is not None:
+            payload["policy"] = policy
+        return self._request_fn(
+            "POST",
+            "/v1/disclosure/preview",
+            self._headers_json(),
+            json.dumps(payload).encode("utf-8"),
+        )
+
     def get_bundle(self, bundle_id: str) -> dict[str, Any]:
         return self._request_fn("GET", f"/v1/bundles/{bundle_id}", self._headers(), None)
 

@@ -176,6 +176,11 @@ Completed:
   `annex_iv_redacted` exports now include selected artefact files in disclosure packages,
   local `proofctl disclose` now supports `--artefacts ...`,
   and the TypeScript / Python SDK vault clients now expose disclosure-config read/update helpers.
+- Added the next disclosure-authoring slice:
+  disclosure policies now support allowed/excluded obligation-ref filters,
+  the vault now exposes `POST /v1/disclosure/preview` for named or inline policy previews against stored bundles,
+  `proofctl vault disclosure-preview` surfaces that flow on the CLI,
+  and the TypeScript / Python SDK clients now expose `previewDisclosure` / `preview_disclosure`.
 - Restored a clean Rust verification loop: `cargo test --workspace` and `cargo clippy --workspace --all-targets -- -D warnings` both pass.
 
 Still outstanding from `plan.md`:
@@ -183,7 +188,7 @@ Still outstanding from `plan.md`:
 - JSON schema coverage is now started, with timestamp and Rekor transparency receipt coverage added, but richer export/archive schemas are still incomplete.
 - The vault now uses SQLite with legal-hold-aware retention, audit logging, file/env/runtime configuration, background retention scanning, curated pack export, redacted disclosure-pack export, RFC 3161 bundle timestamp attachment, and transparency anchoring, but PostgreSQL and Annex-complete artefact/redaction policy assembly are not built yet.
 - TypeScript and Python now both have native FFI bridges, local sealing paths, and higher-level `ProofLayer` facades, but there is still no shared native build/release pipeline for SDK artifacts.
-- TypeScript and Python SDKs now expose local redacted-bundle helpers (`disclose` / `verifyRedactedBundle` in TypeScript, `disclose` / `verify_redacted_bundle` in Python), vault pack helpers for `bundle_format = "full" | "disclosure"` and `disclosure_policy`, and vault disclosure-config read/update helpers, but richer field-level disclosure policy authoring is still future work.
+- TypeScript and Python SDKs now expose local redacted-bundle helpers (`disclose` / `verifyRedactedBundle` in TypeScript, `disclose` / `verify_redacted_bundle` in Python), vault pack helpers for `bundle_format = "full" | "disclosure"` and `disclosure_policy`, vault disclosure-config read/update helpers, and disclosure-preview helpers, but richer field-level disclosure policy authoring is still future work.
 - The main remaining gaps are no longer the evidence catalog itself; they are the harder later-phase items like deeper trust policy work, fuller SCITT interoperability, alternative storage/runtime backends, and release hardening.
 - RFC 3161 verification now supports signer-chain validation against configured PEM trust anchors, optional `TSTInfo.policy` OID enforcement, CRL-based revocation checking, optional live OCSP checks, qualified TSA signer allowlist matching, and operational `qualified` profile gating, but full eIDAS-qualified trust-list evaluation and archival OCSP evidence handling are still outstanding.
 - Rekor verification now supports SET signature validation and `logID` binding against a configured PEM log public key; live-log consistency checks beyond the stored inclusion proof remain future work.

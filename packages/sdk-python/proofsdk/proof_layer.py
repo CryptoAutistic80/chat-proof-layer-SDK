@@ -161,6 +161,23 @@ class ProofLayer:
             return self.client.update_disclosure_config(config)
         raise ValueError("underlying client does not support update_disclosure_config; use vault mode")
 
+    def preview_disclosure(
+        self,
+        *,
+        bundle_id: str,
+        pack_type: str | None = None,
+        disclosure_policy: str | None = None,
+        policy: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        if hasattr(self.client, "preview_disclosure"):
+            return self.client.preview_disclosure(
+                bundle_id=bundle_id,
+                pack_type=pack_type,
+                disclosure_policy=disclosure_policy,
+                policy=policy,
+            )
+        raise ValueError("underlying client does not support preview_disclosure; use vault mode")
+
     def _submit_capture(
         self,
         request: dict[str, Any],

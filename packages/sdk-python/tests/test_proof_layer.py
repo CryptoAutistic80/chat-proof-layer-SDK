@@ -86,6 +86,39 @@ class TestProofLayer(unittest.TestCase):
         self.assertEqual(captured["path"], "/v1/config/disclosure")
         self.assertEqual(result["policies"][0]["name"], "regulator_minimum")
 
+    def test_vault_mode_can_preview_disclosure(self):
+        captured = {}
+
+        def request_fn(method, path, headers, body):
+            captured["method"] = method
+            captured["path"] = path
+            captured["headers"] = headers
+            captured["body"] = body
+            return {
+                "bundle_id": "B1",
+                "policy_name": "risk_only",
+                "disclosed_item_indices": [1],
+                "disclosed_item_types": ["risk_assessment"],
+                "disclosed_item_obligation_refs": ["art9"],
+                "disclosed_artefact_indices": [],
+                "disclosed_artefact_names": [],
+                "disclosed_artefact_bytes_included": False,
+            }
+
+        proof_layer = ProofLayer(
+            vault_url="http://127.0.0.1:8080",
+            request_fn=request_fn,
+        )
+
+        result = proof_layer.preview_disclosure(
+            bundle_id="B1",
+            policy={"name": "risk_only", "allowed_obligation_refs": ["art9"]},
+        )
+
+        self.assertEqual(captured["method"], "POST")
+        self.assertEqual(captured["path"], "/v1/disclosure/preview")
+        self.assertEqual(result["disclosed_item_types"], ["risk_assessment"])
+
     def test_capture_risk_assessment_seals_lifecycle_evidence(self):
         signing_key_pem = (GOLDEN_DIR / "signing_key.txt").read_text(encoding="utf-8")
         proof_layer = ProofLayer(

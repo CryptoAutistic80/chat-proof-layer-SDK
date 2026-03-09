@@ -1,63 +1,118 @@
 # Proof Layer SDK
 
-Rust-first SDK and service for cryptographically verifiable AI interaction evidence bundles.
+Rust-first SDK and evidence vault for tamper-evident AI interaction records.
 
-## Why This Is Needed
+Proof Layer turns an AI run into a signed, portable evidence package that can be verified later, including offline. It is built for teams that need more than ordinary logs: auditability, selective disclosure, retention controls, and cryptographic verification of what was captured.
 
-AI systems are increasingly used in workflows where people later need to answer simple but high-stakes questions:
+## What This Project Does
 
-- What exactly did we send to the model?
+- Captures AI interaction evidence as typed `CaptureEvent` / `EvidenceBundle` data.
+- Canonicalizes and hashes that data deterministically.
+- Builds a Merkle commitment over bundle content and signs the bundle root with Ed25519.
+- Packages the result as `bundle.pkg` for offline verification.
+- Supports RFC 3161 timestamping and transparency anchoring.
+- Supports selective disclosure with verifiable redacted packages.
+- Provides a vault service for storage, retention, audit, export packs, backup, and restore.
+- Exposes native TypeScript and Python SDKs over the Rust core.
+
+## What Works Today
+
+Current implemented surface:
+
+- Rust core for canonicalization, hashing, signing, verification, timestamping, transparency, disclosure, and backup-envelope crypto.
+- `proofctl` CLI for keygen, create, verify, inspect, disclose, vault query/export/backup/restore flows.
+- `proof-service` vault with SQLite storage, filesystem blobs, TLS, bearer auth, single-tenant enforcement, retention, legal holds, audit log, metrics, backup, restore layout export, and pack assembly.
+- TypeScript SDK in `sdks/typescript` published as `@proof-layer/sdk`.
+- Python SDK in `packages/sdk-python` published as `proof-layer-sdk-python`.
+- Web demo in `web-demo` aligned to the live vault API.
+
+Important current limits:
+
+- PostgreSQL and S3 are parsed in config but not implemented.
+- Full EU trusted-list / archival eIDAS trust evaluation is not implemented yet.
+- SCITT is a bounded draft-aligned implementation, not full COSE/CCF interoperability.
+- Multitenancy is bounded single-tenant enforcement today, not a full multi-org isolation model.
+
+## Why This Exists
+
+Normal logs answer "what happened?" but not "can an independent party verify this record was not changed?"
+
+This project is for cases where those questions matter:
+
+- What exactly was sent to the model?
 - What exactly came back?
-- Has that record been changed since it was created?
-- Can a third party verify this without trusting our server?
+- Which supporting artefacts were part of that run?
+- Has the record changed since it was sealed?
+- Can a third party verify the record without trusting our server?
 
-Normal logs are useful, but they are not tamper-evident by default. This project adds a proof layer that turns an AI run into a signed evidence package so teams can validate integrity later, including offline.
+Proof Layer does not claim model determinism or legal finality. It proves what was captured and sealed for one execution.
 
-## How We Achieve It (Plain English)
+## Architecture At A Glance
 
-At a high level, we do four things:
+| Layer | Path | Purpose |
+| --- | --- | --- |
+| Core | `crates/core` | Canonicalization, hashing, Merkle commitments, signing, verification, timestamping, transparency, disclosure |
+| CLI | `crates/cli` | `proofctl` create/verify/disclose/inspect plus vault operations |
+| Vault | `crates/vault` | `proof-service` with SQLite metadata, local blob storage, retention, audit, packs, backup |
+| TypeScript bridge | `crates/napi` | Native N-API bindings over the Rust core |
+| Python bridge | `crates/pyo3` | Native PyO3 bindings over the Rust core |
+| TS SDK | `sdks/typescript` | `@proof-layer/sdk`, local/vault clients, providers, evidence helpers, OTel helpers |
+| Python SDK | `packages/sdk-python` | `proof-layer-sdk-python`, local/vault clients, providers, decorators, helpers |
+| Demo | `web-demo` | Vite + React demo against the vault API |
 
-1. Capture the run inputs/outputs and artefacts.
-2. Canonicalize and hash that data in a deterministic way.
-3. Build a single integrity root (Merkle commitment) and sign it with Ed25519.
-4. Package everything into `bundle.pkg` so anyone with the public key can verify it.
+## Evidence And Assurance Model
 
-That means verification does not depend on trusting this service at verification time. If any byte of header data, artefact data, or signature is changed, verification fails.
+Evidence currently implemented in core and SDKs includes:
 
-## Verification Guarantees
+- `llm_interaction`
+- `tool_call`
+- `retrieval`
+- `human_oversight`
+- `policy_decision`
+- `risk_assessment`
+- `data_governance`
+- `technical_doc`
+- `model_evaluation`
+- `adversarial_test`
+- `training_provenance`
+- `literacy_attestation`
+- `incident_report`
+- `conformity_assessment`
+- `declaration`
+- `registration`
 
-The current implementation provides practical integrity guarantees:
+Assurance levels:
 
-- Deterministic canonicalization (RFC 8785 style) for stable hashing across runtimes.
-- Strict digest parsing and algorithm checks.
-- Tamper detection for header fields, artefact bytes, manifest, and signature.
-- Offline verification with only `bundle.pkg` + public key.
+- `signed`
+- `timestamped`
+- `transparency_anchored`
 
-What it does **not** claim: model determinism or legal finality. It proves what was captured and sealed in one execution, not that the model would produce the same output again.
+Bundle root algorithms:
 
-## Workspace
+- New bundles default to `pl-merkle-sha256-v4`
+- Verification still accepts legacy `pl-merkle-sha256-v1`, `pl-merkle-sha256-v2`, and `pl-merkle-sha256-v3`
 
-- `crates/core` (`proof-layer-core`): RFC 8785 canonicalization, hashing, Merkle commitment + inclusion proofs, Ed25519 JWS sign/verify, v1.0 evidence bundle build/verify logic, and v0.1 -> v1.0 migration helpers.
-- `crates/cli` (`proofctl`): keygen, create full bundle packages, produce redacted disclosure packages, verify packages offline, inspect packages, query vault state, and download vault-assembled evidence packs.
-- `crates/vault` (`proof-service`): Axum service with SQLite metadata storage, retention scanning, pack assembly, and local artifact storage.
-- `crates/napi` (`proof-layer-napi`): native TypeScript/Node bridge over the Rust core for canonicalization, hashing, Merkle root computation, JWS sign/verify, and offline bundle verification.
-- `crates/pyo3` (`proof-layer-pyo3`): native Python bridge over the Rust core for the same canonicalization, hashing, Merkle root, JWS sign/verify, and offline bundle verification surface.
-- `sdks/typescript`: the TypeScript npm SDK package (`@proof-layer/sdk`), with shared v1 evidence helpers, `ProofLayer`, vault/local sealing clients, typed builders for all evidence items currently implemented in Rust core (`llm_interaction`, `tool_call`, `retrieval`, `human_oversight`, `policy_decision`, `risk_assessment`, `data_governance`, `technical_doc`, `model_evaluation`, `adversarial_test`, `training_provenance`, `literacy_attestation`, `incident_report`, `conformity_assessment`, `declaration`, `registration`), provider wrappers, generic/Vercel AI adapters, and tool/OTel helpers over the Rust NAPI module.
-- `packages/sdk-python`: the Python SDK package, with shared v1 evidence helpers, `ProofLayer`, vault/local sealing clients, provider wrappers, decorator helpers, and callback/tool/OTel helpers, backed by the Rust PyO3 module for integrity-sensitive operations.
-- `.github/workflows/sdk-artifacts.yml`: cross-platform CI builds for checked npm tarballs and Python wheels on Linux, macOS, and Windows.
-- `.github/workflows/sdk-release.yml`: tag/manual GitHub Actions flow that rebuilds those SDK artifacts in `release` mode and attaches them to a GitHub release.
-- `web-demo`: Vite + React single-page demo UI.
-- `examples/`: runnable TypeScript/Python/agent-simulated example scripts.
+Selective disclosure:
+
+- Full bundles are packaged as `bundle.pkg`
+- Redacted bundles are packaged as `pl-bundle-disclosure-pkg-v1`
+- Disclosure supports item-level selection, optional artefact inclusion, top-level field redaction, and nested JSON-pointer path redaction on v4 bundles
 
 ## Quick Start
 
+### 1. Prerequisites
+
+- Rust toolchain
+- Node 20+ for the TypeScript SDK and demo
+- Python 3.10+ for the Python SDK
+
+### 2. Build A Bundle Offline
+
 ```bash
-# 1) Generate dev keys
+# Generate a dev signing keypair
 cargo run -p proofctl -- keygen --out ./keys
 
-# 2) Create a capture JSON file.
-#    `proofctl create` accepts either the legacy PoC capture shape or the v1.0 `CaptureEvent` shape.
-# 3) Create a bundle package
+# Create a bundle package from capture + artefacts
 cargo run -p proofctl -- create \
   --input ./capture.json \
   --artefact prompt.json=./prompt.json \
@@ -65,23 +120,30 @@ cargo run -p proofctl -- create \
   --key ./keys/signing.pem \
   --out ./bundle.pkg
 
-# Optional deterministic inputs for reproducible vectors:
-# --bundle-id PLFIXED0001 --created-at 2026-03-02T00:00:00Z --signing-kid kid-dev-01
-# Optional v1 override flags during migration:
-# --system-id system-123 --retention-class runtime_logs --evidence-type llm_interaction
-
-# 4) Verify offline
+# Verify offline
 cargo run -p proofctl -- verify --in ./bundle.pkg --key ./keys/verify.pub
 
-# 4b) Produce a selective-disclosure package for item 0 and verify it
+# Produce a selective-disclosure package for item 0
 cargo run -p proofctl -- disclose \
   --in ./bundle.pkg \
   --items 0 \
   --out ./bundle.disclosure.pkg
 
+# Verify the redacted package
 cargo run -p proofctl -- verify --in ./bundle.disclosure.pkg --key ./keys/verify.pub
+```
 
-# Optional trust-aware local timestamp/receipt attachment during create
+Notes:
+
+- `proofctl create` accepts both the legacy PoC capture shape and the current v1.0 `CaptureEvent` shape.
+- Migration overrides are available, for example `--system-id`, `--retention-class`, and `--evidence-type`.
+- Deterministic fixture inputs live under `fixtures/golden/`.
+
+### 3. Optional Trust-Aware Assurance
+
+Attach timestamp + transparency during create:
+
+```bash
 cargo run -p proofctl -- create \
   --input ./capture.json \
   --key ./keys/signing.pem \
@@ -95,8 +157,11 @@ cargo run -p proofctl -- create \
   --timestamp-qualified-signer ./tsa-signer.pem \
   --transparency-log https://rekor.sigstore.dev \
   --transparency-public-key ./rekor.pub
+```
 
-# Optional trust-aware assurance verification
+Verify with assurance checks:
+
+```bash
 cargo run -p proofctl -- verify \
   --in ./bundle.pkg \
   --key ./keys/verify.pub \
@@ -109,21 +174,43 @@ cargo run -p proofctl -- verify \
   --timestamp-policy-oid 1.2.3.4 \
   --check-receipt \
   --transparency-public-key ./rekor.pub
+```
 
-# 5) Inspect
-cargo run -p proofctl -- inspect --in ./bundle.pkg --format human
+### 4. Run The Vault
 
-# Richer inspect output
+```bash
+cp ./vault.toml.example ./vault.toml
+export PROOF_SIGNING_KEY_PATH=./keys/signing.pem
+cargo run -p proof-service
+```
+
+Or with Docker:
+
+```bash
+docker compose up --build
+```
+
+The service auto-loads `./vault.toml` when present. Environment variables still override file settings.
+
+### 5. Query, Export, And Backup Through The CLI
+
+```bash
+# Inspect a bundle
 cargo run -p proofctl -- inspect --in ./bundle.pkg --show-items --show-merkle
 
-# Assemble and download a vault export pack
+# Query vault bundles
+cargo run -p proofctl -- vault query \
+  --vault-url http://127.0.0.1:8080 \
+  --system-id system-123
+
+# Export a full pack
 cargo run -p proofctl -- pack \
   --type runtime-logs \
   --vault-url http://127.0.0.1:8080 \
   --system-id system-123 \
   --out ./runtime-logs.pack
 
-# Optional: ask the vault to export redacted disclosure packages instead of full bundle.pkg members
+# Export a disclosure-format pack using a built-in policy
 cargo run -p proofctl -- pack \
   --type runtime-logs \
   --bundle-format disclosure \
@@ -132,14 +219,7 @@ cargo run -p proofctl -- pack \
   --system-id system-123 \
   --out ./runtime-logs-disclosure.pack
 
-# Preview how a named disclosure policy would select items before export
-cargo run -p proofctl -- vault disclosure-preview \
-  --vault-url http://127.0.0.1:8080 \
-  --bundle-id BUNDLE_ID \
-  --type annex-iv \
-  --disclosure-policy annex_iv_redacted
-
-# Or preview directly from a built-in disclosure template without saving policy JSON first
+# Preview disclosure selection before export
 cargo run -p proofctl -- vault disclosure-preview \
   --vault-url http://127.0.0.1:8080 \
   --bundle-id BUNDLE_ID \
@@ -148,94 +228,101 @@ cargo run -p proofctl -- vault disclosure-preview \
   --disclosure-template-name privacy_review_internal \
   --disclosure-group metadata
 
-# List built-in disclosure policy templates exposed by the vault
-cargo run -p proofctl -- vault disclosure-templates \
-  --vault-url http://127.0.0.1:8080
-
-# Generate a starter disclosure policy file locally
-cargo run -p proofctl -- vault disclosure-template \
-  --profile runtime_minimum \
-  --group metadata \
-  --out ./runtime_minimum.policy.json
-
-# Or ask the vault to render the starter policy centrally
-cargo run -p proofctl -- vault disclosure-template \
+# Download a backup
+cargo run -p proofctl -- vault backup \
   --vault-url http://127.0.0.1:8080 \
-  --profile privacy_review \
-  --group metadata \
-  --out ./privacy_review.policy.json
+  --out ./vault-backup.tar.gz
 
-# Create a disclosure-format export pack directly from a built-in template profile
-cargo run -p proofctl -- pack \
-  --type runtime-logs \
-  --bundle-format disclosure \
-  --disclosure-template-profile runtime_minimum \
-  --disclosure-template-name runtime_minimum_export \
-  --disclosure-group metadata \
-  --vault-url http://127.0.0.1:8080 \
-  --system-id system-123 \
-  --out ./runtime-template-export.pack
-
-# Query vault bundle inventory
-cargo run -p proofctl -- vault query \
-  --vault-url http://127.0.0.1:8080 \
-  --system-id system-123 \
-  --has-receipt
-
-# Show a system summary
-cargo run -p proofctl -- vault systems \
-  --vault-url http://127.0.0.1:8080 \
-  --system-id system-123
+# Restore a backup layout offline
+cargo run -p proofctl -- vault restore \
+  --in ./vault-backup.tar.gz \
+  --out-dir ./restored-vault
 ```
 
-## Run Proof Service
+## Vault Service
 
-```bash
-# Optional: copy and edit the sample file first.
-cp ./vault.toml.example ./vault.toml
+### Runtime Capabilities
 
-# `proof-service` auto-loads `./vault.toml` when present.
-# Env vars still override file settings.
-export PROOF_SIGNING_KEY_PATH=./keys/signing.pem
-cargo run -p proof-service
-```
+- SQLite metadata backend
+- Filesystem blob backend
+- Optional HTTPS via PEM cert/key
+- Optional bearer auth for `/v1/*`
+- Optional bounded single-tenant enforcement
+- Retention policies, legal holds, soft-delete, grace-period hard-delete
+- Audit trail
+- Prometheus-style `/metrics`
+- Scheduled local backups with optional XChaCha20-Poly1305 envelope encryption
+- Offline restore layout via `proofctl vault restore`
 
-Or run with Docker:
+### Main Config Sections
 
-```bash
-docker compose up --build
-```
+`vault.toml` supports:
 
-Supported runtime config knobs:
+- `[server]`
+- `[auth]` and `[[auth.api_keys]]`
+- `[tenant]`
+- `[signing]`
+- `[storage]`
+- `[backup]` and `[backup.encryption]`
+- `[timestamp]`
+- `[transparency]`
+- `[retention]` and `[[retention.policies]]`
 
-- `vault.toml` sections: `[server]`, `[auth]`, `[[auth.api_keys]]`, `[tenant]`, `[signing]`, `[storage]`, `[backup]`, `[timestamp]`, `[transparency]`, `[retention]`, and `[[retention.policies]]`
-- optional HTTPS listener fields: `[server].tls_cert` and `[server].tls_key`
-- optional bearer-auth fields: `[auth].enabled`, `[[auth.api_keys]].key`, and `[[auth.api_keys]].label`
-- optional single-tenant field: `[tenant].organization_id`
-- scheduled local backup fields: `[backup].directory`, `[backup].interval_hours`, and `[backup].retention_count`
-- optional backup-encryption fields: `[backup.encryption].enabled`, `[backup.encryption].key_base64` / `[backup.encryption].key_path`, and `[backup.encryption].key_id`
-- trust-aware assurance fields: `[timestamp].assurance`, `[timestamp].trust_anchor_pems` / `[timestamp].trust_anchor_paths`, `[timestamp].crl_pems` / `[timestamp].crl_paths`, `[timestamp].ocsp_responder_urls`, `[timestamp].qualified_signer_pems` / `[timestamp].qualified_signer_paths`, `[timestamp].policy_oids`, and `[transparency].log_public_key_pem` / `[transparency].log_public_key_path`
-- `PROOF_SERVICE_CONFIG_PATH=/path/to/vault.toml` to point at a non-default file
-- env overrides for `PROOF_SERVICE_ADDR`, `PROOF_SERVICE_TLS_CERT_PATH`, `PROOF_SERVICE_TLS_KEY_PATH`, `PROOF_SERVICE_API_KEY`, `PROOF_SERVICE_API_KEY_LABEL`, `PROOF_SERVICE_ORGANIZATION_ID`, `PROOF_SERVICE_STORAGE_DIR`, `PROOF_SERVICE_DB_PATH`, `PROOF_SERVICE_BACKUP_DIR`, `PROOF_SERVICE_BACKUP_INTERVAL_HOURS`, `PROOF_SERVICE_BACKUP_RETENTION_COUNT`, `PROOF_SERVICE_BACKUP_ENCRYPTION_KEY_B64`, `PROOF_SERVICE_BACKUP_ENCRYPTION_KEY_PATH`, `PROOF_SERVICE_BACKUP_ENCRYPTION_KEY_ID`, `PROOF_SIGNING_KEY_PATH`, `PROOF_SIGNING_KEY_ID`, `PROOF_SERVICE_MAX_PAYLOAD_BYTES`, `PROOF_SERVICE_RETENTION_GRACE_DAYS`, and `PROOF_SERVICE_RETENTION_SCAN_INTERVAL_HOURS`
+Useful environment overrides:
 
-Current file-config limitations:
+- `PROOF_SERVICE_CONFIG_PATH`
+- `PROOF_SERVICE_ADDR`
+- `PROOF_SERVICE_TLS_CERT_PATH`
+- `PROOF_SERVICE_TLS_KEY_PATH`
+- `PROOF_SERVICE_API_KEY`
+- `PROOF_SERVICE_API_KEY_LABEL`
+- `PROOF_SERVICE_ORGANIZATION_ID`
+- `PROOF_SERVICE_DB_PATH`
+- `PROOF_SERVICE_STORAGE_DIR`
+- `PROOF_SERVICE_BACKUP_DIR`
+- `PROOF_SERVICE_BACKUP_INTERVAL_HOURS`
+- `PROOF_SERVICE_BACKUP_RETENTION_COUNT`
+- `PROOF_SERVICE_BACKUP_ENCRYPTION_KEY_B64`
+- `PROOF_SERVICE_BACKUP_ENCRYPTION_KEY_PATH`
+- `PROOF_SERVICE_BACKUP_ENCRYPTION_KEY_ID`
+- `PROOF_SIGNING_KEY_PATH`
+- `PROOF_SIGNING_KEY_ID`
+
+Current backend limits:
 
 - `signing.algorithm` must be `ed25519`
 - `storage.metadata_backend` must be `sqlite`
 - `storage.blob_backend` must be `filesystem`
-- PostgreSQL and S3 config are parsed but fail fast as not implemented
+- PostgreSQL and S3 config currently fail fast as not implemented
 
-When auth is configured, `/v1/*` requires `Authorization: Bearer <token>`. `proofctl` picks this up from `PROOF_SERVICE_API_KEY`, and the TypeScript/Python vault clients already support `apiKey`. `/healthz`, `/readyz`, and `/metrics` remain open for infrastructure checks and scraping.
+Operational behavior:
 
-When `[tenant].organization_id` or `PROOF_SERVICE_ORGANIZATION_ID` is configured, the vault runs in bounded single-tenant mode: new captures inherit that `actor.organization_id` when missing, explicit mismatches are rejected, and startup fails if existing stored bundles are scoped to a different organization.
+- When auth is enabled, `/v1/*` requires `Authorization: Bearer <token>`.
+- `proofctl` picks up the bearer token from `PROOF_SERVICE_API_KEY`.
+- `/healthz`, `/readyz`, and `/metrics` stay open for infrastructure checks and scraping.
+- When `organization_id` is configured, the vault runs in bounded single-tenant mode and rejects bundle writes scoped to a different org.
 
-### Service Endpoints
+### Main Endpoints
+
+Health and ops:
 
 - `GET /healthz`
 - `GET /readyz`
 - `GET /metrics`
+- `GET /v1/config`
+- `PUT /v1/config/retention`
+- `PUT /v1/config/timestamp`
+- `PUT /v1/config/transparency`
+- `PUT /v1/config/disclosure`
+- `GET /v1/audit-trail`
+- `GET /v1/retention/status`
+- `POST /v1/retention/scan`
+- `POST /v1/backup`
+
+Bundles and assurance:
+
 - `POST /v1/bundles`
-- `GET /v1/bundles?system_id=&role=&type=&has_timestamp=&has_receipt=&assurance_level=&from=&to=&page=&limit=`
+- `GET /v1/bundles`
 - `GET /v1/bundles/{bundle_id}`
 - `DELETE /v1/bundles/{bundle_id}`
 - `GET /v1/bundles/{bundle_id}/artefacts/{name}`
@@ -243,28 +330,28 @@ When `[tenant].organization_id` or `PROOF_SERVICE_ORGANIZATION_ID` is configured
 - `DELETE /v1/bundles/{bundle_id}/legal-hold`
 - `POST /v1/bundles/{bundle_id}/timestamp`
 - `POST /v1/bundles/{bundle_id}/anchor`
-- `GET /v1/audit-trail?action=&bundle_id=&pack_id=&page=&limit=`
-- `GET /v1/config`
-- `PUT /v1/config/retention`
-- `PUT /v1/config/timestamp`
-- `PUT /v1/config/transparency`
-- `PUT /v1/config/disclosure`
+- `POST /v1/verify`
+- `POST /v1/verify/timestamp`
+- `POST /v1/verify/receipt`
+
+Disclosure and packs:
+
+- `POST /v1/disclosure/preview`
 - `GET /v1/disclosure/templates`
 - `POST /v1/disclosure/templates/render`
-- `GET /v1/systems`
-- `GET /v1/systems/{system_id}/summary`
 - `POST /v1/packs`
 - `GET /v1/packs/{pack_id}`
 - `GET /v1/packs/{pack_id}/manifest`
 - `GET /v1/packs/{pack_id}/export`
-- `POST /v1/backup`
-- `GET /v1/retention/status`
-- `POST /v1/retention/scan`
-- `POST /v1/verify` (supports inline bundle+artefacts or packaged `bundle.pkg`)
-- `POST /v1/verify/timestamp`
-- `POST /v1/verify/receipt`
 
-### `POST /v1/bundles` request
+System rollups:
+
+- `GET /v1/systems`
+- `GET /v1/systems/{system_id}/summary`
+
+### Example API Payloads
+
+`POST /v1/bundles`
 
 ```json
 {
@@ -318,20 +405,7 @@ When `[tenant].organization_id` or `PROOF_SERVICE_ORGANIZATION_ID` is configured
 }
 ```
 
-### `POST /v1/verify` request (inline mode)
-
-```json
-{
-  "bundle": { "...": "proof_bundle.json contents" },
-  "artefacts": [
-    { "name": "prompt.json", "data_base64": "..." },
-    { "name": "response.json", "data_base64": "..." }
-  ],
-  "public_key_pem": "-----BEGIN PUBLIC KEY-----\\n..."
-}
-```
-
-### `POST /v1/verify` request (package mode)
+`POST /v1/verify` using a packaged bundle:
 
 ```json
 {
@@ -340,9 +414,20 @@ When `[tenant].organization_id` or `PROOF_SERVICE_ORGANIZATION_ID` is configured
 }
 ```
 
-## SDK And Demo
+## SDKs
 
-Run TypeScript SDK tests:
+### TypeScript
+
+Path: `sdks/typescript`
+
+- Package name: `@proof-layer/sdk`
+- Native Rust-backed N-API module
+- Local and vault clients
+- `ProofLayer` facade
+- Provider wrappers for OpenAI, Anthropic, generic, and Vercel AI style flows
+- Evidence builders, disclosure-policy helpers, and OTel helpers
+
+Basic loop:
 
 ```bash
 cd sdks/typescript
@@ -350,7 +435,23 @@ npm install
 npm test
 ```
 
-Run Python SDK tests:
+Build a checked tarball:
+
+```bash
+npm run pack:smoke
+```
+
+### Python
+
+Path: `packages/sdk-python`
+
+- Package name: `proof-layer-sdk-python`
+- Native Rust-backed PyO3 module
+- Local and vault clients
+- `ProofLayer` facade
+- Provider wrappers, decorators, disclosure-policy helpers, and OTel helpers
+
+Basic loop:
 
 ```bash
 cd packages/sdk-python
@@ -358,27 +459,37 @@ python3 ./scripts/build_native.py
 python -m unittest discover -s tests -v
 ```
 
-Build local SDK distribution artifacts:
+Build a checked wheel:
+
+```bash
+python3 ./scripts/build_dist.py
+```
+
+### Unified SDK Artifact Build
 
 ```bash
 python3 ./scripts/build_sdk_artifacts.py --profile release
 ```
 
 This produces:
+
 - a checked npm tarball at `sdks/typescript/dist/artifacts/*.tgz`
-- a checked platform-tagged Python wheel at `packages/sdk-python/dist/*.whl`
+- a checked platform-tagged wheel at `packages/sdk-python/dist/*.whl`
 
-CI also builds the same artifacts through `.github/workflows/sdk-artifacts.yml`, and `.github/workflows/sdk-release.yml` attaches them to GitHub releases for `sdk-v*` tags.
+GitHub Actions builds the same artifacts through:
 
-Run examples (with proof-service running):
+- `.github/workflows/sdk-artifacts.yml`
+- `.github/workflows/sdk-release.yml`
 
-```bash
-node examples/typescript/run.mjs
-python3 examples/python-basic/run.py
-python3 examples/agent-simulated/run.py
-```
+## Demo And Examples
 
-Run the web demo:
+Examples:
+
+- `node examples/typescript/run.mjs`
+- `python3 examples/python-basic/run.py`
+- `python3 examples/agent-simulated/run.py`
+
+Web demo:
 
 ```bash
 cd web-demo
@@ -386,62 +497,40 @@ npm install
 npm run dev
 ```
 
-The demo is now aligned with the current vault surface rather than the old PoC bundle simulator:
+The demo now uses the live vault API rather than the old PoC simulator. It can:
 
-- it loads `/v1/config` and `/v1/disclosure/templates` to show auth, assurance, tenant, backup, and disclosure capabilities
-- it creates a real v1.0 `llm_interaction` bundle with prompt, response, and trace artefacts through `POST /v1/bundles`
-- it can optionally drive vault timestamping, transparency anchoring, disclosure preview, pack export, and system-summary lookup in one workflow
-- it can export either full or disclosure-format `runtime_logs` packs shaped by a built-in disclosure template
-- if you paste a public key PEM, it also runs service-side bundle verification through `POST /v1/verify`
+- read `/v1/config` and `/v1/disclosure/templates`
+- create a real `llm_interaction` bundle through `POST /v1/bundles`
+- optionally timestamp and anchor that bundle
+- preview disclosure output
+- export full or disclosure-format packs
+- fetch system summaries
+- verify through `POST /v1/verify` when given a public key PEM
 
-## Notes
+## Docs Map
 
-- Full proof packages are gzip-compressed JSON (`bundle.pkg`) containing named files (`proof_bundle.json`, `proof_bundle.canonical.json`, `proof_bundle.sig`, `artefacts/*`, `manifest.json`).
-- Redacted disclosure packages use `format = "pl-bundle-disclosure-pkg-v1"` and contain `redacted_bundle.json`, `manifest.json`, and optional `artefacts/*` members for explicitly disclosed artefact bytes.
-- Bundles now serialize as `bundle_version: "1.0"` with typed `items` plus `context`.
-- New bundles now default to `bundle_root_algorithm = "pl-merkle-sha256-v4"` with separate header, path-level item, and artefact-metadata Merkle leaves; `proofctl verify` still accepts legacy `pl-merkle-sha256-v1`, `pl-merkle-sha256-v2`, and `pl-merkle-sha256-v3` bundles.
-- `proofctl create` and `POST /v1/bundles` accept either the legacy PoC capture shape or the v1.0 capture shape during migration.
-- `proofctl create` also supports Phase 2 migration overrides such as `--system-id`, `--retention-class`, and `--evidence-type`.
-- `proofctl create` now supports `--timestamp-url <tsa>` and can attach an RFC 3161 token before packaging.
-- `proofctl create --transparency-log <url>` now anchors the RFC 3161 token into either Rekor or the draft-aligned SCITT receipt path, selected with `--transparency-provider <rekor|scitt>`; this still requires `--timestamp-url`.
-- `proofctl create` also supports local trust-aware attachment via `--timestamp-assurance <standard|qualified>`, `--timestamp-trust-anchor <pem>`, `--timestamp-crl <pem>`, `--timestamp-ocsp-url <url>`, `--timestamp-qualified-signer <pem>`, `--timestamp-policy-oid <oid>`, and `--transparency-public-key <pem>`, so locally attached assurance fails fast when it does not satisfy the configured policy.
-- `proofctl verify --check-timestamp` now validates RFC 3161 tokens against the UTF-8 bytes of `integrity.bundle_root`, and `--check-receipt` now validates both Rekor RFC 3161 receipts and the current draft-aligned SCITT receipt format against the same bundle root.
-- `proofctl verify` also supports `--timestamp-assurance <standard|qualified>`, `--timestamp-trust-anchor <pem>` (repeatable), `--timestamp-crl <pem>` (repeatable), `--timestamp-ocsp-url <url>` (repeatable), `--timestamp-qualified-signer <pem>` (repeatable), `--timestamp-policy-oid <oid>` (repeatable), and `--transparency-public-key <pem>` so optional assurance checks can move from structural validity to configured trust validation.
-- `proofctl verify` now reports the bundle assurance level as `signed`, `timestamped`, or `transparency_anchored`.
-- `proofctl disclose --items ...` now creates redacted packages with Merkle inclusion proofs, `--artefacts ...` can carry selected artefact bytes into that disclosure package, and repeatable `--redact-field <item_index>:<field-or-json-pointer>` supports top-level field redaction on `pl-merkle-sha256-v3` bundles and nested JSON-pointer path redaction on `pl-merkle-sha256-v4` bundles; `proofctl verify` auto-detects full vs disclosure package formats.
-- The TypeScript and Python SDKs now expose local disclosure helpers, vault pack client methods for `bundle_format = "full" | "disclosure"` and optional `disclosure_policy` or `disclosure_template`, and vault disclosure-config helpers, so SDK callers can request policy-shaped or template-shaped redacted exports without dropping to raw HTTP.
-- `proofctl vault disclosure-preview` and the TypeScript/Python SDK clients can now preview named or inline disclosure policies against a stored bundle before export, and disclosure policies can now filter by obligation refs as well as evidence item types.
-- Disclosure policies can now also define `redacted_fields_by_item_type`, using either top-level field names or JSON-pointer paths, and vault disclosure previews/manifests report the resulting per-item field/path redactions that will be applied to `pl-merkle-sha256-v3` / `pl-merkle-sha256-v4` bundles.
-- `proofctl vault disclosure-template` now generates starter policy JSON for built-in profiles such as `regulator_minimum`, `annex_iv_redacted`, `incident_summary`, `runtime_minimum`, and `privacy_review`, with optional redaction groups like `commitments`, `metadata`, `parameters`, and `operational_metrics`.
-- The vault now also exposes `GET /v1/disclosure/templates` and `POST /v1/disclosure/templates/render`, so `proofctl`, TypeScript, and Python clients can discover the built-in disclosure-template catalog and ask the service to materialize starter policy JSON before saving or previewing it.
-- `POST /v1/packs` and `POST /v1/disclosure/preview` now also accept `disclosure_template` directly, so `proofctl pack`, `proofctl vault export`, `proofctl vault disclosure-preview`, and the TypeScript/Python SDKs can use built-in template profiles inline via `--disclosure-template-profile`, `--disclosure-template-name`, and repeatable `--disclosure-group` flags without first saving policy JSON.
-- The TypeScript and Python SDKs now also expose local disclosure-policy builder helpers so callers can compose the same template/group model without hand-writing selector maps.
-- `proofctl inspect` now supports `--show-items` and `--show-merkle`.
-- `proofctl pack` and `proofctl vault export` now support `--bundle-format <full|disclosure>` plus either `--disclosure-policy <name>` or inline template selection through `--disclosure-template-profile`, `--disclosure-template-name`, and repeatable `--disclosure-group`, so vault exports can contain either full `bundle.pkg` members or disclosure packages shaped by named or built-in disclosure profiles.
-- `proofctl vault status|metrics|backup|restore|query|retention|systems|export` now covers the main vault read/query/export flows from the plan without requiring manual `curl`.
-- The vault now persists metadata in SQLite, computes bundle expiry from seeded retention policies, derives per-item `obligation_ref` tags, exposes retention scan/status endpoints, supports legal holds, and indexes evidence items for `/v1/bundles` filtering.
-- The vault now exposes `GET /v1/systems` and `GET /v1/systems/{system_id}/summary` for system-level evidence rollups across role, item type, retention class, assurance level, and model usage.
-- `/v1/bundles` now also supports assurance-oriented filtering through `has_timestamp`, `has_receipt`, and `assurance_level=signed|timestamped|transparency_anchored`, and bundle summaries now report the computed assurance level.
-- Retention scans now soft-delete expired bundles, skip held bundles, and hard-delete previously soft-deleted bundles after the configured grace period (`PROOF_SERVICE_RETENTION_GRACE_DAYS`, default `30`).
-- The vault now keeps an append-only audit trail and exposes it via `/v1/audit-trail`; current actions include bundle create/read/verify/delete, legal hold changes, retention scans, and pack create/read/export events.
-- Optional bearer auth now protects `/v1/*`, and audit rows record the configured principal label instead of the generic `api` actor when requests are authenticated.
-- The vault now exposes a Prometheus-style `/metrics` endpoint for infra scraping, with gauges for bundle/pack/audit totals plus auth/TLS/tenant runtime state.
-- `POST /v1/backup` now returns an authenticated `.tar.gz` snapshot for SQLite-based deployments containing a consistent `VACUUM INTO` metadata copy, current non-secret config, and filesystem blobs/pack exports under the vault storage directory.
-- `proofctl vault restore --in backup.tar.gz --out-dir ./restored-vault` now validates that archive offline, rejects traversal/duplicate entries, and lays it back out as `manifest.json`, `config/vault_config.json`, `metadata/metadata.db`, and `storage/*` for relaunch or inspection. Encrypted backups can be restored with `--backup-key ./backup.key` or `PROOF_SERVICE_BACKUP_ENCRYPTION_KEY_B64`.
-- The vault can now also run scheduled local backups into `[backup].directory` / `PROOF_SERVICE_BACKUP_DIR`, pruning old `proof-layer-vault-backup-*.tar.gz` or `.tar.gz.enc` archives down to the configured retention count while excluding `storage/backups/*` from the archive itself to avoid recursive growth.
-- When `[backup.encryption]` or `PROOF_SERVICE_BACKUP_ENCRYPTION_KEY_*` is configured, `POST /v1/backup` and scheduled backups encrypt the archive with an XChaCha20-Poly1305 envelope before writing or returning it; `GET /v1/config` and `proofctl vault status` expose only the non-secret algorithm/key-id view.
-- The vault now exposes `GET /v1/config`, `PUT /v1/config/retention`, `PUT /v1/config/timestamp`, `PUT /v1/config/transparency`, `PUT /v1/config/disclosure`, and `POST /v1/disclosure/preview`; disclosure config persists named disclosure-policy profiles with item-type filters, obligation-ref filters, artefact-metadata rules, and optional artefact-byte inclusion, while timestamp/transparency config carry PEM trust anchors, PEM CRLs, live OCSP responder URLs, qualified TSA signer allowlists, expected RFC 3161 policy OIDs, and transparency-service public keys for trust-aware verification.
-- Retention policies now include an `expiry_mode`; the seeded `gpai_documentation` class uses `until_withdrawn`, so GPAI documentation stays active until operator withdrawal instead of auto-expiring on a fixed date.
-- `POST /v1/bundles/{bundle_id}/timestamp` now uses the configured RFC 3161 provider to timestamp an existing stored bundle and persist the token back into bundle JSON.
-- `POST /v1/bundles/{bundle_id}/anchor` now uses the configured transparency provider to anchor an existing timestamped bundle and persist the receipt back into bundle JSON for both Rekor and the current SCITT-style receipt flow.
-- `POST /v1/verify/timestamp` and `POST /v1/verify/receipt` now verify assurance artefacts either directly (`bundle_root` + token/receipt) or by stored `bundle_id`, and they automatically use configured trust anchors / transparency public keys when present.
-- Timestamp verification now has six layers: structural CMS/message-imprint validation by default, optional RFC 3161 policy OID matching when configured, signer-chain validation against configured PEM trust anchors at token generation time, optional CRL-based revocation checks against configured PEM CRLs, optional live OCSP checks against configured responder URLs, and optional qualified TSA signer allowlist matching. Setting `assurance = "qualified"` still makes trust anchors, CRLs, expected policy OIDs, and at least one allowed TSA signer certificate mandatory and also requires the TSA signer certificate profile to be appropriate for time stamping. EU trusted-list ingestion and archival OCSP evidence handling are still future work.
-- Transparency verification now checks Rekor receipt structure, entry UUID to leaf-hash binding, the Merkle inclusion proof against the advertised Rekor root hash, the embedded RFC 3161 token binding to `integrity.bundle_root`, and Rekor signed-entry-timestamp signatures plus `logID` binding when a trusted public key is configured. The SCITT path verifies a draft-aligned canonical JSON statement/receipt contract with `serviceId == sha256(SPKI_DER(public_key))`; full interoperable COSE/CCF SCITT is still future work.
-- Pack assembly is now available through `/v1/packs`; packs apply an initial heuristic curation profile (`pack-rules-v1`) based on actor role, evidence item types, retention class, and derived obligation refs, then export matching bundles as either embedded full `bundle.pkg` files or redacted disclosure packages plus a manifest.
-- When `bundle_format=disclosure`, the vault emits `pl-bundle-disclosure-pkg-v1` members and applies a named disclosure policy (`regulator_minimum`, `annex_iv_redacted`, `incident_summary`, or operator-defined profiles) to filter disclosed item types and optionally include artefact metadata and selected artefact bytes.
-- Vault startup now supports `vault.toml` + env override configuration, an optional HTTPS listener via PEM cert/key paths, optional bearer-auth protection for `/v1/*`, automatic background retention scanning, and scheduled local backup export; PostgreSQL/S3 remain future work.
-- Canonicalization and signing semantics follow `docs/architecture.md`.
-- Verification is designed to work offline with a full or disclosure package plus the public key.
-- JSON Schemas: `schemas/evidence_bundle.schema.json`, `schemas/redacted_bundle.schema.json`, `schemas/capture_event.schema.json`, `schemas/evidence_item.schema.json`, `schemas/evidence_pack.schema.json`.
-- Test matrix: `docs/verification-test-matrix.md`.
-- Deterministic fixture inputs: `fixtures/golden/`.
+- [Architecture](docs/architecture.md)
+- [Proof Bundle Schema](docs/proof_bundle_schema.md)
+- [Threat Model](docs/threat_model.md)
+- [Verification Test Matrix](docs/verification-test-matrix.md)
+- [Golden Fixtures](fixtures/golden/README.md)
+- [TypeScript SDK README](sdks/typescript/README.md)
+- [Python SDK README](packages/sdk-python/README.md)
+- [Full Technical Plan](plan.md)
+- [Progress Summary](PROGRESS_SUMMARY.md)
+
+JSON schemas:
+
+- `schemas/evidence_bundle.schema.json`
+- `schemas/redacted_bundle.schema.json`
+- `schemas/capture_event.schema.json`
+- `schemas/evidence_item.schema.json`
+- `schemas/evidence_pack.schema.json`
+
+## Current Caveats
+
+- Full offline verification works with a full or disclosure package plus the public key.
+- RFC 3161 verification supports trust anchors, CRLs, live OCSP, policy OIDs, and TSA signer allowlists, but full EU trusted-list ingestion and archival OCSP evidence handling are still future work.
+- Rekor verification checks receipt structure, entry binding, inclusion proof, and signed-entry-timestamp signature when a trusted public key is configured.
+- The current SCITT path is intentionally bounded and draft-aligned.
+- SQLite is the production-default path in this repo today; PostgreSQL and S3 are future expansion paths, not current backends.

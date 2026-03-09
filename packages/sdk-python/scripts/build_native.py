@@ -32,9 +32,12 @@ def main() -> None:
     cargo_cmd = ["cargo", "build", "-p", "proof-layer-pyo3"]
     if profile == "release":
         cargo_cmd.append("--release")
+    env = os.environ.copy()
+    env.setdefault("PYO3_PYTHON", sys.executable)
     subprocess.run(
         cargo_cmd,
         cwd=repo_root,
+        env=env,
         check=True,
     )
 

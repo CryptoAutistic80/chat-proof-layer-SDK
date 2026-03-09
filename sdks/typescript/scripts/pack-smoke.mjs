@@ -8,6 +8,8 @@ const execFileAsync = promisify(execFile);
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const packageRoot = path.resolve(scriptDir, "..");
 const artifactDir = path.join(packageRoot, "dist", "artifacts");
+const npmExecutable = process.platform === "win32" ? "npm.cmd" : "npm";
+const tarExecutable = process.platform === "win32" ? "tar.exe" : "tar";
 
 const requiredEntries = [
   "package/package.json",
@@ -24,7 +26,7 @@ async function main() {
   env.PROOF_SDK_NATIVE_PROFILE ??= "release";
 
   const { stdout } = await execFileAsync(
-    "npm",
+    npmExecutable,
     ["pack", "--json", "--pack-destination", artifactDir],
     { cwd: packageRoot, env }
   );
@@ -35,7 +37,7 @@ async function main() {
   }
 
   const tarballPath = path.join(artifactDir, tarballName);
-  const listing = await execFileAsync("tar", ["-tzf", tarballPath], {
+  const listing = await execFileAsync(tarExecutable, ["-tzf", tarballPath], {
     cwd: packageRoot,
     env: process.env,
   });

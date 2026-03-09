@@ -14,3 +14,6 @@ proof-layer-core = { path = "../core" }
 pyo3.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+
+[build-dependencies]
+pyo3-build-config.workspace = true

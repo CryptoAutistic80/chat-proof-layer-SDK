@@ -101,14 +101,15 @@ Current retention behavior:
 Current audit behavior:
 
 - Vault writes append-only audit rows for create/read/verify/delete/legal-hold/retention-scan, assurance verification, and pack operations.
-- Audit rows currently use service-side actor labels (`api`, `system`) because authn/authz is not implemented yet.
+- Audit rows use configured API-key principal labels for authenticated `/v1/*` requests and still use `system` for startup sync / background retention work.
 - Audit logging is stored in SQLite and queryable through `GET /v1/audit-trail`.
 
 Current config behavior:
 
 - `proof-service` now supports startup config from `./vault.toml` or `PROOF_SERVICE_CONFIG_PATH`, with env vars overriding file values.
 - `proof-service` can now also serve HTTPS directly when `[server].tls_cert` + `[server].tls_key` or `PROOF_SERVICE_TLS_CERT_PATH` + `PROOF_SERVICE_TLS_KEY_PATH` are configured.
-- `GET /v1/config` returns the active service view for payload limits, bound address, TLS enabled state, signing algorithm/key id, storage backends, retention grace period, retention policies, and persisted timestamp/transparency provider settings.
+- `proof-service` can also require bearer auth on `/v1/*` when `[auth]` / `[[auth.api_keys]]` or `PROOF_SERVICE_API_KEY` are configured; `/healthz` and `/readyz` stay open.
+- `GET /v1/config` returns the active service view for payload limits, bound address, TLS enabled state, auth enabled state/principal labels, signing algorithm/key id, storage backends, retention grace period, retention policies, and persisted timestamp/transparency provider settings.
 - `GET /v1/config` also reports the retention scan interval currently active in the process.
 - `PUT /v1/config/retention` upserts retention policy rows in SQLite.
 - Retention policies now carry an `expiry_mode`; `fixed_days` computes `expires_at`, while `until_withdrawn` leaves bundles active until an explicit withdrawal/delete event.

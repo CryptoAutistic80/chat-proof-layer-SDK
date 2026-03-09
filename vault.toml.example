@@ -4,6 +4,13 @@ max_payload_bytes = 10485760
 # tls_cert = "./tls/server.crt"
 # tls_key = "./tls/server.key"
 
+[auth]
+enabled = false
+
+[[auth.api_keys]]
+key = "change-me"
+label = "ops"
+
 [signing]
 key_id = "kid-dev-01"
 algorithm = "ed25519"

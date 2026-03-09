@@ -1,9 +1,10 @@
 use anyhow::{Context, Result, bail};
 use axum::{
-    Json, Router,
-    extract::{DefaultBodyLimit, Path, Query, State},
-    http::StatusCode,
-    response::IntoResponse,
+    Extension, Json, Router,
+    extract::{DefaultBodyLimit, Path, Query, Request, State},
+    http::{HeaderMap, StatusCode, header},
+    middleware::{self, Next},
+    response::{IntoResponse, Response},
     routing::{get, post, put},
 };
 use axum_server::tls_rustls::RustlsConfig;
@@ -48,6 +49,7 @@ const DEFAULT_MAX_PAYLOAD_BYTES: usize = 10 * 1024 * 1024;
 const DEFAULT_RETENTION_GRACE_PERIOD_DAYS: i64 = 30;
 const DEFAULT_RETENTION_SCAN_INTERVAL_HOURS: i64 = 24;
 const DEFAULT_CONFIG_PATH: &str = "./vault.toml";
+const DEFAULT_AUTH_PRINCIPAL_LABEL: &str = "api";
 const PACKAGE_FORMAT: &str = "pl-bundle-pkg-v1";
 const DISCLOSURE_PACKAGE_FORMAT: &str = "pl-bundle-disclosure-pkg-v1";
 const PACK_EXPORT_FORMAT: &str = "pl-evidence-pack-v1";
@@ -74,6 +76,7 @@ struct AppState {
     db: SqlitePool,
     addr: String,
     tls_enabled: bool,
+    auth_config: Option<RuntimeAuthConfig>,
     storage_dir: PathBuf,
     signing_key: Arc<SigningKey>,
     signing_kid: String,
@@ -91,6 +94,7 @@ struct VaultRuntimeConfig {
     db_path: PathBuf,
     tls_cert_path: Option<PathBuf>,
     tls_key_path: Option<PathBuf>,
+    auth_config: Option<RuntimeAuthConfig>,
     signing_key_path: Option<PathBuf>,
     signing_kid: String,
     metadata_backend: String,
@@ -109,6 +113,8 @@ struct VaultFileConfig {
     #[serde(default)]
     server: VaultServerFileConfig,
     #[serde(default)]
+    auth: Option<VaultAuthFileConfig>,
+    #[serde(default)]
     signing: VaultSigningFileConfig,
     #[serde(default)]
     storage: VaultStorageFileConfig,
@@ -126,6 +132,19 @@ struct VaultServerFileConfig {
     max_payload_bytes: Option<usize>,
     tls_cert: Option<String>,
     tls_key: Option<String>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct VaultAuthFileConfig {
+    enabled: Option<bool>,
+    #[serde(default)]
+    api_keys: Vec<VaultApiKeyFileConfig>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct VaultApiKeyFileConfig {
+    key: String,
+    label: Option<String>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -517,6 +536,7 @@ struct VaultConfigResponse {
     transparency: TransparencyConfig,
     disclosure: DisclosureConfig,
     audit: AuditConfigView,
+    auth: VaultAuthConfigView,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -524,6 +544,13 @@ struct VaultServiceConfigView {
     addr: String,
     max_payload_bytes: usize,
     tls_enabled: bool,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct VaultAuthConfigView {
+    enabled: bool,
+    scheme: String,
+    principal_labels: Vec<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -623,6 +650,22 @@ struct DisclosurePolicyConfig {
 #[derive(Debug, Serialize, Deserialize)]
 struct AuditConfigView {
     enabled: bool,
+}
+
+#[derive(Debug, Clone)]
+struct RuntimeAuthConfig {
+    principals: Arc<Vec<ApiKeyPrincipal>>,
+}
+
+#[derive(Debug, Clone)]
+struct ApiKeyPrincipal {
+    key: String,
+    label: String,
+}
+
+#[derive(Debug, Clone)]
+struct AuthenticatedActor {
+    label: String,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -934,6 +977,7 @@ async fn main() -> Result<()> {
         db,
         addr: addr.to_string(),
         tls_enabled: runtime_config.tls_cert_path.is_some(),
+        auth_config: runtime_config.auth_config.clone(),
         storage_dir,
         signing_key: Arc::new(signing_key),
         signing_kid: runtime_config.signing_kid.clone(),
@@ -986,9 +1030,7 @@ fn build_router(state: AppState, max_payload_bytes: usize) -> Router {
         .allow_methods(Any)
         .allow_headers(Any);
 
-    Router::new()
-        .route("/healthz", get(healthz))
-        .route("/readyz", get(readyz))
+    let mut api_router = Router::new()
         .route("/v1/bundles", get(list_bundles).post(create_bundle))
         .route(
             "/v1/bundles/{bundle_id}",
@@ -1027,6 +1069,19 @@ fn build_router(state: AppState, max_payload_bytes: usize) -> Router {
         .route("/v1/verify", post(verify_bundle))
         .route("/v1/verify/timestamp", post(verify_timestamp_token))
         .route("/v1/verify/receipt", post(verify_transparency_receipt))
+        .with_state(state.clone());
+
+    if state.auth_config.is_some() {
+        api_router = api_router.layer(middleware::from_fn_with_state(
+            state.clone(),
+            require_api_key_auth,
+        ));
+    }
+
+    Router::new()
+        .route("/healthz", get(healthz))
+        .route("/readyz", get(readyz))
+        .merge(api_router)
         .layer(cors)
         .layer(DefaultBodyLimit::max(max_payload_bytes))
         .with_state(state)
@@ -1193,6 +1248,7 @@ fn build_vault_runtime_config(
         })
         .collect::<Result<Vec<_>>>()?;
 
+    let auth_config = resolve_auth_runtime_config(file_config.auth, env_vars)?;
     let timestamp_config = resolve_timestamp_file_config(config_base_dir, file_config.timestamp)?;
     let transparency_config =
         resolve_transparency_file_config(config_base_dir, file_config.transparency)?;
@@ -1203,6 +1259,7 @@ fn build_vault_runtime_config(
         db_path,
         tls_cert_path,
         tls_key_path,
+        auth_config,
         signing_key_path,
         signing_kid,
         metadata_backend,
@@ -1235,6 +1292,67 @@ fn validate_file_config_capabilities(file_config: &VaultFileConfig) -> Result<()
 
 fn env_value<'a>(env_vars: &'a BTreeMap<String, String>, key: &str) -> Option<&'a str> {
     env_vars.get(key).map(|value| value.as_str())
+}
+
+fn resolve_auth_runtime_config(
+    file_config: Option<VaultAuthFileConfig>,
+    env_vars: &BTreeMap<String, String>,
+) -> Result<Option<RuntimeAuthConfig>> {
+    let env_key = env_value(env_vars, "PROOF_SERVICE_API_KEY")
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned);
+    let env_label = env_value(env_vars, "PROOF_SERVICE_API_KEY_LABEL")
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or(DEFAULT_AUTH_PRINCIPAL_LABEL)
+        .to_string();
+
+    let mut enabled = false;
+    let principals = if let Some(key) = env_key {
+        enabled = true;
+        vec![ApiKeyPrincipal {
+            key,
+            label: env_label,
+        }]
+    } else if let Some(config) = file_config {
+        enabled = config.enabled.unwrap_or(!config.api_keys.is_empty());
+        config
+            .api_keys
+            .into_iter()
+            .enumerate()
+            .map(|(index, principal)| {
+                let key = principal.key.trim();
+                if key.is_empty() {
+                    bail!("auth.api_keys[{index}].key must not be empty");
+                }
+                let label = principal
+                    .label
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                    .unwrap_or(DEFAULT_AUTH_PRINCIPAL_LABEL)
+                    .to_string();
+                Ok(ApiKeyPrincipal {
+                    key: key.to_string(),
+                    label,
+                })
+            })
+            .collect::<Result<Vec<_>>>()?
+    } else {
+        Vec::new()
+    };
+
+    if enabled && principals.is_empty() {
+        bail!("auth.enabled=true requires at least one configured API key");
+    }
+    if !enabled {
+        return Ok(None);
+    }
+
+    Ok(Some(RuntimeAuthConfig {
+        principals: Arc::new(principals),
+    }))
 }
 
 fn normalize_backend(raw: Option<&str>, default_value: &str, field: &str) -> Result<String> {
@@ -1441,6 +1559,60 @@ fn maybe_spawn_retention_scan_task(state: AppState) {
     });
 }
 
+async fn require_api_key_auth(
+    State(state): State<AppState>,
+    mut request: Request,
+    next: Next,
+) -> Response {
+    let Some(auth_config) = state.auth_config.as_ref() else {
+        return next.run(request).await;
+    };
+
+    match authenticate_request(request.headers(), auth_config) {
+        Ok(actor) => {
+            request.extensions_mut().insert(actor);
+            next.run(request).await
+        }
+        Err(err) => err.into_response(),
+    }
+}
+
+fn authenticate_request(
+    headers: &HeaderMap,
+    auth_config: &RuntimeAuthConfig,
+) -> Result<AuthenticatedActor, ApiError> {
+    let authorization = headers
+        .get(header::AUTHORIZATION)
+        .and_then(|value| value.to_str().ok())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| ApiError::unauthorized("missing bearer token"))?;
+
+    let token = authorization
+        .strip_prefix("Bearer ")
+        .or_else(|| authorization.strip_prefix("bearer "))
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| ApiError::unauthorized("authorization header must use Bearer"))?;
+
+    let principal = auth_config
+        .principals
+        .iter()
+        .find(|principal| principal.key == token)
+        .ok_or_else(|| ApiError::unauthorized("invalid bearer token"))?;
+
+    Ok(AuthenticatedActor {
+        label: principal.label.clone(),
+    })
+}
+
+fn request_actor_label(actor: &Option<Extension<AuthenticatedActor>>) -> &str {
+    actor
+        .as_ref()
+        .map(|actor| actor.0.label.as_str())
+        .unwrap_or(AUDIT_ACTOR_API)
+}
+
 async fn healthz() -> impl IntoResponse {
     (StatusCode::OK, "ok")
 }
@@ -1455,6 +1627,7 @@ async fn readyz(State(state): State<AppState>) -> Result<impl IntoResponse, ApiE
 
 async fn create_bundle(
     State(state): State<AppState>,
+    actor: Option<Extension<AuthenticatedActor>>,
     Json(request): Json<CreateBundleRequest>,
 ) -> Result<impl IntoResponse, ApiError> {
     if request.artefacts.is_empty() {
@@ -1514,7 +1687,7 @@ async fn create_bundle(
     append_audit_log(
         &state.db,
         "create_bundle",
-        Some(AUDIT_ACTOR_API),
+        Some(request_actor_label(&actor)),
         Some(&bundle.bundle_id),
         None,
         serde_json::json!({
@@ -1540,6 +1713,7 @@ async fn create_bundle(
 
 async fn list_bundles(
     State(state): State<AppState>,
+    actor: Option<Extension<AuthenticatedActor>>,
     Query(query): Query<BundleQuery>,
 ) -> Result<impl IntoResponse, ApiError> {
     let now = Utc::now().to_rfc3339();
@@ -1634,7 +1808,7 @@ async fn list_bundles(
     append_audit_log(
         &state.db,
         "list_bundles",
-        Some(AUDIT_ACTOR_API),
+        Some(request_actor_label(&actor)),
         None,
         None,
         serde_json::json!({
@@ -1662,7 +1836,10 @@ async fn list_bundles(
     ))
 }
 
-async fn retention_status(State(state): State<AppState>) -> Result<impl IntoResponse, ApiError> {
+async fn retention_status(
+    State(state): State<AppState>,
+    actor: Option<Extension<AuthenticatedActor>>,
+) -> Result<impl IntoResponse, ApiError> {
     let now = Utc::now().to_rfc3339();
     let hard_delete_before =
         (Utc::now() - chrono::Duration::days(state.retention_grace_period_days)).to_rfc3339();
@@ -1748,7 +1925,7 @@ async fn retention_status(State(state): State<AppState>) -> Result<impl IntoResp
     append_audit_log(
         &state.db,
         "retention_status",
-        Some(AUDIT_ACTOR_API),
+        Some(request_actor_label(&actor)),
         None,
         None,
         serde_json::json!({
@@ -1842,6 +2019,7 @@ async fn perform_retention_scan(state: &AppState) -> Result<RetentionScanRespons
 
 async fn list_audit_trail(
     State(state): State<AppState>,
+    _actor: Option<Extension<AuthenticatedActor>>,
     Query(query): Query<AuditTrailQuery>,
 ) -> Result<impl IntoResponse, ApiError> {
     let page = query.page.unwrap_or(1).max(1);
@@ -1897,7 +2075,10 @@ async fn list_audit_trail(
     ))
 }
 
-async fn list_systems(State(state): State<AppState>) -> Result<impl IntoResponse, ApiError> {
+async fn list_systems(
+    State(state): State<AppState>,
+    actor: Option<Extension<AuthenticatedActor>>,
+) -> Result<impl IntoResponse, ApiError> {
     let items = sqlx::query_as::<_, SystemListEntry>(
         "SELECT
             system_id,
@@ -1921,7 +2102,7 @@ async fn list_systems(State(state): State<AppState>) -> Result<impl IntoResponse
     append_audit_log(
         &state.db,
         "list_systems",
-        Some(AUDIT_ACTOR_API),
+        Some(request_actor_label(&actor)),
         None,
         None,
         serde_json::json!({
@@ -1936,6 +2117,7 @@ async fn list_systems(State(state): State<AppState>) -> Result<impl IntoResponse
 
 async fn get_system_summary(
     State(state): State<AppState>,
+    actor: Option<Extension<AuthenticatedActor>>,
     Path(system_id): Path<String>,
 ) -> Result<impl IntoResponse, ApiError> {
     let system_id = normalize_system_id_path(&system_id).map_err(ApiError::bad_request_anyhow)?;
@@ -2033,7 +2215,7 @@ async fn get_system_summary(
     append_audit_log(
         &state.db,
         "get_system_summary",
-        Some(AUDIT_ACTOR_API),
+        Some(request_actor_label(&actor)),
         None,
         None,
         serde_json::json!({
@@ -2047,14 +2229,17 @@ async fn get_system_summary(
     Ok((StatusCode::OK, Json(summary)))
 }
 
-async fn get_config(State(state): State<AppState>) -> Result<impl IntoResponse, ApiError> {
+async fn get_config(
+    State(state): State<AppState>,
+    actor: Option<Extension<AuthenticatedActor>>,
+) -> Result<impl IntoResponse, ApiError> {
     let response = build_vault_config_response(&state)
         .await
         .map_err(ApiError::internal_anyhow)?;
     append_audit_log(
         &state.db,
         "get_config",
-        Some(AUDIT_ACTOR_API),
+        Some(request_actor_label(&actor)),
         None,
         None,
         serde_json::json!({
@@ -2076,6 +2261,7 @@ async fn get_config(State(state): State<AppState>) -> Result<impl IntoResponse, 
 
 async fn update_retention_config(
     State(state): State<AppState>,
+    actor: Option<Extension<AuthenticatedActor>>,
     Json(request): Json<UpdateRetentionConfigRequest>,
 ) -> Result<impl IntoResponse, ApiError> {
     let request =
@@ -2098,7 +2284,7 @@ async fn update_retention_config(
     append_audit_log(
         &state.db,
         "update_retention_config",
-        Some(AUDIT_ACTOR_API),
+        Some(request_actor_label(&actor)),
         None,
         None,
         serde_json::json!({
@@ -2124,6 +2310,7 @@ async fn update_retention_config(
 
 async fn update_timestamp_config(
     State(state): State<AppState>,
+    actor: Option<Extension<AuthenticatedActor>>,
     Json(request): Json<TimestampConfig>,
 ) -> Result<impl IntoResponse, ApiError> {
     let config = validate_timestamp_config(request).map_err(ApiError::bad_request_anyhow)?;
@@ -2134,7 +2321,7 @@ async fn update_timestamp_config(
     append_audit_log(
         &state.db,
         "update_timestamp_config",
-        Some(AUDIT_ACTOR_API),
+        Some(request_actor_label(&actor)),
         None,
         None,
         serde_json::json!({
@@ -2157,6 +2344,7 @@ async fn update_timestamp_config(
 
 async fn update_transparency_config(
     State(state): State<AppState>,
+    actor: Option<Extension<AuthenticatedActor>>,
     Json(request): Json<TransparencyConfig>,
 ) -> Result<impl IntoResponse, ApiError> {
     let config = validate_transparency_config(request).map_err(ApiError::bad_request_anyhow)?;
@@ -2167,7 +2355,7 @@ async fn update_transparency_config(
     append_audit_log(
         &state.db,
         "update_transparency_config",
-        Some(AUDIT_ACTOR_API),
+        Some(request_actor_label(&actor)),
         None,
         None,
         serde_json::json!({
@@ -2185,6 +2373,7 @@ async fn update_transparency_config(
 
 async fn update_disclosure_config(
     State(state): State<AppState>,
+    actor: Option<Extension<AuthenticatedActor>>,
     Json(request): Json<DisclosureConfig>,
 ) -> Result<impl IntoResponse, ApiError> {
     let config = validate_disclosure_config(request).map_err(ApiError::bad_request_anyhow)?;
@@ -2195,7 +2384,7 @@ async fn update_disclosure_config(
     append_audit_log(
         &state.db,
         "update_disclosure_config",
-        Some(AUDIT_ACTOR_API),
+        Some(request_actor_label(&actor)),
         None,
         None,
         serde_json::json!({
@@ -2215,13 +2404,14 @@ async fn update_disclosure_config(
 
 async fn list_disclosure_templates(
     State(state): State<AppState>,
+    actor: Option<Extension<AuthenticatedActor>>,
 ) -> Result<impl IntoResponse, ApiError> {
     let response = disclosure_template_catalog().map_err(ApiError::internal_anyhow)?;
 
     append_audit_log(
         &state.db,
         "list_disclosure_templates",
-        Some(AUDIT_ACTOR_API),
+        Some(request_actor_label(&actor)),
         None,
         None,
         serde_json::json!({
@@ -2237,6 +2427,7 @@ async fn list_disclosure_templates(
 
 async fn render_disclosure_template(
     State(state): State<AppState>,
+    actor: Option<Extension<AuthenticatedActor>>,
     Json(request): Json<DisclosureTemplateRenderRequest>,
 ) -> Result<impl IntoResponse, ApiError> {
     let request = normalize_disclosure_template_render_request(request)
@@ -2247,7 +2438,7 @@ async fn render_disclosure_template(
     append_audit_log(
         &state.db,
         "render_disclosure_template",
-        Some(AUDIT_ACTOR_API),
+        Some(request_actor_label(&actor)),
         None,
         None,
         serde_json::json!({
@@ -2265,6 +2456,7 @@ async fn render_disclosure_template(
 
 async fn preview_disclosure(
     State(state): State<AppState>,
+    actor: Option<Extension<AuthenticatedActor>>,
     Json(request): Json<DisclosurePreviewRequest>,
 ) -> Result<impl IntoResponse, ApiError> {
     let request =
@@ -2294,7 +2486,7 @@ async fn preview_disclosure(
     append_audit_log(
         &state.db,
         "preview_disclosure",
-        Some(AUDIT_ACTOR_API),
+        Some(request_actor_label(&actor)),
         Some(&bundle.bundle_id),
         None,
         serde_json::json!({
@@ -2313,6 +2505,7 @@ async fn preview_disclosure(
 
 async fn delete_bundle(
     State(state): State<AppState>,
+    actor: Option<Extension<AuthenticatedActor>>,
     Path(bundle_id): Path<String>,
 ) -> Result<impl IntoResponse, ApiError> {
     let row = load_bundle_retention_row(&state.db, &bundle_id)
@@ -2346,7 +2539,7 @@ async fn delete_bundle(
     append_audit_log(
         &state.db,
         "delete_bundle",
-        Some(AUDIT_ACTOR_API),
+        Some(request_actor_label(&actor)),
         Some(&bundle_id),
         None,
         serde_json::json!({
@@ -2368,6 +2561,7 @@ async fn delete_bundle(
 
 async fn timestamp_bundle(
     State(state): State<AppState>,
+    actor: Option<Extension<AuthenticatedActor>>,
     Path(bundle_id): Path<String>,
 ) -> Result<impl IntoResponse, ApiError> {
     let mut bundle = load_active_bundle(&state.db, &bundle_id)
@@ -2405,7 +2599,7 @@ async fn timestamp_bundle(
     append_audit_log(
         &state.db,
         "timestamp_bundle",
-        Some(AUDIT_ACTOR_API),
+        Some(request_actor_label(&actor)),
         Some(&bundle.bundle_id),
         None,
         serde_json::json!({
@@ -2434,6 +2628,7 @@ async fn timestamp_bundle(
 
 async fn anchor_bundle(
     State(state): State<AppState>,
+    actor: Option<Extension<AuthenticatedActor>>,
     Path(bundle_id): Path<String>,
 ) -> Result<impl IntoResponse, ApiError> {
     let mut bundle = load_active_bundle(&state.db, &bundle_id)
@@ -2512,7 +2707,7 @@ async fn anchor_bundle(
     append_audit_log(
         &state.db,
         "anchor_bundle",
-        Some(AUDIT_ACTOR_API),
+        Some(request_actor_label(&actor)),
         Some(&bundle.bundle_id),
         None,
         serde_json::json!({
@@ -2543,6 +2738,7 @@ async fn anchor_bundle(
 
 async fn set_legal_hold(
     State(state): State<AppState>,
+    actor: Option<Extension<AuthenticatedActor>>,
     Path(bundle_id): Path<String>,
     Json(request): Json<LegalHoldRequest>,
 ) -> Result<impl IntoResponse, ApiError> {
@@ -2574,7 +2770,7 @@ async fn set_legal_hold(
     append_audit_log(
         &state.db,
         "set_legal_hold",
-        Some(AUDIT_ACTOR_API),
+        Some(request_actor_label(&actor)),
         Some(&bundle_id),
         None,
         serde_json::json!({
@@ -2599,6 +2795,7 @@ async fn set_legal_hold(
 
 async fn release_legal_hold(
     State(state): State<AppState>,
+    actor: Option<Extension<AuthenticatedActor>>,
     Path(bundle_id): Path<String>,
 ) -> Result<impl IntoResponse, ApiError> {
     let row = load_bundle_retention_row(&state.db, &bundle_id)
@@ -2620,7 +2817,7 @@ async fn release_legal_hold(
     append_audit_log(
         &state.db,
         "release_legal_hold",
-        Some(AUDIT_ACTOR_API),
+        Some(request_actor_label(&actor)),
         Some(&bundle_id),
         None,
         serde_json::json!({
@@ -2648,6 +2845,7 @@ async fn release_legal_hold(
 
 async fn create_pack(
     State(state): State<AppState>,
+    actor: Option<Extension<AuthenticatedActor>>,
     Json(request): Json<CreatePackRequest>,
 ) -> Result<impl IntoResponse, ApiError> {
     let request = normalize_create_pack_request(request).map_err(ApiError::bad_request_anyhow)?;
@@ -2771,7 +2969,7 @@ async fn create_pack(
     append_audit_log(
         &state.db,
         "create_pack",
-        Some(AUDIT_ACTOR_API),
+        Some(request_actor_label(&actor)),
         None,
         Some(&pack_id),
         serde_json::json!({
@@ -2790,6 +2988,7 @@ async fn create_pack(
 
 async fn get_pack(
     State(state): State<AppState>,
+    actor: Option<Extension<AuthenticatedActor>>,
     Path(pack_id): Path<String>,
 ) -> Result<impl IntoResponse, ApiError> {
     let row = load_pack_row(&state.db, &pack_id)
@@ -2800,7 +2999,7 @@ async fn get_pack(
     append_audit_log(
         &state.db,
         "get_pack",
-        Some(AUDIT_ACTOR_API),
+        Some(request_actor_label(&actor)),
         None,
         Some(&pack_id),
         serde_json::json!({
@@ -2815,6 +3014,7 @@ async fn get_pack(
 
 async fn get_pack_manifest(
     State(state): State<AppState>,
+    actor: Option<Extension<AuthenticatedActor>>,
     Path(pack_id): Path<String>,
 ) -> Result<impl IntoResponse, ApiError> {
     let row = load_pack_row(&state.db, &pack_id)
@@ -2825,7 +3025,7 @@ async fn get_pack_manifest(
     append_audit_log(
         &state.db,
         "get_pack_manifest",
-        Some(AUDIT_ACTOR_API),
+        Some(request_actor_label(&actor)),
         None,
         Some(&pack_id),
         serde_json::json!({
@@ -2839,6 +3039,7 @@ async fn get_pack_manifest(
 
 async fn get_pack_export(
     State(state): State<AppState>,
+    actor: Option<Extension<AuthenticatedActor>>,
     Path(pack_id): Path<String>,
 ) -> Result<impl IntoResponse, ApiError> {
     let row = load_pack_row(&state.db, &pack_id)
@@ -2860,7 +3061,7 @@ async fn get_pack_export(
     append_audit_log(
         &state.db,
         "get_pack_export",
-        Some(AUDIT_ACTOR_API),
+        Some(request_actor_label(&actor)),
         None,
         Some(&pack_id),
         serde_json::json!({
@@ -2875,6 +3076,7 @@ async fn get_pack_export(
 
 async fn get_bundle(
     State(state): State<AppState>,
+    actor: Option<Extension<AuthenticatedActor>>,
     Path(bundle_id): Path<String>,
 ) -> Result<impl IntoResponse, ApiError> {
     let value =
@@ -2893,7 +3095,7 @@ async fn get_bundle(
     append_audit_log(
         &state.db,
         "get_bundle",
-        Some(AUDIT_ACTOR_API),
+        Some(request_actor_label(&actor)),
         Some(&bundle_id),
         None,
         serde_json::json!({
@@ -2908,6 +3110,7 @@ async fn get_bundle(
 
 async fn get_artefact(
     State(state): State<AppState>,
+    actor: Option<Extension<AuthenticatedActor>>,
     Path((bundle_id, name)): Path<(String, String)>,
 ) -> Result<impl IntoResponse, ApiError> {
     validate_artefact_name(&name).map_err(ApiError::bad_request_anyhow)?;
@@ -2929,7 +3132,7 @@ async fn get_artefact(
     append_audit_log(
         &state.db,
         "get_artefact",
-        Some(AUDIT_ACTOR_API),
+        Some(request_actor_label(&actor)),
         Some(&bundle_id),
         None,
         serde_json::json!({
@@ -2945,6 +3148,7 @@ async fn get_artefact(
 
 async fn verify_bundle(
     State(state): State<AppState>,
+    actor: Option<Extension<AuthenticatedActor>>,
     Json(request): Json<VerifyRequest>,
 ) -> Result<impl IntoResponse, ApiError> {
     let response = match request {
@@ -2956,7 +3160,7 @@ async fn verify_bundle(
     append_audit_log(
         &state.db,
         "verify_bundle",
-        Some(AUDIT_ACTOR_API),
+        Some(request_actor_label(&actor)),
         None,
         None,
         serde_json::json!({
@@ -2973,6 +3177,7 @@ async fn verify_bundle(
 
 async fn verify_timestamp_token(
     State(state): State<AppState>,
+    actor: Option<Extension<AuthenticatedActor>>,
     Json(request): Json<VerifyTimestampRequest>,
 ) -> Result<impl IntoResponse, ApiError> {
     let (bundle_id, bundle_root, timestamp) =
@@ -3010,7 +3215,7 @@ async fn verify_timestamp_token(
     append_audit_log(
         &state.db,
         "verify_timestamp",
-        Some(AUDIT_ACTOR_API),
+        Some(request_actor_label(&actor)),
         bundle_id.as_deref(),
         None,
         serde_json::json!({
@@ -3026,6 +3231,7 @@ async fn verify_timestamp_token(
 
 async fn verify_transparency_receipt(
     State(state): State<AppState>,
+    actor: Option<Extension<AuthenticatedActor>>,
     Json(request): Json<VerifyReceiptRequest>,
 ) -> Result<impl IntoResponse, ApiError> {
     let (bundle_id, bundle_root, receipt) = resolve_receipt_verification_target(&state.db, request)
@@ -3065,7 +3271,7 @@ async fn verify_transparency_receipt(
     append_audit_log(
         &state.db,
         "verify_receipt",
-        Some(AUDIT_ACTOR_API),
+        Some(request_actor_label(&actor)),
         bundle_id.as_deref(),
         None,
         serde_json::json!({
@@ -4635,6 +4841,21 @@ async fn build_vault_config_response(state: &AppState) -> Result<VaultConfigResp
         transparency: load_transparency_config(&state.db).await?,
         disclosure: load_disclosure_config(&state.db).await?,
         audit: AuditConfigView { enabled: true },
+        auth: VaultAuthConfigView {
+            enabled: state.auth_config.is_some(),
+            scheme: "bearer".to_string(),
+            principal_labels: state
+                .auth_config
+                .as_ref()
+                .map(|config| {
+                    config
+                        .principals
+                        .iter()
+                        .map(|principal| principal.label.clone())
+                        .collect()
+                })
+                .unwrap_or_default(),
+        },
     })
 }
 
@@ -6725,6 +6946,13 @@ impl ApiError {
         }
     }
 
+    fn unauthorized(message: impl Into<String>) -> Self {
+        Self {
+            status: StatusCode::UNAUTHORIZED,
+            message: message.into(),
+        }
+    }
+
     fn internal_anyhow(err: impl Into<anyhow::Error>) -> Self {
         let err = err.into();
         error!("internal error: {err:#}");
@@ -6851,6 +7079,7 @@ mod tests {
             db,
             addr: DEFAULT_ADDR.to_string(),
             tls_enabled: false,
+            auth_config: None,
             storage_dir,
             signing_key: Arc::new(signing_key),
             signing_kid: "kid-dev-01".to_string(),
@@ -6860,6 +7089,25 @@ mod tests {
             retention_grace_period_days: DEFAULT_RETENTION_GRACE_PERIOD_DAYS,
             retention_scan_interval_hours: DEFAULT_RETENTION_SCAN_INTERVAL_HOURS,
         }
+    }
+
+    async fn test_state_with_auth(
+        max_payload_bytes: usize,
+        principals: &[(&str, &str)],
+    ) -> AppState {
+        let mut state = test_state(max_payload_bytes).await;
+        state.auth_config = Some(RuntimeAuthConfig {
+            principals: Arc::new(
+                principals
+                    .iter()
+                    .map(|(key, label)| ApiKeyPrincipal {
+                        key: (*key).to_string(),
+                        label: (*label).to_string(),
+                    })
+                    .collect(),
+            ),
+        });
+        state
     }
 
     fn build_test_timestamp_token(digest: &str, provider: Option<&str>) -> TimestampToken {
@@ -7097,12 +7345,27 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
         app: &Router,
         payload: &CreateBundleRequest,
     ) -> CreateBundleResponse {
+        create_bundle_response_with_token(app, payload, None).await
+    }
+
+    async fn create_bundle_response_with_token(
+        app: &Router,
+        payload: &CreateBundleRequest,
+        bearer_token: Option<&str>,
+    ) -> CreateBundleResponse {
         let request = Request::builder()
             .method("POST")
             .uri("/v1/bundles")
             .header("content-type", "application/json")
             .body(Body::from(serde_json::to_vec(payload).unwrap()))
             .unwrap();
+        let mut request = request;
+        if let Some(bearer_token) = bearer_token {
+            request.headers_mut().insert(
+                header::AUTHORIZATION,
+                format!("Bearer {bearer_token}").parse().unwrap(),
+            );
+        }
         let response = app.clone().oneshot(request).await.unwrap();
         assert_eq!(response.status(), StatusCode::CREATED);
         let body = axum::body::to_bytes(response.into_body(), usize::MAX)
@@ -7127,6 +7390,13 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
                 tls_cert: Some("./tls/server.crt".to_string()),
                 tls_key: Some("./tls/server.key".to_string()),
             },
+            auth: Some(VaultAuthFileConfig {
+                enabled: Some(true),
+                api_keys: vec![VaultApiKeyFileConfig {
+                    key: "test-api-key".to_string(),
+                    label: Some("ops".to_string()),
+                }],
+            }),
             signing: VaultSigningFileConfig {
                 key_path: Some("./keys/signing.pem".to_string()),
                 key_id: Some("file-kid".to_string()),
@@ -7197,6 +7467,13 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
             runtime.tls_key_path.as_ref(),
             Some(&config_dir.join("tls/server.key"))
         );
+        assert_eq!(
+            runtime
+                .auth_config
+                .as_ref()
+                .map(|config| config.principals[0].label.as_str()),
+            Some("ops")
+        );
         assert_eq!(runtime.signing_kid, "file-kid");
         let expected_signing_key_path = config_dir.join("keys/signing.pem");
         assert_eq!(
@@ -7256,6 +7533,20 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
     }
 
     #[test]
+    fn build_vault_runtime_config_rejects_enabled_auth_without_keys() {
+        let file_config = VaultFileConfig {
+            auth: Some(VaultAuthFileConfig {
+                enabled: Some(true),
+                api_keys: Vec::new(),
+            }),
+            ..VaultFileConfig::default()
+        };
+
+        let err = build_vault_runtime_config(file_config, None, &BTreeMap::new()).unwrap_err();
+        assert!(err.to_string().contains("at least one configured API key"));
+    }
+
+    #[test]
     fn artefact_name_rejects_traversal() {
         let err = validate_artefact_name("../secret").unwrap_err();
         assert!(err.to_string().contains("path traversal"));
@@ -7273,6 +7564,85 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
             .unwrap();
         let response = app.oneshot(request).await.unwrap();
         assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn v1_routes_require_bearer_auth_when_configured() {
+        let state =
+            test_state_with_auth(DEFAULT_MAX_PAYLOAD_BYTES, &[("secret-token", "ops")]).await;
+        let app = build_router(state, DEFAULT_MAX_PAYLOAD_BYTES);
+
+        let health_request = Request::builder()
+            .method("GET")
+            .uri("/healthz")
+            .body(Body::empty())
+            .unwrap();
+        let health_response = app.clone().oneshot(health_request).await.unwrap();
+        assert_eq!(health_response.status(), StatusCode::OK);
+
+        let config_request = Request::builder()
+            .method("GET")
+            .uri("/v1/config")
+            .body(Body::empty())
+            .unwrap();
+        let config_response = app.clone().oneshot(config_request).await.unwrap();
+        assert_eq!(config_response.status(), StatusCode::UNAUTHORIZED);
+
+        let wrong_request = Request::builder()
+            .method("GET")
+            .uri("/v1/config")
+            .header("authorization", "Bearer wrong-token")
+            .body(Body::empty())
+            .unwrap();
+        let wrong_response = app.clone().oneshot(wrong_request).await.unwrap();
+        assert_eq!(wrong_response.status(), StatusCode::UNAUTHORIZED);
+
+        let auth_request = Request::builder()
+            .method("GET")
+            .uri("/v1/config")
+            .header("authorization", "Bearer secret-token")
+            .body(Body::empty())
+            .unwrap();
+        let auth_response = app.clone().oneshot(auth_request).await.unwrap();
+        assert_eq!(auth_response.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(auth_response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let config: VaultConfigResponse = serde_json::from_slice(&body).unwrap();
+        assert!(config.auth.enabled);
+        assert_eq!(config.auth.principal_labels, vec!["ops".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn authenticated_principal_label_is_written_to_audit_log() {
+        let state =
+            test_state_with_auth(DEFAULT_MAX_PAYLOAD_BYTES, &[("secret-token", "ops")]).await;
+        let db = state.db.clone();
+        let app = build_router(state, DEFAULT_MAX_PAYLOAD_BYTES);
+
+        let created = create_bundle_response_with_token(
+            &app,
+            &CreateBundleRequest {
+                capture: SealableCaptureInput::Legacy(sample_capture()),
+                artefacts: vec![InlineArtefact {
+                    name: "prompt.json".to_string(),
+                    content_type: "application/json".to_string(),
+                    data_base64: Base64::encode_string(br#"{"prompt":"auth"}"#),
+                }],
+            },
+            Some("secret-token"),
+        )
+        .await;
+
+        let actor: Option<String> = sqlx::query_scalar(
+            "SELECT actor FROM audit_log WHERE action = ? AND bundle_id = ? ORDER BY id DESC LIMIT 1",
+        )
+        .bind("create_bundle")
+        .bind(&created.bundle_id)
+        .fetch_optional(&db)
+        .await
+        .unwrap();
+        assert_eq!(actor.as_deref(), Some("ops"));
     }
 
     #[tokio::test]
@@ -8408,6 +8778,8 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
         assert_eq!(config.service.addr, DEFAULT_ADDR);
         assert_eq!(config.service.max_payload_bytes, DEFAULT_MAX_PAYLOAD_BYTES);
         assert!(!config.service.tls_enabled);
+        assert!(!config.auth.enabled);
+        assert!(config.auth.principal_labels.is_empty());
         assert_eq!(config.signing.key_id, "kid-dev-01");
         assert_eq!(config.signing.algorithm, "ed25519");
         assert_eq!(config.storage.metadata_backend, "sqlite");
@@ -8462,6 +8834,7 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
             db_path: state.storage_dir.join("metadata.db"),
             tls_cert_path: None,
             tls_key_path: None,
+            auth_config: None,
             signing_key_path: None,
             signing_kid: "kid-runtime".to_string(),
             metadata_backend: "sqlite".to_string(),

@@ -20,12 +20,12 @@ use proof_layer_core::{
 };
 use reqwest::{
     Url,
-    blocking::{Client, Response},
+    blocking::{Client, RequestBuilder, Response},
 };
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::{
     collections::{BTreeMap, HashSet},
-    fs,
+    env, fs,
     io::{Read, Write},
     path::{Component, Path, PathBuf},
 };
@@ -1024,6 +1024,7 @@ struct VaultConfigResponse {
     retention: VaultRetentionConfigView,
     timestamp: VaultTimestampConfig,
     transparency: VaultTransparencyConfig,
+    auth: VaultAuthConfigView,
     audit: VaultAuditConfigView,
 }
 
@@ -1031,6 +1032,14 @@ struct VaultConfigResponse {
 struct VaultServiceConfigView {
     addr: String,
     max_payload_bytes: usize,
+    tls_enabled: bool,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct VaultAuthConfigView {
+    enabled: bool,
+    scheme: String,
+    principal_labels: Vec<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -1138,6 +1147,7 @@ struct VaultStatusOutput {
     ready: bool,
     service_addr: String,
     max_payload_bytes: usize,
+    tls_enabled: bool,
     signing_key_id: String,
     metadata_backend: String,
     blob_backend: String,
@@ -1156,6 +1166,9 @@ struct VaultStatusOutput {
     timestamp_policy_oid_count: usize,
     transparency_enabled: bool,
     transparency_provider: String,
+    auth_enabled: bool,
+    auth_scheme: String,
+    auth_principal_count: usize,
 }
 
 impl EvidenceTypeArg {
@@ -2064,8 +2077,7 @@ fn cmd_pack(input: PackCommandInput<'_>) -> Result<()> {
 
     let client = build_http_client()?;
     let create_url = join_vault_url(input.vault_url, "/v1/packs");
-    let create_response = client
-        .post(&create_url)
+    let create_response = with_cli_api_key(client.post(&create_url))
         .json(&request)
         .send()
         .with_context(|| format!("failed to call {create_url}"))?;
@@ -2078,8 +2090,7 @@ fn cmd_pack(input: PackCommandInput<'_>) -> Result<()> {
         input.vault_url,
         &format!("/v1/packs/{}/export", pack.pack_id),
     );
-    let export_response = client
-        .get(&export_url)
+    let export_response = with_cli_api_key(client.get(&export_url))
         .send()
         .with_context(|| format!("failed to call {export_url}"))?;
     let export_response = ensure_success(export_response, "pack export download")?;
@@ -2155,8 +2166,7 @@ fn cmd_vault_disclosure_preview(
 
     let client = build_http_client()?;
     let url = join_vault_url(vault_url, "/v1/disclosure/preview");
-    let response = client
-        .post(&url)
+    let response = with_cli_api_key(client.post(&url))
         .json(&request)
         .send()
         .with_context(|| format!("failed to call {url}"))?;
@@ -2176,8 +2186,7 @@ fn cmd_vault_disclosure_preview(
 fn cmd_vault_disclosure_templates(vault_url: &str, format: OutputFormat) -> Result<()> {
     let client = build_http_client()?;
     let url = join_vault_url(vault_url, "/v1/disclosure/templates");
-    let response = client
-        .get(&url)
+    let response = with_cli_api_key(client.get(&url))
         .send()
         .with_context(|| format!("failed to call {url}"))?;
     let response = ensure_success(response, "list disclosure templates")?;
@@ -2290,8 +2299,7 @@ fn render_vault_disclosure_template(
 
     let client = build_http_client()?;
     let url = join_vault_url(vault_url, "/v1/disclosure/templates/render");
-    let response = client
-        .post(&url)
+    let response = with_cli_api_key(client.post(&url))
         .json(&request)
         .send()
         .with_context(|| format!("failed to call {url}"))?;
@@ -2344,6 +2352,7 @@ fn cmd_vault_status(vault_url: &str, format: OutputFormat) -> Result<()> {
         ready: true,
         service_addr: config.service.addr.clone(),
         max_payload_bytes: config.service.max_payload_bytes,
+        tls_enabled: config.service.tls_enabled,
         signing_key_id: config.signing.key_id.clone(),
         metadata_backend: config.storage.metadata_backend.clone(),
         blob_backend: config.storage.blob_backend.clone(),
@@ -2362,6 +2371,9 @@ fn cmd_vault_status(vault_url: &str, format: OutputFormat) -> Result<()> {
         timestamp_policy_oid_count: config.timestamp.policy_oids.len(),
         transparency_enabled: config.transparency.enabled,
         transparency_provider: config.transparency.provider.clone(),
+        auth_enabled: config.auth.enabled,
+        auth_scheme: config.auth.scheme.clone(),
+        auth_principal_count: config.auth.principal_labels.len(),
     };
 
     match format {
@@ -2515,6 +2527,10 @@ fn print_vault_status_human(status: &VaultStatusOutput, config: &VaultConfigResp
     println!("ready: {}", if status.ready { "yes" } else { "no" });
     println!("service.addr: {}", status.service_addr);
     println!("service.max_payload_bytes: {}", status.max_payload_bytes);
+    println!(
+        "service.tls_enabled: {}",
+        if status.tls_enabled { "yes" } else { "no" }
+    );
     println!("signing.key_id: {}", status.signing_key_id);
     println!(
         "storage: metadata={} blobs={}",
@@ -2543,6 +2559,10 @@ fn print_vault_status_human(status: &VaultStatusOutput, config: &VaultConfigResp
     println!(
         "transparency: enabled={} provider={}",
         status.transparency_enabled, status.transparency_provider
+    );
+    println!(
+        "auth: enabled={} scheme={} principals={}",
+        status.auth_enabled, status.auth_scheme, status.auth_principal_count
     );
 }
 
@@ -3553,17 +3573,30 @@ fn build_http_client() -> Result<Client> {
         .context("failed to build HTTP client")
 }
 
+fn cli_api_key() -> Option<String> {
+    env::var("PROOF_SERVICE_API_KEY")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+fn with_cli_api_key(builder: RequestBuilder) -> RequestBuilder {
+    if let Some(api_key) = cli_api_key() {
+        builder.bearer_auth(api_key)
+    } else {
+        builder
+    }
+}
+
 fn require_vault_ready(client: &Client, vault_url: &str) -> Result<()> {
-    let response = client
-        .get(join_vault_url(vault_url, "/readyz"))
+    let response = with_cli_api_key(client.get(join_vault_url(vault_url, "/readyz")))
         .send()
         .with_context(|| format!("failed to call {}/readyz", vault_url.trim_end_matches('/')))?;
     ensure_success(response, "vault readiness check").map(|_| ())
 }
 
 fn get_json<T: DeserializeOwned>(client: &Client, url: String, action: &str) -> Result<T> {
-    let response = client
-        .get(&url)
+    let response = with_cli_api_key(client.get(&url))
         .send()
         .with_context(|| format!("failed to call {url}"))?;
     let response = ensure_success(response, action)?;

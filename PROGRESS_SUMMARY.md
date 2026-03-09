@@ -196,6 +196,11 @@ Completed:
   optional HTTPS serving via `[server].tls_cert` / `[server].tls_key` or `PROOF_SERVICE_TLS_CERT_PATH` / `PROOF_SERVICE_TLS_KEY_PATH`,
   startup loading of PEM cert/key pairs through `axum-server` + rustls,
   and `GET /v1/config` now reports whether TLS is currently enabled.
+- Added the next vault auth slice:
+  optional bearer API-key auth via `[auth]` / `[[auth.api_keys]]` or `PROOF_SERVICE_API_KEY`,
+  protection of `/v1/*` while leaving `/healthz` and `/readyz` open,
+  audit-log actor labels now use the authenticated principal label instead of the generic `api` marker,
+  and `proofctl` now automatically uses `PROOF_SERVICE_API_KEY` for vault HTTP calls.
 - Extended pack export into the selective-disclosure path:
   `POST /v1/packs` now accepts `bundle_format = "full" | "disclosure"`,
   vault `GET /v1/packs/{id}/export` can emit redacted disclosure-package members selected by pack curation rules,
@@ -228,6 +233,7 @@ Still outstanding from `plan.md`:
 
 - JSON schema coverage is now started, with timestamp and Rekor transparency receipt coverage added, but richer export/archive schemas are still incomplete.
 - The vault now uses SQLite with legal-hold-aware retention, audit logging, file/env/runtime configuration, background retention scanning, curated pack export, redacted disclosure-pack export, RFC 3161 bundle timestamp attachment, and transparency anchoring, but PostgreSQL and Annex-complete artefact/redaction policy assembly are not built yet.
+- The vault now also supports optional bearer auth with per-principal audit labels on `/v1/*`; multi-tenant org isolation is still future work.
 - TypeScript and Python now both have native FFI bridges, local sealing paths, higher-level `ProofLayer` facades, a local artifact build path for npm tarballs and platform-tagged wheels, and CI-backed multi-platform GitHub artifact builds, but there is still no automated publish step to npm or PyPI.
 - TypeScript and Python SDKs now expose local redacted-bundle helpers (`disclose` / `verifyRedactedBundle` in TypeScript, `disclose` / `verify_redacted_bundle` in Python), including top-level field redaction for local v3 bundles and nested JSON-pointer path redaction for local v4 bundles, plus vault pack helpers for `bundle_format = "full" | "disclosure"` with `disclosure_policy` or inline `disclosure_template`, vault disclosure-config read/update helpers, and disclosure-preview helpers.
 - The main remaining gaps are no longer the evidence catalog itself; they are the harder later-phase items like deeper trust policy work, fuller SCITT interoperability, alternative storage backends, and automated npm/PyPI/prebuilt release publishing hardening.

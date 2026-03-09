@@ -354,6 +354,7 @@ export interface VaultConfigResponse extends JsonObject {
   service: JsonObject & {
     addr: string;
     max_payload_bytes: number;
+    tls_enabled: boolean;
   };
   signing: JsonObject & {
     key_id: string;
@@ -371,6 +372,11 @@ export interface VaultConfigResponse extends JsonObject {
   timestamp: JsonObject;
   transparency: JsonObject;
   disclosure: DisclosureConfig;
+  auth: JsonObject & {
+    enabled: boolean;
+    scheme: string;
+    principal_labels: string[];
+  };
   audit: JsonObject & {
     enabled: boolean;
   };

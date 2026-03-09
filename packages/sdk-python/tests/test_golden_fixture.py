@@ -15,7 +15,57 @@ FIXED_BUNDLE_DIR = GOLDEN_DIR / "fixed_bundle"
 RFC_VECTOR_PATH = GOLDEN_DIR / "rfc8785_vectors.json"
 
 
+def escape_json_pointer_segment(segment: str) -> str:
+    return segment.replace("~", "~0").replace("/", "~1")
+
+
+def collect_path_commitments(
+    path: str,
+    value: object,
+    container_kinds: dict[str, str],
+    path_digests: dict[str, str],
+) -> None:
+    if isinstance(value, list):
+        container_kinds[path] = "array"
+        for index, entry in enumerate(value):
+            collect_path_commitments(f"{path}/{index}", entry, container_kinds, path_digests)
+        return
+
+    if isinstance(value, dict):
+        container_kinds[path] = "object"
+        for key, entry in value.items():
+            collect_path_commitments(
+                f"{path}/{escape_json_pointer_segment(key)}",
+                entry,
+                container_kinds,
+                path_digests,
+            )
+        return
+
+    path_digests[path] = hash_sha256(canonicalize_json(json.dumps(value)))
+
+
 def item_commitment_digest(item: dict[str, object], algorithm: str) -> str:
+    if algorithm == "pl-merkle-sha256-v4":
+        container_kinds = {"": "object"}
+        path_digests: dict[str, str] = {}
+        for field, value in item["data"].items():
+            collect_path_commitments(
+                f"/{escape_json_pointer_segment(field)}",
+                value,
+                container_kinds,
+                path_digests,
+            )
+        return hash_sha256(
+            canonicalize_json(
+                {
+                    "item_type": item["type"],
+                    "container_kinds": container_kinds,
+                    "path_digests": path_digests,
+                }
+            )
+        )
+
     if algorithm == "pl-merkle-sha256-v3":
         field_digests = {
             field: hash_sha256(canonicalize_json(json.dumps(value)))

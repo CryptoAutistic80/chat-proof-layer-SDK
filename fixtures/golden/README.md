@@ -31,6 +31,6 @@ cargo run -p proofctl -- verify \
 ## Notes
 
 - `header_digest`, `bundle_root`, and `signature` remain stable only when all integrity inputs are pinned (capture bytes, artefact bytes, signing key, `bundle_id`, `created_at`, and `signing_kid`).
-- The checked-in fixture now uses `bundle_root_algorithm = "pl-merkle-sha256-v3"`, so `proof_bundle.canonical.json` contains the reduced signed header projection (`bundle_version`, `bundle_id`, `created_at`, `actor`, `subject`, `context`, `policy`, `item_count`, `artefact_count`) rather than the full bundle body.
-- The fixture Merkle root is computed from `[header_digest, item_digest..., artefact_meta_digest...]`; for v3 each `item_digest` is the digest of `{item_type, field_digests}` rather than the full item JSON, and artefact byte digests are still verified separately against the recorded artefact entries.
+- The checked-in fixture now uses `bundle_root_algorithm = "pl-merkle-sha256-v4"`, so `proof_bundle.canonical.json` contains the reduced signed header projection (`bundle_version`, `bundle_id`, `created_at`, `actor`, `subject`, `context`, `policy`, `item_count`, `artefact_count`) rather than the full bundle body.
+- The fixture Merkle root is computed from `[header_digest, item_digest..., artefact_meta_digest...]`; for v4 each `item_digest` is the digest of `{item_type, container_kinds, path_digests}` rather than the full item JSON, and artefact byte digests are still verified separately against the recorded artefact entries.
 - Artifact digest values in `expected_digests.json` should stay stable unless fixture file bytes change.

@@ -16,7 +16,51 @@ const goldenDir = path.join(repoRoot, "fixtures", "golden");
 const fixedBundleDir = path.join(goldenDir, "fixed_bundle");
 const rfcVectorPath = path.join(goldenDir, "rfc8785_vectors.json");
 
+function escapeJsonPointerSegment(segment) {
+  return segment.replace(/~/g, "~0").replace(/\//g, "~1");
+}
+
+function collectPathCommitments(pathValue, value, containerKinds, pathDigests) {
+  if (Array.isArray(value)) {
+    containerKinds[pathValue] = "array";
+    value.forEach((entry, index) => {
+      collectPathCommitments(`${pathValue}/${index}`, entry, containerKinds, pathDigests);
+    });
+    return;
+  }
+
+  if (value && typeof value === "object") {
+    containerKinds[pathValue] = "object";
+    for (const [key, entry] of Object.entries(value)) {
+      collectPathCommitments(
+        `${pathValue}/${escapeJsonPointerSegment(key)}`,
+        entry,
+        containerKinds,
+        pathDigests
+      );
+    }
+    return;
+  }
+
+  pathDigests[pathValue] = hashSha256(canonicalizeJson(JSON.stringify(value)));
+}
+
 function itemCommitmentDigest(item, algorithm) {
+  if (algorithm === "pl-merkle-sha256-v4") {
+    const containerKinds = { "": "object" };
+    const pathDigests = {};
+    for (const [field, value] of Object.entries(item.data)) {
+      collectPathCommitments(`/${escapeJsonPointerSegment(field)}`, value, containerKinds, pathDigests);
+    }
+    return hashSha256(
+      canonicalizeJson({
+        item_type: item.type,
+        container_kinds: containerKinds,
+        path_digests: pathDigests
+      })
+    );
+  }
+
   if (algorithm === "pl-merkle-sha256-v3") {
     const fieldDigests = Object.fromEntries(
       Object.entries(item.data).map(([field, value]) => [

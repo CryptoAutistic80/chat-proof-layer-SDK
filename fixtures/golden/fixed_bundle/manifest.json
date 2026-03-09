@@ -17,12 +17,12 @@
     },
     {
       "name": "proof_bundle.json",
-      "digest": "sha256:f32ceba43ae9a2538303b91a553be147812e522e526ce382f81d228a789331a8",
+      "digest": "sha256:ceb597f493f973f9a7b6ec95752b7fcb9d1bb72ca71998f590830255a900cd40",
       "size": 2526
     },
     {
       "name": "proof_bundle.sig",
-      "digest": "sha256:a0bcba56b75d9653b86c75ffebe9b524b457934c7450cffaaec7c0f794cf57db",
+      "digest": "sha256:49ae33ab12133336068a7ca4dc46fc0dbb5483ce7fdcabef31b819dd2d711fc2",
       "size": 229
     }
   ]

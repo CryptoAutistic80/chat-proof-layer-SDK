@@ -14,12 +14,13 @@ pub mod bundle {
     pub use crate::schema::v01::{CaptureInput, Inputs, ModelInfo, Outputs, Trace};
     pub use crate::schema::{
         Actor, ActorRole, ArtefactMeta, ArtefactRef, BUNDLE_ROOT_ALGORITHM,
-        BUNDLE_ROOT_ALGORITHM_V2, BUNDLE_ROOT_ALGORITHM_V3, BUNDLE_VERSION, BundleValidationError,
-        BundleVerificationError, CANONICALIZATION_ALGORITHM, CaptureEvent, EncryptionPolicy,
-        EvidenceBundle as ProofBundle, EvidenceContext, EvidenceItem, HASH_ALGORITHM, Integrity,
-        LEGACY_BUNDLE_ROOT_ALGORITHM, LlmInteractionEvidence, Policy, SIGNATURE_ALGORITHM,
-        SIGNATURE_FORMAT, SignatureInfo, Subject, TimestampToken, TransparencyReceipt,
-        VerificationSummary, validate_bundle_integrity_fields,
+        BUNDLE_ROOT_ALGORITHM_V2, BUNDLE_ROOT_ALGORITHM_V3, BUNDLE_ROOT_ALGORITHM_V4,
+        BUNDLE_VERSION, BundleValidationError, BundleVerificationError, CANONICALIZATION_ALGORITHM,
+        CaptureEvent, EncryptionPolicy, EvidenceBundle as ProofBundle, EvidenceContext,
+        EvidenceItem, HASH_ALGORITHM, Integrity, LEGACY_BUNDLE_ROOT_ALGORITHM,
+        LlmInteractionEvidence, Policy, SIGNATURE_ALGORITHM, SIGNATURE_FORMAT, SignatureInfo,
+        Subject, TimestampToken, TransparencyReceipt, VerificationSummary,
+        validate_bundle_integrity_fields,
     };
 }
 
@@ -48,10 +49,11 @@ pub use merkle::{
 pub use schema::migration::{capture_input_v01_to_event, migrate_v01_to_v10};
 pub use schema::v01::{CaptureInput as LegacyCaptureInput, ProofBundle as LegacyProofBundle};
 pub use schema::{
-    BUNDLE_ROOT_ALGORITHM_V2, BUNDLE_ROOT_ALGORITHM_V3, LEGACY_BUNDLE_ROOT_ALGORITHM,
-    artefact_commitment_digest, field_commitment_digest, item_commitment_digest,
-    item_commitment_digest_for_algorithm, item_commitment_digest_from_fields,
-    item_field_commitment_digests,
+    BUNDLE_ROOT_ALGORITHM_V2, BUNDLE_ROOT_ALGORITHM_V3, BUNDLE_ROOT_ALGORITHM_V4,
+    LEGACY_BUNDLE_ROOT_ALGORITHM, artefact_commitment_digest, field_commitment_digest,
+    item_commitment_digest, item_commitment_digest_for_algorithm,
+    item_commitment_digest_from_fields, item_commitment_digest_from_paths,
+    item_field_commitment_digests, item_path_commitment_digests,
 };
 pub use sign::{
     JwsHeader, KeyEncodingError, SignError, decode_private_key_pem, decode_public_key_pem,

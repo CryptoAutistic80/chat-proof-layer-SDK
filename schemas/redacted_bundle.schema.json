@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://proof-layer.dev/schemas/redacted_bundle.schema.json",
   "title": "Redacted Evidence Bundle",
-  "description": "Selective-disclosure bundle carrying Merkle inclusion proofs for a v2 or v3 evidence bundle.",
+  "description": "Selective-disclosure bundle carrying Merkle inclusion proofs for a v2, v3, or v4 evidence bundle.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -67,7 +67,8 @@
         "bundle_root_algorithm": {
           "enum": [
             "pl-merkle-sha256-v2",
-            "pl-merkle-sha256-v3"
+            "pl-merkle-sha256-v3",
+            "pl-merkle-sha256-v4"
           ]
         },
         "bundle_root": {
@@ -214,8 +215,7 @@
       "type": "object",
       "additionalProperties": false,
       "required": [
-        "item_type",
-        "field_digests"
+        "item_type"
       ],
       "properties": {
         "item_type": {
@@ -232,6 +232,32 @@
           }
         },
         "redacted_fields": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "container_kinds": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string",
+            "enum": [
+              "object",
+              "array"
+            ]
+          }
+        },
+        "revealed_paths": {
+          "type": "object"
+        },
+        "path_digests": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/sha256Digest"
+          }
+        },
+        "redacted_paths": {
           "type": "array",
           "items": {
             "type": "string",

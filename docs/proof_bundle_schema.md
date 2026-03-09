@@ -47,7 +47,7 @@ Current bundles are `bundle_version: "1.0"` and contain:
 
 `proof_bundle.canonical.json` always stores the exact canonical UTF-8 bytes used to derive `integrity.header_digest`.
 
-### Current Default Projection (`pl-merkle-sha256-v3`)
+### Current Default Projection (`pl-merkle-sha256-v4`)
 
 New bundles use the following canonical header projection:
 
@@ -88,7 +88,7 @@ Legacy bundles use:
 
 where each artefact leaf is the digest of the artefact bytes themselves.
 
-### Current Default (`pl-merkle-sha256-v3`)
+### Current Default (`pl-merkle-sha256-v4`)
 
 New bundles use:
 
@@ -96,11 +96,19 @@ New bundles use:
 
 where:
 
-- `item_digest_n = sha256(RFC8785({"item_type": item.type, "field_digests": {...}}))`
-- `field_digests[field_name] = sha256(RFC8785(item.data[field_name]))`
+- `item_digest_n = sha256(RFC8785({"item_type": item.type, "container_kinds": {...}, "path_digests": {...}}))`
+- `container_kinds[path]` records whether an `item.data` JSON Pointer path is an object or array container
+- `path_digests[path] = sha256(RFC8785(item.data[path]))` for each scalar / null leaf path
 - `artefact_meta_digest_n = sha256(RFC8785(artefact_ref_json))`
 
 Artefact content bytes are still verified separately against each artefact record's `digest` field before trust decisions.
+
+### Compatibility Default (`pl-merkle-sha256-v3`)
+
+Previously issued v3 bundles use the same leaf ordering, but each item leaf commits only the top-level item-data fields:
+
+- `item_digest_n = sha256(RFC8785({"item_type": item.type, "field_digests": {...}}))`
+- `field_digests[field_name] = sha256(RFC8785(item.data[field_name]))`
 
 ### Compatibility Default (`pl-merkle-sha256-v2`)
 
@@ -116,7 +124,7 @@ For both algorithms:
 4. Duplicate the last node when a level has odd width.
 5. Encode the final root as `sha256:<hex(root_hash)>`.
 
-The proof format still uses `algorithm = "pl-merkle-sha256-v1"` because the Merkle tree construction itself is unchanged; v1 vs v2 vs v3 only changes which digests become leaves.
+The proof format still uses `algorithm = "pl-merkle-sha256-v1"` because the Merkle tree construction itself is unchanged; v1 vs v2 vs v3 vs v4 only changes which digests become leaves.
 
 ## Verification Procedure
 
@@ -162,7 +170,7 @@ Required members:
 
 ## Redacted Bundle Shape
 
-Selective disclosure is currently defined for `pl-merkle-sha256-v2` and `pl-merkle-sha256-v3` bundles.
+Selective disclosure is currently defined for `pl-merkle-sha256-v2`, `pl-merkle-sha256-v3`, and `pl-merkle-sha256-v4` bundles.
 
 `schemas/redacted_bundle.schema.json` describes the redacted bundle object carried inside a disclosure package. It contains:
 
@@ -177,7 +185,7 @@ Selective disclosure is currently defined for `pl-merkle-sha256-v2` and `pl-merk
 
 Each disclosed entry carries either the original item object or a `field_redacted_item` projection plus an inclusion proof.
 
-Leaf indices for v2/v3 disclosure are fixed:
+Leaf indices for v2/v3/v4 disclosure are fixed:
 
 - header leaf: `0`
 - item leaf `n`: `1 + n`
@@ -194,7 +202,8 @@ Redacted disclosure packages are gzip-compressed JSON archives with:
 
 Current CLI support is:
 
-- `proofctl disclose --items ... [--artefacts ...] [--redact-field <item_index>:<field>]` for item-level disclosure, top-level field redaction on v3 bundles, and optional artefact-byte carry-through
+- `proofctl disclose --items ... [--artefacts ...] [--redact-field <item_index>:<field-or-json-pointer>]` for item-level disclosure, top-level field redaction on v3 bundles, nested JSON-pointer path redaction on v4 bundles, and optional artefact-byte carry-through
 - `proofctl verify` auto-detects and verifies both full packages and disclosure packages
 
 Vault-side redacted pack assembly is implemented through `/v1/packs` with `bundle_format = "disclosure"` and optional named `disclosure_policy` selection.
+Those disclosure policies can now also supply `redacted_fields_by_item_type`, using either top-level field names or JSON-pointer paths, which becomes a per-item field/path redaction map in preview responses and pack manifests for v3/v4 bundles.

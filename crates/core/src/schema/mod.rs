@@ -19,7 +19,8 @@ pub const HASH_ALGORITHM: &str = "SHA-256";
 pub const LEGACY_BUNDLE_ROOT_ALGORITHM: &str = "pl-merkle-sha256-v1";
 pub const BUNDLE_ROOT_ALGORITHM_V2: &str = "pl-merkle-sha256-v2";
 pub const BUNDLE_ROOT_ALGORITHM_V3: &str = "pl-merkle-sha256-v3";
-pub const BUNDLE_ROOT_ALGORITHM: &str = BUNDLE_ROOT_ALGORITHM_V3;
+pub const BUNDLE_ROOT_ALGORITHM_V4: &str = "pl-merkle-sha256-v4";
+pub const BUNDLE_ROOT_ALGORITHM: &str = BUNDLE_ROOT_ALGORITHM_V4;
 pub const SIGNATURE_FORMAT: &str = "JWS";
 pub const SIGNATURE_ALGORITHM: &str = "EdDSA";
 
@@ -333,6 +334,7 @@ pub struct ArtefactRef {
 }
 
 pub type ArtefactMeta = ArtefactRef;
+pub type ItemPathCommitmentParts = (String, BTreeMap<String, String>, BTreeMap<String, String>);
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub struct EncryptionPolicy {
@@ -512,7 +514,7 @@ impl EvidenceBundle {
                 ordered_digests.extend(artefact_digests);
                 Ok(ordered_digests)
             }
-            BUNDLE_ROOT_ALGORITHM_V3 => {
+            BUNDLE_ROOT_ALGORITHM_V3 | BUNDLE_ROOT_ALGORITHM_V4 => {
                 let item_digests = self.item_commitment_digests()?;
                 let artefact_digests = self.artefact_commitment_digests()?;
                 let mut ordered_digests =
@@ -544,7 +546,9 @@ impl EvidenceBundle {
 
         let canonical_header = match self.integrity.bundle_root_algorithm.as_str() {
             LEGACY_BUNDLE_ROOT_ALGORITHM => self.legacy_canonical_header_bytes()?,
-            BUNDLE_ROOT_ALGORITHM_V2 | BUNDLE_ROOT_ALGORITHM_V3 => self.canonical_header_bytes()?,
+            BUNDLE_ROOT_ALGORITHM_V2 | BUNDLE_ROOT_ALGORITHM_V3 | BUNDLE_ROOT_ALGORITHM_V4 => {
+                self.canonical_header_bytes()?
+            }
             other => {
                 return Err(BundleVerificationError::Canonicalization(
                     CanonError::Canonicalization(format!(
@@ -698,6 +702,7 @@ pub fn validate_bundle_integrity_fields(
     if bundle.integrity.bundle_root_algorithm != LEGACY_BUNDLE_ROOT_ALGORITHM
         && bundle.integrity.bundle_root_algorithm != BUNDLE_ROOT_ALGORITHM_V2
         && bundle.integrity.bundle_root_algorithm != BUNDLE_ROOT_ALGORITHM_V3
+        && bundle.integrity.bundle_root_algorithm != BUNDLE_ROOT_ALGORITHM_V4
     {
         return Err(BundleValidationError::UnsupportedBundleRootAlgorithm(
             bundle.integrity.bundle_root_algorithm.clone(),
@@ -871,6 +876,10 @@ pub fn item_commitment_digest_for_algorithm(
             let (item_type, field_digests) = item_field_commitment_digests(item)?;
             item_commitment_digest_from_fields(&item_type, &field_digests)
         }
+        BUNDLE_ROOT_ALGORITHM_V4 => {
+            let (item_type, container_kinds, path_digests) = item_path_commitment_digests(item)?;
+            item_commitment_digest_from_paths(&item_type, &container_kinds, &path_digests)
+        }
         other => Err(CanonError::Canonicalization(format!(
             "unsupported bundle root algorithm {other}"
         ))),
@@ -906,6 +915,42 @@ pub fn item_field_commitment_digests(
     Ok((item_type, field_digests))
 }
 
+pub fn item_path_commitment_digests(
+    item: &EvidenceItem,
+) -> Result<ItemPathCommitmentParts, CanonError> {
+    let value = serde_json::to_value(item)?;
+    let object = value.as_object().ok_or_else(|| {
+        CanonError::Canonicalization("evidence item must serialize to an object".to_string())
+    })?;
+    let item_type = object
+        .get("type")
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            CanonError::Canonicalization("evidence item is missing its type tag".to_string())
+        })?
+        .to_string();
+    let data = object
+        .get("data")
+        .and_then(Value::as_object)
+        .ok_or_else(|| {
+            CanonError::Canonicalization("evidence item must serialize object data".to_string())
+        })?;
+
+    let mut container_kinds = BTreeMap::new();
+    let mut path_digests = BTreeMap::new();
+    container_kinds.insert(String::new(), "object".to_string());
+    for (field, value) in data {
+        collect_path_commitment_digests(
+            &format!("/{}", escape_json_pointer_segment(field)),
+            value,
+            &mut container_kinds,
+            &mut path_digests,
+        )?;
+    }
+
+    Ok((item_type, container_kinds, path_digests))
+}
+
 pub fn item_commitment_digest_from_fields(
     item_type: &str,
     field_digests: &BTreeMap<String, String>,
@@ -913,6 +958,19 @@ pub fn item_commitment_digest_from_fields(
     let canonical = canonicalize_value(&json!({
         "field_digests": field_digests,
         "item_type": item_type,
+    }))?;
+    Ok(sha256_prefixed(&canonical))
+}
+
+pub fn item_commitment_digest_from_paths(
+    item_type: &str,
+    container_kinds: &BTreeMap<String, String>,
+    path_digests: &BTreeMap<String, String>,
+) -> Result<String, CanonError> {
+    let canonical = canonicalize_value(&json!({
+        "container_kinds": container_kinds,
+        "item_type": item_type,
+        "path_digests": path_digests,
     }))?;
     Ok(sha256_prefixed(&canonical))
 }
@@ -937,6 +995,46 @@ fn validate_named_digest(
         source,
     })?;
     Ok(())
+}
+
+fn collect_path_commitment_digests(
+    path: &str,
+    value: &Value,
+    container_kinds: &mut BTreeMap<String, String>,
+    path_digests: &mut BTreeMap<String, String>,
+) -> Result<(), CanonError> {
+    match value {
+        Value::Object(object) => {
+            container_kinds.insert(path.to_string(), "object".to_string());
+            for (key, value) in object {
+                collect_path_commitment_digests(
+                    &format!("{path}/{}", escape_json_pointer_segment(key)),
+                    value,
+                    container_kinds,
+                    path_digests,
+                )?;
+            }
+        }
+        Value::Array(array) => {
+            container_kinds.insert(path.to_string(), "array".to_string());
+            for (index, value) in array.iter().enumerate() {
+                collect_path_commitment_digests(
+                    &format!("{path}/{index}"),
+                    value,
+                    container_kinds,
+                    path_digests,
+                )?;
+            }
+        }
+        _ => {
+            path_digests.insert(path.to_string(), field_commitment_digest(value)?);
+        }
+    }
+    Ok(())
+}
+
+fn escape_json_pointer_segment(segment: &str) -> String {
+    segment.replace('~', "~0").replace('/', "~1")
 }
 
 #[cfg(test)]

@@ -16,8 +16,9 @@ use proof_layer_core::{
     ScittTransparencyProvider, TimestampAssuranceProfile, TimestampToken, TimestampTrustPolicy,
     TimestampVerification, TransparencyReceipt, TransparencyTrustPolicy,
     anchor_bundle as anchor_bundle_receipt, build_bundle, canonicalize_value,
-    decode_private_key_pem, decode_public_key_pem, redact_bundle, sha256_prefixed,
-    timestamp_digest, validate_bundle_integrity_fields, validate_timestamp_trust_policy,
+    decode_private_key_pem, decode_public_key_pem, redact_bundle,
+    redact_bundle_with_field_redactions, sha256_prefixed, timestamp_digest,
+    validate_bundle_integrity_fields, validate_timestamp_trust_policy,
     validate_transparency_trust_policy, verify_receipt, verify_receipt_with_policy,
     verify_redacted_bundle, verify_timestamp, verify_timestamp_with_policy,
 };
@@ -608,6 +609,8 @@ struct DisclosurePolicyConfig {
     include_artefact_bytes: bool,
     #[serde(default)]
     artefact_names: Vec<String>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    redacted_fields_by_item_type: BTreeMap<String, Vec<String>>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -683,6 +686,8 @@ struct DisclosurePreviewResponse {
     disclosed_item_types: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     disclosed_item_obligation_refs: Vec<String>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    disclosed_item_field_redactions: BTreeMap<usize, Vec<String>>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     disclosed_artefact_indices: Vec<usize>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -749,6 +754,8 @@ struct PackBundleEntry {
     disclosed_item_indices: Vec<usize>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     disclosed_item_types: Vec<String>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    disclosed_item_field_redactions: BTreeMap<usize, Vec<String>>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     disclosed_artefact_indices: Vec<usize>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -847,6 +854,7 @@ struct CuratedPackBundle {
     obligation_refs: Vec<String>,
     disclosed_item_indices: Vec<usize>,
     disclosed_item_types: Vec<String>,
+    disclosed_item_field_redactions: BTreeMap<usize, Vec<String>>,
     disclosed_artefact_indices: Vec<usize>,
     disclosed_artefact_names: Vec<String>,
     disclosed_artefact_bytes_included: bool,
@@ -2557,6 +2565,7 @@ async fn create_pack(
                 build_disclosure_package_bytes(
                     &curated.bundle,
                     &curated.disclosed_item_indices,
+                    &curated.disclosed_item_field_redactions,
                     &curated.disclosed_artefact_indices,
                     &disclosed_artefacts,
                 )
@@ -2583,6 +2592,7 @@ async fn create_pack(
             package_name: Some(package_name.clone()),
             disclosed_item_indices: curated.disclosed_item_indices,
             disclosed_item_types: curated.disclosed_item_types,
+            disclosed_item_field_redactions: curated.disclosed_item_field_redactions,
             disclosed_artefact_indices: curated.disclosed_artefact_indices,
             disclosed_artefact_names: curated.disclosed_artefact_names,
             disclosed_artefact_bytes_included: curated.disclosed_artefact_bytes_included,
@@ -3598,6 +3608,11 @@ fn curate_pack_bundles(
             &bundle,
             &candidate_disclosed_item_indices,
         );
+        let disclosed_item_field_redactions = build_disclosed_item_field_redactions(
+            disclosure_policy,
+            &bundle,
+            &disclosed_item_indices,
+        )?;
         let disclosed_item_types = disclosed_item_indices
             .iter()
             .map(|index| evidence_item_type(&bundle.items[*index]).to_string())
@@ -3647,6 +3662,7 @@ fn curate_pack_bundles(
             obligation_refs,
             disclosed_item_indices,
             disclosed_item_types,
+            disclosed_item_field_redactions,
             disclosed_artefact_indices,
             disclosed_artefact_names,
             disclosed_artefact_bytes_included,
@@ -3708,6 +3724,50 @@ fn apply_disclosure_policy_to_items(
         .collect()
 }
 
+fn build_disclosed_item_field_redactions(
+    disclosure_policy: Option<&DisclosurePolicyConfig>,
+    bundle: &ProofBundle,
+    disclosed_item_indices: &[usize],
+) -> Result<BTreeMap<usize, Vec<String>>> {
+    let Some(policy) = disclosure_policy else {
+        return Ok(BTreeMap::new());
+    };
+
+    let mut field_redactions = BTreeMap::new();
+    for index in disclosed_item_indices {
+        let item_type = evidence_item_type(&bundle.items[*index]);
+        let Some(fields) = policy.redacted_fields_by_item_type.get(item_type) else {
+            continue;
+        };
+        if fields.is_empty() {
+            continue;
+        }
+        if bundle.integrity.bundle_root_algorithm != proof_layer_core::BUNDLE_ROOT_ALGORITHM_V3
+            && bundle.integrity.bundle_root_algorithm != proof_layer_core::BUNDLE_ROOT_ALGORITHM_V4
+        {
+            bail!(
+                "bundle {} uses {} and cannot satisfy field/path redactions for item type {}",
+                bundle.bundle_id,
+                bundle.integrity.bundle_root_algorithm,
+                item_type
+            );
+        }
+        if bundle.integrity.bundle_root_algorithm == proof_layer_core::BUNDLE_ROOT_ALGORITHM_V3
+            && fields.iter().any(|field| field.starts_with('/'))
+        {
+            bail!(
+                "bundle {} uses {} and cannot satisfy nested path redactions for item type {}",
+                bundle.bundle_id,
+                bundle.integrity.bundle_root_algorithm,
+                item_type
+            );
+        }
+        field_redactions.insert(*index, fields.clone());
+    }
+
+    Ok(field_redactions)
+}
+
 fn select_disclosed_artefact_indices(
     disclosure_policy: Option<&DisclosurePolicyConfig>,
     bundle: &ProofBundle,
@@ -3755,6 +3815,8 @@ fn build_disclosure_preview_response(
     };
     let disclosed_item_indices =
         apply_disclosure_policy_to_items(Some(policy), bundle, &candidate_item_indices);
+    let disclosed_item_field_redactions =
+        build_disclosed_item_field_redactions(Some(policy), bundle, &disclosed_item_indices)?;
     let disclosed_item_types = disclosed_item_indices
         .iter()
         .map(|index| evidence_item_type(&bundle.items[*index]).to_string())
@@ -3784,6 +3846,7 @@ fn build_disclosure_preview_response(
         disclosed_item_indices,
         disclosed_item_types,
         disclosed_item_obligation_refs,
+        disclosed_item_field_redactions,
         disclosed_artefact_indices,
         disclosed_artefact_names,
         disclosed_artefact_bytes_included,
@@ -3948,11 +4011,21 @@ fn build_bundle_package_bytes(
 fn build_disclosure_package_bytes(
     bundle: &ProofBundle,
     item_indices: &[usize],
+    item_field_redactions: &BTreeMap<usize, Vec<String>>,
     artefact_indices: &[usize],
     disclosed_artefacts: &[PackArtefactBytes],
 ) -> Result<Vec<u8>> {
-    let redacted = redact_bundle(bundle, item_indices, artefact_indices)
-        .context("failed to redact bundle for disclosure package")?;
+    let redacted = if item_field_redactions.is_empty() {
+        redact_bundle(bundle, item_indices, artefact_indices)
+    } else {
+        redact_bundle_with_field_redactions(
+            bundle,
+            item_indices,
+            artefact_indices,
+            item_field_redactions,
+        )
+    }
+    .context("failed to redact bundle for disclosure package")?;
     let mut package_files = BTreeMap::<String, Vec<u8>>::new();
     package_files.insert(
         "redacted_bundle.json".to_string(),
@@ -4569,6 +4642,10 @@ fn validate_disclosure_config(mut config: DisclosureConfig) -> Result<Disclosure
             "excluded_obligation_refs",
             &policy.name,
         )?;
+        policy.redacted_fields_by_item_type = normalize_disclosure_item_field_redactions(
+            &policy.redacted_fields_by_item_type,
+            &policy.name,
+        )?;
         let allowed = policy
             .allowed_item_types
             .iter()
@@ -4596,6 +4673,16 @@ fn validate_disclosure_config(mut config: DisclosureConfig) -> Result<Disclosure
                     obligation_ref
                 );
             }
+        }
+        for item_type in policy.redacted_fields_by_item_type.keys() {
+            if allowed.contains(item_type) || policy.allowed_item_types.is_empty() {
+                continue;
+            }
+            bail!(
+                "disclosure policy {} defines redacted fields for {} but that item type is not allowed by allowed_item_types",
+                policy.name,
+                item_type
+            );
         }
 
         policy.artefact_names = policy
@@ -4704,6 +4791,50 @@ fn normalize_disclosure_obligation_refs(
     Ok(normalized)
 }
 
+fn normalize_disclosure_item_field_redactions(
+    value: &BTreeMap<String, Vec<String>>,
+    policy_name: &str,
+) -> Result<BTreeMap<String, Vec<String>>> {
+    let mut normalized = BTreeMap::new();
+    for (item_type, fields) in value {
+        let item_type = item_type.trim().to_ascii_lowercase();
+        if item_type.is_empty() {
+            continue;
+        }
+        if !is_known_evidence_item_type(&item_type) {
+            bail!(
+                "disclosure policy {} has unsupported redacted_fields_by_item_type key {}",
+                policy_name,
+                item_type
+            );
+        }
+        let mut seen = HashSet::new();
+        let mut normalized_fields = Vec::new();
+        for field in fields {
+            let field = field.trim().to_string();
+            if field.is_empty() {
+                continue;
+            }
+            if !is_supported_redaction_selector(&item_type, &field) {
+                bail!(
+                    "disclosure policy {} has unsupported redacted field/path {} for item type {}",
+                    policy_name,
+                    field,
+                    item_type
+                );
+            }
+            if seen.insert(field.clone()) {
+                normalized_fields.push(field);
+            }
+        }
+        if !normalized_fields.is_empty() {
+            normalized.insert(item_type, normalized_fields);
+        }
+    }
+
+    Ok(normalized)
+}
+
 fn is_known_evidence_item_type(item_type: &str) -> bool {
     matches!(
         item_type,
@@ -4724,6 +4855,127 @@ fn is_known_evidence_item_type(item_type: &str) -> bool {
             | "literacy_attestation"
             | "incident_report"
     )
+}
+
+fn known_item_fields(item_type: &str) -> &'static [&'static str] {
+    match item_type {
+        "llm_interaction" => &[
+            "provider",
+            "model",
+            "parameters",
+            "input_commitment",
+            "retrieval_commitment",
+            "output_commitment",
+            "tool_outputs_commitment",
+            "token_usage",
+            "latency_ms",
+            "trace_commitment",
+            "trace_semconv_version",
+        ],
+        "tool_call" => &[
+            "tool_name",
+            "input_commitment",
+            "output_commitment",
+            "metadata",
+        ],
+        "retrieval" => &[
+            "corpus",
+            "result_commitment",
+            "query_commitment",
+            "metadata",
+        ],
+        "human_oversight" => &["action", "reviewer", "notes_commitment"],
+        "policy_decision" => &[
+            "policy_name",
+            "decision",
+            "rationale_commitment",
+            "metadata",
+        ],
+        "risk_assessment" => &["risk_id", "severity", "status", "summary", "metadata"],
+        "data_governance" => &["decision", "dataset_ref", "metadata"],
+        "technical_doc" => &["document_ref", "section", "commitment"],
+        "model_evaluation" => &[
+            "evaluation_id",
+            "benchmark",
+            "status",
+            "summary",
+            "report_commitment",
+            "metadata",
+        ],
+        "adversarial_test" => &[
+            "test_id",
+            "focus",
+            "status",
+            "finding_severity",
+            "report_commitment",
+            "metadata",
+        ],
+        "training_provenance" => &[
+            "dataset_ref",
+            "stage",
+            "lineage_ref",
+            "record_commitment",
+            "metadata",
+        ],
+        "conformity_assessment" => &[
+            "assessment_id",
+            "procedure",
+            "status",
+            "report_commitment",
+            "metadata",
+        ],
+        "declaration" => &[
+            "declaration_id",
+            "jurisdiction",
+            "status",
+            "document_commitment",
+            "metadata",
+        ],
+        "registration" => &[
+            "registration_id",
+            "authority",
+            "status",
+            "receipt_commitment",
+            "metadata",
+        ],
+        "literacy_attestation" => &[
+            "attested_role",
+            "status",
+            "training_ref",
+            "attestation_commitment",
+            "metadata",
+        ],
+        "incident_report" => &[
+            "incident_id",
+            "severity",
+            "status",
+            "occurred_at",
+            "summary",
+            "report_commitment",
+            "metadata",
+        ],
+        _ => &[],
+    }
+}
+
+fn is_supported_redaction_selector(item_type: &str, selector: &str) -> bool {
+    if let Some(stripped) = selector.strip_prefix('/') {
+        let mut segments = stripped.split('/');
+        let Some(first_segment) = segments.next() else {
+            return false;
+        };
+        let top_level = unescape_json_pointer_segment(first_segment);
+        if top_level.is_empty() {
+            return false;
+        }
+        return known_item_fields(item_type).contains(&top_level.as_str());
+    }
+
+    known_item_fields(item_type).contains(&selector)
+}
+
+fn unescape_json_pointer_segment(segment: &str) -> String {
+    segment.replace("~1", "/").replace("~0", "~")
 }
 
 fn is_known_obligation_ref(obligation_ref: &str) -> bool {
@@ -4811,6 +5063,7 @@ fn default_disclosure_config() -> DisclosureConfig {
                 include_artefact_metadata: false,
                 include_artefact_bytes: false,
                 artefact_names: Vec::new(),
+                redacted_fields_by_item_type: BTreeMap::new(),
             },
             DisclosurePolicyConfig {
                 name: DEFAULT_DISCLOSURE_POLICY_ANNEX_IV_REDACTED.to_string(),
@@ -4826,6 +5079,7 @@ fn default_disclosure_config() -> DisclosureConfig {
                 include_artefact_metadata: true,
                 include_artefact_bytes: true,
                 artefact_names: Vec::new(),
+                redacted_fields_by_item_type: BTreeMap::new(),
             },
             DisclosurePolicyConfig {
                 name: DEFAULT_DISCLOSURE_POLICY_INCIDENT_SUMMARY.to_string(),
@@ -4845,6 +5099,7 @@ fn default_disclosure_config() -> DisclosureConfig {
                 include_artefact_metadata: false,
                 include_artefact_bytes: false,
                 artefact_names: Vec::new(),
+                redacted_fields_by_item_type: BTreeMap::new(),
             },
         ],
     }
@@ -8541,6 +8796,7 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
                     include_artefact_metadata: false,
                     include_artefact_bytes: false,
                     artefact_names: Vec::new(),
+                    redacted_fields_by_item_type: BTreeMap::new(),
                 },
                 DisclosurePolicyConfig {
                     name: "annex_iv_redacted".to_string(),
@@ -8554,6 +8810,10 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
                     include_artefact_metadata: true,
                     include_artefact_bytes: true,
                     artefact_names: vec!["doc.json".to_string()],
+                    redacted_fields_by_item_type: BTreeMap::from([(
+                        "risk_assessment".to_string(),
+                        vec!["metadata".to_string()],
+                    )]),
                 },
             ],
         };
@@ -8662,6 +8922,10 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
                         include_artefact_metadata: false,
                         include_artefact_bytes: false,
                         artefact_names: Vec::new(),
+                        redacted_fields_by_item_type: BTreeMap::from([(
+                            "risk_assessment".to_string(),
+                            vec!["/metadata/source".to_string()],
+                        )]),
                     }),
                 })
                 .unwrap(),
@@ -8680,6 +8944,10 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
         assert_eq!(preview.disclosed_item_indices, vec![1]);
         assert_eq!(preview.disclosed_item_types, vec!["risk_assessment"]);
         assert_eq!(preview.disclosed_item_obligation_refs, vec!["art9"]);
+        assert_eq!(
+            preview.disclosed_item_field_redactions,
+            BTreeMap::from([(1usize, vec!["/metadata/source".to_string()])])
+        );
         assert!(preview.disclosed_artefact_indices.is_empty());
         assert!(!preview.disclosed_artefact_bytes_included);
     }
@@ -9194,6 +9462,155 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
         let verify_response: VerifyResponse = serde_json::from_slice(&body).unwrap();
         assert!(verify_response.valid);
         assert_eq!(verify_response.artefacts_verified, 2);
+    }
+
+    #[tokio::test]
+    async fn create_pack_applies_named_disclosure_policy_with_field_redactions() {
+        let state = test_state(DEFAULT_MAX_PAYLOAD_BYTES).await;
+        let public_key_pem = encode_public_key_pem(&state.signing_key.verifying_key());
+        let app = build_router(state, DEFAULT_MAX_PAYLOAD_BYTES);
+
+        let update_config = DisclosureConfig {
+            policies: vec![
+                DisclosurePolicyConfig {
+                    name: "runtime_minimum".to_string(),
+                    allowed_item_types: vec!["llm_interaction".to_string()],
+                    excluded_item_types: Vec::new(),
+                    allowed_obligation_refs: Vec::new(),
+                    excluded_obligation_refs: Vec::new(),
+                    include_artefact_metadata: false,
+                    include_artefact_bytes: false,
+                    artefact_names: Vec::new(),
+                    redacted_fields_by_item_type: BTreeMap::from([(
+                        "llm_interaction".to_string(),
+                        vec!["output_commitment".to_string()],
+                    )]),
+                },
+                DisclosurePolicyConfig {
+                    name: DEFAULT_DISCLOSURE_POLICY_REGULATOR_MINIMUM.to_string(),
+                    allowed_item_types: Vec::new(),
+                    excluded_item_types: Vec::new(),
+                    allowed_obligation_refs: Vec::new(),
+                    excluded_obligation_refs: Vec::new(),
+                    include_artefact_metadata: false,
+                    include_artefact_bytes: false,
+                    artefact_names: Vec::new(),
+                    redacted_fields_by_item_type: BTreeMap::new(),
+                },
+            ],
+        };
+        let update_req = Request::builder()
+            .method("PUT")
+            .uri("/v1/config/disclosure")
+            .header("content-type", "application/json")
+            .body(Body::from(serde_json::to_vec(&update_config).unwrap()))
+            .unwrap();
+        let update_res = app.clone().oneshot(update_req).await.unwrap();
+        assert_eq!(update_res.status(), StatusCode::OK);
+
+        let llm_bundle = create_bundle_response(
+            &app,
+            &CreateBundleRequest {
+                capture: SealableCaptureInput::V10(sample_event_with_profile(
+                    "system-redacted",
+                    proof_layer_core::ActorRole::Provider,
+                    sample_event_with_system("system-redacted").items,
+                    Some("runtime_logs"),
+                )),
+                artefacts: vec![InlineArtefact {
+                    name: "prompt.json".to_string(),
+                    content_type: "application/json".to_string(),
+                    data_base64: Base64::encode_string(br#"{"prompt":"hello"}"#),
+                }],
+            },
+        )
+        .await;
+
+        let pack_req = Request::builder()
+            .method("POST")
+            .uri("/v1/packs")
+            .header("content-type", "application/json")
+            .body(Body::from(
+                serde_json::to_vec(&CreatePackRequest {
+                    pack_type: "runtime_logs".to_string(),
+                    system_id: Some("system-redacted".to_string()),
+                    from: None,
+                    to: None,
+                    bundle_format: PACK_BUNDLE_FORMAT_DISCLOSURE.to_string(),
+                    disclosure_policy: Some("runtime_minimum".to_string()),
+                })
+                .unwrap(),
+            ))
+            .unwrap();
+        let pack_res = app.clone().oneshot(pack_req).await.unwrap();
+        assert_eq!(pack_res.status(), StatusCode::CREATED);
+        let body = axum::body::to_bytes(pack_res.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let pack: PackSummaryResponse = serde_json::from_slice(&body).unwrap();
+        assert_eq!(pack.bundle_ids, vec![llm_bundle.bundle_id.clone()]);
+
+        let manifest_req = Request::builder()
+            .method("GET")
+            .uri(format!("/v1/packs/{}/manifest", pack.pack_id))
+            .body(Body::empty())
+            .unwrap();
+        let manifest_res = app.clone().oneshot(manifest_req).await.unwrap();
+        assert_eq!(manifest_res.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(manifest_res.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let manifest: PackManifest = serde_json::from_slice(&body).unwrap();
+        assert_eq!(
+            manifest.bundles[0].disclosed_item_field_redactions,
+            BTreeMap::from([(0usize, vec!["output_commitment".to_string()])])
+        );
+
+        let export_req = Request::builder()
+            .method("GET")
+            .uri(format!("/v1/packs/{}/export", pack.pack_id))
+            .body(Body::empty())
+            .unwrap();
+        let export_res = app.clone().oneshot(export_req).await.unwrap();
+        assert_eq!(export_res.status(), StatusCode::OK);
+        let export_bytes = axum::body::to_bytes(export_res.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let archive = decode_pack_archive(&export_bytes);
+        let disclosure_package =
+            Base64::decode_vec(&archive.files[0].data_base64).expect("base64 disclosure package");
+        let decoded =
+            read_package_from_bytes(&disclosure_package, DEFAULT_MAX_PAYLOAD_BYTES).unwrap();
+        let redacted = parse_redacted_bundle_file(&decoded.files).unwrap();
+        assert!(redacted.disclosed_items[0].item.is_none());
+        assert_eq!(
+            redacted.disclosed_items[0]
+                .field_redacted_item
+                .as_ref()
+                .unwrap()
+                .redacted_paths,
+            vec!["/output_commitment".to_string()]
+        );
+
+        let verify_req = Request::builder()
+            .method("POST")
+            .uri("/v1/verify")
+            .header("content-type", "application/json")
+            .body(Body::from(
+                serde_json::to_vec(&VerifyRequest::Package(Box::new(PackageVerifyRequest {
+                    bundle_pkg_base64: archive.files[0].data_base64.clone(),
+                    public_key_pem,
+                })))
+                .unwrap(),
+            ))
+            .unwrap();
+        let verify_res = app.oneshot(verify_req).await.unwrap();
+        assert_eq!(verify_res.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(verify_res.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let verify_response: VerifyResponse = serde_json::from_slice(&body).unwrap();
+        assert!(verify_response.valid);
     }
 
     #[tokio::test]

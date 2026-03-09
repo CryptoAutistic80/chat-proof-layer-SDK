@@ -66,13 +66,13 @@
     "canonicalization": "RFC8785-JCS",
     "hash": "SHA-256",
     "header_digest": "sha256:164b2fe2c29228c26534b3ecc1c4b90fece23e6c9e675991a7d19f73cb8bab88",
-    "bundle_root_algorithm": "pl-merkle-sha256-v3",
-    "bundle_root": "sha256:6859aafa5ceee8f0f0e6edfcbc374af9f1b2372cd804c01bb3143fb1eb8bf802",
+    "bundle_root_algorithm": "pl-merkle-sha256-v4",
+    "bundle_root": "sha256:ddc1baf36b18fef60a6d8d79976efeb37b4efc42ea134a2588cb82bda3df4150",
     "signature": {
       "format": "JWS",
       "alg": "EdDSA",
       "kid": "kid-dev-01",
-      "value": "eyJhbGciOiJFZERTQSIsImtpZCI6ImtpZC1kZXYtMDEifQ.c2hhMjU2OjY4NTlhYWZhNWNlZWU4ZjBmMGU2ZWRmY2JjMzc0YWY5ZjFiMjM3MmNkODA0YzAxYmIzMTQzZmIxZWI4YmY4MDI.4yEP5LAzQlro-VlHa7SHhZTFa0KMNS29z_-dotp8sJyVuk-bzljs1zBVSLE0vZJFP5dCw_lC1BSLZrQLYVIbAQ"
+      "value": "eyJhbGciOiJFZERTQSIsImtpZCI6ImtpZC1kZXYtMDEifQ.c2hhMjU2OmRkYzFiYWYzNmIxOGZlZjYwYTZkOGQ3OTk3NmVmZWIzN2I0ZWZjNDJlYTEzNGEyNTg4Y2I4MmJkYTNkZjQxNTA.b8T15whUgvlo8KvKCSGq4SqnDd9c-4hNbS-6dkcyX9CkRH1isq_CVxe2179GUP_FvQfDKqwLIbFer7BzYAtbCw"
     }
   }
 }

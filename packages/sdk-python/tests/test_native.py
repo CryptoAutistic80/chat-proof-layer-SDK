@@ -96,8 +96,8 @@ class TestNativeBindings(unittest.TestCase):
 
         self.assertIsNone(redacted["disclosed_items"][0].get("item"))
         self.assertEqual(
-            redacted["disclosed_items"][0]["field_redacted_item"]["redacted_fields"],
-            ["output_commitment"],
+            redacted["disclosed_items"][0]["field_redacted_item"]["redacted_paths"],
+            ["/output_commitment"],
         )
 
 

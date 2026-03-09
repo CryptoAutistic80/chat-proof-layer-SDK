@@ -114,6 +114,9 @@ await proofClient.updateDisclosureConfig({
     {
       name: "regulator_minimum",
       excluded_item_types: ["tool_call"],
+      redacted_fields_by_item_type: {
+        llm_interaction: ["/parameters/temperature"]
+      },
       include_artefact_metadata: false,
       include_artefact_bytes: false,
       artefact_names: []

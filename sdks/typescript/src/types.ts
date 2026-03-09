@@ -83,8 +83,12 @@ export interface RedactedBundle extends JsonObject {
 export interface FieldRedactedItem extends JsonObject {
   item_type: string;
   revealed_data?: JsonObject;
-  field_digests: Record<string, string>;
+  field_digests?: Record<string, string>;
   redacted_fields?: string[];
+  container_kinds?: Record<string, string>;
+  revealed_paths?: Record<string, JsonValue>;
+  path_digests?: Record<string, string>;
+  redacted_paths?: string[];
 }
 
 export interface DisclosedItem extends JsonObject {
@@ -207,6 +211,7 @@ export interface PackBundleEntry extends JsonObject {
   package_name?: string;
   disclosed_item_indices?: number[];
   disclosed_item_types?: string[];
+  disclosed_item_field_redactions?: Record<string, string[]>;
   disclosed_artefact_indices?: number[];
   disclosed_artefact_names?: string[];
   disclosed_artefact_bytes_included?: boolean;
@@ -250,6 +255,7 @@ export interface DisclosurePolicyConfig extends JsonObject {
   include_artefact_metadata?: boolean;
   include_artefact_bytes?: boolean;
   artefact_names?: string[];
+  redacted_fields_by_item_type?: Record<string, string[]>;
 }
 
 export interface DisclosureConfig extends JsonObject {
@@ -271,6 +277,7 @@ export interface DisclosurePreviewResponse extends JsonObject {
   disclosed_item_indices?: number[];
   disclosed_item_types?: string[];
   disclosed_item_obligation_refs?: string[];
+  disclosed_item_field_redactions?: Record<string, string[]>;
   disclosed_artefact_indices?: number[];
   disclosed_artefact_names?: string[];
   disclosed_artefact_bytes_included?: boolean;

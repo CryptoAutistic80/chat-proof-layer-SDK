@@ -559,6 +559,8 @@ struct DisclosurePolicyConfig {
     include_artefact_bytes: bool,
     #[serde(default)]
     artefact_names: Vec<String>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    redacted_fields_by_item_type: BTreeMap<String, Vec<String>>,
 }
 
 #[derive(Debug, Serialize)]
@@ -585,6 +587,8 @@ struct DisclosurePreviewResponse {
     disclosed_item_types: Vec<String>,
     #[serde(default)]
     disclosed_item_obligation_refs: Vec<String>,
+    #[serde(default)]
+    disclosed_item_field_redactions: BTreeMap<usize, Vec<String>>,
     #[serde(default)]
     disclosed_artefact_indices: Vec<usize>,
     #[serde(default)]
@@ -1857,6 +1861,13 @@ fn print_disclosure_preview_human(response: &DisclosurePreviewResponse) {
         "disclosed_obligation_refs: {}",
         format_csv(&response.disclosed_item_obligation_refs)
     );
+    if !response.disclosed_item_field_redactions.is_empty() {
+        println!(
+            "disclosed_item_field_redactions: {}",
+            serde_json::to_string(&response.disclosed_item_field_redactions)
+                .unwrap_or_else(|_| "{}".to_string())
+        );
+    }
     println!(
         "disclosed_artefacts: {}",
         format_csv(&response.disclosed_artefact_names)
@@ -2861,16 +2872,16 @@ fn parse_field_redactions(values: &[String]) -> Result<BTreeMap<usize, Vec<Strin
         if trimmed.is_empty() {
             bail!("redact-field entries must not be empty");
         }
-        let (index, field) = trimmed
-            .split_once(':')
-            .ok_or_else(|| anyhow!("redact-field must be <item_index>:<field>, got {trimmed}"))?;
+        let (index, field) = trimmed.split_once(':').ok_or_else(|| {
+            anyhow!("redact-field must be <item_index>:<field-or-path>, got {trimmed}")
+        })?;
         let index = index
             .trim()
             .parse::<usize>()
             .with_context(|| format!("invalid item index in redact-field {trimmed}"))?;
         let field = field.trim();
         if field.is_empty() {
-            bail!("redact-field must specify a field name after ':', got {trimmed}");
+            bail!("redact-field must specify a field or JSON pointer after ':', got {trimmed}");
         }
         field_redactions
             .entry(index)
@@ -3837,8 +3848,79 @@ mod tests {
             .as_ref()
             .unwrap();
         assert_eq!(
-            field_redacted_item.redacted_fields,
-            vec!["output_commitment".to_string()]
+            field_redacted_item.redacted_paths,
+            vec!["/output_commitment".to_string()]
+        );
+
+        fs::remove_dir_all(&tmp_dir).unwrap();
+    }
+
+    #[test]
+    fn disclose_command_supports_nested_path_redaction() {
+        let bundle = sample_bundle();
+        let artefact_bytes = br#"{"hello":"world"}"#.to_vec();
+
+        let mut package_files = BTreeMap::<String, Vec<u8>>::new();
+        package_files.insert(
+            "proof_bundle.json".to_string(),
+            serde_json::to_vec_pretty(&bundle).unwrap(),
+        );
+        package_files.insert(
+            "proof_bundle.canonical.json".to_string(),
+            bundle.canonical_header_bytes().unwrap(),
+        );
+        package_files.insert(
+            "proof_bundle.sig".to_string(),
+            bundle.integrity.signature.value.as_bytes().to_vec(),
+        );
+        package_files.insert("artefacts/prompt.json".to_string(), artefact_bytes);
+
+        let manifest = Manifest {
+            files: package_files
+                .iter()
+                .map(|(name, bytes)| ManifestEntry {
+                    name: name.clone(),
+                    digest: sha256_prefixed(bytes),
+                    size: bytes.len() as u64,
+                })
+                .collect(),
+        };
+        package_files.insert(
+            "manifest.json".to_string(),
+            serde_json::to_vec_pretty(&manifest).unwrap(),
+        );
+
+        let tmp_dir = std::env::temp_dir().join(format!("proofctl-disclose-paths-{}", Ulid::new()));
+        fs::create_dir_all(&tmp_dir).unwrap();
+        let bundle_path = tmp_dir.join("bundle.pkg");
+        let disclosure_path = tmp_dir.join("bundle.disclosure.pkg");
+
+        write_bundle_package(&bundle_path, &package_files).unwrap();
+        cmd_disclose(
+            &bundle_path,
+            "0",
+            None,
+            &["0:/parameters/temperature".to_string()],
+            &disclosure_path,
+        )
+        .unwrap();
+
+        let package = read_package(&disclosure_path).unwrap();
+        let redacted = parse_redacted_bundle_file(&package.files).unwrap();
+        let field_redacted_item = redacted.disclosed_items[0]
+            .field_redacted_item
+            .as_ref()
+            .unwrap();
+        assert_eq!(
+            field_redacted_item.redacted_paths,
+            vec!["/parameters/temperature".to_string()]
+        );
+        assert_eq!(
+            field_redacted_item
+                .container_kinds
+                .get("/parameters")
+                .map(String::as_str),
+            Some("object")
         );
 
         fs::remove_dir_all(&tmp_dir).unwrap();

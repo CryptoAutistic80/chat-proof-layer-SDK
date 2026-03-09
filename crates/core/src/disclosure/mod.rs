@@ -5,7 +5,8 @@ use crate::{
         Actor, ArtefactRef, BUNDLE_VERSION, EvidenceContext, EvidenceItem, Integrity, Policy,
         ProofBundle, Subject, TimestampToken, TransparencyReceipt, artefact_commitment_digest,
         field_commitment_digest, item_commitment_digest_for_algorithm,
-        item_commitment_digest_from_fields, validate_bundle_integrity_fields,
+        item_commitment_digest_from_fields, item_commitment_digest_from_paths,
+        item_path_commitment_digests, validate_bundle_integrity_fields,
     },
     verify::{VerifyBundleRootError, verify_bundle_root},
 };
@@ -20,9 +21,18 @@ pub struct FieldRedactedItem {
     pub item_type: String,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub revealed_data: BTreeMap<String, Value>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub field_digests: BTreeMap<String, String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub redacted_fields: Vec<String>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub container_kinds: BTreeMap<String, String>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub revealed_paths: BTreeMap<String, Value>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub path_digests: BTreeMap<String, String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub redacted_paths: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -76,11 +86,13 @@ pub struct RedactedVerificationSummary {
 #[derive(Debug, Error)]
 pub enum DisclosureError {
     #[error(
-        "selective disclosure requires bundle root algorithm pl-merkle-sha256-v2 or pl-merkle-sha256-v3"
+        "selective disclosure requires bundle root algorithm pl-merkle-sha256-v2, pl-merkle-sha256-v3, or pl-merkle-sha256-v4"
     )]
     UnsupportedBundleRootAlgorithm,
-    #[error("field-level redaction requires bundle root algorithm pl-merkle-sha256-v3")]
-    FieldRedactionRequiresV3,
+    #[error(
+        "field/path redaction requires bundle root algorithm pl-merkle-sha256-v3 or pl-merkle-sha256-v4"
+    )]
+    FieldRedactionRequiresV3OrV4,
     #[error("redacted bundle version must be {expected}, got {actual}")]
     UnsupportedBundleVersion { expected: String, actual: String },
     #[error("bundle validation failed: {0}")]
@@ -127,6 +139,8 @@ pub enum DisclosureError {
     ItemProofIndexMismatch { expected: usize, actual: usize },
     #[error("item field {field} is not present at disclosed index {index}")]
     UnknownItemField { index: usize, field: String },
+    #[error("item data path {path} is not present at disclosed index {index}")]
+    UnknownItemPath { index: usize, path: String },
     #[error(
         "disclosed item field digest mismatch at index {index} for field {field}; expected {expected}, got {actual}"
     )]
@@ -138,6 +152,23 @@ pub enum DisclosureError {
     },
     #[error("field redaction metadata mismatch at disclosed index {0}")]
     FieldRedactionMetadataMismatch(usize),
+    #[error(
+        "disclosed item path digest mismatch at index {index} for path {path}; expected {expected}, got {actual}"
+    )]
+    PathDigestMismatch {
+        index: usize,
+        path: String,
+        expected: String,
+        actual: String,
+    },
+    #[error("path redaction metadata mismatch at disclosed index {0}")]
+    PathRedactionMetadataMismatch(usize),
+    #[error("invalid container kind {kind} for path {path} at disclosed index {index}")]
+    InvalidContainerKind {
+        index: usize,
+        path: String,
+        kind: String,
+    },
     #[error(
         "artefact commitment mismatch at disclosed index {index}; expected {expected}, got {actual}"
     )]
@@ -189,7 +220,7 @@ pub fn redact_bundle_with_field_redactions(
     if bundle.integrity.bundle_root_algorithm == crate::schema::BUNDLE_ROOT_ALGORITHM_V2
         && !field_redactions.is_empty()
     {
-        return Err(DisclosureError::FieldRedactionRequiresV3);
+        return Err(DisclosureError::FieldRedactionRequiresV3OrV4);
     }
 
     let digests = bundle.commitment_digests()?;
@@ -211,10 +242,12 @@ pub fn redact_bundle_with_field_redactions(
             let proof = build_inclusion_proof(&digests, 1 + index)?;
             let field_redacted_item = if bundle.integrity.bundle_root_algorithm
                 == crate::schema::BUNDLE_ROOT_ALGORITHM_V3
+                || bundle.integrity.bundle_root_algorithm == crate::schema::BUNDLE_ROOT_ALGORITHM_V4
             {
                 build_field_redacted_item(
                     index,
                     &bundle.items[index],
+                    &bundle.integrity.bundle_root_algorithm,
                     field_redactions
                         .get(&index)
                         .map(Vec::as_slice)
@@ -443,6 +476,7 @@ fn commitment_header_projection(bundle: &RedactedBundle) -> serde_json::Value {
 fn supports_selective_disclosure(algorithm: &str) -> bool {
     algorithm == crate::schema::BUNDLE_ROOT_ALGORITHM_V2
         || algorithm == crate::schema::BUNDLE_ROOT_ALGORITHM_V3
+        || algorithm == crate::schema::BUNDLE_ROOT_ALGORITHM_V4
 }
 
 fn disclosed_item_digest(
@@ -469,6 +503,16 @@ fn disclosed_item_digest(
                 }),
             }
         }
+        crate::schema::BUNDLE_ROOT_ALGORITHM_V4 => {
+            match (&disclosed.item, &disclosed.field_redacted_item) {
+                (Some(item), None) => item_commitment_digest_for_algorithm(item, algorithm)
+                    .map_err(DisclosureError::Canonicalization),
+                (None, Some(redacted)) => verify_path_redacted_item(disclosed.index, redacted),
+                _ => Err(DisclosureError::InvalidDisclosedItemPayload {
+                    index: disclosed.index,
+                }),
+            }
+        }
         _ => Err(DisclosureError::UnsupportedBundleRootAlgorithm),
     }
 }
@@ -476,10 +520,15 @@ fn disclosed_item_digest(
 fn build_field_redacted_item(
     index: usize,
     item: &EvidenceItem,
+    algorithm: &str,
     requested_fields: &[String],
 ) -> Result<Option<FieldRedactedItem>, DisclosureError> {
     if requested_fields.is_empty() {
         return Ok(None);
+    }
+
+    if algorithm == crate::schema::BUNDLE_ROOT_ALGORITHM_V4 {
+        return build_path_redacted_item(index, item, requested_fields);
     }
 
     let (item_type, data) = item_type_and_data(item)?;
@@ -510,6 +559,10 @@ fn build_field_redacted_item(
         revealed_data,
         field_digests,
         redacted_fields: requested_fields.into_iter().collect(),
+        container_kinds: BTreeMap::new(),
+        revealed_paths: BTreeMap::new(),
+        path_digests: BTreeMap::new(),
+        redacted_paths: Vec::new(),
     }))
 }
 
@@ -547,6 +600,254 @@ fn verify_field_redacted_item(
 
     item_commitment_digest_from_fields(&item.item_type, &item.field_digests)
         .map_err(DisclosureError::Canonicalization)
+}
+
+fn build_path_redacted_item(
+    index: usize,
+    item: &EvidenceItem,
+    requested_selectors: &[String],
+) -> Result<Option<FieldRedactedItem>, DisclosureError> {
+    let (item_type, data_value) = item_type_and_data_value(item)?;
+    let (_, container_kinds, path_digests) =
+        item_path_commitment_digests(item).map_err(DisclosureError::Canonicalization)?;
+    let mut revealed_paths = BTreeMap::new();
+    collect_leaf_values("", &data_value, &mut revealed_paths);
+    let redacted_path_set =
+        expand_requested_redaction_paths(index, &data_value, requested_selectors)?;
+    if redacted_path_set.is_empty() {
+        return Ok(None);
+    }
+
+    revealed_paths.retain(|path, _| !redacted_path_set.contains(path));
+
+    Ok(Some(FieldRedactedItem {
+        item_type,
+        revealed_data: BTreeMap::new(),
+        field_digests: BTreeMap::new(),
+        redacted_fields: Vec::new(),
+        container_kinds,
+        revealed_paths,
+        path_digests,
+        redacted_paths: redacted_path_set.into_iter().collect(),
+    }))
+}
+
+fn verify_path_redacted_item(
+    index: usize,
+    item: &FieldRedactedItem,
+) -> Result<String, DisclosureError> {
+    validate_path_commitment_topology(index, &item.container_kinds, &item.path_digests)?;
+
+    let revealed_paths = item.revealed_paths.keys().cloned().collect::<BTreeSet<_>>();
+    let derived_redacted_paths = item
+        .path_digests
+        .keys()
+        .filter(|path| !revealed_paths.contains(*path))
+        .cloned()
+        .collect::<Vec<_>>();
+    if derived_redacted_paths != item.redacted_paths {
+        return Err(DisclosureError::PathRedactionMetadataMismatch(index));
+    }
+
+    for (path, value) in &item.revealed_paths {
+        let expected_digest = item
+            .path_digests
+            .get(path)
+            .ok_or(DisclosureError::PathRedactionMetadataMismatch(index))?;
+        let actual_digest =
+            field_commitment_digest(value).map_err(DisclosureError::Canonicalization)?;
+        if &actual_digest != expected_digest {
+            return Err(DisclosureError::PathDigestMismatch {
+                index,
+                path: path.clone(),
+                expected: expected_digest.clone(),
+                actual: actual_digest,
+            });
+        }
+    }
+
+    item_commitment_digest_from_paths(&item.item_type, &item.container_kinds, &item.path_digests)
+        .map_err(DisclosureError::Canonicalization)
+}
+
+fn collect_leaf_values(path: &str, value: &Value, leaf_values: &mut BTreeMap<String, Value>) {
+    match value {
+        Value::Object(object) => {
+            for (key, value) in object {
+                collect_leaf_values(
+                    &format!("{path}/{}", escape_json_pointer_segment(key)),
+                    value,
+                    leaf_values,
+                );
+            }
+        }
+        Value::Array(array) => {
+            for (index, value) in array.iter().enumerate() {
+                collect_leaf_values(&format!("{path}/{index}"), value, leaf_values);
+            }
+        }
+        _ => {
+            leaf_values.insert(path.to_string(), value.clone());
+        }
+    }
+}
+
+fn expand_requested_redaction_paths(
+    index: usize,
+    data_value: &Value,
+    requested_selectors: &[String],
+) -> Result<BTreeSet<String>, DisclosureError> {
+    let mut requested_paths = BTreeSet::new();
+    for selector in requested_selectors {
+        let path = normalize_item_selector(selector);
+        let value = resolve_relative_json_pointer(data_value, &path).ok_or_else(|| {
+            if selector.starts_with('/') {
+                DisclosureError::UnknownItemPath {
+                    index,
+                    path: selector.clone(),
+                }
+            } else {
+                DisclosureError::UnknownItemField {
+                    index,
+                    field: selector.clone(),
+                }
+            }
+        })?;
+        collect_leaf_paths_under_value(&path, value, &mut requested_paths);
+    }
+    Ok(requested_paths)
+}
+
+fn collect_leaf_paths_under_value(path: &str, value: &Value, paths: &mut BTreeSet<String>) {
+    match value {
+        Value::Object(object) => {
+            for (key, value) in object {
+                collect_leaf_paths_under_value(
+                    &format!("{path}/{}", escape_json_pointer_segment(key)),
+                    value,
+                    paths,
+                );
+            }
+        }
+        Value::Array(array) => {
+            for (index, value) in array.iter().enumerate() {
+                collect_leaf_paths_under_value(&format!("{path}/{index}"), value, paths);
+            }
+        }
+        _ => {
+            paths.insert(path.to_string());
+        }
+    }
+}
+
+fn validate_path_commitment_topology(
+    index: usize,
+    container_kinds: &BTreeMap<String, String>,
+    path_digests: &BTreeMap<String, String>,
+) -> Result<(), DisclosureError> {
+    match container_kinds.get("") {
+        Some(kind) if kind == "object" => {}
+        Some(kind) => {
+            return Err(DisclosureError::InvalidContainerKind {
+                index,
+                path: String::new(),
+                kind: kind.clone(),
+            });
+        }
+        None => return Err(DisclosureError::PathRedactionMetadataMismatch(index)),
+    }
+
+    for (path, kind) in container_kinds {
+        if kind != "object" && kind != "array" {
+            return Err(DisclosureError::InvalidContainerKind {
+                index,
+                path: path.clone(),
+                kind: kind.clone(),
+            });
+        }
+        if path.is_empty() {
+            continue;
+        }
+        let (parent_path, token) = split_parent_and_token(path)
+            .ok_or(DisclosureError::PathRedactionMetadataMismatch(index))?;
+        let parent_kind = container_kinds
+            .get(parent_path)
+            .ok_or(DisclosureError::PathRedactionMetadataMismatch(index))?;
+        validate_child_token(index, path, token, parent_kind)?;
+    }
+
+    for path in path_digests.keys() {
+        let (parent_path, token) = split_parent_and_token(path)
+            .ok_or(DisclosureError::PathRedactionMetadataMismatch(index))?;
+        let parent_kind = container_kinds
+            .get(parent_path)
+            .ok_or(DisclosureError::PathRedactionMetadataMismatch(index))?;
+        validate_child_token(index, path, token, parent_kind)?;
+        if container_kinds.contains_key(path) {
+            return Err(DisclosureError::PathRedactionMetadataMismatch(index));
+        }
+    }
+
+    Ok(())
+}
+
+fn validate_child_token(
+    index: usize,
+    path: &str,
+    token: &str,
+    parent_kind: &str,
+) -> Result<(), DisclosureError> {
+    match parent_kind {
+        "object" => Ok(()),
+        "array" => token
+            .parse::<usize>()
+            .map(|_| ())
+            .map_err(|_| DisclosureError::PathRedactionMetadataMismatch(index)),
+        other => Err(DisclosureError::InvalidContainerKind {
+            index,
+            path: path.to_string(),
+            kind: other.to_string(),
+        }),
+    }
+}
+
+fn split_parent_and_token(path: &str) -> Option<(&str, &str)> {
+    if !path.starts_with('/') {
+        return None;
+    }
+    let position = path.rfind('/')?;
+    let parent = if position == 0 { "" } else { &path[..position] };
+    let token = &path[position + 1..];
+    Some((parent, token))
+}
+
+fn normalize_item_selector(selector: &str) -> String {
+    if selector.starts_with('/') {
+        selector.to_string()
+    } else {
+        format!("/{}", escape_json_pointer_segment(selector))
+    }
+}
+
+fn resolve_relative_json_pointer<'a>(value: &'a Value, path: &str) -> Option<&'a Value> {
+    if path.is_empty() {
+        Some(value)
+    } else {
+        value.pointer(path)
+    }
+}
+
+fn escape_json_pointer_segment(segment: &str) -> String {
+    segment.replace('~', "~0").replace('/', "~1")
+}
+
+fn item_type_and_data_value(item: &EvidenceItem) -> Result<(String, Value), DisclosureError> {
+    let (item_type, data) = item_type_and_data(item)?;
+    let mut object = serde_json::Map::new();
+    for (field, value) in data {
+        object.insert(field, value);
+    }
+    Ok((item_type, Value::Object(object)))
 }
 
 fn item_type_and_data(
@@ -708,13 +1009,13 @@ mod tests {
             .unwrap();
         assert_eq!(field_redacted_item.item_type, "llm_interaction");
         assert_eq!(
-            field_redacted_item.redacted_fields,
-            vec!["output_commitment".to_string()]
+            field_redacted_item.redacted_paths,
+            vec!["/output_commitment".to_string()]
         );
         assert!(
             !field_redacted_item
-                .revealed_data
-                .contains_key("output_commitment")
+                .revealed_paths
+                .contains_key("/output_commitment")
         );
     }
 
@@ -733,15 +1034,15 @@ mod tests {
             .as_mut()
             .unwrap();
         field_redacted_item
-            .revealed_data
-            .insert("provider".to_string(), json!("tampered"));
+            .revealed_paths
+            .insert("/provider".to_string(), json!("tampered"));
         let verifying_key = SigningKey::from_bytes(&[9_u8; 32]).verifying_key();
         let err = verify_redacted_bundle(&redacted, &BTreeMap::new(), &verifying_key).unwrap_err();
-        assert!(matches!(err, DisclosureError::FieldDigestMismatch { .. }));
+        assert!(matches!(err, DisclosureError::PathDigestMismatch { .. }));
     }
 
     #[test]
-    fn field_redaction_requires_v3_commitment_layout() {
+    fn field_redaction_requires_v3_or_v4_commitment_layout() {
         let mut bundle = sample_bundle();
         bundle.integrity.bundle_root_algorithm =
             crate::schema::BUNDLE_ROOT_ALGORITHM_V2.to_string();
@@ -752,7 +1053,49 @@ mod tests {
             &BTreeMap::from([(0usize, vec!["output_commitment".to_string()])]),
         )
         .unwrap_err();
-        assert!(matches!(err, DisclosureError::FieldRedactionRequiresV3));
+        assert!(matches!(err, DisclosureError::FieldRedactionRequiresV3OrV4));
+    }
+
+    #[test]
+    fn redact_bundle_round_trips_selected_item_with_nested_path_redaction() {
+        let bundle = sample_bundle();
+        let redacted = redact_bundle_with_field_redactions(
+            &bundle,
+            &[1],
+            &[],
+            &BTreeMap::from([(1usize, vec!["/metadata/source".to_string()])]),
+        )
+        .unwrap();
+        let verifying_key = SigningKey::from_bytes(&[9_u8; 32]).verifying_key();
+        let summary = verify_redacted_bundle(&redacted, &BTreeMap::new(), &verifying_key).unwrap();
+        assert_eq!(summary.disclosed_item_count, 1);
+        let field_redacted_item = redacted.disclosed_items[0]
+            .field_redacted_item
+            .as_ref()
+            .unwrap();
+        assert_eq!(
+            field_redacted_item.redacted_paths,
+            vec!["/metadata/source".to_string()]
+        );
+        assert_eq!(
+            field_redacted_item
+                .container_kinds
+                .get("/metadata")
+                .map(String::as_str),
+            Some("object")
+        );
+        assert!(
+            !field_redacted_item
+                .revealed_paths
+                .contains_key("/metadata/source")
+        );
+        assert_eq!(
+            field_redacted_item
+                .revealed_paths
+                .get("/tool_name")
+                .and_then(Value::as_str),
+            Some("search")
+        );
     }
 
     #[test]

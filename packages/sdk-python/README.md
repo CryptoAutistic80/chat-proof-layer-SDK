@@ -115,6 +115,9 @@ proof_client.update_disclosure_config(
             {
                 "name": "regulator_minimum",
                 "excluded_item_types": ["tool_call"],
+                "redacted_fields_by_item_type": {
+                    "llm_interaction": ["/parameters/temperature"],
+                },
                 "include_artefact_metadata": False,
                 "include_artefact_bytes": False,
                 "artefact_names": [],

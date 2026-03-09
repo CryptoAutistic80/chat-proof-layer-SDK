@@ -106,7 +106,7 @@ test("native redactBundle supports field-level redaction for v3 bundles", async 
   });
 
   assert.equal(redacted.disclosed_items[0].item, undefined);
-  assert.deepEqual(redacted.disclosed_items[0].field_redacted_item?.redacted_fields, [
-    "output_commitment"
+  assert.deepEqual(redacted.disclosed_items[0].field_redacted_item?.redacted_paths, [
+    "/output_commitment"
   ]);
 });

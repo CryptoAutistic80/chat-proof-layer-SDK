@@ -137,6 +137,16 @@
               "minLength": 1
             }
           },
+          "disclosed_item_field_redactions": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          },
           "disclosed_artefact_indices": {
             "type": "array",
             "items": {

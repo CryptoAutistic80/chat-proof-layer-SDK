@@ -262,6 +262,25 @@ Completed:
   vault previews now report per-item field/path redactions,
   disclosure-pack manifests now record the resulting item field/path redaction map,
   and vault disclosure-pack exports now apply those selectors through the core disclosure path.
+- Rebuilt `web-demo` into a dedicated route-based playground:
+  separate `/playground`, `/results`, `/examination`, and `/exports` pages now sit on top of a shared `DemoContext`,
+  the demo can run either `synthetic_demo_capture` or vault-mediated `live_provider_capture`,
+  fixed presets now cover investor summary, deployer runtime log, incident review, and Annex IV filing,
+  recent runs can be revisited across results/examination/export routes,
+  and empty disclosure/export cases now explain themselves instead of surfacing generic workflow failures.
+- Added the demo-provider backend surface in the vault:
+  `GET /v1/config` now reports demo capture modes plus per-provider live availability,
+  `POST /v1/demo/provider-response` now centralizes synthetic and live OpenAI/Anthropic response generation without exposing provider keys to the browser,
+  and the OpenAI live path is tuned for `gpt-5-mini` style models so the demo returns visible text instead of exhausting output tokens on reasoning.
+- Added the next demo-usability slice:
+  the playground now distinguishes `Vault API key (auth only)` from a demo-only `Temporary provider API key`,
+  live mode can now run even when the vault was not started with `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` by sending a one-off provider key only to `POST /v1/demo/provider-response`,
+  the vault never persists that temporary provider key in config, bundles, or audit payloads,
+  and the UI now explains that the vault API key is only needed when bearer auth is enabled.
+- Added verification coverage for the new playground flow:
+  vault tests now cover the demo provider-response endpoint,
+  `web-demo` now has Vitest coverage for routes/presets/export eligibility,
+  and a Playwright smoke test verifies the synthetic route flow from Playground to Results, Examination, and Exports.
 - Restored a clean Rust verification loop: `cargo test --workspace` and `cargo clippy --workspace --all-targets -- -D warnings` both pass.
 
 Still outstanding from `plan.md`:

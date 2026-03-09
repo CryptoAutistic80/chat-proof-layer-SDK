@@ -5,6 +5,7 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+async-trait.workspace = true
 anyhow.workspace = true
 axum.workspace = true
 axum-server.workspace = true
@@ -14,6 +15,7 @@ ed25519-dalek.workspace = true
 flate2.workspace = true
 hex.workspace = true
 rand.workspace = true
+reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sqlx.workspace = true

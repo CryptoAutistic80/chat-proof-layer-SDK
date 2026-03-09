@@ -22,6 +22,7 @@ import {
   ProofLayer,
   ProofLayerClient,
   buildBundle,
+  createDisclosurePolicyTemplate,
   createLlmInteractionRequest,
   hashSha256,
   verifyBundle
@@ -109,18 +110,21 @@ const pack = await proofClient.createPack({
   bundleFormat: "disclosure",
   disclosurePolicy: "annex_iv_redacted"
 });
+const templateCatalog = await proofClient.getDisclosureTemplates();
+const renderedTemplate = await proofClient.renderDisclosureTemplate({
+  profile: "privacy_review",
+  name: "privacy_review_internal",
+  redactionGroups: ["metadata"],
+  redactedFieldsByItemType: {
+    risk_assessment: ["/metadata/internal_notes"]
+  }
+});
 await proofClient.updateDisclosureConfig({
   policies: [
-    {
-      name: "regulator_minimum",
-      excluded_item_types: ["tool_call"],
-      redacted_fields_by_item_type: {
-        llm_interaction: ["/parameters/temperature"]
-      },
-      include_artefact_metadata: false,
-      include_artefact_bytes: false,
-      artefact_names: []
-    }
+    createDisclosurePolicyTemplate("runtime_minimum", {
+      name: "runtime_minimum_internal",
+      redactionGroups: ["metadata"]
+    })
   ]
 });
 const preview = await proofClient.previewDisclosure({
@@ -157,4 +161,5 @@ const riskBundle = await proofLayer.captureRiskAssessment({
 console.log(riskBundle.bundle?.items[0].type);
 console.log(redactedSummary.disclosed_item_count, archive.length);
 console.log(preview.disclosed_item_types);
+console.log(templateCatalog.templates[0].profile, renderedTemplate.policy.name);
 ```

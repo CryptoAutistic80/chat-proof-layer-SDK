@@ -258,6 +258,38 @@ export interface DisclosurePolicyConfig extends JsonObject {
   redacted_fields_by_item_type?: Record<string, string[]>;
 }
 
+export type DisclosurePolicyTemplateName =
+  | "regulator_minimum"
+  | "annex_iv_redacted"
+  | "incident_summary"
+  | "runtime_minimum"
+  | "privacy_review";
+
+export type DisclosureRedactionGroup =
+  | "commitments"
+  | "metadata"
+  | "parameters"
+  | "operational_metrics";
+
+export interface DisclosurePolicyBuilderOptions extends JsonObject {
+  name: string;
+  allowedItemTypes?: string[];
+  excludedItemTypes?: string[];
+  allowedObligationRefs?: string[];
+  excludedObligationRefs?: string[];
+  includeArtefactMetadata?: boolean;
+  includeArtefactBytes?: boolean;
+  artefactNames?: string[];
+  redactionGroups?: DisclosureRedactionGroup[];
+  redactedFieldsByItemType?: Record<string, string[]>;
+}
+
+export interface DisclosurePolicyTemplateOptions extends JsonObject {
+  name?: string;
+  redactionGroups?: DisclosureRedactionGroup[];
+  redactedFieldsByItemType?: Record<string, string[]>;
+}
+
 export interface DisclosureConfig extends JsonObject {
   policies: DisclosurePolicyConfig[];
 }
@@ -267,6 +299,30 @@ export interface DisclosurePreviewRequest extends JsonObject {
   packType?: string;
   disclosurePolicy?: string;
   policy?: DisclosurePolicyConfig;
+}
+
+export interface DisclosureTemplateRenderRequest extends JsonObject {
+  profile: DisclosurePolicyTemplateName;
+  name?: string;
+  redactionGroups?: DisclosureRedactionGroup[];
+  redactedFieldsByItemType?: Record<string, string[]>;
+}
+
+export interface DisclosureTemplateInfo extends JsonObject {
+  profile: DisclosurePolicyTemplateName;
+  description: string;
+  default_redaction_groups?: DisclosureRedactionGroup[];
+  policy: DisclosurePolicyConfig;
+}
+
+export interface DisclosureRedactionGroupInfo extends JsonObject {
+  name: DisclosureRedactionGroup;
+  description: string;
+}
+
+export interface DisclosureTemplateCatalog extends JsonObject {
+  templates: DisclosureTemplateInfo[];
+  redaction_groups: DisclosureRedactionGroupInfo[];
 }
 
 export interface DisclosurePreviewResponse extends JsonObject {

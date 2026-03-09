@@ -65,6 +65,8 @@ const DEFAULT_TRANSPARENCY_PROVIDER: &str = "none";
 const DEFAULT_DISCLOSURE_POLICY_REGULATOR_MINIMUM: &str = "regulator_minimum";
 const DEFAULT_DISCLOSURE_POLICY_ANNEX_IV_REDACTED: &str = "annex_iv_redacted";
 const DEFAULT_DISCLOSURE_POLICY_INCIDENT_SUMMARY: &str = "incident_summary";
+const DEFAULT_DISCLOSURE_POLICY_RUNTIME_MINIMUM: &str = "runtime_minimum";
+const DEFAULT_DISCLOSURE_POLICY_PRIVACY_REVIEW: &str = "privacy_review";
 
 #[derive(Clone)]
 struct AppState {
@@ -672,6 +674,38 @@ struct DisclosurePreviewRequest {
     policy: Option<DisclosurePolicyConfig>,
 }
 
+#[derive(Debug, Deserialize, Serialize)]
+struct DisclosureTemplateRenderRequest {
+    profile: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    name: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    redaction_groups: Vec<String>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    redacted_fields_by_item_type: BTreeMap<String, Vec<String>>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct DisclosureTemplateCatalogResponse {
+    templates: Vec<DisclosureTemplateResponse>,
+    redaction_groups: Vec<DisclosureRedactionGroupResponse>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+struct DisclosureTemplateResponse {
+    profile: String,
+    description: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    default_redaction_groups: Vec<String>,
+    policy: DisclosurePolicyConfig,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+struct DisclosureRedactionGroupResponse {
+    name: String,
+    description: String,
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 struct DisclosurePreviewResponse {
     bundle_id: String,
@@ -946,6 +980,11 @@ fn build_router(state: AppState, max_payload_bytes: usize) -> Router {
         .route("/v1/config/timestamp", put(update_timestamp_config))
         .route("/v1/config/transparency", put(update_transparency_config))
         .route("/v1/config/disclosure", put(update_disclosure_config))
+        .route("/v1/disclosure/templates", get(list_disclosure_templates))
+        .route(
+            "/v1/disclosure/templates/render",
+            post(render_disclosure_template),
+        )
         .route("/v1/disclosure/preview", post(preview_disclosure))
         .route("/v1/systems", get(list_systems))
         .route("/v1/systems/{system_id}/summary", get(get_system_summary))
@@ -2125,6 +2164,56 @@ async fn update_disclosure_config(
     Ok((StatusCode::OK, Json(config)))
 }
 
+async fn list_disclosure_templates(
+    State(state): State<AppState>,
+) -> Result<impl IntoResponse, ApiError> {
+    let response = disclosure_template_catalog().map_err(ApiError::internal_anyhow)?;
+
+    append_audit_log(
+        &state.db,
+        "list_disclosure_templates",
+        Some(AUDIT_ACTOR_API),
+        None,
+        None,
+        serde_json::json!({
+            "template_count": response.templates.len(),
+            "redaction_group_count": response.redaction_groups.len(),
+        }),
+    )
+    .await
+    .map_err(ApiError::internal_anyhow)?;
+
+    Ok((StatusCode::OK, Json(response)))
+}
+
+async fn render_disclosure_template(
+    State(state): State<AppState>,
+    Json(request): Json<DisclosureTemplateRenderRequest>,
+) -> Result<impl IntoResponse, ApiError> {
+    let request = normalize_disclosure_template_render_request(request)
+        .map_err(ApiError::bad_request_anyhow)?;
+    let response =
+        build_disclosure_template_response(&request).map_err(ApiError::bad_request_anyhow)?;
+
+    append_audit_log(
+        &state.db,
+        "render_disclosure_template",
+        Some(AUDIT_ACTOR_API),
+        None,
+        None,
+        serde_json::json!({
+            "profile": response.profile.clone(),
+            "name": response.policy.name.clone(),
+            "redaction_group_count": request.redaction_groups.len(),
+            "redacted_item_type_count": request.redacted_fields_by_item_type.len(),
+        }),
+    )
+    .await
+    .map_err(ApiError::internal_anyhow)?;
+
+    Ok((StatusCode::OK, Json(response)))
+}
+
 async fn preview_disclosure(
     State(state): State<AppState>,
     Json(request): Json<DisclosurePreviewRequest>,
@@ -3288,6 +3377,24 @@ fn normalize_create_pack_request(mut request: CreatePackRequest) -> Result<Creat
         bail!("disclosure_policy requires bundle_format=disclosure");
     }
 
+    Ok(request)
+}
+
+fn normalize_disclosure_template_render_request(
+    mut request: DisclosureTemplateRenderRequest,
+) -> Result<DisclosureTemplateRenderRequest> {
+    request.profile = normalize_disclosure_template_profile(&request.profile)?.to_string();
+    request.name = normalize_optional_nonempty("name", request.name)?;
+    request.redaction_groups = normalize_disclosure_redaction_groups(&request.redaction_groups)?;
+    let policy_name = request
+        .name
+        .as_deref()
+        .unwrap_or(&request.profile)
+        .to_string();
+    request.redacted_fields_by_item_type = normalize_disclosure_item_field_redactions(
+        &request.redacted_fields_by_item_type,
+        &policy_name,
+    )?;
     Ok(request)
 }
 
@@ -4477,6 +4584,47 @@ fn validate_update_retention_config_request(
     Ok(request)
 }
 
+fn normalize_disclosure_template_profile(raw: &str) -> Result<&'static str> {
+    let normalized = raw.trim().replace('-', "_").to_ascii_lowercase();
+    match normalized.as_str() {
+        DEFAULT_DISCLOSURE_POLICY_REGULATOR_MINIMUM
+        | DEFAULT_DISCLOSURE_POLICY_ANNEX_IV_REDACTED
+        | DEFAULT_DISCLOSURE_POLICY_INCIDENT_SUMMARY
+        | DEFAULT_DISCLOSURE_POLICY_RUNTIME_MINIMUM
+        | DEFAULT_DISCLOSURE_POLICY_PRIVACY_REVIEW => Ok(match normalized.as_str() {
+            DEFAULT_DISCLOSURE_POLICY_REGULATOR_MINIMUM => {
+                DEFAULT_DISCLOSURE_POLICY_REGULATOR_MINIMUM
+            }
+            DEFAULT_DISCLOSURE_POLICY_ANNEX_IV_REDACTED => {
+                DEFAULT_DISCLOSURE_POLICY_ANNEX_IV_REDACTED
+            }
+            DEFAULT_DISCLOSURE_POLICY_INCIDENT_SUMMARY => {
+                DEFAULT_DISCLOSURE_POLICY_INCIDENT_SUMMARY
+            }
+            DEFAULT_DISCLOSURE_POLICY_RUNTIME_MINIMUM => DEFAULT_DISCLOSURE_POLICY_RUNTIME_MINIMUM,
+            DEFAULT_DISCLOSURE_POLICY_PRIVACY_REVIEW => DEFAULT_DISCLOSURE_POLICY_PRIVACY_REVIEW,
+            _ => unreachable!(),
+        }),
+        _ => bail!("unsupported disclosure template profile {}", raw.trim()),
+    }
+}
+
+fn normalize_disclosure_redaction_groups(values: &[String]) -> Result<Vec<String>> {
+    let mut seen = HashSet::new();
+    let mut normalized = Vec::new();
+    for value in values {
+        let group = value.trim().replace('-', "_").to_ascii_lowercase();
+        if group.is_empty() {
+            continue;
+        }
+        disclosure_redaction_group_description(&group)?;
+        if seen.insert(group.clone()) {
+            normalized.push(group);
+        }
+    }
+    Ok(normalized)
+}
+
 fn validate_retention_policy_config(policy: &RetentionPolicyConfig) -> Result<()> {
     if policy.retention_class.trim().is_empty() {
         bail!("retention_class must not be empty");
@@ -5048,6 +5196,342 @@ fn default_transparency_config() -> TransparencyConfig {
         provider: DEFAULT_TRANSPARENCY_PROVIDER.to_string(),
         url: None,
         log_public_key_pem: None,
+    }
+}
+
+const ALL_DISCLOSURE_ITEM_TYPES: &[&str] = &[
+    "llm_interaction",
+    "tool_call",
+    "retrieval",
+    "human_oversight",
+    "policy_decision",
+    "risk_assessment",
+    "data_governance",
+    "technical_doc",
+    "model_evaluation",
+    "adversarial_test",
+    "training_provenance",
+    "conformity_assessment",
+    "declaration",
+    "registration",
+    "literacy_attestation",
+    "incident_report",
+];
+
+fn disclosure_template_catalog() -> Result<DisclosureTemplateCatalogResponse> {
+    let templates = [
+        DEFAULT_DISCLOSURE_POLICY_REGULATOR_MINIMUM,
+        DEFAULT_DISCLOSURE_POLICY_ANNEX_IV_REDACTED,
+        DEFAULT_DISCLOSURE_POLICY_INCIDENT_SUMMARY,
+        DEFAULT_DISCLOSURE_POLICY_RUNTIME_MINIMUM,
+        DEFAULT_DISCLOSURE_POLICY_PRIVACY_REVIEW,
+    ]
+    .into_iter()
+    .map(|profile| {
+        build_disclosure_template_response(&DisclosureTemplateRenderRequest {
+            profile: profile.to_string(),
+            name: None,
+            redaction_groups: Vec::new(),
+            redacted_fields_by_item_type: BTreeMap::new(),
+        })
+    })
+    .collect::<Result<Vec<_>>>()?;
+
+    Ok(DisclosureTemplateCatalogResponse {
+        templates,
+        redaction_groups: disclosure_redaction_groups()
+            .into_iter()
+            .map(|(name, description)| DisclosureRedactionGroupResponse {
+                name: name.to_string(),
+                description: description.to_string(),
+            })
+            .collect(),
+    })
+}
+
+fn build_disclosure_template_response(
+    request: &DisclosureTemplateRenderRequest,
+) -> Result<DisclosureTemplateResponse> {
+    let default_redaction_groups = disclosure_template_default_redaction_groups(&request.profile);
+    let mut policy = disclosure_policy_template(
+        &request.profile,
+        request.name.as_deref(),
+        &request.redaction_groups,
+    )?;
+    if !request.redacted_fields_by_item_type.is_empty() {
+        for (item_type, selectors) in &request.redacted_fields_by_item_type {
+            let bucket = policy
+                .redacted_fields_by_item_type
+                .entry(item_type.clone())
+                .or_default();
+            for selector in selectors {
+                if !bucket.contains(selector) {
+                    bucket.push(selector.clone());
+                }
+            }
+        }
+        policy = validate_single_disclosure_policy(policy)?;
+    }
+
+    Ok(DisclosureTemplateResponse {
+        profile: request.profile.clone(),
+        description: disclosure_template_description(&request.profile)?.to_string(),
+        default_redaction_groups,
+        policy,
+    })
+}
+
+fn disclosure_policy_template(
+    profile: &str,
+    name: Option<&str>,
+    groups: &[String],
+) -> Result<DisclosurePolicyConfig> {
+    let profile = normalize_disclosure_template_profile(profile)?;
+    let mut policy = match profile {
+        DEFAULT_DISCLOSURE_POLICY_REGULATOR_MINIMUM => DisclosurePolicyConfig {
+            name: profile.to_string(),
+            allowed_item_types: Vec::new(),
+            excluded_item_types: Vec::new(),
+            allowed_obligation_refs: Vec::new(),
+            excluded_obligation_refs: Vec::new(),
+            include_artefact_metadata: false,
+            include_artefact_bytes: false,
+            artefact_names: Vec::new(),
+            redacted_fields_by_item_type: BTreeMap::new(),
+        },
+        DEFAULT_DISCLOSURE_POLICY_ANNEX_IV_REDACTED => DisclosurePolicyConfig {
+            name: profile.to_string(),
+            allowed_item_types: vec![
+                "technical_doc".to_string(),
+                "risk_assessment".to_string(),
+                "data_governance".to_string(),
+                "human_oversight".to_string(),
+            ],
+            excluded_item_types: Vec::new(),
+            allowed_obligation_refs: Vec::new(),
+            excluded_obligation_refs: Vec::new(),
+            include_artefact_metadata: true,
+            include_artefact_bytes: true,
+            artefact_names: Vec::new(),
+            redacted_fields_by_item_type: BTreeMap::new(),
+        },
+        DEFAULT_DISCLOSURE_POLICY_INCIDENT_SUMMARY => DisclosurePolicyConfig {
+            name: profile.to_string(),
+            allowed_item_types: vec![
+                "incident_report".to_string(),
+                "risk_assessment".to_string(),
+                "policy_decision".to_string(),
+                "human_oversight".to_string(),
+            ],
+            excluded_item_types: vec![
+                "llm_interaction".to_string(),
+                "retrieval".to_string(),
+                "tool_call".to_string(),
+            ],
+            allowed_obligation_refs: Vec::new(),
+            excluded_obligation_refs: Vec::new(),
+            include_artefact_metadata: false,
+            include_artefact_bytes: false,
+            artefact_names: Vec::new(),
+            redacted_fields_by_item_type: BTreeMap::new(),
+        },
+        DEFAULT_DISCLOSURE_POLICY_RUNTIME_MINIMUM => DisclosurePolicyConfig {
+            name: profile.to_string(),
+            allowed_item_types: vec![
+                "llm_interaction".to_string(),
+                "tool_call".to_string(),
+                "retrieval".to_string(),
+                "policy_decision".to_string(),
+                "human_oversight".to_string(),
+            ],
+            excluded_item_types: Vec::new(),
+            allowed_obligation_refs: Vec::new(),
+            excluded_obligation_refs: Vec::new(),
+            include_artefact_metadata: false,
+            include_artefact_bytes: false,
+            artefact_names: Vec::new(),
+            redacted_fields_by_item_type: BTreeMap::new(),
+        },
+        DEFAULT_DISCLOSURE_POLICY_PRIVACY_REVIEW => DisclosurePolicyConfig {
+            name: profile.to_string(),
+            allowed_item_types: vec![
+                "llm_interaction".to_string(),
+                "risk_assessment".to_string(),
+                "incident_report".to_string(),
+                "policy_decision".to_string(),
+                "human_oversight".to_string(),
+            ],
+            excluded_item_types: Vec::new(),
+            allowed_obligation_refs: Vec::new(),
+            excluded_obligation_refs: Vec::new(),
+            include_artefact_metadata: false,
+            include_artefact_bytes: false,
+            artefact_names: Vec::new(),
+            redacted_fields_by_item_type: BTreeMap::new(),
+        },
+        _ => unreachable!(),
+    };
+
+    if let Some(name) = name {
+        policy.name = name.to_string();
+    }
+
+    let mut all_groups = disclosure_template_default_redaction_groups(profile);
+    all_groups.extend(groups.iter().cloned());
+    apply_disclosure_redaction_groups(&mut policy, &all_groups)?;
+    validate_single_disclosure_policy(policy)
+}
+
+fn disclosure_template_description(profile: &str) -> Result<&'static str> {
+    match normalize_disclosure_template_profile(profile)? {
+        DEFAULT_DISCLOSURE_POLICY_REGULATOR_MINIMUM => {
+            Ok("Minimal disclosure suitable for broad regulator or verifier review.")
+        }
+        DEFAULT_DISCLOSURE_POLICY_ANNEX_IV_REDACTED => {
+            Ok("Annex IV-oriented documentation disclosure with artefact payload inclusion.")
+        }
+        DEFAULT_DISCLOSURE_POLICY_INCIDENT_SUMMARY => {
+            Ok("Incident-focused disclosure that excludes raw runtime interaction traces.")
+        }
+        DEFAULT_DISCLOSURE_POLICY_RUNTIME_MINIMUM => {
+            Ok("Runtime evidence disclosure with standard commitment and telemetry redactions.")
+        }
+        DEFAULT_DISCLOSURE_POLICY_PRIVACY_REVIEW => {
+            Ok("Privacy review disclosure with metadata, commitment, and operational redactions.")
+        }
+        _ => unreachable!(),
+    }
+}
+
+fn disclosure_template_default_redaction_groups(profile: &str) -> Vec<String> {
+    match profile {
+        DEFAULT_DISCLOSURE_POLICY_RUNTIME_MINIMUM => vec![
+            "commitments".to_string(),
+            "parameters".to_string(),
+            "operational_metrics".to_string(),
+        ],
+        DEFAULT_DISCLOSURE_POLICY_PRIVACY_REVIEW => vec![
+            "commitments".to_string(),
+            "metadata".to_string(),
+            "parameters".to_string(),
+            "operational_metrics".to_string(),
+        ],
+        _ => Vec::new(),
+    }
+}
+
+fn disclosure_redaction_groups() -> [(&'static str, &'static str); 4] {
+    [
+        (
+            "commitments",
+            "Hide digest/commitment fields while preserving proof-bearing metadata.",
+        ),
+        (
+            "metadata",
+            "Hide nested metadata blobs commonly used for internal reviewer/operator context.",
+        ),
+        (
+            "parameters",
+            "Hide model/runtime parameter objects such as temperature or top_p.",
+        ),
+        (
+            "operational_metrics",
+            "Hide token counts, latency, and trace semantic-convention metadata.",
+        ),
+    ]
+}
+
+fn apply_disclosure_redaction_groups(
+    policy: &mut DisclosurePolicyConfig,
+    groups: &[String],
+) -> Result<()> {
+    let item_types = if policy.allowed_item_types.is_empty() {
+        ALL_DISCLOSURE_ITEM_TYPES
+            .iter()
+            .map(|item_type| (*item_type).to_string())
+            .collect::<Vec<_>>()
+    } else {
+        policy.allowed_item_types.clone()
+    };
+
+    for item_type in item_types {
+        for group in groups {
+            for selector in disclosure_redaction_group_selectors(&item_type, group)? {
+                let bucket = policy
+                    .redacted_fields_by_item_type
+                    .entry(item_type.clone())
+                    .or_default();
+                if !bucket.contains(&selector.to_string()) {
+                    bucket.push(selector.to_string());
+                }
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn disclosure_redaction_group_description(group: &str) -> Result<&'static str> {
+    disclosure_redaction_groups()
+        .into_iter()
+        .find_map(|(name, description)| (name == group).then_some(description))
+        .ok_or_else(|| anyhow::anyhow!("unsupported disclosure redaction group {group}"))
+}
+
+fn disclosure_redaction_group_selectors(
+    item_type: &str,
+    group: &str,
+) -> Result<&'static [&'static str]> {
+    match group {
+        "commitments" => Ok(match item_type {
+            "llm_interaction" => &[
+                "input_commitment",
+                "retrieval_commitment",
+                "output_commitment",
+                "tool_outputs_commitment",
+                "trace_commitment",
+            ],
+            "tool_call" => &["input_commitment", "output_commitment"],
+            "retrieval" => &["result_commitment", "query_commitment"],
+            "human_oversight" => &["notes_commitment"],
+            "policy_decision" => &["rationale_commitment"],
+            "technical_doc" => &["commitment"],
+            "model_evaluation" => &["report_commitment"],
+            "adversarial_test" => &["report_commitment"],
+            "training_provenance" => &["record_commitment"],
+            "conformity_assessment" => &["report_commitment"],
+            "declaration" => &["document_commitment"],
+            "registration" => &["receipt_commitment"],
+            "literacy_attestation" => &["attestation_commitment"],
+            "incident_report" => &["report_commitment"],
+            _ => &[],
+        }),
+        "metadata" => Ok(match item_type {
+            "tool_call"
+            | "retrieval"
+            | "policy_decision"
+            | "risk_assessment"
+            | "data_governance"
+            | "model_evaluation"
+            | "adversarial_test"
+            | "training_provenance"
+            | "conformity_assessment"
+            | "declaration"
+            | "literacy_attestation"
+            | "incident_report" => &["/metadata"],
+            _ => &[],
+        }),
+        "parameters" => Ok(match item_type {
+            "llm_interaction" => &["/parameters"],
+            _ => &[],
+        }),
+        "operational_metrics" => Ok(match item_type {
+            "llm_interaction" => &["/token_usage", "/latency_ms", "/trace_semconv_version"],
+            _ => &[],
+        }),
+        _ => Err(anyhow::anyhow!(
+            "unsupported disclosure redaction group {group}"
+        )),
     }
 }
 
@@ -8858,6 +9342,113 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
                 .get("policy_count")
                 .and_then(serde_json::Value::as_u64),
             Some(2)
+        );
+    }
+
+    #[tokio::test]
+    async fn list_disclosure_templates_returns_catalog_and_audits() {
+        let state = test_state(DEFAULT_MAX_PAYLOAD_BYTES).await;
+        let db = state.db.clone();
+        let app = build_router(state, DEFAULT_MAX_PAYLOAD_BYTES);
+
+        let request = Request::builder()
+            .method("GET")
+            .uri("/v1/disclosure/templates")
+            .body(Body::empty())
+            .unwrap();
+        let response = app.oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let catalog: DisclosureTemplateCatalogResponse = serde_json::from_slice(&body).unwrap();
+
+        assert!(
+            catalog
+                .templates
+                .iter()
+                .any(|template| template.profile == DEFAULT_DISCLOSURE_POLICY_RUNTIME_MINIMUM)
+        );
+        assert!(
+            catalog
+                .redaction_groups
+                .iter()
+                .any(|group| group.name == "commitments")
+        );
+
+        let audit_details: String = sqlx::query_scalar(
+            "SELECT details_json FROM audit_log WHERE action = ? ORDER BY id DESC LIMIT 1",
+        )
+        .bind("list_disclosure_templates")
+        .fetch_one(&db)
+        .await
+        .unwrap();
+        let audit: serde_json::Value = serde_json::from_str(&audit_details).unwrap();
+        assert_eq!(
+            audit
+                .get("template_count")
+                .and_then(serde_json::Value::as_u64),
+            Some(5)
+        );
+    }
+
+    #[tokio::test]
+    async fn render_disclosure_template_supports_groups_and_explicit_redactions() {
+        let state = test_state(DEFAULT_MAX_PAYLOAD_BYTES).await;
+        let db = state.db.clone();
+        let app = build_router(state, DEFAULT_MAX_PAYLOAD_BYTES);
+
+        let request = Request::builder()
+            .method("POST")
+            .uri("/v1/disclosure/templates/render")
+            .header("content-type", "application/json")
+            .body(Body::from(
+                serde_json::to_vec(&DisclosureTemplateRenderRequest {
+                    profile: DEFAULT_DISCLOSURE_POLICY_PRIVACY_REVIEW.to_string(),
+                    name: Some("privacy_review_custom".to_string()),
+                    redaction_groups: vec!["metadata".to_string()],
+                    redacted_fields_by_item_type: BTreeMap::from([(
+                        "risk_assessment".to_string(),
+                        vec!["/metadata/internal_notes".to_string()],
+                    )]),
+                })
+                .unwrap(),
+            ))
+            .unwrap();
+        let response = app.clone().oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let rendered: DisclosureTemplateResponse = serde_json::from_slice(&body).unwrap();
+
+        assert_eq!(rendered.profile, DEFAULT_DISCLOSURE_POLICY_PRIVACY_REVIEW);
+        assert_eq!(rendered.policy.name, "privacy_review_custom");
+        assert!(
+            rendered
+                .policy
+                .redacted_fields_by_item_type
+                .get("risk_assessment")
+                .unwrap()
+                .contains(&"/metadata/internal_notes".to_string())
+        );
+        assert!(
+            rendered
+                .default_redaction_groups
+                .contains(&"operational_metrics".to_string())
+        );
+
+        let audit_details: String = sqlx::query_scalar(
+            "SELECT details_json FROM audit_log WHERE action = ? ORDER BY id DESC LIMIT 1",
+        )
+        .bind("render_disclosure_template")
+        .fetch_one(&db)
+        .await
+        .unwrap();
+        let audit: serde_json::Value = serde_json::from_str(&audit_details).unwrap();
+        assert_eq!(
+            audit.get("profile").and_then(serde_json::Value::as_str),
+            Some(DEFAULT_DISCLOSURE_POLICY_PRIVACY_REVIEW)
         );
     }
 

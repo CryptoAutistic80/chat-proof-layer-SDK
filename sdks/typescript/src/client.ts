@@ -7,6 +7,9 @@ import type {
   DisclosureConfig,
   DisclosurePreviewRequest,
   DisclosurePreviewResponse,
+  DisclosureTemplateCatalog,
+  DisclosureTemplateInfo,
+  DisclosureTemplateRenderRequest,
   FetchLike,
   HttpClientOptions,
   InlineArtefactRequest,
@@ -124,6 +127,30 @@ export class ProofLayerClient {
   async getDisclosureConfig(): Promise<DisclosureConfig> {
     const config = await this.getConfig();
     return config.disclosure;
+  }
+
+  async getDisclosureTemplates(): Promise<DisclosureTemplateCatalog> {
+    return this.#get("/v1/disclosure/templates") as Promise<DisclosureTemplateCatalog>;
+  }
+
+  async renderDisclosureTemplate({
+    profile,
+    name,
+    redactionGroups,
+    redactedFieldsByItemType
+  }: DisclosureTemplateRenderRequest): Promise<DisclosureTemplateInfo> {
+    const payload = {
+      profile,
+      ...(name ? { name } : {}),
+      ...(redactionGroups && redactionGroups.length > 0
+        ? { redaction_groups: redactionGroups }
+        : {}),
+      ...(redactedFieldsByItemType &&
+      Object.keys(redactedFieldsByItemType).length > 0
+        ? { redacted_fields_by_item_type: redactedFieldsByItemType }
+        : {})
+    };
+    return this.#post("/v1/disclosure/templates/render", payload);
   }
 
   async updateDisclosureConfig(config: DisclosureConfig): Promise<DisclosureConfig> {

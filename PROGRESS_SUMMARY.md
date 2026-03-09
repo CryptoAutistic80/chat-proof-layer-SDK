@@ -172,6 +172,14 @@ Completed:
   legacy `pl-merkle-sha256-v1`, `pl-merkle-sha256-v2`, and `pl-merkle-sha256-v3` verification remain supported,
   `proofctl disclose --redact-field <item_index>:<field-or-json-pointer>` now supports nested path redaction on v4 bundles,
   and vault disclosure policies can carry the same selectors through preview/manifests/pack export.
+- Added disclosure-policy authoring helpers:
+  `proofctl vault disclosure-template` now emits starter policy JSON for `regulator_minimum`, `annex_iv_redacted`, `incident_summary`, `runtime_minimum`, and `privacy_review`,
+  the CLI template command can layer reusable redaction groups like `commitments`, `metadata`, `parameters`, and `operational_metrics`,
+  and the TypeScript / Python SDKs now expose matching local builder helpers so callers can compose policy JSON without manually hand-writing selector maps.
+- Added vault-side disclosure-template discovery/rendering:
+  the service now exposes `GET /v1/disclosure/templates` and `POST /v1/disclosure/templates/render`,
+  `proofctl vault disclosure-templates` can list the built-in template catalog and `proofctl vault disclosure-template --vault-url ...` can render starter policy JSON through the service,
+  and the TypeScript / Python vault clients plus `ProofLayer` facades now expose `getDisclosureTemplates` / `renderDisclosureTemplate` and `get_disclosure_templates` / `render_disclosure_template`.
 - Extended pack export into the selective-disclosure path:
   `POST /v1/packs` now accepts `bundle_format = "full" | "disclosure"`,
   vault `GET /v1/packs/{id}/export` can emit redacted disclosure-package members selected by pack curation rules,

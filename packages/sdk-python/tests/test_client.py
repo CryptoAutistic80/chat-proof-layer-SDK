@@ -102,6 +102,80 @@ class TestProofLayerClient(unittest.TestCase):
         self.assertEqual(disclosure["policies"][0]["name"], "annex_iv_redacted")
         self.assertTrue(disclosure["policies"][0]["include_artefact_bytes"])
 
+    def test_get_disclosure_templates_reads_catalog(self):
+        captured = {}
+
+        def request_fn(method, path, headers, body):
+            captured["method"] = method
+            captured["path"] = path
+            return {
+                "templates": [
+                    {
+                        "profile": "runtime_minimum",
+                        "description": "Runtime disclosure template",
+                        "default_redaction_groups": ["commitments"],
+                        "policy": {"name": "runtime_minimum"},
+                    }
+                ],
+                "redaction_groups": [
+                    {
+                        "name": "commitments",
+                        "description": "Hide digest fields.",
+                    }
+                ],
+            }
+
+        client = ProofLayerClient(base_url="http://127.0.0.1:8080", request_fn=request_fn)
+        catalog = client.get_disclosure_templates()
+
+        self.assertEqual(captured["method"], "GET")
+        self.assertEqual(captured["path"], "/v1/disclosure/templates")
+        self.assertEqual(catalog["templates"][0]["profile"], "runtime_minimum")
+
+    def test_render_disclosure_template_posts_template_options(self):
+        captured = {}
+
+        def request_fn(method, path, headers, body):
+            captured["method"] = method
+            captured["path"] = path
+            captured["headers"] = headers
+            captured["body"] = body
+            return {
+                "profile": "privacy_review",
+                "description": "Privacy review disclosure",
+                "default_redaction_groups": ["metadata"],
+                "policy": {
+                    "name": "privacy_review_custom",
+                    "redacted_fields_by_item_type": {
+                        "risk_assessment": ["/metadata/internal_notes"]
+                    },
+                },
+            }
+
+        client = ProofLayerClient(base_url="http://127.0.0.1:8080", request_fn=request_fn)
+        rendered = client.render_disclosure_template(
+            profile="privacy_review",
+            name="privacy_review_custom",
+            redaction_groups=["metadata"],
+            redacted_fields_by_item_type={"risk_assessment": ["/metadata/internal_notes"]},
+        )
+
+        self.assertEqual(captured["method"], "POST")
+        self.assertEqual(captured["path"], "/v1/disclosure/templates/render")
+        payload = json.loads(captured["body"].decode("utf-8"))
+        self.assertEqual(
+            payload,
+            {
+                "profile": "privacy_review",
+                "name": "privacy_review_custom",
+                "redaction_groups": ["metadata"],
+                "redacted_fields_by_item_type": {
+                    "risk_assessment": ["/metadata/internal_notes"]
+                },
+            },
+        )
+        self.assertEqual(rendered["policy"]["name"], "privacy_review_custom")
+
     def test_update_disclosure_config_uses_put(self):
         captured = {}
 

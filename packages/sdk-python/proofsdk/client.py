@@ -98,6 +98,31 @@ class ProofLayerClient:
     def get_disclosure_config(self) -> dict[str, Any]:
         return self.get_config()["disclosure"]
 
+    def get_disclosure_templates(self) -> dict[str, Any]:
+        return self._request_fn("GET", "/v1/disclosure/templates", self._headers(), None)
+
+    def render_disclosure_template(
+        self,
+        *,
+        profile: str,
+        name: str | None = None,
+        redaction_groups: list[str] | None = None,
+        redacted_fields_by_item_type: dict[str, list[str]] | None = None,
+    ) -> dict[str, Any]:
+        payload: dict[str, Any] = {"profile": profile}
+        if name is not None:
+            payload["name"] = name
+        if redaction_groups:
+            payload["redaction_groups"] = redaction_groups
+        if redacted_fields_by_item_type:
+            payload["redacted_fields_by_item_type"] = redacted_fields_by_item_type
+        return self._request_fn(
+            "POST",
+            "/v1/disclosure/templates/render",
+            self._headers_json(),
+            json.dumps(payload).encode("utf-8"),
+        )
+
     def update_disclosure_config(self, config: dict[str, Any]) -> dict[str, Any]:
         return self._request_fn(
             "PUT",

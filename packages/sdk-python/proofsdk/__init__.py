@@ -1,5 +1,11 @@
 from .client import ProofLayerClient
 from .decorators import prove_llm_call
+from .disclosure_policy import (
+    DISCLOSURE_POLICY_TEMPLATE_NAMES,
+    DISCLOSURE_REDACTION_GROUPS,
+    create_disclosure_policy,
+    create_disclosure_policy_template,
+)
 from .evidence import (
     create_adversarial_test_request,
     create_conformity_assessment_request,
@@ -39,6 +45,10 @@ __all__ = [
     "build_bundle",
     "canonicalize_json",
     "compute_merkle_root",
+    "DISCLOSURE_POLICY_TEMPLATE_NAMES",
+    "DISCLOSURE_REDACTION_GROUPS",
+    "create_disclosure_policy",
+    "create_disclosure_policy_template",
     "create_adversarial_test_request",
     "create_conformity_assessment_request",
     "create_data_governance_request",

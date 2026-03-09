@@ -31,6 +31,9 @@ import type {
   DisclosureConfig,
   DisclosurePreviewRequest,
   DisclosurePreviewResponse,
+  DisclosureTemplateCatalog,
+  DisclosureTemplateInfo,
+  DisclosureTemplateRenderRequest,
   HumanOversightRequestOptions,
   IncidentReportRequestOptions,
   LiteracyAttestationRequestOptions,
@@ -208,6 +211,30 @@ export class ProofLayer implements BundleCreateClient {
       return (this.client as ProofLayerClient).getDisclosureConfig();
     }
     throw new Error("underlying client does not support getDisclosureConfig; use vault mode");
+  }
+
+  async getDisclosureTemplates(): Promise<DisclosureTemplateCatalog> {
+    if (
+      "getDisclosureTemplates" in this.client &&
+      typeof this.client.getDisclosureTemplates === "function"
+    ) {
+      return (this.client as ProofLayerClient).getDisclosureTemplates();
+    }
+    throw new Error("underlying client does not support getDisclosureTemplates; use vault mode");
+  }
+
+  async renderDisclosureTemplate(
+    request: DisclosureTemplateRenderRequest
+  ): Promise<DisclosureTemplateInfo> {
+    if (
+      "renderDisclosureTemplate" in this.client &&
+      typeof this.client.renderDisclosureTemplate === "function"
+    ) {
+      return (this.client as ProofLayerClient).renderDisclosureTemplate(request);
+    }
+    throw new Error(
+      "underlying client does not support renderDisclosureTemplate; use vault mode"
+    );
   }
 
   async updateDisclosureConfig(config: DisclosureConfig): Promise<DisclosureConfig> {

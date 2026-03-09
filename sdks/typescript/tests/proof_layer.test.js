@@ -113,6 +113,78 @@ test("ProofLayer vault mode can update disclosure config", async () => {
   assert.equal(result.policies[0].name, "regulator_minimum");
 });
 
+test("ProofLayer vault mode can list disclosure templates", async () => {
+  let captured;
+  const proofLayer = new ProofLayer({
+    vaultUrl: "http://127.0.0.1:8080",
+    fetchImpl: async (url, init) => {
+      captured = { url, init };
+      return new Response(
+        JSON.stringify({
+          templates: [
+            {
+              profile: "runtime_minimum",
+              description: "Runtime disclosure template",
+              default_redaction_groups: ["commitments"],
+              policy: {
+                name: "runtime_minimum"
+              }
+            }
+          ],
+          redaction_groups: [
+            {
+              name: "commitments",
+              description: "Hide digest fields."
+            }
+          ]
+        }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      );
+    }
+  });
+
+  const result = await proofLayer.getDisclosureTemplates();
+
+  assert.equal(captured.url, "http://127.0.0.1:8080/v1/disclosure/templates");
+  assert.equal(result.templates[0].profile, "runtime_minimum");
+});
+
+test("ProofLayer vault mode can render disclosure templates", async () => {
+  let captured;
+  const proofLayer = new ProofLayer({
+    vaultUrl: "http://127.0.0.1:8080",
+    fetchImpl: async (url, init) => {
+      captured = { url, init };
+      return new Response(
+        JSON.stringify({
+          profile: "privacy_review",
+          description: "Privacy review disclosure",
+          default_redaction_groups: ["metadata"],
+          policy: {
+            name: "privacy_review_custom",
+            redacted_fields_by_item_type: {
+              risk_assessment: ["/metadata/internal_notes"]
+            }
+          }
+        }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      );
+    }
+  });
+
+  const result = await proofLayer.renderDisclosureTemplate({
+    profile: "privacy_review",
+    name: "privacy_review_custom",
+    redactionGroups: ["metadata"],
+    redactedFieldsByItemType: {
+      risk_assessment: ["/metadata/internal_notes"]
+    }
+  });
+
+  assert.equal(captured.url, "http://127.0.0.1:8080/v1/disclosure/templates/render");
+  assert.equal(result.policy.name, "privacy_review_custom");
+});
+
 test("ProofLayer vault mode can preview disclosure selection", async () => {
   let captured;
   const proofLayer = new ProofLayer({

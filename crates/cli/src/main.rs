@@ -266,6 +266,28 @@ enum VaultCommands {
         #[arg(long, default_value = "human")]
         format: OutputFormat,
     },
+    /// List built-in disclosure policy templates and reusable redaction groups from the vault.
+    DisclosureTemplates {
+        #[arg(long)]
+        vault_url: String,
+        #[arg(long, default_value = "human")]
+        format: OutputFormat,
+    },
+    /// Generate a starter disclosure policy JSON template locally or via the vault.
+    DisclosureTemplate {
+        #[arg(long)]
+        vault_url: Option<String>,
+        #[arg(long)]
+        profile: DisclosurePolicyTemplateArg,
+        #[arg(long)]
+        name: Option<String>,
+        #[arg(long = "group")]
+        redaction_group: Vec<DisclosureRedactionGroupArg>,
+        #[arg(long)]
+        out: Option<PathBuf>,
+        #[arg(long, default_value = "human")]
+        format: OutputFormat,
+    },
 }
 
 #[derive(Clone, Debug)]
@@ -320,6 +342,25 @@ enum PackTypeArg {
 enum PackBundleFormatArg {
     Full,
     Disclosure,
+}
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq, ValueEnum)]
+#[value(rename_all = "snake_case")]
+enum DisclosurePolicyTemplateArg {
+    RegulatorMinimum,
+    AnnexIvRedacted,
+    IncidentSummary,
+    RuntimeMinimum,
+    PrivacyReview,
+}
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq, ValueEnum)]
+#[value(rename_all = "snake_case")]
+enum DisclosureRedactionGroupArg {
+    Commitments,
+    Metadata,
+    Parameters,
+    OperationalMetrics,
 }
 
 impl PackBundleFormatArg {
@@ -574,6 +615,38 @@ struct DisclosurePreviewRequest {
     policy: Option<DisclosurePolicyConfig>,
 }
 
+#[derive(Debug, Serialize)]
+struct DisclosureTemplateRenderRequest {
+    profile: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    name: Option<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    redaction_groups: Vec<String>,
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    redacted_fields_by_item_type: BTreeMap<String, Vec<String>>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct DisclosureTemplateCatalogResponse {
+    templates: Vec<DisclosureTemplateResponse>,
+    redaction_groups: Vec<DisclosureRedactionGroupInfo>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+struct DisclosureTemplateResponse {
+    profile: String,
+    description: String,
+    #[serde(default)]
+    default_redaction_groups: Vec<String>,
+    policy: DisclosurePolicyConfig,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+struct DisclosureRedactionGroupInfo {
+    name: String,
+    description: String,
+}
+
 #[derive(Debug, Deserialize, Serialize)]
 struct DisclosurePreviewResponse {
     bundle_id: String,
@@ -595,6 +668,230 @@ struct DisclosurePreviewResponse {
     disclosed_artefact_names: Vec<String>,
     #[serde(default)]
     disclosed_artefact_bytes_included: bool,
+}
+
+const ALL_DISCLOSURE_ITEM_TYPES: &[&str] = &[
+    "llm_interaction",
+    "tool_call",
+    "retrieval",
+    "human_oversight",
+    "policy_decision",
+    "risk_assessment",
+    "data_governance",
+    "technical_doc",
+    "model_evaluation",
+    "adversarial_test",
+    "training_provenance",
+    "conformity_assessment",
+    "declaration",
+    "registration",
+    "literacy_attestation",
+    "incident_report",
+];
+
+fn disclosure_policy_template_name(profile: DisclosurePolicyTemplateArg) -> &'static str {
+    match profile {
+        DisclosurePolicyTemplateArg::RegulatorMinimum => "regulator_minimum",
+        DisclosurePolicyTemplateArg::AnnexIvRedacted => "annex_iv_redacted",
+        DisclosurePolicyTemplateArg::IncidentSummary => "incident_summary",
+        DisclosurePolicyTemplateArg::RuntimeMinimum => "runtime_minimum",
+        DisclosurePolicyTemplateArg::PrivacyReview => "privacy_review",
+    }
+}
+
+fn disclosure_policy_template(
+    profile: DisclosurePolicyTemplateArg,
+    name: Option<&str>,
+    groups: &[DisclosureRedactionGroupArg],
+) -> DisclosurePolicyConfig {
+    let mut policy = match profile {
+        DisclosurePolicyTemplateArg::RegulatorMinimum => DisclosurePolicyConfig {
+            name: disclosure_policy_template_name(profile).to_string(),
+            allowed_item_types: Vec::new(),
+            excluded_item_types: Vec::new(),
+            allowed_obligation_refs: Vec::new(),
+            excluded_obligation_refs: Vec::new(),
+            include_artefact_metadata: false,
+            include_artefact_bytes: false,
+            artefact_names: Vec::new(),
+            redacted_fields_by_item_type: BTreeMap::new(),
+        },
+        DisclosurePolicyTemplateArg::AnnexIvRedacted => DisclosurePolicyConfig {
+            name: disclosure_policy_template_name(profile).to_string(),
+            allowed_item_types: vec![
+                "technical_doc".to_string(),
+                "risk_assessment".to_string(),
+                "data_governance".to_string(),
+                "human_oversight".to_string(),
+            ],
+            excluded_item_types: Vec::new(),
+            allowed_obligation_refs: Vec::new(),
+            excluded_obligation_refs: Vec::new(),
+            include_artefact_metadata: true,
+            include_artefact_bytes: true,
+            artefact_names: Vec::new(),
+            redacted_fields_by_item_type: BTreeMap::new(),
+        },
+        DisclosurePolicyTemplateArg::IncidentSummary => DisclosurePolicyConfig {
+            name: disclosure_policy_template_name(profile).to_string(),
+            allowed_item_types: vec![
+                "incident_report".to_string(),
+                "risk_assessment".to_string(),
+                "policy_decision".to_string(),
+                "human_oversight".to_string(),
+            ],
+            excluded_item_types: vec![
+                "llm_interaction".to_string(),
+                "retrieval".to_string(),
+                "tool_call".to_string(),
+            ],
+            allowed_obligation_refs: Vec::new(),
+            excluded_obligation_refs: Vec::new(),
+            include_artefact_metadata: false,
+            include_artefact_bytes: false,
+            artefact_names: Vec::new(),
+            redacted_fields_by_item_type: BTreeMap::new(),
+        },
+        DisclosurePolicyTemplateArg::RuntimeMinimum => DisclosurePolicyConfig {
+            name: disclosure_policy_template_name(profile).to_string(),
+            allowed_item_types: vec![
+                "llm_interaction".to_string(),
+                "tool_call".to_string(),
+                "retrieval".to_string(),
+                "policy_decision".to_string(),
+                "human_oversight".to_string(),
+            ],
+            excluded_item_types: Vec::new(),
+            allowed_obligation_refs: Vec::new(),
+            excluded_obligation_refs: Vec::new(),
+            include_artefact_metadata: false,
+            include_artefact_bytes: false,
+            artefact_names: Vec::new(),
+            redacted_fields_by_item_type: BTreeMap::new(),
+        },
+        DisclosurePolicyTemplateArg::PrivacyReview => DisclosurePolicyConfig {
+            name: disclosure_policy_template_name(profile).to_string(),
+            allowed_item_types: vec![
+                "llm_interaction".to_string(),
+                "risk_assessment".to_string(),
+                "incident_report".to_string(),
+                "policy_decision".to_string(),
+                "human_oversight".to_string(),
+            ],
+            excluded_item_types: Vec::new(),
+            allowed_obligation_refs: Vec::new(),
+            excluded_obligation_refs: Vec::new(),
+            include_artefact_metadata: false,
+            include_artefact_bytes: false,
+            artefact_names: Vec::new(),
+            redacted_fields_by_item_type: BTreeMap::new(),
+        },
+    };
+
+    if let Some(name) = name {
+        policy.name = name.to_string();
+    }
+
+    let mut all_groups = match profile {
+        DisclosurePolicyTemplateArg::RuntimeMinimum => vec![
+            DisclosureRedactionGroupArg::Commitments,
+            DisclosureRedactionGroupArg::Parameters,
+            DisclosureRedactionGroupArg::OperationalMetrics,
+        ],
+        DisclosurePolicyTemplateArg::PrivacyReview => vec![
+            DisclosureRedactionGroupArg::Commitments,
+            DisclosureRedactionGroupArg::Metadata,
+            DisclosureRedactionGroupArg::Parameters,
+            DisclosureRedactionGroupArg::OperationalMetrics,
+        ],
+        _ => Vec::new(),
+    };
+    all_groups.extend_from_slice(groups);
+    apply_disclosure_redaction_groups(&mut policy, &all_groups);
+
+    policy
+}
+
+fn apply_disclosure_redaction_groups(
+    policy: &mut DisclosurePolicyConfig,
+    groups: &[DisclosureRedactionGroupArg],
+) {
+    let item_types = if policy.allowed_item_types.is_empty() {
+        ALL_DISCLOSURE_ITEM_TYPES
+            .iter()
+            .map(|item_type| (*item_type).to_string())
+            .collect::<Vec<_>>()
+    } else {
+        policy.allowed_item_types.clone()
+    };
+
+    for item_type in item_types {
+        for group in groups {
+            for selector in disclosure_redaction_group_selectors(&item_type, *group) {
+                let bucket = policy
+                    .redacted_fields_by_item_type
+                    .entry(item_type.clone())
+                    .or_default();
+                if !bucket.contains(&selector.to_string()) {
+                    bucket.push(selector.to_string());
+                }
+            }
+        }
+    }
+}
+
+fn disclosure_redaction_group_selectors(
+    item_type: &str,
+    group: DisclosureRedactionGroupArg,
+) -> &'static [&'static str] {
+    match group {
+        DisclosureRedactionGroupArg::Commitments => match item_type {
+            "llm_interaction" => &[
+                "input_commitment",
+                "retrieval_commitment",
+                "output_commitment",
+                "tool_outputs_commitment",
+                "trace_commitment",
+            ],
+            "tool_call" => &["input_commitment", "output_commitment"],
+            "retrieval" => &["result_commitment", "query_commitment"],
+            "human_oversight" => &["notes_commitment"],
+            "policy_decision" => &["rationale_commitment"],
+            "technical_doc" => &["commitment"],
+            "model_evaluation" => &["report_commitment"],
+            "adversarial_test" => &["report_commitment"],
+            "training_provenance" => &["record_commitment"],
+            "conformity_assessment" => &["report_commitment"],
+            "declaration" => &["document_commitment"],
+            "registration" => &["receipt_commitment"],
+            "literacy_attestation" => &["attestation_commitment"],
+            "incident_report" => &["report_commitment"],
+            _ => &[],
+        },
+        DisclosureRedactionGroupArg::Metadata => match item_type {
+            "tool_call"
+            | "retrieval"
+            | "policy_decision"
+            | "risk_assessment"
+            | "data_governance"
+            | "model_evaluation"
+            | "adversarial_test"
+            | "training_provenance"
+            | "conformity_assessment"
+            | "declaration"
+            | "literacy_attestation"
+            | "incident_report" => &["/metadata"],
+            _ => &[],
+        },
+        DisclosureRedactionGroupArg::Parameters => match item_type {
+            "llm_interaction" => &["/parameters"],
+            _ => &[],
+        },
+        DisclosureRedactionGroupArg::OperationalMetrics => match item_type {
+            "llm_interaction" => &["/token_usage", "/latency_ms", "/trace_semconv_version"],
+            _ => &[],
+        },
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -1045,6 +1342,24 @@ fn main() -> Result<()> {
                 pack_type,
                 disclosure_policy.as_deref(),
                 disclosure_policy_file.as_deref(),
+                format,
+            ),
+            VaultCommands::DisclosureTemplates { vault_url, format } => {
+                cmd_vault_disclosure_templates(&vault_url, format)
+            }
+            VaultCommands::DisclosureTemplate {
+                vault_url,
+                profile,
+                name,
+                redaction_group,
+                out,
+                format,
+            } => cmd_vault_disclosure_template(
+                vault_url.as_deref(),
+                profile,
+                name.as_deref(),
+                &redaction_group,
+                out.as_deref(),
                 format,
             ),
         },
@@ -1767,6 +2082,134 @@ fn cmd_vault_disclosure_preview(
     Ok(())
 }
 
+fn cmd_vault_disclosure_templates(vault_url: &str, format: OutputFormat) -> Result<()> {
+    let client = build_http_client()?;
+    let url = join_vault_url(vault_url, "/v1/disclosure/templates");
+    let response = client
+        .get(&url)
+        .send()
+        .with_context(|| format!("failed to call {url}"))?;
+    let response = ensure_success(response, "list disclosure templates")?;
+    let catalog: DisclosureTemplateCatalogResponse = response
+        .json()
+        .context("failed to decode disclosure template catalog")?;
+
+    match format {
+        OutputFormat::Human => print_disclosure_template_catalog_human(&catalog),
+        OutputFormat::Json => println!("{}", serde_json::to_string_pretty(&catalog)?),
+    }
+
+    Ok(())
+}
+
+fn cmd_vault_disclosure_template(
+    vault_url: Option<&str>,
+    profile: DisclosurePolicyTemplateArg,
+    name: Option<&str>,
+    groups: &[DisclosureRedactionGroupArg],
+    out_path: Option<&Path>,
+    format: OutputFormat,
+) -> Result<()> {
+    let rendered = if let Some(vault_url) = vault_url {
+        render_vault_disclosure_template(vault_url, profile, name, groups)?
+    } else {
+        DisclosureTemplateResponse {
+            profile: disclosure_policy_template_name(profile).to_string(),
+            description: String::new(),
+            default_redaction_groups: match profile {
+                DisclosurePolicyTemplateArg::RuntimeMinimum => vec![
+                    "commitments".to_string(),
+                    "parameters".to_string(),
+                    "operational_metrics".to_string(),
+                ],
+                DisclosurePolicyTemplateArg::PrivacyReview => vec![
+                    "commitments".to_string(),
+                    "metadata".to_string(),
+                    "parameters".to_string(),
+                    "operational_metrics".to_string(),
+                ],
+                _ => Vec::new(),
+            },
+            policy: disclosure_policy_template(
+                profile,
+                normalize_optional_cli_text("name", name)?.as_deref(),
+                groups,
+            ),
+        }
+    };
+    let policy = rendered.policy;
+    let json = serde_json::to_string_pretty(&policy)?;
+
+    if let Some(out_path) = out_path {
+        fs::write(out_path, format!("{json}\n"))
+            .with_context(|| format!("failed to write {}", out_path.display()))?;
+    }
+
+    match format {
+        OutputFormat::Human => {
+            println!("profile: {}", rendered.profile);
+            println!("name: {}", policy.name);
+            if let Some(vault_url) = vault_url {
+                println!("source: {}", vault_url);
+            } else {
+                println!("source: local");
+            }
+            if !rendered.default_redaction_groups.is_empty() {
+                println!(
+                    "default_groups: {}",
+                    rendered.default_redaction_groups.join(",")
+                );
+            }
+            if !groups.is_empty() {
+                println!(
+                    "groups: {}",
+                    groups
+                        .iter()
+                        .map(|group| group.to_possible_value().unwrap().get_name().to_string())
+                        .collect::<Vec<_>>()
+                        .join(",")
+                );
+            }
+            if let Some(out_path) = out_path {
+                println!("wrote: {}", out_path.display());
+            }
+            println!("{json}");
+        }
+        OutputFormat::Json => println!("{json}"),
+    }
+
+    Ok(())
+}
+
+fn render_vault_disclosure_template(
+    vault_url: &str,
+    profile: DisclosurePolicyTemplateArg,
+    name: Option<&str>,
+    groups: &[DisclosureRedactionGroupArg],
+) -> Result<DisclosureTemplateResponse> {
+    let request = DisclosureTemplateRenderRequest {
+        profile: disclosure_policy_template_name(profile).to_string(),
+        name: normalize_optional_cli_text("name", name)?,
+        redaction_groups: groups
+            .iter()
+            .map(|group| group.to_possible_value().unwrap().get_name().to_string())
+            .collect(),
+        redacted_fields_by_item_type: BTreeMap::new(),
+    };
+
+    let client = build_http_client()?;
+    let url = join_vault_url(vault_url, "/v1/disclosure/templates/render");
+    let response = client
+        .post(&url)
+        .json(&request)
+        .send()
+        .with_context(|| format!("failed to call {url}"))?;
+    let response = ensure_success(response, "render disclosure template")?;
+    response
+        .json()
+        .context("failed to decode disclosure template render response")
+}
+
 fn cmd_vault_status(vault_url: &str, format: OutputFormat) -> Result<()> {
     let client = build_http_client()?;
     require_vault_ready(&client, vault_url)?;
@@ -1880,6 +2323,42 @@ fn print_disclosure_preview_human(response: &DisclosurePreviewResponse) {
             "no"
         }
     );
+}
+
+fn print_disclosure_template_catalog_human(catalog: &DisclosureTemplateCatalogResponse) {
+    println!("templates:");
+    for template in &catalog.templates {
+        println!("  - {}", template.profile);
+        println!("    description: {}", template.description);
+        println!("    policy_name: {}", template.policy.name);
+        if !template.default_redaction_groups.is_empty() {
+            println!(
+                "    default_groups: {}",
+                template.default_redaction_groups.join(",")
+            );
+        }
+        if !template.policy.allowed_item_types.is_empty() {
+            println!(
+                "    allowed_item_types: {}",
+                template.policy.allowed_item_types.join(",")
+            );
+        }
+        if template.policy.include_artefact_metadata {
+            println!(
+                "    artefacts: metadata{}",
+                if template.policy.include_artefact_bytes {
+                    "+bytes"
+                } else {
+                    ""
+                }
+            );
+        }
+    }
+
+    println!("redaction_groups:");
+    for group in &catalog.redaction_groups {
+        println!("  - {}: {}", group.name, group.description);
+    }
 }
 
 fn cmd_vault_query(args: VaultQueryCommandInput<'_>) -> Result<()> {
@@ -3519,6 +3998,93 @@ mod tests {
     }
 
     #[test]
+    fn vault_disclosure_template_command_accepts_profile_and_groups() {
+        let cli = Cli::try_parse_from([
+            "proofctl",
+            "vault",
+            "disclosure-template",
+            "--profile",
+            "runtime_minimum",
+            "--group",
+            "metadata",
+            "--group",
+            "commitments",
+            "--name",
+            "runtime_custom",
+        ])
+        .unwrap();
+
+        match cli.command {
+            Commands::Vault {
+                command:
+                    VaultCommands::DisclosureTemplate {
+                        profile,
+                        redaction_group,
+                        name,
+                        ..
+                    },
+            } => {
+                assert_eq!(profile, DisclosurePolicyTemplateArg::RuntimeMinimum);
+                assert_eq!(
+                    redaction_group,
+                    vec![
+                        DisclosureRedactionGroupArg::Metadata,
+                        DisclosureRedactionGroupArg::Commitments,
+                    ]
+                );
+                assert_eq!(name.as_deref(), Some("runtime_custom"));
+            }
+            _ => panic!("unexpected command parsed"),
+        }
+    }
+
+    #[test]
+    fn vault_disclosure_templates_command_accepts_vault_url() {
+        let cli = Cli::try_parse_from([
+            "proofctl",
+            "vault",
+            "disclosure-templates",
+            "--vault-url",
+            "http://127.0.0.1:8080",
+        ])
+        .unwrap();
+
+        match cli.command {
+            Commands::Vault {
+                command: VaultCommands::DisclosureTemplates { vault_url, .. },
+            } => assert_eq!(vault_url, "http://127.0.0.1:8080"),
+            _ => panic!("unexpected command parsed"),
+        }
+    }
+
+    #[test]
+    fn vault_disclosure_template_command_accepts_optional_vault_url() {
+        let cli = Cli::try_parse_from([
+            "proofctl",
+            "vault",
+            "disclosure-template",
+            "--vault-url",
+            "http://127.0.0.1:8080",
+            "--profile",
+            "privacy_review",
+        ])
+        .unwrap();
+
+        match cli.command {
+            Commands::Vault {
+                command:
+                    VaultCommands::DisclosureTemplate {
+                        vault_url, profile, ..
+                    },
+            } => {
+                assert_eq!(vault_url.as_deref(), Some("http://127.0.0.1:8080"));
+                assert_eq!(profile, DisclosurePolicyTemplateArg::PrivacyReview);
+            }
+            _ => panic!("unexpected command parsed"),
+        }
+    }
+
+    #[test]
     fn join_vault_url_strips_trailing_slash() {
         let joined = join_vault_url("http://127.0.0.1:8080/", "/v1/packs");
         assert_eq!(joined, "http://127.0.0.1:8080/v1/packs");
@@ -3637,7 +4203,7 @@ mod tests {
     fn parse_field_redactions_groups_entries_by_item_index() {
         let parsed = parse_field_redactions(&[
             "0:output_commitment".to_string(),
-            "0:latency_ms".to_string(),
+            "0:/parameters/temperature".to_string(),
             "2:metadata".to_string(),
         ])
         .unwrap();
@@ -3646,9 +4212,40 @@ mod tests {
             BTreeMap::from([
                 (
                     0usize,
-                    vec!["output_commitment".to_string(), "latency_ms".to_string()],
+                    vec![
+                        "output_commitment".to_string(),
+                        "/parameters/temperature".to_string(),
+                    ],
                 ),
                 (2usize, vec!["metadata".to_string()]),
+            ])
+        );
+    }
+
+    #[test]
+    fn disclosure_policy_template_builds_runtime_minimum_redactions() {
+        let policy =
+            disclosure_policy_template(DisclosurePolicyTemplateArg::RuntimeMinimum, None, &[]);
+        assert_eq!(policy.name, "runtime_minimum");
+        assert_eq!(
+            policy.redacted_fields_by_item_type.get("llm_interaction"),
+            Some(&vec![
+                "input_commitment".to_string(),
+                "retrieval_commitment".to_string(),
+                "output_commitment".to_string(),
+                "tool_outputs_commitment".to_string(),
+                "trace_commitment".to_string(),
+                "/parameters".to_string(),
+                "/token_usage".to_string(),
+                "/latency_ms".to_string(),
+                "/trace_semconv_version".to_string(),
+            ])
+        );
+        assert_eq!(
+            policy.redacted_fields_by_item_type.get("tool_call"),
+            Some(&vec![
+                "input_commitment".to_string(),
+                "output_commitment".to_string(),
             ])
         );
     }

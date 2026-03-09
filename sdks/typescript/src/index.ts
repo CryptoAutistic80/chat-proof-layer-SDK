@@ -2,6 +2,12 @@ export { ProofLayerClient, _internals } from "./client.js";
 export { LocalProofLayerClient } from "./local_client.js";
 export { ProofLayer } from "./proof_layer.js";
 export {
+  createDisclosurePolicy,
+  createDisclosurePolicyTemplate,
+  disclosurePolicyTemplateNames,
+  disclosureRedactionGroups
+} from "./disclosure_policy.js";
+export {
   createAdversarialTestRequest,
   createConformityAssessmentRequest,
   createDataGovernanceRequest,
@@ -52,6 +58,18 @@ export type {
   CreateBundleResponse,
   DataGovernanceRequestOptions,
   DeclarationRequestOptions,
+  DisclosureConfig,
+  DisclosurePolicyConfig,
+  DisclosurePolicyBuilderOptions,
+  DisclosureTemplateCatalog,
+  DisclosureTemplateInfo,
+  DisclosureTemplateRenderRequest,
+  DisclosurePolicyTemplateName,
+  DisclosurePolicyTemplateOptions,
+  DisclosureRedactionGroup,
+  DisclosureRedactionGroupInfo,
+  DisclosurePreviewRequest,
+  DisclosurePreviewResponse,
   EvidenceActorOptions,
   EvidencePolicyOptions,
   EvidenceSubjectOptions,

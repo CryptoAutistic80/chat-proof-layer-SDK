@@ -113,6 +113,94 @@ test("getDisclosureConfig returns disclosure policies from vault config", async 
   assert.equal(disclosure.policies[0].include_artefact_bytes, true);
 });
 
+test("getDisclosureTemplates fetches the vault template catalog", async () => {
+  let captured;
+  const fetchImpl = async (url, init) => {
+    captured = { url, init };
+    return new Response(
+      JSON.stringify({
+        templates: [
+          {
+            profile: "runtime_minimum",
+            description: "Runtime disclosure template",
+            default_redaction_groups: ["commitments", "parameters", "operational_metrics"],
+            policy: {
+              name: "runtime_minimum",
+              allowed_item_types: ["llm_interaction"],
+              redacted_fields_by_item_type: {
+                llm_interaction: ["/parameters"]
+              }
+            }
+          }
+        ],
+        redaction_groups: [
+          {
+            name: "commitments",
+            description: "Hide digest fields."
+          }
+        ]
+      }),
+      { status: 200, headers: { "content-type": "application/json" } }
+    );
+  };
+
+  const client = new ProofLayerClient({ baseUrl: "http://127.0.0.1:8080", fetchImpl });
+  const catalog = await client.getDisclosureTemplates();
+
+  assert.equal(captured.url, "http://127.0.0.1:8080/v1/disclosure/templates");
+  assert.equal(catalog.templates[0].profile, "runtime_minimum");
+  assert.equal(catalog.redaction_groups[0].name, "commitments");
+});
+
+test("renderDisclosureTemplate posts template options to the vault", async () => {
+  let captured;
+  const fetchImpl = async (url, init) => {
+    captured = { url, init };
+    return new Response(
+      JSON.stringify({
+        profile: "privacy_review",
+        description: "Privacy review disclosure",
+        default_redaction_groups: [
+          "commitments",
+          "metadata",
+          "parameters",
+          "operational_metrics"
+        ],
+        policy: {
+          name: "privacy_review_custom",
+          allowed_item_types: ["llm_interaction"],
+          redacted_fields_by_item_type: {
+            risk_assessment: ["/metadata/internal_notes"]
+          }
+        }
+      }),
+      { status: 200, headers: { "content-type": "application/json" } }
+    );
+  };
+
+  const client = new ProofLayerClient({ baseUrl: "http://127.0.0.1:8080", fetchImpl });
+  const rendered = await client.renderDisclosureTemplate({
+    profile: "privacy_review",
+    name: "privacy_review_custom",
+    redactionGroups: ["metadata"],
+    redactedFieldsByItemType: {
+      risk_assessment: ["/metadata/internal_notes"]
+    }
+  });
+
+  assert.equal(captured.url, "http://127.0.0.1:8080/v1/disclosure/templates/render");
+  assert.equal(captured.init.method, "POST");
+  assert.deepEqual(JSON.parse(captured.init.body), {
+    profile: "privacy_review",
+    name: "privacy_review_custom",
+    redaction_groups: ["metadata"],
+    redacted_fields_by_item_type: {
+      risk_assessment: ["/metadata/internal_notes"]
+    }
+  });
+  assert.equal(rendered.policy.name, "privacy_review_custom");
+});
+
 test("updateDisclosureConfig issues PUT with policy payload", async () => {
   let captured;
   const fetchImpl = async (url, init) => {

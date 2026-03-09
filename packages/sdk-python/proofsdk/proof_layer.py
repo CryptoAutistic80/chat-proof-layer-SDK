@@ -158,6 +158,30 @@ class ProofLayer:
             return self.client.get_disclosure_config()
         raise ValueError("underlying client does not support get_disclosure_config; use vault mode")
 
+    def get_disclosure_templates(self) -> dict[str, Any]:
+        if hasattr(self.client, "get_disclosure_templates"):
+            return self.client.get_disclosure_templates()
+        raise ValueError("underlying client does not support get_disclosure_templates; use vault mode")
+
+    def render_disclosure_template(
+        self,
+        *,
+        profile: str,
+        name: str | None = None,
+        redaction_groups: list[str] | None = None,
+        redacted_fields_by_item_type: dict[str, list[str]] | None = None,
+    ) -> dict[str, Any]:
+        if hasattr(self.client, "render_disclosure_template"):
+            return self.client.render_disclosure_template(
+                profile=profile,
+                name=name,
+                redaction_groups=redaction_groups,
+                redacted_fields_by_item_type=redacted_fields_by_item_type,
+            )
+        raise ValueError(
+            "underlying client does not support render_disclosure_template; use vault mode"
+        )
+
     def update_disclosure_config(self, config: dict[str, Any]) -> dict[str, Any]:
         if hasattr(self.client, "update_disclosure_config"):
             return self.client.update_disclosure_config(config)

@@ -137,6 +137,23 @@ cargo run -p proofctl -- vault disclosure-preview \
   --type annex-iv \
   --disclosure-policy annex_iv_redacted
 
+# List built-in disclosure policy templates exposed by the vault
+cargo run -p proofctl -- vault disclosure-templates \
+  --vault-url http://127.0.0.1:8080
+
+# Generate a starter disclosure policy file locally
+cargo run -p proofctl -- vault disclosure-template \
+  --profile runtime_minimum \
+  --group metadata \
+  --out ./runtime_minimum.policy.json
+
+# Or ask the vault to render the starter policy centrally
+cargo run -p proofctl -- vault disclosure-template \
+  --vault-url http://127.0.0.1:8080 \
+  --profile privacy_review \
+  --group metadata \
+  --out ./privacy_review.policy.json
+
 # Query vault bundle inventory
 cargo run -p proofctl -- vault query \
   --vault-url http://127.0.0.1:8080 \
@@ -200,6 +217,8 @@ Current file-config limitations:
 - `PUT /v1/config/timestamp`
 - `PUT /v1/config/transparency`
 - `PUT /v1/config/disclosure`
+- `GET /v1/disclosure/templates`
+- `POST /v1/disclosure/templates/render`
 - `GET /v1/systems`
 - `GET /v1/systems/{system_id}/summary`
 - `POST /v1/packs`
@@ -340,6 +359,9 @@ npm run dev
 - The TypeScript and Python SDKs now expose local disclosure helpers, vault pack client methods for `bundle_format = "full" | "disclosure"` and optional `disclosure_policy`, and vault disclosure-config helpers, so SDK callers can request policy-shaped redacted exports or manage disclosure profiles without dropping to raw HTTP.
 - `proofctl vault disclosure-preview` and the TypeScript/Python SDK clients can now preview named or inline disclosure policies against a stored bundle before export, and disclosure policies can now filter by obligation refs as well as evidence item types.
 - Disclosure policies can now also define `redacted_fields_by_item_type`, using either top-level field names or JSON-pointer paths, and vault disclosure previews/manifests report the resulting per-item field/path redactions that will be applied to `pl-merkle-sha256-v3` / `pl-merkle-sha256-v4` bundles.
+- `proofctl vault disclosure-template` now generates starter policy JSON for built-in profiles such as `regulator_minimum`, `annex_iv_redacted`, `incident_summary`, `runtime_minimum`, and `privacy_review`, with optional redaction groups like `commitments`, `metadata`, `parameters`, and `operational_metrics`.
+- The vault now also exposes `GET /v1/disclosure/templates` and `POST /v1/disclosure/templates/render`, so `proofctl`, TypeScript, and Python clients can discover the built-in disclosure-template catalog and ask the service to materialize starter policy JSON before saving or previewing it.
+- The TypeScript and Python SDKs now also expose local disclosure-policy builder helpers so callers can compose the same template/group model without hand-writing selector maps.
 - `proofctl inspect` now supports `--show-items` and `--show-merkle`.
 - `proofctl pack` and `proofctl vault export` now support `--bundle-format <full|disclosure>` plus `--disclosure-policy <name>` so vault exports can contain either full `bundle.pkg` members or disclosure packages shaped by named disclosure profiles.
 - `proofctl vault status|query|retention|systems|export` now covers the main vault read/query/export flows from the plan without requiring manual `curl`.

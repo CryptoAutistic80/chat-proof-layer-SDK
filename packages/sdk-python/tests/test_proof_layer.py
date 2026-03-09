@@ -106,6 +106,76 @@ class TestProofLayer(unittest.TestCase):
         self.assertEqual(captured["path"], "/v1/config/disclosure")
         self.assertEqual(result["policies"][0]["name"], "regulator_minimum")
 
+    def test_vault_mode_can_list_disclosure_templates(self):
+        captured = {}
+
+        def request_fn(method, path, headers, body):
+            captured["method"] = method
+            captured["path"] = path
+            return {
+                "templates": [
+                    {
+                        "profile": "runtime_minimum",
+                        "description": "Runtime disclosure template",
+                        "default_redaction_groups": ["commitments"],
+                        "policy": {"name": "runtime_minimum"},
+                    }
+                ],
+                "redaction_groups": [
+                    {
+                        "name": "commitments",
+                        "description": "Hide digest fields.",
+                    }
+                ],
+            }
+
+        proof_layer = ProofLayer(
+            vault_url="http://127.0.0.1:8080",
+            request_fn=request_fn,
+        )
+
+        result = proof_layer.get_disclosure_templates()
+
+        self.assertEqual(captured["method"], "GET")
+        self.assertEqual(captured["path"], "/v1/disclosure/templates")
+        self.assertEqual(result["templates"][0]["profile"], "runtime_minimum")
+
+    def test_vault_mode_can_render_disclosure_template(self):
+        captured = {}
+
+        def request_fn(method, path, headers, body):
+            captured["method"] = method
+            captured["path"] = path
+            captured["headers"] = headers
+            captured["body"] = body
+            return {
+                "profile": "privacy_review",
+                "description": "Privacy review disclosure",
+                "default_redaction_groups": ["metadata"],
+                "policy": {
+                    "name": "privacy_review_custom",
+                    "redacted_fields_by_item_type": {
+                        "risk_assessment": ["/metadata/internal_notes"]
+                    },
+                },
+            }
+
+        proof_layer = ProofLayer(
+            vault_url="http://127.0.0.1:8080",
+            request_fn=request_fn,
+        )
+
+        result = proof_layer.render_disclosure_template(
+            profile="privacy_review",
+            name="privacy_review_custom",
+            redaction_groups=["metadata"],
+            redacted_fields_by_item_type={"risk_assessment": ["/metadata/internal_notes"]},
+        )
+
+        self.assertEqual(captured["method"], "POST")
+        self.assertEqual(captured["path"], "/v1/disclosure/templates/render")
+        self.assertEqual(result["policy"]["name"], "privacy_review_custom")
+
     def test_vault_mode_can_preview_disclosure(self):
         captured = {}
 

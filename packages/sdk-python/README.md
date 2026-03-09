@@ -18,6 +18,7 @@ from proofsdk import (
     LocalProofLayerClient,
     ProofLayer,
     build_bundle,
+    create_disclosure_policy_template,
     hash_sha256,
     verify_bundle,
 )
@@ -109,19 +110,21 @@ pack = proof_client.create_pack(
     bundle_format="disclosure",
     disclosure_policy="annex_iv_redacted",
 )
+template_catalog = proof_client.get_disclosure_templates()
+rendered_template = proof_client.render_disclosure_template(
+    profile="privacy_review",
+    name="privacy_review_internal",
+    redaction_groups=["metadata"],
+    redacted_fields_by_item_type={"risk_assessment": ["/metadata/internal_notes"]},
+)
 proof_client.update_disclosure_config(
     {
         "policies": [
-            {
-                "name": "regulator_minimum",
-                "excluded_item_types": ["tool_call"],
-                "redacted_fields_by_item_type": {
-                    "llm_interaction": ["/parameters/temperature"],
-                },
-                "include_artefact_metadata": False,
-                "include_artefact_bytes": False,
-                "artefact_names": [],
-            }
+            create_disclosure_policy_template(
+                "runtime_minimum",
+                name="runtime_minimum_internal",
+                redaction_groups=["metadata"],
+            )
         ]
     }
 )
@@ -145,4 +148,5 @@ risk_bundle = proof_layer.capture_risk_assessment(
 print(risk_bundle["bundle"]["items"][0]["type"])
 print(redacted_summary["disclosed_item_count"], len(archive))
 print(preview["disclosed_item_types"])
+print(template_catalog["templates"][0]["profile"], rendered_template["policy"]["name"])
 ```

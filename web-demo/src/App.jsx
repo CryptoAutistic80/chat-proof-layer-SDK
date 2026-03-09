@@ -7,8 +7,8 @@ const DEFAULT_TEMPLATE_PROFILE = "runtime_minimum";
 const PACK_TYPE = "runtime_logs";
 
 const PROVIDER_MODELS = {
-  anthropic: ["claude-sonnet-4-6", "claude-haiku-4-5"],
-  openai: ["gpt-4o", "gpt-4o-mini"]
+  anthropic: ["claude-sonnet-4-6", "claude-opus-4-6", "claude-haiku-4-5"],
+  openai: ["gpt-5.2", "gpt-5-mini", "gpt-5-nano"]
 };
 
 function encodeBase64(bytes) {
@@ -203,6 +203,10 @@ function defaultTemplateName(profile) {
   return `${profile}_web_demo`;
 }
 
+function arrayValue(value) {
+  return Array.isArray(value) ? value : [];
+}
+
 function TimelineStep({ title, status, detail }) {
   return (
     <article className={`timeline-step is-${formatStatusTone(status)}`}>
@@ -357,10 +361,10 @@ export function App() {
       setVaultConfig(configResponse);
       setTemplateCatalog(templateResponse);
 
-      if (templateResponse.templates.length > 0) {
+      const templates = arrayValue(templateResponse?.templates);
+      if (templates.length > 0) {
         const existingTemplate =
-          templateResponse.templates.find((template) => template.profile === templateProfile) ??
-          templateResponse.templates[0];
+          templates.find((template) => template.profile === templateProfile) ?? templates[0];
         setTemplateProfile(existingTemplate.profile);
         setTemplateName((current) =>
           current.trim() ? current : defaultTemplateName(existingTemplate.profile)
@@ -649,9 +653,11 @@ export function App() {
       })
     });
     setDisclosurePreview(previewPayload);
+    const disclosedItemIndices = arrayValue(previewPayload?.disclosed_item_indices);
+    const disclosedArtefactNames = arrayValue(previewPayload?.disclosed_artefact_names);
     appendActivity(
       "Disclosure preview ready",
-      `${previewPayload.disclosed_item_indices.length} items · ${previewPayload.disclosed_artefact_names.length} artefacts`,
+      `${disclosedItemIndices.length} items · ${disclosedArtefactNames.length} artefacts`,
       "accent"
     );
     return previewPayload;
@@ -812,6 +818,7 @@ export function App() {
   const template = selectedTemplate();
   const capabilityChips = capabilityValue(vaultConfig, templateCatalog);
   const templateGroups = templateCatalog?.redaction_groups ?? [];
+  const previewDisclosedItemIndices = arrayValue(disclosurePreview?.disclosed_item_indices);
   const timeline = [
     {
       title: "Vault capabilities",
@@ -872,7 +879,7 @@ export function App() {
       title: "Disclosure preview",
       status: disclosurePreview ? "done" : isPreviewing ? "active" : "idle",
       detail: disclosurePreview
-        ? `${disclosurePreview.disclosed_item_indices.length} items disclosed via ${disclosurePreview.policy_name}`
+        ? `${previewDisclosedItemIndices.length} items disclosed via ${disclosurePreview.policy_name}`
         : "Render a disclosure template and preview redacted output before export."
     },
     {

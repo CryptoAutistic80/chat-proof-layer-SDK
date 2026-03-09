@@ -1,0 +1,82 @@
+[server]
+addr = "0.0.0.0:8080"
+max_payload_bytes = 10485760
+# tls_cert = "./tls/server.crt"
+# tls_key = "./tls/server.key"
+
+[auth]
+enabled = false
+
+[[auth.api_keys]]
+key = "change-me"
+label = "ops"
+
+[tenant]
+# Optional single-tenant enforcement for one-org-per-vault deployments.
+# organization_id = "org-demo"
+
+[signing]
+key_id = "kid-dev-01"
+algorithm = "ed25519"
+# key_path = "./keys/signing.pem"
+
+[storage]
+metadata_backend = "sqlite"
+sqlite_path = "./storage/metadata.db"
+blob_backend = "filesystem"
+blob_path = "./storage"
+
+[backup]
+directory = "./storage/backups"
+interval_hours = 0
+retention_count = 7
+# [backup.encryption]
+# enabled = true
+# key_path = "./keys/backup.key"
+# key_id = "backup-key-01"
+
+[timestamp]
+enabled = false
+provider = "rfc3161"
+url = "http://timestamp.digicert.com"
+# assurance = "qualified"
+# trust_anchor_paths = ["./trust/tsa-root.pem"]
+# crl_paths = ["./trust/tsa.crl.pem"]
+# ocsp_responder_urls = ["http://ocsp.example.test"]
+# qualified_signer_paths = ["./trust/tsa-signer.pem"]
+# policy_oids = ["1.2.3.4"]
+
+[transparency]
+enabled = false
+provider = "none"
+# rekor_url = "https://rekor.sigstore.dev"
+# url = "https://scitt.example.test/entries"
+# log_public_key_path = "./trust/rekor.pub"
+
+[retention]
+grace_period_days = 30
+scan_interval_hours = 24
+
+[[retention.policies]]
+retention_class = "runtime_logs"
+min_duration_days = 3650
+legal_basis = "eu_ai_act_article_12_19_26"
+active = true
+
+[[retention.policies]]
+retention_class = "risk_mgmt"
+min_duration_days = 3650
+legal_basis = "eu_ai_act_article_9"
+active = true
+
+[[retention.policies]]
+retention_class = "technical_doc"
+min_duration_days = 3650
+legal_basis = "eu_ai_act_annex_iv"
+active = true
+
+[[retention.policies]]
+retention_class = "ai_literacy"
+min_duration_days = 1095
+legal_basis = "eu_ai_act_article_4"
+active = true

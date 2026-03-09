@@ -77,6 +77,7 @@ struct AppState {
     addr: String,
     tls_enabled: bool,
     auth_config: Option<RuntimeAuthConfig>,
+    tenant_organization_id: Option<String>,
     storage_dir: PathBuf,
     signing_key: Arc<SigningKey>,
     signing_kid: String,
@@ -95,6 +96,7 @@ struct VaultRuntimeConfig {
     tls_cert_path: Option<PathBuf>,
     tls_key_path: Option<PathBuf>,
     auth_config: Option<RuntimeAuthConfig>,
+    tenant_organization_id: Option<String>,
     signing_key_path: Option<PathBuf>,
     signing_kid: String,
     metadata_backend: String,
@@ -114,6 +116,8 @@ struct VaultFileConfig {
     server: VaultServerFileConfig,
     #[serde(default)]
     auth: Option<VaultAuthFileConfig>,
+    #[serde(default)]
+    tenant: Option<VaultTenantFileConfig>,
     #[serde(default)]
     signing: VaultSigningFileConfig,
     #[serde(default)]
@@ -145,6 +149,11 @@ struct VaultAuthFileConfig {
 struct VaultApiKeyFileConfig {
     key: String,
     label: Option<String>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct VaultTenantFileConfig {
+    organization_id: Option<String>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -537,6 +546,7 @@ struct VaultConfigResponse {
     disclosure: DisclosureConfig,
     audit: AuditConfigView,
     auth: VaultAuthConfigView,
+    tenant: VaultTenantConfigView,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -551,6 +561,26 @@ struct VaultAuthConfigView {
     enabled: bool,
     scheme: String,
     principal_labels: Vec<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct VaultTenantConfigView {
+    organization_id: Option<String>,
+    enforced: bool,
+}
+
+#[derive(Debug)]
+struct VaultMetricsSnapshot {
+    bundle_total: i64,
+    bundle_active: i64,
+    bundle_deleted: i64,
+    bundle_held: i64,
+    bundle_timestamped: i64,
+    bundle_receipted: i64,
+    pack_total: i64,
+    audit_log_total: i64,
+    retention_policy_total: i64,
+    disclosure_policy_total: i64,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -965,6 +995,11 @@ async fn main() -> Result<()> {
 
     let db = open_sqlite_pool(&runtime_config.db_path).await?;
     initialize_sqlite_schema(&db).await?;
+    validate_existing_bundle_organization_scope(
+        &db,
+        runtime_config.tenant_organization_id.as_deref(),
+    )
+    .await?;
     seed_default_retention_policies(&db).await?;
     seed_default_disclosure_config(&db).await?;
     apply_runtime_config_to_db(&db, &runtime_config).await?;
@@ -978,6 +1013,7 @@ async fn main() -> Result<()> {
         addr: addr.to_string(),
         tls_enabled: runtime_config.tls_cert_path.is_some(),
         auth_config: runtime_config.auth_config.clone(),
+        tenant_organization_id: runtime_config.tenant_organization_id.clone(),
         storage_dir,
         signing_key: Arc::new(signing_key),
         signing_kid: runtime_config.signing_kid.clone(),
@@ -1081,6 +1117,7 @@ fn build_router(state: AppState, max_payload_bytes: usize) -> Router {
     Router::new()
         .route("/healthz", get(healthz))
         .route("/readyz", get(readyz))
+        .route("/metrics", get(metrics))
         .merge(api_router)
         .layer(cors)
         .layer(DefaultBodyLimit::max(max_payload_bytes))
@@ -1249,6 +1286,7 @@ fn build_vault_runtime_config(
         .collect::<Result<Vec<_>>>()?;
 
     let auth_config = resolve_auth_runtime_config(file_config.auth, env_vars)?;
+    let tenant_organization_id = resolve_tenant_organization_id(file_config.tenant, env_vars);
     let timestamp_config = resolve_timestamp_file_config(config_base_dir, file_config.timestamp)?;
     let transparency_config =
         resolve_transparency_file_config(config_base_dir, file_config.transparency)?;
@@ -1260,6 +1298,7 @@ fn build_vault_runtime_config(
         tls_cert_path,
         tls_key_path,
         auth_config,
+        tenant_organization_id,
         signing_key_path,
         signing_kid,
         metadata_backend,
@@ -1353,6 +1392,16 @@ fn resolve_auth_runtime_config(
     Ok(Some(RuntimeAuthConfig {
         principals: Arc::new(principals),
     }))
+}
+
+fn resolve_tenant_organization_id(
+    file_config: Option<VaultTenantFileConfig>,
+    env_vars: &BTreeMap<String, String>,
+) -> Option<String> {
+    let raw = env_value(env_vars, "PROOF_SERVICE_ORGANIZATION_ID")
+        .map(ToOwned::to_owned)
+        .or_else(|| file_config.and_then(|config| config.organization_id));
+    normalize_optional_string(raw)
 }
 
 fn normalize_backend(raw: Option<&str>, default_value: &str, field: &str) -> Result<String> {
@@ -1613,6 +1662,67 @@ fn request_actor_label(actor: &Option<Extension<AuthenticatedActor>>) -> &str {
         .unwrap_or(AUDIT_ACTOR_API)
 }
 
+async fn validate_existing_bundle_organization_scope(
+    db: &SqlitePool,
+    tenant_organization_id: Option<&str>,
+) -> Result<()> {
+    let Some(tenant_organization_id) = tenant_organization_id else {
+        return Ok(());
+    };
+
+    let mismatch: Option<(String, String)> = sqlx::query_as(
+        "SELECT bundle_id, actor_org_id
+         FROM bundles
+         WHERE actor_org_id IS NOT NULL
+           AND actor_org_id <> ?
+         ORDER BY bundle_id ASC
+         LIMIT 1",
+    )
+    .bind(tenant_organization_id)
+    .fetch_optional(db)
+    .await
+    .context("failed to validate existing bundle organization scope")?;
+
+    if let Some((bundle_id, actor_org_id)) = mismatch {
+        bail!(
+            "bundle {bundle_id} is scoped to organization_id={actor_org_id}, which conflicts with tenant.organization_id={tenant_organization_id}"
+        );
+    }
+
+    Ok(())
+}
+
+fn build_tenant_scoped_capture(
+    capture: SealableCaptureInput,
+    tenant_organization_id: Option<&str>,
+) -> Result<CaptureEvent> {
+    let mut event = match capture {
+        SealableCaptureInput::V10(event) => event,
+        SealableCaptureInput::Legacy(capture) => {
+            proof_layer_core::capture_input_v01_to_event(capture)
+        }
+    };
+
+    let actor_org_id = normalize_optional_string(event.actor.organization_id.take());
+    if let Some(tenant_organization_id) = tenant_organization_id {
+        if let Some(actor_org_id) = actor_org_id {
+            if actor_org_id != tenant_organization_id {
+                bail!(
+                    "capture actor.organization_id={} does not match tenant.organization_id={tenant_organization_id}",
+                    actor_org_id
+                );
+            }
+            event.actor.organization_id = Some(actor_org_id);
+        } else {
+            event.actor.organization_id = Some(tenant_organization_id.to_string());
+        }
+    } else {
+        event.actor.organization_id = actor_org_id;
+    }
+
+    Ok(event)
+}
+
 async fn healthz() -> impl IntoResponse {
     (StatusCode::OK, "ok")
 }
@@ -1655,25 +1765,18 @@ async fn create_bundle(
         });
     }
 
+    let capture =
+        build_tenant_scoped_capture(request.capture, state.tenant_organization_id.as_deref())
+            .map_err(ApiError::bad_request_anyhow)?;
     let bundle_id = generate_bundle_id();
-    let bundle = match request.capture {
-        SealableCaptureInput::V10(capture) => build_bundle(
-            capture,
-            &artefacts,
-            &state.signing_key,
-            &state.signing_kid,
-            &bundle_id,
-            Utc::now(),
-        ),
-        SealableCaptureInput::Legacy(capture) => build_bundle(
-            capture,
-            &artefacts,
-            &state.signing_key,
-            &state.signing_kid,
-            &bundle_id,
-            Utc::now(),
-        ),
-    }
+    let bundle = build_bundle(
+        capture,
+        &artefacts,
+        &state.signing_key,
+        &state.signing_kid,
+        &bundle_id,
+        Utc::now(),
+    )
     .map_err(map_build_bundle_error)?;
 
     resolve_bundle_expiry(&state.db, &bundle)
@@ -4856,6 +4959,10 @@ async fn build_vault_config_response(state: &AppState) -> Result<VaultConfigResp
                 })
                 .unwrap_or_default(),
         },
+        tenant: VaultTenantConfigView {
+            organization_id: state.tenant_organization_id.clone(),
+            enforced: state.tenant_organization_id.is_some(),
+        },
     })
 }
 
@@ -7080,6 +7187,7 @@ mod tests {
             addr: DEFAULT_ADDR.to_string(),
             tls_enabled: false,
             auth_config: None,
+            tenant_organization_id: None,
             storage_dir,
             signing_key: Arc::new(signing_key),
             signing_kid: "kid-dev-01".to_string(),
@@ -7107,6 +7215,12 @@ mod tests {
                     .collect(),
             ),
         });
+        state
+    }
+
+    async fn test_state_with_tenant(max_payload_bytes: usize, tenant_org_id: &str) -> AppState {
+        let mut state = test_state(max_payload_bytes).await;
+        state.tenant_organization_id = Some(tenant_org_id.to_string());
         state
     }
 
@@ -7397,6 +7511,9 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
                     label: Some("ops".to_string()),
                 }],
             }),
+            tenant: Some(VaultTenantFileConfig {
+                organization_id: Some("org-demo".to_string()),
+            }),
             signing: VaultSigningFileConfig {
                 key_path: Some("./keys/signing.pem".to_string()),
                 key_id: Some("file-kid".to_string()),
@@ -7474,6 +7591,7 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
                 .map(|config| config.principals[0].label.as_str()),
             Some("ops")
         );
+        assert_eq!(runtime.tenant_organization_id.as_deref(), Some("org-demo"));
         assert_eq!(runtime.signing_kid, "file-kid");
         let expected_signing_key_path = config_dir.join("keys/signing.pem");
         assert_eq!(
@@ -7643,6 +7761,109 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
         .await
         .unwrap();
         assert_eq!(actor.as_deref(), Some("ops"));
+    }
+
+    #[tokio::test]
+    async fn create_bundle_injects_tenant_organization_id_when_missing() {
+        let state = test_state_with_tenant(DEFAULT_MAX_PAYLOAD_BYTES, "org-demo").await;
+        let db = state.db.clone();
+        let app = build_router(state, DEFAULT_MAX_PAYLOAD_BYTES);
+
+        let created = create_bundle_response(
+            &app,
+            &CreateBundleRequest {
+                capture: SealableCaptureInput::Legacy(sample_capture()),
+                artefacts: vec![InlineArtefact {
+                    name: "prompt.json".to_string(),
+                    content_type: "application/json".to_string(),
+                    data_base64: Base64::encode_string(br#"{"prompt":"tenant"}"#),
+                }],
+            },
+        )
+        .await;
+
+        let actor_org_id: Option<String> =
+            sqlx::query_scalar("SELECT actor_org_id FROM bundles WHERE bundle_id = ?")
+                .bind(&created.bundle_id)
+                .fetch_one(&db)
+                .await
+                .unwrap();
+        assert_eq!(actor_org_id.as_deref(), Some("org-demo"));
+    }
+
+    #[tokio::test]
+    async fn create_bundle_rejects_mismatched_tenant_organization_id() {
+        let state = test_state_with_tenant(DEFAULT_MAX_PAYLOAD_BYTES, "org-demo").await;
+        let app = build_router(state, DEFAULT_MAX_PAYLOAD_BYTES);
+
+        let mut event = sample_event_with_system("tenant-system");
+        event.actor.organization_id = Some("org-other".to_string());
+
+        let request = Request::builder()
+            .method("POST")
+            .uri("/v1/bundles")
+            .header("content-type", "application/json")
+            .body(Body::from(
+                serde_json::to_vec(&CreateBundleRequest {
+                    capture: SealableCaptureInput::V10(event),
+                    artefacts: vec![InlineArtefact {
+                        name: "prompt.json".to_string(),
+                        content_type: "application/json".to_string(),
+                        data_base64: Base64::encode_string(br#"{"prompt":"tenant"}"#),
+                    }],
+                })
+                .unwrap(),
+            ))
+            .unwrap();
+
+        let response = app.oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let error: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert!(
+            error
+                .get("error")
+                .and_then(serde_json::Value::as_str)
+                .unwrap()
+                .contains("does not match tenant.organization_id=org-demo")
+        );
+    }
+
+    #[tokio::test]
+    async fn validate_existing_bundle_organization_scope_rejects_conflicting_rows() {
+        let state = test_state(DEFAULT_MAX_PAYLOAD_BYTES).await;
+        let db = state.db.clone();
+
+        let mut event = sample_event_with_system("tenant-system");
+        event.actor.organization_id = Some("org-other".to_string());
+        let artefacts = vec![ArtefactInput {
+            name: "prompt.json".to_string(),
+            content_type: "application/json".to_string(),
+            bytes: br#"{"prompt":"tenant"}"#.to_vec(),
+        }];
+        let bundle = build_bundle(
+            event,
+            &artefacts,
+            &state.signing_key,
+            "kid-dev-01",
+            &generate_bundle_id(),
+            Utc::now(),
+        )
+        .unwrap();
+
+        persist_bundle_metadata(&db, &state.storage_dir, &bundle)
+            .await
+            .unwrap();
+
+        let err = validate_existing_bundle_organization_scope(&db, Some("org-demo"))
+            .await
+            .unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("conflicts with tenant.organization_id=org-demo")
+        );
     }
 
     #[tokio::test]
@@ -8760,7 +8981,7 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
 
     #[tokio::test]
     async fn get_config_returns_runtime_retention_and_assurance_views() {
-        let state = test_state(DEFAULT_MAX_PAYLOAD_BYTES).await;
+        let state = test_state_with_tenant(DEFAULT_MAX_PAYLOAD_BYTES, "org-demo").await;
         let app = build_router(state, DEFAULT_MAX_PAYLOAD_BYTES);
 
         let request = Request::builder()
@@ -8780,6 +9001,8 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
         assert!(!config.service.tls_enabled);
         assert!(!config.auth.enabled);
         assert!(config.auth.principal_labels.is_empty());
+        assert_eq!(config.tenant.organization_id.as_deref(), Some("org-demo"));
+        assert!(config.tenant.enforced);
         assert_eq!(config.signing.key_id, "kid-dev-01");
         assert_eq!(config.signing.algorithm, "ed25519");
         assert_eq!(config.storage.metadata_backend, "sqlite");
@@ -8835,6 +9058,7 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
             tls_cert_path: None,
             tls_key_path: None,
             auth_config: None,
+            tenant_organization_id: None,
             signing_key_path: None,
             signing_kid: "kid-runtime".to_string(),
             metadata_backend: "sqlite".to_string(),

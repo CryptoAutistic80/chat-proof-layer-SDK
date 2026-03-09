@@ -377,6 +377,10 @@ export interface VaultConfigResponse extends JsonObject {
     scheme: string;
     principal_labels: string[];
   };
+  tenant: JsonObject & {
+    organization_id?: string;
+    enforced: boolean;
+  };
   audit: JsonObject & {
     enabled: boolean;
   };

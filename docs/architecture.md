@@ -109,7 +109,8 @@ Current config behavior:
 - `proof-service` now supports startup config from `./vault.toml` or `PROOF_SERVICE_CONFIG_PATH`, with env vars overriding file values.
 - `proof-service` can now also serve HTTPS directly when `[server].tls_cert` + `[server].tls_key` or `PROOF_SERVICE_TLS_CERT_PATH` + `PROOF_SERVICE_TLS_KEY_PATH` are configured.
 - `proof-service` can also require bearer auth on `/v1/*` when `[auth]` / `[[auth.api_keys]]` or `PROOF_SERVICE_API_KEY` are configured; `/healthz` and `/readyz` stay open.
-- `GET /v1/config` returns the active service view for payload limits, bound address, TLS enabled state, auth enabled state/principal labels, signing algorithm/key id, storage backends, retention grace period, retention policies, and persisted timestamp/transparency provider settings.
+- `proof-service` can also enforce a single organization scope when `[tenant].organization_id` or `PROOF_SERVICE_ORGANIZATION_ID` is configured; new captures inherit that `actor.organization_id` when omitted, mismatches are rejected, and startup fails if stored bundles already belong to a different organization.
+- `GET /v1/config` returns the active service view for payload limits, bound address, TLS enabled state, auth enabled state/principal labels, tenant enforcement state, signing algorithm/key id, storage backends, retention grace period, retention policies, and persisted timestamp/transparency provider settings.
 - `GET /v1/config` also reports the retention scan interval currently active in the process.
 - `PUT /v1/config/retention` upserts retention policy rows in SQLite.
 - Retention policies now carry an `expiry_mode`; `fixed_days` computes `expires_at`, while `until_withdrawn` leaves bundles active until an explicit withdrawal/delete event.

@@ -208,12 +208,13 @@ docker compose up --build
 
 Supported runtime config knobs:
 
-- `vault.toml` sections: `[server]`, `[auth]`, `[[auth.api_keys]]`, `[signing]`, `[storage]`, `[timestamp]`, `[transparency]`, `[retention]`, and `[[retention.policies]]`
+- `vault.toml` sections: `[server]`, `[auth]`, `[[auth.api_keys]]`, `[tenant]`, `[signing]`, `[storage]`, `[timestamp]`, `[transparency]`, `[retention]`, and `[[retention.policies]]`
 - optional HTTPS listener fields: `[server].tls_cert` and `[server].tls_key`
 - optional bearer-auth fields: `[auth].enabled`, `[[auth.api_keys]].key`, and `[[auth.api_keys]].label`
+- optional single-tenant field: `[tenant].organization_id`
 - trust-aware assurance fields: `[timestamp].assurance`, `[timestamp].trust_anchor_pems` / `[timestamp].trust_anchor_paths`, `[timestamp].crl_pems` / `[timestamp].crl_paths`, `[timestamp].ocsp_responder_urls`, `[timestamp].qualified_signer_pems` / `[timestamp].qualified_signer_paths`, `[timestamp].policy_oids`, and `[transparency].log_public_key_pem` / `[transparency].log_public_key_path`
 - `PROOF_SERVICE_CONFIG_PATH=/path/to/vault.toml` to point at a non-default file
-- env overrides for `PROOF_SERVICE_ADDR`, `PROOF_SERVICE_TLS_CERT_PATH`, `PROOF_SERVICE_TLS_KEY_PATH`, `PROOF_SERVICE_API_KEY`, `PROOF_SERVICE_API_KEY_LABEL`, `PROOF_SERVICE_STORAGE_DIR`, `PROOF_SERVICE_DB_PATH`, `PROOF_SIGNING_KEY_PATH`, `PROOF_SIGNING_KEY_ID`, `PROOF_SERVICE_MAX_PAYLOAD_BYTES`, `PROOF_SERVICE_RETENTION_GRACE_DAYS`, and `PROOF_SERVICE_RETENTION_SCAN_INTERVAL_HOURS`
+- env overrides for `PROOF_SERVICE_ADDR`, `PROOF_SERVICE_TLS_CERT_PATH`, `PROOF_SERVICE_TLS_KEY_PATH`, `PROOF_SERVICE_API_KEY`, `PROOF_SERVICE_API_KEY_LABEL`, `PROOF_SERVICE_ORGANIZATION_ID`, `PROOF_SERVICE_STORAGE_DIR`, `PROOF_SERVICE_DB_PATH`, `PROOF_SIGNING_KEY_PATH`, `PROOF_SIGNING_KEY_ID`, `PROOF_SERVICE_MAX_PAYLOAD_BYTES`, `PROOF_SERVICE_RETENTION_GRACE_DAYS`, and `PROOF_SERVICE_RETENTION_SCAN_INTERVAL_HOURS`
 
 Current file-config limitations:
 
@@ -223,6 +224,8 @@ Current file-config limitations:
 - PostgreSQL and S3 config are parsed but fail fast as not implemented
 
 When auth is configured, `/v1/*` requires `Authorization: Bearer <token>`. `proofctl` picks this up from `PROOF_SERVICE_API_KEY`, and the TypeScript/Python vault clients already support `apiKey`. `/healthz` and `/readyz` remain open for infrastructure checks.
+
+When `[tenant].organization_id` or `PROOF_SERVICE_ORGANIZATION_ID` is configured, the vault runs in bounded single-tenant mode: new captures inherit that `actor.organization_id` when missing, explicit mismatches are rejected, and startup fails if existing stored bundles are scoped to a different organization.
 
 ### Service Endpoints
 

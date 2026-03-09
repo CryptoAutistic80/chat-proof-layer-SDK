@@ -1026,6 +1026,7 @@ struct VaultConfigResponse {
     transparency: VaultTransparencyConfig,
     auth: VaultAuthConfigView,
     audit: VaultAuditConfigView,
+    tenant: VaultTenantConfigView,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -1040,6 +1041,12 @@ struct VaultAuthConfigView {
     enabled: bool,
     scheme: String,
     principal_labels: Vec<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct VaultTenantConfigView {
+    organization_id: Option<String>,
+    enforced: bool,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -1169,6 +1176,8 @@ struct VaultStatusOutput {
     auth_enabled: bool,
     auth_scheme: String,
     auth_principal_count: usize,
+    tenant_organization_id: Option<String>,
+    tenant_enforced: bool,
 }
 
 impl EvidenceTypeArg {
@@ -2374,6 +2383,8 @@ fn cmd_vault_status(vault_url: &str, format: OutputFormat) -> Result<()> {
         auth_enabled: config.auth.enabled,
         auth_scheme: config.auth.scheme.clone(),
         auth_principal_count: config.auth.principal_labels.len(),
+        tenant_organization_id: config.tenant.organization_id.clone(),
+        tenant_enforced: config.tenant.enforced,
     };
 
     match format {
@@ -2563,6 +2574,11 @@ fn print_vault_status_human(status: &VaultStatusOutput, config: &VaultConfigResp
     println!(
         "auth: enabled={} scheme={} principals={}",
         status.auth_enabled, status.auth_scheme, status.auth_principal_count
+    );
+    println!(
+        "tenant: enforced={} organization_id={}",
+        if status.tenant_enforced { "yes" } else { "no" },
+        status.tenant_organization_id.as_deref().unwrap_or("n/a")
     );
 }
 

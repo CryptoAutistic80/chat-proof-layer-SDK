@@ -11,6 +11,10 @@ enabled = false
 key = "change-me"
 label = "ops"
 
+[tenant]
+# Optional single-tenant enforcement for one-org-per-vault deployments.
+# organization_id = "org-demo"
+
 [signing]
 key_id = "kid-dev-01"
 algorithm = "ed25519"

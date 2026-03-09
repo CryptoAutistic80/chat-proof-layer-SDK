@@ -26,6 +26,11 @@ sqlite_path = "./storage/metadata.db"
 blob_backend = "filesystem"
 blob_path = "./storage"
 
+[backup]
+directory = "./storage/backups"
+interval_hours = 0
+retention_count = 7
+
 [timestamp]
 enabled = false
 provider = "rfc3161"

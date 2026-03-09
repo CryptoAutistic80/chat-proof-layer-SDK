@@ -49,6 +49,8 @@ const DEFAULT_ADDR: &str = "0.0.0.0:8080";
 const DEFAULT_MAX_PAYLOAD_BYTES: usize = 10 * 1024 * 1024;
 const DEFAULT_RETENTION_GRACE_PERIOD_DAYS: i64 = 30;
 const DEFAULT_RETENTION_SCAN_INTERVAL_HOURS: i64 = 24;
+const DEFAULT_BACKUP_INTERVAL_HOURS: i64 = 0;
+const DEFAULT_BACKUP_RETENTION_COUNT: usize = 7;
 const DEFAULT_CONFIG_PATH: &str = "./vault.toml";
 const DEFAULT_AUTH_PRINCIPAL_LABEL: &str = "api";
 const PACKAGE_FORMAT: &str = "pl-bundle-pkg-v1";
@@ -82,6 +84,7 @@ struct AppState {
     tenant_organization_id: Option<String>,
     storage_dir: PathBuf,
     db_path: PathBuf,
+    backup_dir: PathBuf,
     signing_key: Arc<SigningKey>,
     signing_kid: String,
     metadata_backend: String,
@@ -89,6 +92,8 @@ struct AppState {
     max_payload_bytes: usize,
     retention_grace_period_days: i64,
     retention_scan_interval_hours: i64,
+    backup_interval_hours: i64,
+    backup_retention_count: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -96,6 +101,7 @@ struct VaultRuntimeConfig {
     addr: SocketAddr,
     storage_dir: PathBuf,
     db_path: PathBuf,
+    backup_dir: PathBuf,
     tls_cert_path: Option<PathBuf>,
     tls_key_path: Option<PathBuf>,
     auth_config: Option<RuntimeAuthConfig>,
@@ -107,6 +113,8 @@ struct VaultRuntimeConfig {
     max_payload_bytes: usize,
     retention_grace_period_days: i64,
     retention_scan_interval_hours: i64,
+    backup_interval_hours: i64,
+    backup_retention_count: usize,
     retention_policies: Vec<RetentionPolicyConfig>,
     timestamp_config: Option<TimestampConfig>,
     transparency_config: Option<TransparencyConfig>,
@@ -129,6 +137,8 @@ struct VaultFileConfig {
     timestamp: Option<VaultTimestampFileConfig>,
     #[serde(default)]
     transparency: Option<VaultTransparencyFileConfig>,
+    #[serde(default)]
+    backup: VaultBackupFileConfig,
     #[serde(default)]
     retention: VaultRetentionFileConfig,
 }
@@ -220,6 +230,13 @@ struct VaultTransparencyFileConfig {
     rekor_url: Option<String>,
     log_public_key_pem: Option<String>,
     log_public_key_path: Option<String>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct VaultBackupFileConfig {
+    directory: Option<String>,
+    interval_hours: Option<i64>,
+    retention_count: Option<usize>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -544,6 +561,7 @@ struct VaultConfigResponse {
     signing: VaultSigningConfigView,
     storage: VaultStorageConfigView,
     retention: RetentionConfigView,
+    backup: VaultBackupConfigView,
     timestamp: TimestampConfig,
     transparency: TransparencyConfig,
     disclosure: DisclosureConfig,
@@ -572,6 +590,14 @@ struct VaultTenantConfigView {
     enforced: bool,
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+struct VaultBackupConfigView {
+    enabled: bool,
+    directory: String,
+    interval_hours: i64,
+    retention_count: usize,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct VaultMetricsSnapshot {
     bundle_total: i64,
@@ -592,6 +618,12 @@ struct VaultBackupManifest {
     backup_id: String,
     created_at: String,
     metrics: VaultMetricsSnapshot,
+}
+
+#[derive(Debug)]
+struct ScheduledBackupResult {
+    file_name: String,
+    pruned_count: usize,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -1003,6 +1035,12 @@ async fn main() -> Result<()> {
     let storage_dir = runtime_config.storage_dir.clone();
     fs::create_dir_all(&storage_dir)
         .with_context(|| format!("failed to create storage dir {}", storage_dir.display()))?;
+    fs::create_dir_all(&runtime_config.backup_dir).with_context(|| {
+        format!(
+            "failed to create backup dir {}",
+            runtime_config.backup_dir.display()
+        )
+    })?;
 
     let db = open_sqlite_pool(&runtime_config.db_path).await?;
     initialize_sqlite_schema(&db).await?;
@@ -1027,6 +1065,7 @@ async fn main() -> Result<()> {
         tenant_organization_id: runtime_config.tenant_organization_id.clone(),
         storage_dir,
         db_path: runtime_config.db_path.clone(),
+        backup_dir: runtime_config.backup_dir.clone(),
         signing_key: Arc::new(signing_key),
         signing_kid: runtime_config.signing_kid.clone(),
         metadata_backend: runtime_config.metadata_backend.clone(),
@@ -1034,10 +1073,13 @@ async fn main() -> Result<()> {
         max_payload_bytes: runtime_config.max_payload_bytes,
         retention_grace_period_days: runtime_config.retention_grace_period_days,
         retention_scan_interval_hours: runtime_config.retention_scan_interval_hours,
+        backup_interval_hours: runtime_config.backup_interval_hours,
+        backup_retention_count: runtime_config.backup_retention_count,
     };
 
     let tls_enabled = state.tls_enabled;
     maybe_spawn_retention_scan_task(state.clone());
+    maybe_spawn_backup_task(state.clone());
     let app = build_router(state, runtime_config.max_payload_bytes);
 
     info!(
@@ -1239,6 +1281,16 @@ fn build_vault_runtime_config(
                 .map(|value| resolve_path_from_config(config_base_dir, value))
         })
         .unwrap_or_else(|| PathBuf::from("./storage"));
+    let backup_dir = env_value(env_vars, "PROOF_SERVICE_BACKUP_DIR")
+        .map(PathBuf::from)
+        .or_else(|| {
+            file_config
+                .backup
+                .directory
+                .as_deref()
+                .map(|value| resolve_path_from_config(config_base_dir, value))
+        })
+        .unwrap_or_else(|| storage_dir.join("backups"));
 
     let db_path = env_value(env_vars, "PROOF_SERVICE_DB_PATH")
         .map(PathBuf::from)
@@ -1287,6 +1339,16 @@ fn build_vault_runtime_config(
             .transpose()?
             .or(file_config.retention.scan_interval_hours)
             .unwrap_or(DEFAULT_RETENTION_SCAN_INTERVAL_HOURS);
+    let backup_interval_hours = env_value(env_vars, "PROOF_SERVICE_BACKUP_INTERVAL_HOURS")
+        .map(parse_backup_interval_hours)
+        .transpose()?
+        .or(file_config.backup.interval_hours)
+        .unwrap_or(DEFAULT_BACKUP_INTERVAL_HOURS);
+    let backup_retention_count = env_value(env_vars, "PROOF_SERVICE_BACKUP_RETENTION_COUNT")
+        .map(parse_backup_retention_count)
+        .transpose()?
+        .or(file_config.backup.retention_count)
+        .unwrap_or(DEFAULT_BACKUP_RETENTION_COUNT);
 
     let retention_policies = file_config
         .retention
@@ -1308,6 +1370,7 @@ fn build_vault_runtime_config(
         addr,
         storage_dir,
         db_path,
+        backup_dir,
         tls_cert_path,
         tls_key_path,
         auth_config,
@@ -1319,6 +1382,8 @@ fn build_vault_runtime_config(
         max_payload_bytes,
         retention_grace_period_days,
         retention_scan_interval_hours,
+        backup_interval_hours,
+        backup_retention_count,
         retention_policies,
         timestamp_config,
         transparency_config,
@@ -1616,6 +1681,38 @@ fn maybe_spawn_retention_scan_task(state: AppState) {
                     result.soft_deleted, result.hard_deleted, result.held_skipped
                 ),
                 Err(err) => error!("background retention scan failed: {err:#}"),
+            }
+        }
+    });
+}
+
+fn maybe_spawn_backup_task(state: AppState) {
+    if state.backup_interval_hours <= 0 {
+        info!("background backup export disabled");
+        return;
+    }
+
+    let interval = Duration::from_secs(
+        u64::try_from(state.backup_interval_hours)
+            .unwrap_or_default()
+            .saturating_mul(60 * 60),
+    );
+    info!(
+        "background backup export enabled every {} hour(s), keeping {} archive(s)",
+        state.backup_interval_hours, state.backup_retention_count
+    );
+
+    tokio::spawn(async move {
+        let mut ticker = tokio::time::interval(interval);
+        ticker.tick().await;
+        loop {
+            ticker.tick().await;
+            match perform_scheduled_backup(&state).await {
+                Ok(result) => info!(
+                    "background backup export created={} pruned={}",
+                    result.file_name, result.pruned_count
+                ),
+                Err(err) => error!("background backup export failed: {err:#}"),
             }
         }
     });
@@ -2001,6 +2098,7 @@ async fn create_vault_backup_archive(
         &snapshot_db_path,
         &state.storage_dir,
         &state.db_path,
+        &state.backup_dir,
     );
 
     match fs::remove_dir_all(&snapshot_dir) {
@@ -2016,6 +2114,44 @@ async fn create_vault_backup_archive(
 
     let archive_bytes = archive_result?;
     Ok((backup_id, file_name, archive_bytes, manifest))
+}
+
+async fn perform_scheduled_backup(state: &AppState) -> Result<ScheduledBackupResult> {
+    fs::create_dir_all(&state.backup_dir).with_context(|| {
+        format!(
+            "failed to create scheduled backup dir {}",
+            state.backup_dir.display()
+        )
+    })?;
+
+    let (backup_id, file_name, archive_bytes, manifest) =
+        create_vault_backup_archive(state).await?;
+    let archive_path = state.backup_dir.join(&file_name);
+    persist_backup_archive(&archive_path, &archive_bytes)?;
+    let pruned_count = prune_backup_archives(&state.backup_dir, state.backup_retention_count)?;
+
+    append_audit_log(
+        &state.db,
+        "scheduled_backup",
+        Some(AUDIT_ACTOR_SYSTEM),
+        None,
+        None,
+        serde_json::json!({
+            "backup_id": backup_id,
+            "file_name": file_name,
+            "path": archive_path.display().to_string(),
+            "bytes": archive_bytes.len(),
+            "bundle_total": manifest.metrics.bundle_total,
+            "pack_total": manifest.metrics.pack_total,
+            "pruned_count": pruned_count,
+        }),
+    )
+    .await?;
+
+    Ok(ScheduledBackupResult {
+        file_name,
+        pruned_count,
+    })
 }
 
 async fn snapshot_sqlite_database(db: &SqlitePool, destination: &FsPath) -> Result<()> {
@@ -2054,6 +2190,7 @@ fn build_backup_archive_bytes(
     snapshot_db_path: &FsPath,
     storage_dir: &FsPath,
     db_path: &FsPath,
+    backup_dir: &FsPath,
 ) -> Result<Vec<u8>> {
     let mut builder = TarBuilder::new(GzEncoder::new(Vec::new(), Compression::default()));
 
@@ -2069,7 +2206,7 @@ fn build_backup_archive_bytes(
         storage_dir,
         storage_dir,
         "storage",
-        Some(db_path),
+        &[db_path, backup_dir],
     )?;
 
     let encoder = builder
@@ -2078,6 +2215,29 @@ fn build_backup_archive_bytes(
     encoder
         .finish()
         .context("failed to finish backup gzip stream")
+}
+
+fn persist_backup_archive(path: &FsPath, bytes: &[u8]) -> Result<()> {
+    let parent = path.parent().unwrap_or_else(|| FsPath::new("."));
+    fs::create_dir_all(parent)
+        .with_context(|| format!("failed to create backup dir {}", parent.display()))?;
+
+    let tmp_path = path.with_extension(format!("tmp-{}", generate_bundle_id()));
+    let mut file = File::create(&tmp_path)
+        .with_context(|| format!("failed to create temp backup {}", tmp_path.display()))?;
+    file.write_all(bytes)
+        .with_context(|| format!("failed to write temp backup {}", tmp_path.display()))?;
+    file.sync_all()
+        .with_context(|| format!("failed to sync temp backup {}", tmp_path.display()))?;
+
+    fs::rename(&tmp_path, path).with_context(|| {
+        format!(
+            "failed to atomically rename {} to {}",
+            tmp_path.display(),
+            path.display()
+        )
+    })?;
+    Ok(())
 }
 
 fn append_bytes_to_tar<W: Write>(
@@ -2116,7 +2276,7 @@ fn append_directory_to_tar<W: Write>(
     root_dir: &FsPath,
     current_dir: &FsPath,
     archive_prefix: &str,
-    exclude_path: Option<&FsPath>,
+    exclude_paths: &[&FsPath],
 ) -> Result<()> {
     let mut entries = fs::read_dir(current_dir)
         .with_context(|| format!("failed to read backup dir {}", current_dir.display()))?
@@ -2126,14 +2286,14 @@ fn append_directory_to_tar<W: Write>(
 
     for entry in entries {
         let path = entry.path();
+        if should_exclude_backup_path(&path, exclude_paths) {
+            continue;
+        }
         if path.is_dir() {
-            append_directory_to_tar(builder, root_dir, &path, archive_prefix, exclude_path)?;
+            append_directory_to_tar(builder, root_dir, &path, archive_prefix, exclude_paths)?;
             continue;
         }
         if !path.is_file() {
-            continue;
-        }
-        if exclude_path.is_some_and(|exclude| path == exclude) {
             continue;
         }
 
@@ -2148,6 +2308,39 @@ fn append_directory_to_tar<W: Write>(
     }
 
     Ok(())
+}
+
+fn should_exclude_backup_path(path: &FsPath, exclude_paths: &[&FsPath]) -> bool {
+    exclude_paths
+        .iter()
+        .any(|exclude| path == *exclude || path.starts_with(exclude))
+}
+
+fn prune_backup_archives(backup_dir: &FsPath, keep_count: usize) -> Result<usize> {
+    let mut archives = fs::read_dir(backup_dir)
+        .with_context(|| format!("failed to read backup dir {}", backup_dir.display()))?
+        .collect::<Result<Vec<_>, _>>()
+        .with_context(|| format!("failed to list backup dir {}", backup_dir.display()))?
+        .into_iter()
+        .filter_map(|entry| {
+            let path = entry.path();
+            let file_name = path.file_name()?.to_str()?;
+            (path.is_file()
+                && file_name.starts_with("proof-layer-vault-backup-")
+                && file_name.ends_with(".tar.gz"))
+            .then_some((file_name.to_string(), path))
+        })
+        .collect::<Vec<_>>();
+    archives.sort_by(|left, right| right.0.cmp(&left.0));
+
+    let mut pruned_count = 0usize;
+    for (_, path) in archives.into_iter().skip(keep_count) {
+        fs::remove_file(&path)
+            .with_context(|| format!("failed to remove old backup {}", path.display()))?;
+        pruned_count += 1;
+    }
+
+    Ok(pruned_count)
 }
 
 async fn create_bundle(
@@ -2765,6 +2958,9 @@ async fn get_config(
             "disclosure_policy_count": response.disclosure.policies.len(),
             "grace_period_days": response.retention.grace_period_days,
             "scan_interval_hours": response.retention.scan_interval_hours,
+            "backup_enabled": response.backup.enabled,
+            "backup_interval_hours": response.backup.interval_hours,
+            "backup_retention_count": response.backup.retention_count,
             "timestamp_enabled": response.timestamp.enabled,
             "timestamp_provider": &response.timestamp.provider,
             "transparency_enabled": response.transparency.enabled,
@@ -5355,6 +5551,12 @@ async fn build_vault_config_response(state: &AppState) -> Result<VaultConfigResp
             scan_interval_hours: state.retention_scan_interval_hours,
             policies: load_retention_policies(&state.db).await?,
         },
+        backup: VaultBackupConfigView {
+            enabled: state.backup_interval_hours > 0,
+            directory: state.backup_dir.display().to_string(),
+            interval_hours: state.backup_interval_hours,
+            retention_count: state.backup_retention_count,
+        },
         timestamp: load_timestamp_config(&state.db).await?,
         transparency: load_transparency_config(&state.db).await?,
         disclosure: load_disclosure_config(&state.db).await?,
@@ -6614,6 +6816,28 @@ fn parse_retention_scan_interval_hours(raw: &str) -> Result<i64> {
     Ok(hours)
 }
 
+fn parse_backup_interval_hours(raw: &str) -> Result<i64> {
+    let hours = raw
+        .trim()
+        .parse::<i64>()
+        .with_context(|| format!("invalid PROOF_SERVICE_BACKUP_INTERVAL_HOURS value {raw}"))?;
+    if hours < 0 {
+        bail!("PROOF_SERVICE_BACKUP_INTERVAL_HOURS must be >= 0");
+    }
+    Ok(hours)
+}
+
+fn parse_backup_retention_count(raw: &str) -> Result<usize> {
+    let count = raw
+        .trim()
+        .parse::<usize>()
+        .with_context(|| format!("invalid PROOF_SERVICE_BACKUP_RETENTION_COUNT value {raw}"))?;
+    if count == 0 {
+        bail!("PROOF_SERVICE_BACKUP_RETENTION_COUNT must be >= 1");
+    }
+    Ok(count)
+}
+
 fn parse_max_payload_bytes(raw: &str) -> Result<usize> {
     raw.trim()
         .parse::<usize>()
@@ -7589,6 +7813,8 @@ mod tests {
             rand::random::<u64>()
         ));
         std::fs::create_dir_all(&storage_dir).unwrap();
+        let backup_dir = storage_dir.join("backups");
+        std::fs::create_dir_all(&backup_dir).unwrap();
         let db_path = storage_dir.join("metadata.db");
         let db = open_sqlite_pool(&db_path).await.unwrap();
         initialize_sqlite_schema(&db).await.unwrap();
@@ -7605,6 +7831,7 @@ mod tests {
             tenant_organization_id: None,
             storage_dir,
             db_path,
+            backup_dir,
             signing_key: Arc::new(signing_key),
             signing_kid: "kid-dev-01".to_string(),
             metadata_backend: "sqlite".to_string(),
@@ -7612,6 +7839,8 @@ mod tests {
             max_payload_bytes,
             retention_grace_period_days: DEFAULT_RETENTION_GRACE_PERIOD_DAYS,
             retention_scan_interval_hours: DEFAULT_RETENTION_SCAN_INTERVAL_HOURS,
+            backup_interval_hours: DEFAULT_BACKUP_INTERVAL_HOURS,
+            backup_retention_count: DEFAULT_BACKUP_RETENTION_COUNT,
         }
     }
 
@@ -7981,6 +8210,11 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
                 log_public_key_pem: None,
                 log_public_key_path: None,
             }),
+            backup: VaultBackupFileConfig {
+                directory: Some("./scheduled-backups".to_string()),
+                interval_hours: Some(4),
+                retention_count: Some(9),
+            },
             retention: VaultRetentionFileConfig {
                 grace_period_days: Some(21),
                 scan_interval_hours: Some(12),
@@ -7999,6 +8233,10 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
             (
                 "PROOF_SERVICE_RETENTION_SCAN_INTERVAL_HOURS".to_string(),
                 "6".to_string(),
+            ),
+            (
+                "PROOF_SERVICE_BACKUP_RETENTION_COUNT".to_string(),
+                "5".to_string(),
             ),
         ]);
 
@@ -8034,8 +8272,11 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
         assert_eq!(runtime.blob_backend, "filesystem");
         assert_eq!(runtime.storage_dir, config_dir.join("data/blobs"));
         assert_eq!(runtime.db_path, config_dir.join("data/vault.db"));
+        assert_eq!(runtime.backup_dir, config_dir.join("scheduled-backups"));
         assert_eq!(runtime.retention_grace_period_days, 21);
         assert_eq!(runtime.retention_scan_interval_hours, 6);
+        assert_eq!(runtime.backup_interval_hours, 4);
+        assert_eq!(runtime.backup_retention_count, 5);
         assert_eq!(runtime.retention_policies.len(), 1);
         assert_eq!(
             runtime
@@ -8160,6 +8401,11 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
     async fn backup_endpoint_exports_snapshot_archive() {
         let state = test_state_with_tenant(DEFAULT_MAX_PAYLOAD_BYTES, "org-demo").await;
         let db = state.db.clone();
+        std::fs::write(
+            state.backup_dir.join("should-not-be-archived.txt"),
+            b"exclude-me",
+        )
+        .unwrap();
         let app = build_router(state, DEFAULT_MAX_PAYLOAD_BYTES);
 
         let created = create_bundle_response(
@@ -8231,6 +8477,11 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
                 .keys()
                 .any(|name| name.ends_with(PACK_EXPORT_FILE_NAME))
         );
+        assert!(
+            files
+                .keys()
+                .all(|name| !name.contains("storage/backups/should-not-be-archived.txt"))
+        );
 
         let manifest: VaultBackupManifest =
             serde_json::from_slice(files.get("manifest.json").unwrap()).unwrap();
@@ -8250,6 +8501,75 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
         .await
         .unwrap();
         assert_eq!(actor.as_deref(), Some(AUDIT_ACTOR_API));
+    }
+
+    #[tokio::test]
+    async fn scheduled_backups_persist_archives_and_prune_old_ones() {
+        let mut state = test_state(DEFAULT_MAX_PAYLOAD_BYTES).await;
+        state.backup_interval_hours = 2;
+        state.backup_retention_count = 2;
+        std::fs::write(state.backup_dir.join("scheduled-marker.txt"), b"skip-me").unwrap();
+        let db = state.db.clone();
+        let backup_dir = state.backup_dir.clone();
+        let app = build_router(state.clone(), DEFAULT_MAX_PAYLOAD_BYTES);
+
+        create_bundle_response(
+            &app,
+            &CreateBundleRequest {
+                capture: SealableCaptureInput::Legacy(sample_capture()),
+                artefacts: vec![InlineArtefact {
+                    name: "prompt.json".to_string(),
+                    content_type: "application/json".to_string(),
+                    data_base64: Base64::encode_string(br#"{"prompt":"scheduled-backup"}"#),
+                }],
+            },
+        )
+        .await;
+
+        let first = perform_scheduled_backup(&state).await.unwrap();
+        assert_eq!(first.pruned_count, 0);
+        let second = perform_scheduled_backup(&state).await.unwrap();
+        assert_eq!(second.pruned_count, 0);
+        let third = perform_scheduled_backup(&state).await.unwrap();
+        assert_eq!(third.pruned_count, 1);
+
+        let mut archives = std::fs::read_dir(&backup_dir)
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .filter(|path| {
+                path.is_file()
+                    && path
+                        .file_name()
+                        .and_then(|name| name.to_str())
+                        .is_some_and(|name| {
+                            name.starts_with("proof-layer-vault-backup-")
+                                && name.ends_with(".tar.gz")
+                        })
+            })
+            .collect::<Vec<_>>();
+        archives.sort();
+        assert_eq!(archives.len(), 2);
+        assert!(
+            archives
+                .iter()
+                .all(|path| path.file_name().unwrap() != first.file_name.as_str())
+        );
+
+        let files = decode_backup_archive(&std::fs::read(archives.last().unwrap()).unwrap());
+        assert!(files.contains_key("manifest.json"));
+        assert!(files.contains_key("metadata/metadata.db"));
+        assert!(
+            files
+                .keys()
+                .all(|name| !name.contains("storage/backups/scheduled-marker.txt"))
+        );
+
+        let audit_count: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM audit_log WHERE action = 'scheduled_backup'")
+                .fetch_one(&db)
+                .await
+                .unwrap();
+        assert_eq!(audit_count, 3);
     }
 
     #[tokio::test]
@@ -9566,6 +9886,7 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
     #[tokio::test]
     async fn get_config_returns_runtime_retention_and_assurance_views() {
         let state = test_state_with_tenant(DEFAULT_MAX_PAYLOAD_BYTES, "org-demo").await;
+        let expected_backup_dir = state.backup_dir.display().to_string();
         let app = build_router(state, DEFAULT_MAX_PAYLOAD_BYTES);
 
         let request = Request::builder()
@@ -9599,6 +9920,13 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
             config.retention.scan_interval_hours,
             DEFAULT_RETENTION_SCAN_INTERVAL_HOURS
         );
+        assert!(!config.backup.enabled);
+        assert_eq!(config.backup.interval_hours, DEFAULT_BACKUP_INTERVAL_HOURS);
+        assert_eq!(
+            config.backup.retention_count,
+            DEFAULT_BACKUP_RETENTION_COUNT
+        );
+        assert_eq!(config.backup.directory, expected_backup_dir);
         assert!(
             config
                 .retention
@@ -9639,6 +9967,7 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
             addr: SocketAddr::from(([127, 0, 0, 1], 8080)),
             storage_dir: state.storage_dir.clone(),
             db_path: state.storage_dir.join("metadata.db"),
+            backup_dir: state.backup_dir.clone(),
             tls_cert_path: None,
             tls_key_path: None,
             auth_config: None,
@@ -9650,6 +9979,8 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
             max_payload_bytes: DEFAULT_MAX_PAYLOAD_BYTES,
             retention_grace_period_days: 45,
             retention_scan_interval_hours: 8,
+            backup_interval_hours: 12,
+            backup_retention_count: 6,
             retention_policies: vec![RetentionPolicyConfig {
                 retention_class: "runtime_logs".to_string(),
                 expiry_mode: RetentionExpiryMode::FixedDays,

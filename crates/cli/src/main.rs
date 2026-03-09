@@ -1050,6 +1050,7 @@ struct VaultConfigResponse {
     signing: VaultSigningConfigView,
     storage: VaultStorageConfigView,
     retention: VaultRetentionConfigView,
+    backup: VaultBackupConfigView,
     timestamp: VaultTimestampConfig,
     transparency: VaultTransparencyConfig,
     auth: VaultAuthConfigView,
@@ -1075,6 +1076,14 @@ struct VaultAuthConfigView {
 struct VaultTenantConfigView {
     organization_id: Option<String>,
     enforced: bool,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct VaultBackupConfigView {
+    enabled: bool,
+    directory: String,
+    interval_hours: i64,
+    retention_count: usize,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -1193,6 +1202,10 @@ struct VaultStatusOutput {
     system_count: usize,
     retention_policy_count: usize,
     scan_interval_hours: i64,
+    backup_enabled: bool,
+    backup_directory: String,
+    backup_interval_hours: i64,
+    backup_retention_count: usize,
     timestamp_enabled: bool,
     timestamp_provider: String,
     timestamp_assurance: Option<String>,
@@ -2403,6 +2416,10 @@ fn cmd_vault_status(vault_url: &str, format: OutputFormat) -> Result<()> {
         system_count: systems.items.len(),
         retention_policy_count: config.retention.policies.len(),
         scan_interval_hours: config.retention.scan_interval_hours,
+        backup_enabled: config.backup.enabled,
+        backup_directory: config.backup.directory.clone(),
+        backup_interval_hours: config.backup.interval_hours,
+        backup_retention_count: config.backup.retention_count,
         timestamp_enabled: config.timestamp.enabled,
         timestamp_provider: config.timestamp.provider.clone(),
         timestamp_assurance: config.timestamp.assurance.clone(),
@@ -2792,6 +2809,13 @@ fn print_vault_status_human(status: &VaultStatusOutput, config: &VaultConfigResp
         status.retention_policy_count,
         config.retention.grace_period_days,
         status.scan_interval_hours
+    );
+    println!(
+        "backup: enabled={} interval_hours={} retention_count={} directory={}",
+        if status.backup_enabled { "yes" } else { "no" },
+        status.backup_interval_hours,
+        status.backup_retention_count,
+        status.backup_directory
     );
     println!(
         "timestamp: enabled={} provider={} assurance={} trust_anchors={} ocsp_urls={} policy_oids={}",
@@ -4223,6 +4247,12 @@ mod tests {
                     legal_basis: "eu_ai_act_article_12_19_26".to_string(),
                     active: true,
                 }],
+            },
+            backup: VaultBackupConfigView {
+                enabled: true,
+                directory: "/var/lib/proof-layer/backups".to_string(),
+                interval_hours: 6,
+                retention_count: 8,
             },
             timestamp: VaultTimestampConfig {
                 enabled: false,

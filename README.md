@@ -208,13 +208,14 @@ docker compose up --build
 
 Supported runtime config knobs:
 
-- `vault.toml` sections: `[server]`, `[auth]`, `[[auth.api_keys]]`, `[tenant]`, `[signing]`, `[storage]`, `[timestamp]`, `[transparency]`, `[retention]`, and `[[retention.policies]]`
+- `vault.toml` sections: `[server]`, `[auth]`, `[[auth.api_keys]]`, `[tenant]`, `[signing]`, `[storage]`, `[backup]`, `[timestamp]`, `[transparency]`, `[retention]`, and `[[retention.policies]]`
 - optional HTTPS listener fields: `[server].tls_cert` and `[server].tls_key`
 - optional bearer-auth fields: `[auth].enabled`, `[[auth.api_keys]].key`, and `[[auth.api_keys]].label`
 - optional single-tenant field: `[tenant].organization_id`
+- scheduled local backup fields: `[backup].directory`, `[backup].interval_hours`, and `[backup].retention_count`
 - trust-aware assurance fields: `[timestamp].assurance`, `[timestamp].trust_anchor_pems` / `[timestamp].trust_anchor_paths`, `[timestamp].crl_pems` / `[timestamp].crl_paths`, `[timestamp].ocsp_responder_urls`, `[timestamp].qualified_signer_pems` / `[timestamp].qualified_signer_paths`, `[timestamp].policy_oids`, and `[transparency].log_public_key_pem` / `[transparency].log_public_key_path`
 - `PROOF_SERVICE_CONFIG_PATH=/path/to/vault.toml` to point at a non-default file
-- env overrides for `PROOF_SERVICE_ADDR`, `PROOF_SERVICE_TLS_CERT_PATH`, `PROOF_SERVICE_TLS_KEY_PATH`, `PROOF_SERVICE_API_KEY`, `PROOF_SERVICE_API_KEY_LABEL`, `PROOF_SERVICE_ORGANIZATION_ID`, `PROOF_SERVICE_STORAGE_DIR`, `PROOF_SERVICE_DB_PATH`, `PROOF_SIGNING_KEY_PATH`, `PROOF_SIGNING_KEY_ID`, `PROOF_SERVICE_MAX_PAYLOAD_BYTES`, `PROOF_SERVICE_RETENTION_GRACE_DAYS`, and `PROOF_SERVICE_RETENTION_SCAN_INTERVAL_HOURS`
+- env overrides for `PROOF_SERVICE_ADDR`, `PROOF_SERVICE_TLS_CERT_PATH`, `PROOF_SERVICE_TLS_KEY_PATH`, `PROOF_SERVICE_API_KEY`, `PROOF_SERVICE_API_KEY_LABEL`, `PROOF_SERVICE_ORGANIZATION_ID`, `PROOF_SERVICE_STORAGE_DIR`, `PROOF_SERVICE_DB_PATH`, `PROOF_SERVICE_BACKUP_DIR`, `PROOF_SERVICE_BACKUP_INTERVAL_HOURS`, `PROOF_SERVICE_BACKUP_RETENTION_COUNT`, `PROOF_SIGNING_KEY_PATH`, `PROOF_SIGNING_KEY_ID`, `PROOF_SERVICE_MAX_PAYLOAD_BYTES`, `PROOF_SERVICE_RETENTION_GRACE_DAYS`, and `PROOF_SERVICE_RETENTION_SCAN_INTERVAL_HOURS`
 
 Current file-config limitations:
 
@@ -418,6 +419,7 @@ npm run dev
 - The vault now exposes a Prometheus-style `/metrics` endpoint for infra scraping, with gauges for bundle/pack/audit totals plus auth/TLS/tenant runtime state.
 - `POST /v1/backup` now returns an authenticated `.tar.gz` snapshot for SQLite-based deployments containing a consistent `VACUUM INTO` metadata copy, current non-secret config, and filesystem blobs/pack exports under the vault storage directory.
 - `proofctl vault restore --in backup.tar.gz --out-dir ./restored-vault` now validates that archive offline, rejects traversal/duplicate entries, and lays it back out as `manifest.json`, `config/vault_config.json`, `metadata/metadata.db`, and `storage/*` for relaunch or inspection.
+- The vault can now also run scheduled local backups into `[backup].directory` / `PROOF_SERVICE_BACKUP_DIR`, pruning old `proof-layer-vault-backup-*.tar.gz` archives down to the configured retention count while excluding `storage/backups/*` from the archive itself to avoid recursive growth.
 - The vault now exposes `GET /v1/config`, `PUT /v1/config/retention`, `PUT /v1/config/timestamp`, `PUT /v1/config/transparency`, `PUT /v1/config/disclosure`, and `POST /v1/disclosure/preview`; disclosure config persists named disclosure-policy profiles with item-type filters, obligation-ref filters, artefact-metadata rules, and optional artefact-byte inclusion, while timestamp/transparency config carry PEM trust anchors, PEM CRLs, live OCSP responder URLs, qualified TSA signer allowlists, expected RFC 3161 policy OIDs, and transparency-service public keys for trust-aware verification.
 - Retention policies now include an `expiry_mode`; the seeded `gpai_documentation` class uses `until_withdrawn`, so GPAI documentation stays active until operator withdrawal instead of auto-expiring on a fixed date.
 - `POST /v1/bundles/{bundle_id}/timestamp` now uses the configured RFC 3161 provider to timestamp an existing stored bundle and persist the token back into bundle JSON.
@@ -427,7 +429,7 @@ npm run dev
 - Transparency verification now checks Rekor receipt structure, entry UUID to leaf-hash binding, the Merkle inclusion proof against the advertised Rekor root hash, the embedded RFC 3161 token binding to `integrity.bundle_root`, and Rekor signed-entry-timestamp signatures plus `logID` binding when a trusted public key is configured. The SCITT path verifies a draft-aligned canonical JSON statement/receipt contract with `serviceId == sha256(SPKI_DER(public_key))`; full interoperable COSE/CCF SCITT is still future work.
 - Pack assembly is now available through `/v1/packs`; packs apply an initial heuristic curation profile (`pack-rules-v1`) based on actor role, evidence item types, retention class, and derived obligation refs, then export matching bundles as either embedded full `bundle.pkg` files or redacted disclosure packages plus a manifest.
 - When `bundle_format=disclosure`, the vault emits `pl-bundle-disclosure-pkg-v1` members and applies a named disclosure policy (`regulator_minimum`, `annex_iv_redacted`, `incident_summary`, or operator-defined profiles) to filter disclosed item types and optionally include artefact metadata and selected artefact bytes.
-- Vault startup now supports `vault.toml` + env override configuration, an optional HTTPS listener via PEM cert/key paths, optional bearer-auth protection for `/v1/*`, and an automatic background retention scan loop; PostgreSQL/S3 remain future work.
+- Vault startup now supports `vault.toml` + env override configuration, an optional HTTPS listener via PEM cert/key paths, optional bearer-auth protection for `/v1/*`, automatic background retention scanning, and scheduled local backup export; PostgreSQL/S3 remain future work.
 - Canonicalization and signing semantics follow `docs/architecture.md`.
 - Verification is designed to work offline with a full or disclosure package plus the public key.
 - JSON Schemas: `schemas/evidence_bundle.schema.json`, `schemas/redacted_bundle.schema.json`, `schemas/capture_event.schema.json`, `schemas/evidence_item.schema.json`, `schemas/evidence_pack.schema.json`.

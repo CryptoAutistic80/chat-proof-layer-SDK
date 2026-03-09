@@ -369,6 +369,12 @@ export interface VaultConfigResponse extends JsonObject {
     scan_interval_hours: number;
     policies: RetentionPolicyConfig[];
   };
+  backup: JsonObject & {
+    enabled: boolean;
+    directory: string;
+    interval_hours: number;
+    retention_count: number;
+  };
   timestamp: JsonObject;
   transparency: JsonObject;
   disclosure: DisclosureConfig;

@@ -107,8 +107,9 @@ Current audit behavior:
 Current config behavior:
 
 - `proof-service` now supports startup config from `./vault.toml` or `PROOF_SERVICE_CONFIG_PATH`, with env vars overriding file values.
-- `GET /v1/config` returns the active service view for payload limits, signing algorithm/key id, storage backends, retention grace period, retention policies, and persisted timestamp/transparency provider settings.
-- `GET /v1/config` also reports the bound address and retention scan interval currently active in the process.
+- `proof-service` can now also serve HTTPS directly when `[server].tls_cert` + `[server].tls_key` or `PROOF_SERVICE_TLS_CERT_PATH` + `PROOF_SERVICE_TLS_KEY_PATH` are configured.
+- `GET /v1/config` returns the active service view for payload limits, bound address, TLS enabled state, signing algorithm/key id, storage backends, retention grace period, retention policies, and persisted timestamp/transparency provider settings.
+- `GET /v1/config` also reports the retention scan interval currently active in the process.
 - `PUT /v1/config/retention` upserts retention policy rows in SQLite.
 - Retention policies now carry an `expiry_mode`; `fixed_days` computes `expires_at`, while `until_withdrawn` leaves bundles active until an explicit withdrawal/delete event.
 - `PUT /v1/config/timestamp` persists RFC 3161 provider configuration (`enabled`, `provider`, `url`, optional `assurance`) plus optional PEM trust anchors, PEM CRLs, live OCSP responder URLs, qualified TSA signer allowlists, and expected RFC 3161 policy OIDs used for trust-aware timestamp verification.

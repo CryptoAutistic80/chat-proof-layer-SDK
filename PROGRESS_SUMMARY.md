@@ -192,6 +192,10 @@ Completed:
   `.github/workflows/sdk-artifacts.yml` now builds checked npm tarballs and Python wheels on Linux, macOS, and Windows for PRs, pushes, and manual runs,
   `.github/workflows/sdk-release.yml` rebuilds those artifacts in `release` mode for `sdk-v*` tags or manual dispatch,
   and release runs attach the generated `.tgz` and `.whl` files to the GitHub release.
+- Added the next vault runtime hardening slice:
+  optional HTTPS serving via `[server].tls_cert` / `[server].tls_key` or `PROOF_SERVICE_TLS_CERT_PATH` / `PROOF_SERVICE_TLS_KEY_PATH`,
+  startup loading of PEM cert/key pairs through `axum-server` + rustls,
+  and `GET /v1/config` now reports whether TLS is currently enabled.
 - Extended pack export into the selective-disclosure path:
   `POST /v1/packs` now accepts `bundle_format = "full" | "disclosure"`,
   vault `GET /v1/packs/{id}/export` can emit redacted disclosure-package members selected by pack curation rules,
@@ -226,7 +230,7 @@ Still outstanding from `plan.md`:
 - The vault now uses SQLite with legal-hold-aware retention, audit logging, file/env/runtime configuration, background retention scanning, curated pack export, redacted disclosure-pack export, RFC 3161 bundle timestamp attachment, and transparency anchoring, but PostgreSQL and Annex-complete artefact/redaction policy assembly are not built yet.
 - TypeScript and Python now both have native FFI bridges, local sealing paths, higher-level `ProofLayer` facades, a local artifact build path for npm tarballs and platform-tagged wheels, and CI-backed multi-platform GitHub artifact builds, but there is still no automated publish step to npm or PyPI.
 - TypeScript and Python SDKs now expose local redacted-bundle helpers (`disclose` / `verifyRedactedBundle` in TypeScript, `disclose` / `verify_redacted_bundle` in Python), including top-level field redaction for local v3 bundles and nested JSON-pointer path redaction for local v4 bundles, plus vault pack helpers for `bundle_format = "full" | "disclosure"` with `disclosure_policy` or inline `disclosure_template`, vault disclosure-config read/update helpers, and disclosure-preview helpers.
-- The main remaining gaps are no longer the evidence catalog itself; they are the harder later-phase items like deeper trust policy work, fuller SCITT interoperability, alternative storage/runtime backends, and automated npm/PyPI/prebuilt release publishing hardening.
+- The main remaining gaps are no longer the evidence catalog itself; they are the harder later-phase items like deeper trust policy work, fuller SCITT interoperability, alternative storage backends, and automated npm/PyPI/prebuilt release publishing hardening.
 - RFC 3161 verification now supports signer-chain validation against configured PEM trust anchors, optional `TSTInfo.policy` OID enforcement, CRL-based revocation checking, optional live OCSP checks, qualified TSA signer allowlist matching, and operational `qualified` profile gating, but full eIDAS-qualified trust-list evaluation and archival OCSP evidence handling are still outstanding.
 - Rekor verification now supports SET signature validation and `logID` binding against a configured PEM log public key; live-log consistency checks beyond the stored inclusion proof remain future work.
 - The current SCITT path is intentionally bounded: it verifies a draft-aligned canonical JSON statement/receipt contract, not a full interoperable COSE/CCF profile.

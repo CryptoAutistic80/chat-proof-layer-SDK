@@ -6,6 +6,7 @@ use axum::{
     response::IntoResponse,
     routing::{get, post, put},
 };
+use axum_server::tls_rustls::RustlsConfig;
 use base64ct::{Base64, Encoding};
 use chrono::Utc;
 use ed25519_dalek::SigningKey;
@@ -72,6 +73,7 @@ const DEFAULT_DISCLOSURE_POLICY_PRIVACY_REVIEW: &str = "privacy_review";
 struct AppState {
     db: SqlitePool,
     addr: String,
+    tls_enabled: bool,
     storage_dir: PathBuf,
     signing_key: Arc<SigningKey>,
     signing_kid: String,
@@ -87,6 +89,8 @@ struct VaultRuntimeConfig {
     addr: SocketAddr,
     storage_dir: PathBuf,
     db_path: PathBuf,
+    tls_cert_path: Option<PathBuf>,
+    tls_key_path: Option<PathBuf>,
     signing_key_path: Option<PathBuf>,
     signing_kid: String,
     metadata_backend: String,
@@ -519,6 +523,7 @@ struct VaultConfigResponse {
 struct VaultServiceConfigView {
     addr: String,
     max_payload_bytes: usize,
+    tls_enabled: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -928,6 +933,7 @@ async fn main() -> Result<()> {
     let state = AppState {
         db,
         addr: addr.to_string(),
+        tls_enabled: runtime_config.tls_cert_path.is_some(),
         storage_dir,
         signing_key: Arc::new(signing_key),
         signing_kid: runtime_config.signing_kid.clone(),
@@ -938,19 +944,39 @@ async fn main() -> Result<()> {
         retention_scan_interval_hours: runtime_config.retention_scan_interval_hours,
     };
 
+    let tls_enabled = state.tls_enabled;
     maybe_spawn_retention_scan_task(state.clone());
     let app = build_router(state, runtime_config.max_payload_bytes);
 
     info!(
-        "proof-service listening on {addr} using config source {}",
+        "proof-service listening on {}://{addr} using config source {}",
+        if tls_enabled { "https" } else { "http" },
         runtime_config
             .config_path
             .as_ref()
             .map(|path| path.display().to_string())
             .unwrap_or_else(|| "env/defaults".to_string())
     );
-    let listener = tokio::net::TcpListener::bind(addr).await?;
-    axum::serve(listener, app).await?;
+    if let (Some(cert_path), Some(key_path)) = (
+        runtime_config.tls_cert_path.as_deref(),
+        runtime_config.tls_key_path.as_deref(),
+    ) {
+        let tls_config = RustlsConfig::from_pem_file(cert_path, key_path)
+            .await
+            .with_context(|| {
+                format!(
+                    "failed to load TLS certificate {} and key {}",
+                    cert_path.display(),
+                    key_path.display()
+                )
+            })?;
+        axum_server::bind_rustls(addr, tls_config)
+            .serve(app.into_make_service())
+            .await?;
+    } else {
+        let listener = tokio::net::TcpListener::bind(addr).await?;
+        axum::serve(listener, app).await?;
+    }
     Ok(())
 }
 
@@ -1058,6 +1084,27 @@ fn build_vault_runtime_config(
         .transpose()?
         .or(file_config.server.max_payload_bytes)
         .unwrap_or(DEFAULT_MAX_PAYLOAD_BYTES);
+    let tls_cert_path = env_value(env_vars, "PROOF_SERVICE_TLS_CERT_PATH")
+        .map(PathBuf::from)
+        .or_else(|| {
+            file_config
+                .server
+                .tls_cert
+                .as_deref()
+                .map(|value| resolve_path_from_config(config_base_dir, value))
+        });
+    let tls_key_path = env_value(env_vars, "PROOF_SERVICE_TLS_KEY_PATH")
+        .map(PathBuf::from)
+        .or_else(|| {
+            file_config
+                .server
+                .tls_key
+                .as_deref()
+                .map(|value| resolve_path_from_config(config_base_dir, value))
+        });
+    if tls_cert_path.is_some() != tls_key_path.is_some() {
+        bail!("server TLS requires both certificate and key paths");
+    }
 
     let metadata_backend = normalize_backend(
         file_config.storage.metadata_backend.as_deref(),
@@ -1154,6 +1201,8 @@ fn build_vault_runtime_config(
         addr,
         storage_dir,
         db_path,
+        tls_cert_path,
+        tls_key_path,
         signing_key_path,
         signing_kid,
         metadata_backend,
@@ -1169,10 +1218,6 @@ fn build_vault_runtime_config(
 }
 
 fn validate_file_config_capabilities(file_config: &VaultFileConfig) -> Result<()> {
-    if file_config.server.tls_cert.is_some() || file_config.server.tls_key.is_some() {
-        bail!("server.tls_cert/server.tls_key are not implemented yet");
-    }
-
     if let Some(s3) = file_config.storage.s3.as_ref() {
         let configured = s3.bucket.is_some() || s3.region.is_some() || s3.endpoint.is_some();
         if configured {
@@ -4571,6 +4616,7 @@ async fn build_vault_config_response(state: &AppState) -> Result<VaultConfigResp
         service: VaultServiceConfigView {
             addr: state.addr.clone(),
             max_payload_bytes: state.max_payload_bytes,
+            tls_enabled: state.tls_enabled,
         },
         signing: VaultSigningConfigView {
             key_id: state.signing_kid.clone(),
@@ -6804,6 +6850,7 @@ mod tests {
         AppState {
             db,
             addr: DEFAULT_ADDR.to_string(),
+            tls_enabled: false,
             storage_dir,
             signing_key: Arc::new(signing_key),
             signing_kid: "kid-dev-01".to_string(),
@@ -7077,8 +7124,8 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
             server: VaultServerFileConfig {
                 addr: Some("127.0.0.1:8181".to_string()),
                 max_payload_bytes: Some(2048),
-                tls_cert: None,
-                tls_key: None,
+                tls_cert: Some("./tls/server.crt".to_string()),
+                tls_key: Some("./tls/server.key".to_string()),
             },
             signing: VaultSigningFileConfig {
                 key_path: Some("./keys/signing.pem".to_string()),
@@ -7142,6 +7189,14 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
 
         assert_eq!(runtime.addr, SocketAddr::from(([0, 0, 0, 0], 9090)));
         assert_eq!(runtime.max_payload_bytes, 2048);
+        assert_eq!(
+            runtime.tls_cert_path.as_ref(),
+            Some(&config_dir.join("tls/server.crt"))
+        );
+        assert_eq!(
+            runtime.tls_key_path.as_ref(),
+            Some(&config_dir.join("tls/server.key"))
+        );
         assert_eq!(runtime.signing_kid, "file-kid");
         let expected_signing_key_path = config_dir.join("keys/signing.pem");
         assert_eq!(
@@ -7183,6 +7238,21 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
 
         let err = build_vault_runtime_config(file_config, None, &BTreeMap::new()).unwrap_err();
         assert!(err.to_string().contains("not implemented"));
+    }
+
+    #[test]
+    fn build_vault_runtime_config_rejects_partial_tls_configuration() {
+        let file_config = VaultFileConfig {
+            server: VaultServerFileConfig {
+                tls_cert: Some("./tls/server.crt".to_string()),
+                tls_key: None,
+                ..VaultServerFileConfig::default()
+            },
+            ..VaultFileConfig::default()
+        };
+
+        let err = build_vault_runtime_config(file_config, None, &BTreeMap::new()).unwrap_err();
+        assert!(err.to_string().contains("both certificate and key"));
     }
 
     #[test]
@@ -8337,6 +8407,7 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
 
         assert_eq!(config.service.addr, DEFAULT_ADDR);
         assert_eq!(config.service.max_payload_bytes, DEFAULT_MAX_PAYLOAD_BYTES);
+        assert!(!config.service.tls_enabled);
         assert_eq!(config.signing.key_id, "kid-dev-01");
         assert_eq!(config.signing.algorithm, "ed25519");
         assert_eq!(config.storage.metadata_backend, "sqlite");
@@ -8389,6 +8460,8 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
             addr: SocketAddr::from(([127, 0, 0, 1], 8080)),
             storage_dir: state.storage_dir.clone(),
             db_path: state.storage_dir.join("metadata.db"),
+            tls_cert_path: None,
+            tls_key_path: None,
             signing_key_path: None,
             signing_kid: "kid-runtime".to_string(),
             metadata_backend: "sqlite".to_string(),

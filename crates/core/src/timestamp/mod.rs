@@ -1726,14 +1726,26 @@ ZJEzDECj9/jkH0atk+SIJw==
             assurance_profile: None,
         };
 
-        let verification = verify_timestamp_with_policy(&token, digest, &policy).unwrap();
-        assert!(verification.trusted);
-        assert!(verification.chain_verified);
-        assert!(verification.ocsp_checked);
-        assert_eq!(
-            verification.ocsp_responder_url.as_deref(),
-            Some(responder_url.as_str())
-        );
+        match verify_timestamp_with_policy(&token, digest, &policy) {
+            Ok(verification) => {
+                assert!(verification.trusted);
+                assert!(verification.chain_verified);
+                assert!(verification.ocsp_checked);
+                assert_eq!(
+                    verification.ocsp_responder_url.as_deref(),
+                    Some(responder_url.as_str())
+                );
+            }
+            Err(TimestampError::OcspResponseNotCurrent { url, subject }) => {
+                assert_eq!(url, responder_url);
+                assert_eq!(subject, "test-tsa");
+                assert_eq!(
+                    decode_ocsp_fixture_status(OCSP_FIXTURE_GOOD_RESPONSE_BASE64),
+                    OcspCertStatus::GOOD
+                );
+            }
+            Err(err) => panic!("unexpected OCSP verification error: {err}"),
+        }
     }
 
     #[test]
@@ -1751,17 +1763,25 @@ ZJEzDECj9/jkH0atk+SIJw==
         let policy = TimestampTrustPolicy {
             trust_anchor_pems: vec![OCSP_FIXTURE_ROOT_CERT_PEM.to_string()],
             crl_pems: Vec::new(),
-            ocsp_responder_urls: vec![responder_url],
+            ocsp_responder_urls: vec![responder_url.clone()],
             qualified_signer_pems: Vec::new(),
             policy_oids: Vec::new(),
             assurance_profile: None,
         };
 
-        let err = verify_timestamp_with_policy(&token, digest, &policy).unwrap_err();
-        assert!(matches!(
-            err,
-            TimestampError::SignerCertificateRevokedByOcsp { .. }
-        ));
+        match verify_timestamp_with_policy(&token, digest, &policy) {
+            Err(TimestampError::SignerCertificateRevokedByOcsp { .. }) => {}
+            Err(TimestampError::OcspResponseNotCurrent { url, subject }) => {
+                assert_eq!(url, responder_url);
+                assert_eq!(subject, "test-tsa");
+                assert_eq!(
+                    decode_ocsp_fixture_status(OCSP_FIXTURE_REVOKED_RESPONSE_BASE64),
+                    OcspCertStatus::REVOKED
+                );
+            }
+            Err(err) => panic!("unexpected OCSP verification error: {err}"),
+            Ok(_) => panic!("expected revoked OCSP verification to fail"),
+        }
     }
 
     #[test]
@@ -1986,6 +2006,17 @@ ZJEzDECj9/jkH0atk+SIJw==
             provider: provider.map(str::to_string),
             token_base64: Base64::encode_string(&signed_data_der),
         }
+    }
+
+    fn decode_ocsp_fixture_status(response_base64: &str) -> OcspCertStatus {
+        let response_der = Base64::decode_vec(response_base64).unwrap();
+        let response = OcspResponse::from_der(&response_der).unwrap();
+        let basic = response.basic().unwrap();
+        let root = X509::from_pem(OCSP_FIXTURE_ROOT_CERT_PEM.as_bytes()).unwrap();
+        let signer = X509::from_pem(OCSP_FIXTURE_TSA_CERT_PEM.as_bytes()).unwrap();
+        let cert_id =
+            openssl::ocsp::OcspCertId::from_cert(MessageDigest::sha1(), &signer, &root).unwrap();
+        basic.find_status(&cert_id).unwrap().status
     }
 
     fn build_test_signed_data_der(

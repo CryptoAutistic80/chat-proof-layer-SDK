@@ -195,6 +195,18 @@ enum VaultCommands {
         #[arg(long, default_value = "human")]
         format: OutputFormat,
     },
+    /// Fetch the Prometheus metrics surface exposed by the vault.
+    Metrics {
+        #[arg(long)]
+        vault_url: String,
+    },
+    /// Export a vault backup archive for SQLite-based deployments.
+    Backup {
+        #[arg(long)]
+        vault_url: String,
+        #[arg(long)]
+        out: PathBuf,
+    },
     /// Query stored bundles via the vault API.
     Query {
         #[arg(long)]
@@ -1358,6 +1370,8 @@ fn main() -> Result<()> {
         }),
         Commands::Vault { command } => match command {
             VaultCommands::Status { vault_url, format } => cmd_vault_status(&vault_url, format),
+            VaultCommands::Metrics { vault_url } => cmd_vault_metrics(&vault_url),
+            VaultCommands::Backup { vault_url, out } => cmd_vault_backup(&vault_url, &out),
             VaultCommands::Query {
                 vault_url,
                 system_id,
@@ -2392,6 +2406,44 @@ fn cmd_vault_status(vault_url: &str, format: OutputFormat) -> Result<()> {
         OutputFormat::Json => println!("{}", serde_json::to_string_pretty(&output)?),
     }
 
+    Ok(())
+}
+
+fn cmd_vault_metrics(vault_url: &str) -> Result<()> {
+    let client = build_http_client()?;
+    let metrics = get_text(
+        &client,
+        join_vault_url(vault_url, "/metrics"),
+        "vault metrics scrape",
+    )?;
+    print!("{metrics}");
+    if !metrics.ends_with('\n') {
+        println!();
+    }
+    Ok(())
+}
+
+fn cmd_vault_backup(vault_url: &str, out_path: &Path) -> Result<()> {
+    let client = build_http_client()?;
+    let response = with_cli_api_key(client.post(join_vault_url(vault_url, "/v1/backup")))
+        .send()
+        .with_context(|| {
+            format!(
+                "failed to call {}/v1/backup",
+                vault_url.trim_end_matches('/')
+            )
+        })?;
+    let response = ensure_success(response, "vault backup export")?;
+    let bytes = response
+        .bytes()
+        .context("failed to read vault backup archive response")?;
+    if let Some(parent) = out_path.parent() {
+        fs::create_dir_all(parent)
+            .with_context(|| format!("failed to create {}", parent.display()))?;
+    }
+    fs::write(out_path, bytes.as_ref())
+        .with_context(|| format!("failed to write {}", out_path.display()))?;
+    println!("{}", out_path.display());
     Ok(())
 }
 
@@ -3621,6 +3673,16 @@ fn get_json<T: DeserializeOwned>(client: &Client, url: String, action: &str) -> 
         .with_context(|| format!("failed to decode {action} response"))
 }
 
+fn get_text(client: &Client, url: String, action: &str) -> Result<String> {
+    let response = with_cli_api_key(client.get(&url))
+        .send()
+        .with_context(|| format!("failed to call {url}"))?;
+    let response = ensure_success(response, action)?;
+    response
+        .text()
+        .with_context(|| format!("failed to decode {action} response"))
+}
+
 fn build_vault_path_url(vault_url: &str, segments: &[&str]) -> Result<String> {
     let mut url = Url::parse(&format!("{}/", vault_url.trim_end_matches('/')))
         .with_context(|| format!("invalid vault_url: {vault_url}"))?;
@@ -4318,6 +4380,49 @@ mod tests {
             Commands::Vault {
                 command: VaultCommands::DisclosureTemplates { vault_url, .. },
             } => assert_eq!(vault_url, "http://127.0.0.1:8080"),
+            _ => panic!("unexpected command parsed"),
+        }
+    }
+
+    #[test]
+    fn vault_metrics_command_accepts_vault_url() {
+        let cli = Cli::try_parse_from([
+            "proofctl",
+            "vault",
+            "metrics",
+            "--vault-url",
+            "http://127.0.0.1:8080",
+        ])
+        .unwrap();
+
+        match cli.command {
+            Commands::Vault {
+                command: VaultCommands::Metrics { vault_url },
+            } => assert_eq!(vault_url, "http://127.0.0.1:8080"),
+            _ => panic!("unexpected command parsed"),
+        }
+    }
+
+    #[test]
+    fn vault_backup_command_accepts_out_path() {
+        let cli = Cli::try_parse_from([
+            "proofctl",
+            "vault",
+            "backup",
+            "--vault-url",
+            "http://127.0.0.1:8080",
+            "--out",
+            "/tmp/vault-backup.tar.gz",
+        ])
+        .unwrap();
+
+        match cli.command {
+            Commands::Vault {
+                command: VaultCommands::Backup { vault_url, out },
+            } => {
+                assert_eq!(vault_url, "http://127.0.0.1:8080");
+                assert_eq!(out, PathBuf::from("/tmp/vault-backup.tar.gz"));
+            }
             _ => panic!("unexpected command parsed"),
         }
     }

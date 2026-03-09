@@ -40,6 +40,7 @@ use std::{
     sync::Arc,
     time::Duration,
 };
+use tar::{Builder as TarBuilder, Header as TarHeader};
 use tower_http::cors::{Any, CorsLayer};
 use tracing::{error, info, warn};
 use ulid::Ulid;
@@ -54,6 +55,7 @@ const PACKAGE_FORMAT: &str = "pl-bundle-pkg-v1";
 const DISCLOSURE_PACKAGE_FORMAT: &str = "pl-bundle-disclosure-pkg-v1";
 const PACK_EXPORT_FORMAT: &str = "pl-evidence-pack-v1";
 const PACK_EXPORT_FILE_NAME: &str = "evidence_pack.pkg";
+const VAULT_BACKUP_FORMAT: &str = "pl-vault-backup-v1";
 const PACK_CURATION_PROFILE: &str = "pack-rules-v1";
 const PACK_BUNDLE_FORMAT_FULL: &str = "full";
 const PACK_BUNDLE_FORMAT_DISCLOSURE: &str = "disclosure";
@@ -79,6 +81,7 @@ struct AppState {
     auth_config: Option<RuntimeAuthConfig>,
     tenant_organization_id: Option<String>,
     storage_dir: PathBuf,
+    db_path: PathBuf,
     signing_key: Arc<SigningKey>,
     signing_kid: String,
     metadata_backend: String,
@@ -569,7 +572,7 @@ struct VaultTenantConfigView {
     enforced: bool,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct VaultMetricsSnapshot {
     bundle_total: i64,
     bundle_active: i64,
@@ -581,6 +584,14 @@ struct VaultMetricsSnapshot {
     audit_log_total: i64,
     retention_policy_total: i64,
     disclosure_policy_total: i64,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct VaultBackupManifest {
+    format: String,
+    backup_id: String,
+    created_at: String,
+    metrics: VaultMetricsSnapshot,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -1015,6 +1026,7 @@ async fn main() -> Result<()> {
         auth_config: runtime_config.auth_config.clone(),
         tenant_organization_id: runtime_config.tenant_organization_id.clone(),
         storage_dir,
+        db_path: runtime_config.db_path.clone(),
         signing_key: Arc::new(signing_key),
         signing_kid: runtime_config.signing_kid.clone(),
         metadata_backend: runtime_config.metadata_backend.clone(),
@@ -1100,6 +1112,7 @@ fn build_router(state: AppState, max_payload_bytes: usize) -> Router {
         .route("/v1/packs/{pack_id}", get(get_pack))
         .route("/v1/packs/{pack_id}/manifest", get(get_pack_manifest))
         .route("/v1/packs/{pack_id}/export", get(get_pack_export))
+        .route("/v1/backup", post(export_backup))
         .route("/v1/retention/status", get(retention_status))
         .route("/v1/retention/scan", post(retention_scan))
         .route("/v1/verify", post(verify_bundle))
@@ -1733,6 +1746,408 @@ async fn readyz(State(state): State<AppState>) -> Result<impl IntoResponse, ApiE
         .await
         .map_err(ApiError::internal_anyhow)?;
     Ok((StatusCode::OK, "ok"))
+}
+
+async fn metrics(State(state): State<AppState>) -> Result<impl IntoResponse, ApiError> {
+    let snapshot = load_vault_metrics_snapshot(&state)
+        .await
+        .map_err(ApiError::internal_anyhow)?;
+    let body = render_prometheus_metrics(&state, &snapshot);
+    Ok((
+        [(
+            header::CONTENT_TYPE,
+            "text/plain; version=0.0.4; charset=utf-8",
+        )],
+        body,
+    ))
+}
+
+async fn load_vault_metrics_snapshot(state: &AppState) -> Result<VaultMetricsSnapshot> {
+    let now = Utc::now().to_rfc3339();
+    let (
+        bundle_total,
+        bundle_active,
+        bundle_deleted,
+        bundle_held,
+        bundle_timestamped,
+        bundle_receipted,
+    ): (i64, i64, i64, i64, i64, i64) = sqlx::query_as(
+        "SELECT
+            COUNT(*) AS bundle_total,
+            COALESCE(SUM(CASE WHEN deleted_at IS NULL THEN 1 ELSE 0 END), 0) AS bundle_active,
+            COALESCE(SUM(CASE WHEN deleted_at IS NOT NULL THEN 1 ELSE 0 END), 0) AS bundle_deleted,
+            COALESCE(SUM(CASE
+                WHEN legal_hold_reason IS NOT NULL
+                 AND (legal_hold_until IS NULL OR legal_hold_until > ?)
+                THEN 1 ELSE 0 END), 0) AS bundle_held,
+            COALESCE(SUM(CASE WHEN has_timestamp = 1 THEN 1 ELSE 0 END), 0) AS bundle_timestamped,
+            COALESCE(SUM(CASE WHEN has_receipt = 1 THEN 1 ELSE 0 END), 0) AS bundle_receipted
+         FROM bundles",
+    )
+    .bind(&now)
+    .fetch_one(&state.db)
+    .await
+    .context("failed to load bundle metrics snapshot")?;
+
+    let pack_total: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM packs")
+        .fetch_one(&state.db)
+        .await
+        .context("failed to load pack metrics snapshot")?;
+    let audit_log_total: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM audit_log")
+        .fetch_one(&state.db)
+        .await
+        .context("failed to load audit metrics snapshot")?;
+    let retention_policy_total = load_retention_policies(&state.db).await?.len() as i64;
+    let disclosure_policy_total = load_disclosure_config(&state.db).await?.policies.len() as i64;
+
+    Ok(VaultMetricsSnapshot {
+        bundle_total,
+        bundle_active,
+        bundle_deleted,
+        bundle_held,
+        bundle_timestamped,
+        bundle_receipted,
+        pack_total,
+        audit_log_total,
+        retention_policy_total,
+        disclosure_policy_total,
+    })
+}
+
+fn render_prometheus_metrics(state: &AppState, snapshot: &VaultMetricsSnapshot) -> String {
+    let mut body = String::new();
+    write_prometheus_gauge(
+        &mut body,
+        "proof_layer_vault_up",
+        "Whether the vault process is up.",
+        1,
+    );
+    write_prometheus_gauge(
+        &mut body,
+        "proof_layer_vault_tls_enabled",
+        "Whether HTTPS is enabled on the vault listener.",
+        bool_to_metric_value(state.tls_enabled),
+    );
+    write_prometheus_gauge(
+        &mut body,
+        "proof_layer_vault_auth_enabled",
+        "Whether bearer API-key auth is enabled for /v1 routes.",
+        bool_to_metric_value(state.auth_config.is_some()),
+    );
+    write_prometheus_gauge(
+        &mut body,
+        "proof_layer_vault_tenant_enforced",
+        "Whether single-tenant organization enforcement is enabled.",
+        bool_to_metric_value(state.tenant_organization_id.is_some()),
+    );
+    write_prometheus_gauge(
+        &mut body,
+        "proof_layer_vault_max_payload_bytes",
+        "Configured maximum request payload size in bytes.",
+        state.max_payload_bytes as i64,
+    );
+    write_prometheus_gauge(
+        &mut body,
+        "proof_layer_vault_retention_scan_interval_hours",
+        "Configured retention scan interval in hours.",
+        state.retention_scan_interval_hours,
+    );
+    write_prometheus_gauge(
+        &mut body,
+        "proof_layer_vault_bundle_total",
+        "Total stored bundles, including soft-deleted rows.",
+        snapshot.bundle_total,
+    );
+    write_prometheus_gauge(
+        &mut body,
+        "proof_layer_vault_bundle_active",
+        "Stored bundles that are not soft-deleted.",
+        snapshot.bundle_active,
+    );
+    write_prometheus_gauge(
+        &mut body,
+        "proof_layer_vault_bundle_deleted",
+        "Stored bundles that are soft-deleted.",
+        snapshot.bundle_deleted,
+    );
+    write_prometheus_gauge(
+        &mut body,
+        "proof_layer_vault_bundle_held",
+        "Stored bundles currently under legal hold.",
+        snapshot.bundle_held,
+    );
+    write_prometheus_gauge(
+        &mut body,
+        "proof_layer_vault_bundle_timestamped",
+        "Stored bundles with an attached RFC 3161 timestamp token.",
+        snapshot.bundle_timestamped,
+    );
+    write_prometheus_gauge(
+        &mut body,
+        "proof_layer_vault_bundle_receipted",
+        "Stored bundles with an attached transparency receipt.",
+        snapshot.bundle_receipted,
+    );
+    write_prometheus_gauge(
+        &mut body,
+        "proof_layer_vault_pack_total",
+        "Total assembled evidence packs.",
+        snapshot.pack_total,
+    );
+    write_prometheus_gauge(
+        &mut body,
+        "proof_layer_vault_audit_log_total",
+        "Total append-only audit log rows.",
+        snapshot.audit_log_total,
+    );
+    write_prometheus_gauge(
+        &mut body,
+        "proof_layer_vault_retention_policy_total",
+        "Configured retention policy count.",
+        snapshot.retention_policy_total,
+    );
+    write_prometheus_gauge(
+        &mut body,
+        "proof_layer_vault_disclosure_policy_total",
+        "Configured disclosure policy count.",
+        snapshot.disclosure_policy_total,
+    );
+    body
+}
+
+fn write_prometheus_gauge(body: &mut String, name: &str, help: &str, value: i64) {
+    body.push_str("# HELP ");
+    body.push_str(name);
+    body.push(' ');
+    body.push_str(help);
+    body.push('\n');
+    body.push_str("# TYPE ");
+    body.push_str(name);
+    body.push_str(" gauge\n");
+    body.push_str(name);
+    body.push(' ');
+    body.push_str(&value.to_string());
+    body.push('\n');
+}
+
+fn bool_to_metric_value(value: bool) -> i64 {
+    if value { 1 } else { 0 }
+}
+
+async fn export_backup(
+    State(state): State<AppState>,
+    actor: Option<Extension<AuthenticatedActor>>,
+) -> Result<impl IntoResponse, ApiError> {
+    let (backup_id, file_name, archive_bytes, manifest) = create_vault_backup_archive(&state)
+        .await
+        .map_err(ApiError::internal_anyhow)?;
+    append_audit_log(
+        &state.db,
+        "export_backup",
+        Some(request_actor_label(&actor)),
+        None,
+        None,
+        serde_json::json!({
+            "backup_id": backup_id,
+            "file_name": file_name,
+            "bytes": archive_bytes.len(),
+            "bundle_total": manifest.metrics.bundle_total,
+            "pack_total": manifest.metrics.pack_total,
+        }),
+    )
+    .await
+    .map_err(ApiError::internal_anyhow)?;
+
+    Ok((
+        [
+            (header::CONTENT_TYPE, "application/gzip".to_string()),
+            (
+                header::CONTENT_DISPOSITION,
+                format!("attachment; filename=\"{file_name}\""),
+            ),
+            (header::CACHE_CONTROL, "no-store".to_string()),
+        ],
+        archive_bytes,
+    ))
+}
+
+async fn create_vault_backup_archive(
+    state: &AppState,
+) -> Result<(String, String, Vec<u8>, VaultBackupManifest)> {
+    let backup_id = generate_bundle_id();
+    let created_at = Utc::now().to_rfc3339();
+    let file_name = format!("proof-layer-vault-backup-{backup_id}.tar.gz");
+    let metrics = load_vault_metrics_snapshot(state).await?;
+    let manifest = VaultBackupManifest {
+        format: VAULT_BACKUP_FORMAT.to_string(),
+        backup_id: backup_id.clone(),
+        created_at,
+        metrics,
+    };
+    let config = build_vault_config_response(state).await?;
+    let snapshot_dir = std::env::temp_dir().join(format!("proof-layer-backup-{backup_id}"));
+    fs::create_dir_all(&snapshot_dir).with_context(|| {
+        format!(
+            "failed to create backup temp dir {}",
+            snapshot_dir.display()
+        )
+    })?;
+    let snapshot_db_path = snapshot_dir.join("metadata.db");
+    snapshot_sqlite_database(&state.db, &snapshot_db_path).await?;
+
+    let archive_result = build_backup_archive_bytes(
+        &manifest,
+        &config,
+        &snapshot_db_path,
+        &state.storage_dir,
+        &state.db_path,
+    );
+
+    match fs::remove_dir_all(&snapshot_dir) {
+        Ok(()) => {}
+        Err(err) if err.kind() == ErrorKind::NotFound => {}
+        Err(err) => {
+            return Err(anyhow::Error::new(err).context(format!(
+                "failed to remove backup temp dir {}",
+                snapshot_dir.display()
+            )));
+        }
+    }
+
+    let archive_bytes = archive_result?;
+    Ok((backup_id, file_name, archive_bytes, manifest))
+}
+
+async fn snapshot_sqlite_database(db: &SqlitePool, destination: &FsPath) -> Result<()> {
+    if let Some(parent) = destination.parent() {
+        fs::create_dir_all(parent).with_context(|| {
+            format!("failed to create sqlite snapshot dir {}", parent.display())
+        })?;
+    }
+    match fs::remove_file(destination) {
+        Ok(()) => {}
+        Err(err) if err.kind() == ErrorKind::NotFound => {}
+        Err(err) => {
+            return Err(anyhow::Error::new(err).context(format!(
+                "failed to clear sqlite snapshot destination {}",
+                destination.display()
+            )));
+        }
+    }
+
+    let escaped_path = destination.to_string_lossy().replace('\'', "''");
+    sqlx::query(&format!("VACUUM INTO '{escaped_path}'"))
+        .execute(db)
+        .await
+        .with_context(|| {
+            format!(
+                "failed to create sqlite snapshot at {}",
+                destination.display()
+            )
+        })?;
+    Ok(())
+}
+
+fn build_backup_archive_bytes(
+    manifest: &VaultBackupManifest,
+    config: &VaultConfigResponse,
+    snapshot_db_path: &FsPath,
+    storage_dir: &FsPath,
+    db_path: &FsPath,
+) -> Result<Vec<u8>> {
+    let mut builder = TarBuilder::new(GzEncoder::new(Vec::new(), Compression::default()));
+
+    let manifest_json = serde_json::to_vec_pretty(manifest)?;
+    append_bytes_to_tar(&mut builder, "manifest.json", &manifest_json)?;
+
+    let config_json = serde_json::to_vec_pretty(config)?;
+    append_bytes_to_tar(&mut builder, "config/vault_config.json", &config_json)?;
+
+    append_path_to_tar(&mut builder, snapshot_db_path, "metadata/metadata.db")?;
+    append_directory_to_tar(
+        &mut builder,
+        storage_dir,
+        storage_dir,
+        "storage",
+        Some(db_path),
+    )?;
+
+    let encoder = builder
+        .into_inner()
+        .context("failed to finish tar archive")?;
+    encoder
+        .finish()
+        .context("failed to finish backup gzip stream")
+}
+
+fn append_bytes_to_tar<W: Write>(
+    builder: &mut TarBuilder<W>,
+    archive_path: &str,
+    bytes: &[u8],
+) -> Result<()> {
+    let mut header = TarHeader::new_gnu();
+    header.set_mode(0o644);
+    header.set_size(bytes.len() as u64);
+    header.set_cksum();
+    builder
+        .append_data(&mut header, archive_path, std::io::Cursor::new(bytes))
+        .with_context(|| format!("failed to append {archive_path} to backup archive"))?;
+    Ok(())
+}
+
+fn append_path_to_tar<W: Write>(
+    builder: &mut TarBuilder<W>,
+    source_path: &FsPath,
+    archive_path: &str,
+) -> Result<()> {
+    builder
+        .append_path_with_name(source_path, archive_path)
+        .with_context(|| {
+            format!(
+                "failed to append {} as {archive_path} to backup archive",
+                source_path.display()
+            )
+        })?;
+    Ok(())
+}
+
+fn append_directory_to_tar<W: Write>(
+    builder: &mut TarBuilder<W>,
+    root_dir: &FsPath,
+    current_dir: &FsPath,
+    archive_prefix: &str,
+    exclude_path: Option<&FsPath>,
+) -> Result<()> {
+    let mut entries = fs::read_dir(current_dir)
+        .with_context(|| format!("failed to read backup dir {}", current_dir.display()))?
+        .collect::<Result<Vec<_>, _>>()
+        .with_context(|| format!("failed to list backup dir {}", current_dir.display()))?;
+    entries.sort_by_key(|entry| entry.path());
+
+    for entry in entries {
+        let path = entry.path();
+        if path.is_dir() {
+            append_directory_to_tar(builder, root_dir, &path, archive_prefix, exclude_path)?;
+            continue;
+        }
+        if !path.is_file() {
+            continue;
+        }
+        if exclude_path.is_some_and(|exclude| path == exclude) {
+            continue;
+        }
+
+        let relative = path
+            .strip_prefix(root_dir)
+            .with_context(|| format!("failed to relativize {}", path.display()))?;
+        let archive_path = format!(
+            "{archive_prefix}/{}",
+            relative.to_string_lossy().replace('\\', "/")
+        );
+        append_path_to_tar(builder, &path, &archive_path)?;
+    }
+
+    Ok(())
 }
 
 async fn create_bundle(
@@ -7098,7 +7513,7 @@ mod tests {
         TransparencyReceipt, encode_public_key_pem, sha256_prefixed,
     };
     use sha2::{Digest, Sha256};
-    use std::io::{BufRead, BufReader, Read, Write};
+    use std::io::{BufRead, BufReader, Cursor, Read, Write};
     use tower::ServiceExt;
     use x509_certificate::{
         CapturedX509Certificate, DigestAlgorithm, InMemorySigningKeyPair, KeyAlgorithm,
@@ -7189,6 +7604,7 @@ mod tests {
             auth_config: None,
             tenant_organization_id: None,
             storage_dir,
+            db_path,
             signing_key: Arc::new(signing_key),
             signing_kid: "kid-dev-01".to_string(),
             metadata_backend: "sqlite".to_string(),
@@ -7455,6 +7871,22 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
         serde_json::from_slice(&json).unwrap()
     }
 
+    fn decode_backup_archive(bytes: &[u8]) -> BTreeMap<String, Vec<u8>> {
+        let decoder = GzDecoder::new(Cursor::new(bytes));
+        let mut archive = tar::Archive::new(decoder);
+        let mut files = BTreeMap::new();
+
+        for entry in archive.entries().unwrap() {
+            let mut entry = entry.unwrap();
+            let path = entry.path().unwrap().to_string_lossy().to_string();
+            let mut contents = Vec::new();
+            entry.read_to_end(&mut contents).unwrap();
+            files.insert(path, contents);
+        }
+
+        files
+    }
+
     async fn create_bundle_response(
         app: &Router,
         payload: &CreateBundleRequest,
@@ -7685,6 +8117,142 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
     }
 
     #[tokio::test]
+    async fn metrics_endpoint_exposes_prometheus_snapshot() {
+        let state = test_state_with_tenant(DEFAULT_MAX_PAYLOAD_BYTES, "org-demo").await;
+        let app = build_router(state, DEFAULT_MAX_PAYLOAD_BYTES);
+
+        create_bundle_response(
+            &app,
+            &CreateBundleRequest {
+                capture: SealableCaptureInput::Legacy(sample_capture()),
+                artefacts: vec![InlineArtefact {
+                    name: "prompt.json".to_string(),
+                    content_type: "application/json".to_string(),
+                    data_base64: Base64::encode_string(br#"{"prompt":"metrics"}"#),
+                }],
+            },
+        )
+        .await;
+
+        let request = Request::builder()
+            .method("GET")
+            .uri("/metrics")
+            .body(Body::empty())
+            .unwrap();
+        let response = app.oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response.headers().get(header::CONTENT_TYPE).unwrap(),
+            "text/plain; version=0.0.4; charset=utf-8"
+        );
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let metrics = String::from_utf8(body.to_vec()).unwrap();
+        assert!(metrics.contains("proof_layer_vault_up 1"));
+        assert!(metrics.contains("proof_layer_vault_tenant_enforced 1"));
+        assert!(metrics.contains("proof_layer_vault_bundle_total 1"));
+        assert!(metrics.contains("proof_layer_vault_bundle_active 1"));
+        assert!(metrics.contains("proof_layer_vault_disclosure_policy_total 3"));
+    }
+
+    #[tokio::test]
+    async fn backup_endpoint_exports_snapshot_archive() {
+        let state = test_state_with_tenant(DEFAULT_MAX_PAYLOAD_BYTES, "org-demo").await;
+        let db = state.db.clone();
+        let app = build_router(state, DEFAULT_MAX_PAYLOAD_BYTES);
+
+        let created = create_bundle_response(
+            &app,
+            &CreateBundleRequest {
+                capture: SealableCaptureInput::Legacy(sample_capture()),
+                artefacts: vec![InlineArtefact {
+                    name: "prompt.json".to_string(),
+                    content_type: "application/json".to_string(),
+                    data_base64: Base64::encode_string(br#"{"prompt":"backup"}"#),
+                }],
+            },
+        )
+        .await;
+
+        let pack_req = Request::builder()
+            .method("POST")
+            .uri("/v1/packs")
+            .header("content-type", "application/json")
+            .body(Body::from(
+                serde_json::to_vec(&CreatePackRequest {
+                    pack_type: "runtime_logs".to_string(),
+                    system_id: None,
+                    from: None,
+                    to: None,
+                    bundle_format: default_pack_bundle_format(),
+                    disclosure_policy: None,
+                    disclosure_template: None,
+                })
+                .unwrap(),
+            ))
+            .unwrap();
+        let pack_res = app.clone().oneshot(pack_req).await.unwrap();
+        assert_eq!(pack_res.status(), StatusCode::CREATED);
+
+        let backup_req = Request::builder()
+            .method("POST")
+            .uri("/v1/backup")
+            .body(Body::empty())
+            .unwrap();
+        let backup_res = app.clone().oneshot(backup_req).await.unwrap();
+        assert_eq!(backup_res.status(), StatusCode::OK);
+        assert_eq!(
+            backup_res.headers().get(header::CONTENT_TYPE).unwrap(),
+            "application/gzip"
+        );
+        assert!(
+            backup_res
+                .headers()
+                .get(header::CONTENT_DISPOSITION)
+                .unwrap()
+                .to_str()
+                .unwrap()
+                .contains("proof-layer-vault-backup-")
+        );
+        let body = axum::body::to_bytes(backup_res.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let files = decode_backup_archive(&body);
+        assert!(files.contains_key("manifest.json"));
+        assert!(files.contains_key("config/vault_config.json"));
+        assert!(files.contains_key("metadata/metadata.db"));
+        assert!(
+            files.keys()
+                .any(|name| name.ends_with(&format!("artefacts/{}/prompt.json", created.bundle_id)))
+        );
+        assert!(
+            files
+                .keys()
+                .any(|name| name.ends_with(PACK_EXPORT_FILE_NAME))
+        );
+
+        let manifest: VaultBackupManifest =
+            serde_json::from_slice(files.get("manifest.json").unwrap()).unwrap();
+        assert_eq!(manifest.format, VAULT_BACKUP_FORMAT);
+        assert_eq!(manifest.metrics.bundle_total, 1);
+        assert_eq!(manifest.metrics.pack_total, 1);
+
+        let config: VaultConfigResponse =
+            serde_json::from_slice(files.get("config/vault_config.json").unwrap()).unwrap();
+        assert_eq!(config.tenant.organization_id.as_deref(), Some("org-demo"));
+
+        let actor: Option<String> = sqlx::query_scalar(
+            "SELECT actor FROM audit_log WHERE action = ? ORDER BY id DESC LIMIT 1",
+        )
+        .bind("export_backup")
+        .fetch_optional(&db)
+        .await
+        .unwrap();
+        assert_eq!(actor.as_deref(), Some(AUDIT_ACTOR_API));
+    }
+
+    #[tokio::test]
     async fn v1_routes_require_bearer_auth_when_configured() {
         let state =
             test_state_with_auth(DEFAULT_MAX_PAYLOAD_BYTES, &[("secret-token", "ops")]).await;
@@ -7697,6 +8265,22 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
             .unwrap();
         let health_response = app.clone().oneshot(health_request).await.unwrap();
         assert_eq!(health_response.status(), StatusCode::OK);
+
+        let metrics_request = Request::builder()
+            .method("GET")
+            .uri("/metrics")
+            .body(Body::empty())
+            .unwrap();
+        let metrics_response = app.clone().oneshot(metrics_request).await.unwrap();
+        assert_eq!(metrics_response.status(), StatusCode::OK);
+
+        let backup_request = Request::builder()
+            .method("POST")
+            .uri("/v1/backup")
+            .body(Body::empty())
+            .unwrap();
+        let backup_response = app.clone().oneshot(backup_request).await.unwrap();
+        assert_eq!(backup_response.status(), StatusCode::UNAUTHORIZED);
 
         let config_request = Request::builder()
             .method("GET")

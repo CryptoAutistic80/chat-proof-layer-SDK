@@ -223,7 +223,7 @@ Current file-config limitations:
 - `storage.blob_backend` must be `filesystem`
 - PostgreSQL and S3 config are parsed but fail fast as not implemented
 
-When auth is configured, `/v1/*` requires `Authorization: Bearer <token>`. `proofctl` picks this up from `PROOF_SERVICE_API_KEY`, and the TypeScript/Python vault clients already support `apiKey`. `/healthz` and `/readyz` remain open for infrastructure checks.
+When auth is configured, `/v1/*` requires `Authorization: Bearer <token>`. `proofctl` picks this up from `PROOF_SERVICE_API_KEY`, and the TypeScript/Python vault clients already support `apiKey`. `/healthz`, `/readyz`, and `/metrics` remain open for infrastructure checks and scraping.
 
 When `[tenant].organization_id` or `PROOF_SERVICE_ORGANIZATION_ID` is configured, the vault runs in bounded single-tenant mode: new captures inherit that `actor.organization_id` when missing, explicit mismatches are rejected, and startup fails if existing stored bundles are scoped to a different organization.
 
@@ -231,6 +231,7 @@ When `[tenant].organization_id` or `PROOF_SERVICE_ORGANIZATION_ID` is configured
 
 - `GET /healthz`
 - `GET /readyz`
+- `GET /metrics`
 - `POST /v1/bundles`
 - `GET /v1/bundles?system_id=&role=&type=&has_timestamp=&has_receipt=&assurance_level=&from=&to=&page=&limit=`
 - `GET /v1/bundles/{bundle_id}`
@@ -254,6 +255,7 @@ When `[tenant].organization_id` or `PROOF_SERVICE_ORGANIZATION_ID` is configured
 - `GET /v1/packs/{pack_id}`
 - `GET /v1/packs/{pack_id}/manifest`
 - `GET /v1/packs/{pack_id}/export`
+- `POST /v1/backup`
 - `GET /v1/retention/status`
 - `POST /v1/retention/scan`
 - `POST /v1/verify` (supports inline bundle+artefacts or packaged `bundle.pkg`)
@@ -406,13 +408,15 @@ npm run dev
 - The TypeScript and Python SDKs now also expose local disclosure-policy builder helpers so callers can compose the same template/group model without hand-writing selector maps.
 - `proofctl inspect` now supports `--show-items` and `--show-merkle`.
 - `proofctl pack` and `proofctl vault export` now support `--bundle-format <full|disclosure>` plus either `--disclosure-policy <name>` or inline template selection through `--disclosure-template-profile`, `--disclosure-template-name`, and repeatable `--disclosure-group`, so vault exports can contain either full `bundle.pkg` members or disclosure packages shaped by named or built-in disclosure profiles.
-- `proofctl vault status|query|retention|systems|export` now covers the main vault read/query/export flows from the plan without requiring manual `curl`.
+- `proofctl vault status|metrics|backup|query|retention|systems|export` now covers the main vault read/query/export flows from the plan without requiring manual `curl`.
 - The vault now persists metadata in SQLite, computes bundle expiry from seeded retention policies, derives per-item `obligation_ref` tags, exposes retention scan/status endpoints, supports legal holds, and indexes evidence items for `/v1/bundles` filtering.
 - The vault now exposes `GET /v1/systems` and `GET /v1/systems/{system_id}/summary` for system-level evidence rollups across role, item type, retention class, assurance level, and model usage.
 - `/v1/bundles` now also supports assurance-oriented filtering through `has_timestamp`, `has_receipt`, and `assurance_level=signed|timestamped|transparency_anchored`, and bundle summaries now report the computed assurance level.
 - Retention scans now soft-delete expired bundles, skip held bundles, and hard-delete previously soft-deleted bundles after the configured grace period (`PROOF_SERVICE_RETENTION_GRACE_DAYS`, default `30`).
 - The vault now keeps an append-only audit trail and exposes it via `/v1/audit-trail`; current actions include bundle create/read/verify/delete, legal hold changes, retention scans, and pack create/read/export events.
 - Optional bearer auth now protects `/v1/*`, and audit rows record the configured principal label instead of the generic `api` actor when requests are authenticated.
+- The vault now exposes a Prometheus-style `/metrics` endpoint for infra scraping, with gauges for bundle/pack/audit totals plus auth/TLS/tenant runtime state.
+- `POST /v1/backup` now returns an authenticated `.tar.gz` snapshot for SQLite-based deployments containing a consistent `VACUUM INTO` metadata copy, current non-secret config, and filesystem blobs/pack exports under the vault storage directory.
 - The vault now exposes `GET /v1/config`, `PUT /v1/config/retention`, `PUT /v1/config/timestamp`, `PUT /v1/config/transparency`, `PUT /v1/config/disclosure`, and `POST /v1/disclosure/preview`; disclosure config persists named disclosure-policy profiles with item-type filters, obligation-ref filters, artefact-metadata rules, and optional artefact-byte inclusion, while timestamp/transparency config carry PEM trust anchors, PEM CRLs, live OCSP responder URLs, qualified TSA signer allowlists, expected RFC 3161 policy OIDs, and transparency-service public keys for trust-aware verification.
 - Retention policies now include an `expiry_mode`; the seeded `gpai_documentation` class uses `until_withdrawn`, so GPAI documentation stays active until operator withdrawal instead of auto-expiring on a fixed date.
 - `POST /v1/bundles/{bundle_id}/timestamp` now uses the configured RFC 3161 provider to timestamp an existing stored bundle and persist the token back into bundle JSON.

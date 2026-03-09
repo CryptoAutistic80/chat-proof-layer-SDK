@@ -29,11 +29,13 @@ use std::{
     io::{Read, Write},
     path::{Component, Path, PathBuf},
 };
+use tar::Archive as TarArchive;
 use tracing::info;
 use ulid::Ulid;
 
 const BUNDLE_PACKAGE_FORMAT: &str = "pl-bundle-pkg-v1";
 const DISCLOSURE_PACKAGE_FORMAT: &str = "pl-bundle-disclosure-pkg-v1";
+const VAULT_BACKUP_FORMAT: &str = "pl-vault-backup-v1";
 const DEFAULT_MAX_PAYLOAD_BYTES: usize = 10 * 1024 * 1024;
 
 #[derive(Parser)]
@@ -206,6 +208,13 @@ enum VaultCommands {
         vault_url: String,
         #[arg(long)]
         out: PathBuf,
+    },
+    /// Restore a previously exported vault backup archive into a fresh local directory.
+    Restore {
+        #[arg(long = "in")]
+        input: PathBuf,
+        #[arg(long = "out-dir")]
+        out_dir: PathBuf,
     },
     /// Query stored bundles via the vault API.
     Query {
@@ -1029,6 +1038,13 @@ struct VaultRetentionStatusItem {
 }
 
 #[derive(Debug, Deserialize, Serialize)]
+struct VaultBackupManifest {
+    format: String,
+    backup_id: String,
+    created_at: String,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
 struct VaultConfigResponse {
     service: VaultServiceConfigView,
     signing: VaultSigningConfigView,
@@ -1372,6 +1388,7 @@ fn main() -> Result<()> {
             VaultCommands::Status { vault_url, format } => cmd_vault_status(&vault_url, format),
             VaultCommands::Metrics { vault_url } => cmd_vault_metrics(&vault_url),
             VaultCommands::Backup { vault_url, out } => cmd_vault_backup(&vault_url, &out),
+            VaultCommands::Restore { input, out_dir } => cmd_vault_restore(&input, &out_dir),
             VaultCommands::Query {
                 vault_url,
                 system_id,
@@ -2444,6 +2461,172 @@ fn cmd_vault_backup(vault_url: &str, out_path: &Path) -> Result<()> {
     fs::write(out_path, bytes.as_ref())
         .with_context(|| format!("failed to write {}", out_path.display()))?;
     println!("{}", out_path.display());
+    Ok(())
+}
+
+fn cmd_vault_restore(input_path: &Path, out_dir: &Path) -> Result<()> {
+    let archive_bytes =
+        fs::read(input_path).with_context(|| format!("failed to read {}", input_path.display()))?;
+    let layout = restore_vault_backup_archive(&archive_bytes, out_dir)?;
+    println!("restored: {}", layout.root_dir.display());
+    println!("metadata_db: {}", layout.metadata_db.display());
+    println!("storage_dir: {}", layout.storage_dir.display());
+    println!("config_json: {}", layout.config_json.display());
+    Ok(())
+}
+
+#[derive(Debug)]
+struct RestoredVaultLayout {
+    root_dir: PathBuf,
+    metadata_db: PathBuf,
+    storage_dir: PathBuf,
+    config_json: PathBuf,
+}
+
+fn restore_vault_backup_archive(bytes: &[u8], out_dir: &Path) -> Result<RestoredVaultLayout> {
+    if out_dir.exists() {
+        let mut entries = fs::read_dir(out_dir)
+            .with_context(|| format!("failed to inspect {}", out_dir.display()))?;
+        if entries.next().transpose()?.is_some() {
+            bail!(
+                "restore target {} must not already contain files",
+                out_dir.display()
+            );
+        }
+    }
+
+    let parent = out_dir
+        .parent()
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| PathBuf::from("."));
+    fs::create_dir_all(&parent)
+        .with_context(|| format!("failed to create {}", parent.display()))?;
+
+    let staging_dir = parent.join(format!(".proof-layer-restore-{}", generate_bundle_id()));
+    if staging_dir.exists() {
+        fs::remove_dir_all(&staging_dir)
+            .with_context(|| format!("failed to clear {}", staging_dir.display()))?;
+    }
+    fs::create_dir_all(&staging_dir)
+        .with_context(|| format!("failed to create {}", staging_dir.display()))?;
+
+    let restore_result = extract_vault_backup_archive(bytes, &staging_dir).and_then(|layout| {
+        validate_restored_vault_layout(&layout)?;
+        if out_dir.exists() {
+            fs::remove_dir(out_dir)
+                .with_context(|| format!("failed to clear empty {}", out_dir.display()))?;
+        }
+        fs::rename(&staging_dir, out_dir).with_context(|| {
+            format!(
+                "failed to move restored vault from {} to {}",
+                staging_dir.display(),
+                out_dir.display()
+            )
+        })?;
+        Ok(RestoredVaultLayout {
+            root_dir: out_dir.to_path_buf(),
+            metadata_db: out_dir.join("metadata/metadata.db"),
+            storage_dir: out_dir.join("storage"),
+            config_json: out_dir.join("config/vault_config.json"),
+        })
+    });
+
+    if restore_result.is_err() {
+        match fs::remove_dir_all(&staging_dir) {
+            Ok(()) => {}
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+            Err(_) => {}
+        }
+    }
+
+    restore_result
+}
+
+fn extract_vault_backup_archive(bytes: &[u8], target_dir: &Path) -> Result<RestoredVaultLayout> {
+    fs::create_dir_all(target_dir.join("storage"))
+        .with_context(|| format!("failed to create {}", target_dir.join("storage").display()))?;
+    let mut archive = TarArchive::new(GzDecoder::new(std::io::Cursor::new(bytes)));
+    let mut seen_paths = HashSet::new();
+    let mut manifest_bytes = None;
+    let mut config_bytes = None;
+    let mut metadata_present = false;
+
+    for entry in archive
+        .entries()
+        .context("failed to list backup archive entries")?
+    {
+        let mut entry = entry.context("failed to read backup archive entry")?;
+        let raw_path = String::from_utf8_lossy(entry.path_bytes().as_ref()).to_string();
+        validate_artefact_name(&raw_path)
+            .with_context(|| format!("invalid backup archive entry path {raw_path}"))?;
+        if !seen_paths.insert(raw_path.clone()) {
+            bail!("duplicate backup archive entry {raw_path}");
+        }
+
+        let destination = target_dir.join(&raw_path);
+        if let Some(parent) = destination.parent() {
+            fs::create_dir_all(parent)
+                .with_context(|| format!("failed to create {}", parent.display()))?;
+        }
+        let mut contents = Vec::new();
+        entry
+            .read_to_end(&mut contents)
+            .with_context(|| format!("failed to read backup archive entry {raw_path}"))?;
+        fs::write(&destination, &contents)
+            .with_context(|| format!("failed to write {}", destination.display()))?;
+
+        match raw_path.as_str() {
+            "manifest.json" => manifest_bytes = Some(contents),
+            "config/vault_config.json" => config_bytes = Some(contents),
+            "metadata/metadata.db" => metadata_present = true,
+            _ => {}
+        }
+    }
+
+    let manifest_bytes = manifest_bytes.context("backup archive missing manifest.json")?;
+    let manifest: VaultBackupManifest =
+        serde_json::from_slice(&manifest_bytes).context("failed to decode backup manifest.json")?;
+    if manifest.format != VAULT_BACKUP_FORMAT {
+        bail!(
+            "unsupported backup archive format {}, expected {}",
+            manifest.format,
+            VAULT_BACKUP_FORMAT
+        );
+    }
+    if !metadata_present {
+        bail!("backup archive missing metadata/metadata.db");
+    }
+    let config_bytes = config_bytes.context("backup archive missing config/vault_config.json")?;
+    let _: VaultConfigResponse =
+        serde_json::from_slice(&config_bytes).context("failed to decode backup config JSON")?;
+
+    Ok(RestoredVaultLayout {
+        root_dir: target_dir.to_path_buf(),
+        metadata_db: target_dir.join("metadata/metadata.db"),
+        storage_dir: target_dir.join("storage"),
+        config_json: target_dir.join("config/vault_config.json"),
+    })
+}
+
+fn validate_restored_vault_layout(layout: &RestoredVaultLayout) -> Result<()> {
+    if !layout.metadata_db.is_file() {
+        bail!(
+            "restored metadata database is missing at {}",
+            layout.metadata_db.display()
+        );
+    }
+    if !layout.storage_dir.is_dir() {
+        bail!(
+            "restored storage directory is missing at {}",
+            layout.storage_dir.display()
+        );
+    }
+    if !layout.config_json.is_file() {
+        bail!(
+            "restored config JSON is missing at {}",
+            layout.config_json.display()
+        );
+    }
     Ok(())
 }
 
@@ -3788,7 +3971,10 @@ mod tests {
     };
     use serde_json::json;
     use sha2::{Digest, Sha256};
-    use std::time::{SystemTime, UNIX_EPOCH};
+    use std::{
+        fs,
+        time::{SystemTime, UNIX_EPOCH},
+    };
     use x509_certificate::{
         CapturedX509Certificate, DigestAlgorithm, InMemorySigningKeyPair, KeyAlgorithm,
         X509CertificateBuilder,
@@ -4010,6 +4196,159 @@ mod tests {
                 "receipt_b64": base64ct::Base64::encode_string(b"scitt-receipt"),
             }),
         }
+    }
+
+    fn sample_vault_config_response() -> VaultConfigResponse {
+        VaultConfigResponse {
+            service: VaultServiceConfigView {
+                addr: "127.0.0.1:8080".to_string(),
+                max_payload_bytes: DEFAULT_MAX_PAYLOAD_BYTES,
+                tls_enabled: true,
+            },
+            signing: VaultSigningConfigView {
+                key_id: "kid-dev-01".to_string(),
+                algorithm: "ed25519".to_string(),
+            },
+            storage: VaultStorageConfigView {
+                metadata_backend: "sqlite".to_string(),
+                blob_backend: "filesystem".to_string(),
+            },
+            retention: VaultRetentionConfigView {
+                grace_period_days: 30,
+                scan_interval_hours: 24,
+                policies: vec![VaultRetentionPolicyConfig {
+                    retention_class: "runtime_logs".to_string(),
+                    min_duration_days: 3650,
+                    max_duration_days: None,
+                    legal_basis: "eu_ai_act_article_12_19_26".to_string(),
+                    active: true,
+                }],
+            },
+            timestamp: VaultTimestampConfig {
+                enabled: false,
+                provider: "rfc3161".to_string(),
+                url: "http://timestamp.digicert.com".to_string(),
+                assurance: None,
+                trust_anchor_pems: Vec::new(),
+                crl_pems: Vec::new(),
+                ocsp_responder_urls: Vec::new(),
+                qualified_signer_pems: Vec::new(),
+                policy_oids: Vec::new(),
+            },
+            transparency: VaultTransparencyConfig {
+                enabled: false,
+                provider: "none".to_string(),
+                url: None,
+                log_public_key_pem: None,
+            },
+            auth: VaultAuthConfigView {
+                enabled: true,
+                scheme: "bearer".to_string(),
+                principal_labels: vec!["ops".to_string()],
+            },
+            audit: VaultAuditConfigView { enabled: true },
+            tenant: VaultTenantConfigView {
+                organization_id: Some("org-demo".to_string()),
+                enforced: true,
+            },
+        }
+    }
+
+    fn append_test_tar_file(
+        builder: &mut tar::Builder<GzEncoder<Vec<u8>>>,
+        path: &str,
+        bytes: &[u8],
+    ) {
+        let mut header = tar::Header::new_gnu();
+        header.set_mode(0o644);
+        header.set_size(bytes.len() as u64);
+        header.set_cksum();
+        builder
+            .append_data(&mut header, path, std::io::Cursor::new(bytes))
+            .unwrap();
+    }
+
+    fn build_test_backup_archive() -> Vec<u8> {
+        let manifest = VaultBackupManifest {
+            format: VAULT_BACKUP_FORMAT.to_string(),
+            backup_id: "backup-01".to_string(),
+            created_at: "2026-03-09T12:00:00Z".to_string(),
+        };
+        let config = sample_vault_config_response();
+
+        let mut builder = tar::Builder::new(GzEncoder::new(Vec::new(), Compression::default()));
+        append_test_tar_file(
+            &mut builder,
+            "manifest.json",
+            &serde_json::to_vec(&manifest).unwrap(),
+        );
+        append_test_tar_file(
+            &mut builder,
+            "config/vault_config.json",
+            &serde_json::to_vec(&config).unwrap(),
+        );
+        append_test_tar_file(&mut builder, "metadata/metadata.db", b"sqlite-snapshot");
+        append_test_tar_file(
+            &mut builder,
+            "storage/artefacts/bundle-01/prompt.json",
+            br#"{"prompt":"hello"}"#,
+        );
+        append_test_tar_file(
+            &mut builder,
+            "storage/packs/pack-01/evidence_pack.pkg",
+            b"pack-bytes",
+        );
+
+        builder.into_inner().unwrap().finish().unwrap()
+    }
+
+    fn build_test_backup_archive_with_entry(path: &str) -> Vec<u8> {
+        let mut builder = tar::Builder::new(GzEncoder::new(Vec::new(), Compression::default()));
+        append_test_tar_file(
+            &mut builder,
+            "manifest.json",
+            &serde_json::to_vec(&VaultBackupManifest {
+                format: VAULT_BACKUP_FORMAT.to_string(),
+                backup_id: "backup-01".to_string(),
+                created_at: "2026-03-09T12:00:00Z".to_string(),
+            })
+            .unwrap(),
+        );
+        append_test_tar_file(
+            &mut builder,
+            "config/vault_config.json",
+            &serde_json::to_vec(&sample_vault_config_response()).unwrap(),
+        );
+        append_test_tar_file(&mut builder, "metadata/metadata.db", b"sqlite-snapshot");
+        append_test_tar_file(&mut builder, path, b"bad");
+        builder.into_inner().unwrap().finish().unwrap()
+    }
+
+    fn rewrite_backup_archive_entry_path(bytes: &[u8], from: &str, to: &str) -> Vec<u8> {
+        assert_eq!(from.len(), to.len());
+        let mut decoder = flate2::read::GzDecoder::new(std::io::Cursor::new(bytes));
+        let mut tar_bytes = Vec::new();
+        decoder.read_to_end(&mut tar_bytes).unwrap();
+        let offset = tar_bytes
+            .windows(from.len())
+            .position(|window| window == from.as_bytes())
+            .unwrap();
+        tar_bytes[offset..offset + from.len()].copy_from_slice(to.as_bytes());
+        let header_start = offset - (offset % 512);
+        for byte in &mut tar_bytes[header_start + 148..header_start + 156] {
+            *byte = b' ';
+        }
+        let checksum: u32 = tar_bytes[header_start..header_start + 512]
+            .iter()
+            .map(|byte| u32::from(*byte))
+            .sum();
+        let checksum_field = format!("{checksum:06o}\0 ");
+        tar_bytes[header_start + 148..header_start + 156]
+            .copy_from_slice(checksum_field.as_bytes());
+
+        let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
+        encoder.write_all(&tar_bytes).unwrap();
+        encoder.finish().unwrap()
     }
 
     fn rekor_leaf_hash_hex(body_bytes: &[u8]) -> String {
@@ -4424,6 +4763,80 @@ mod tests {
                 assert_eq!(out, PathBuf::from("/tmp/vault-backup.tar.gz"));
             }
             _ => panic!("unexpected command parsed"),
+        }
+    }
+
+    #[test]
+    fn vault_restore_command_accepts_out_dir() {
+        let cli = Cli::try_parse_from([
+            "proofctl",
+            "vault",
+            "restore",
+            "--in",
+            "/tmp/vault-backup.tar.gz",
+            "--out-dir",
+            "/tmp/restored-vault",
+        ])
+        .unwrap();
+
+        match cli.command {
+            Commands::Vault {
+                command: VaultCommands::Restore { input, out_dir },
+            } => {
+                assert_eq!(input, PathBuf::from("/tmp/vault-backup.tar.gz"));
+                assert_eq!(out_dir, PathBuf::from("/tmp/restored-vault"));
+            }
+            _ => panic!("unexpected command parsed"),
+        }
+    }
+
+    #[test]
+    fn restore_vault_backup_archive_extracts_expected_layout() {
+        let base = std::env::temp_dir().join(format!(
+            "proofctl-restore-test-{}",
+            generate_bundle_id().to_ascii_lowercase()
+        ));
+        let out_dir = base.join("restored");
+        let archive = build_test_backup_archive();
+
+        let layout = restore_vault_backup_archive(&archive, &out_dir).unwrap();
+
+        assert_eq!(layout.root_dir, out_dir);
+        assert!(layout.metadata_db.is_file());
+        assert!(layout.storage_dir.is_dir());
+        assert!(layout.config_json.is_file());
+        assert_eq!(
+            fs::read_to_string(out_dir.join("storage/artefacts/bundle-01/prompt.json")).unwrap(),
+            "{\"prompt\":\"hello\"}"
+        );
+        let manifest: VaultBackupManifest =
+            serde_json::from_slice(&fs::read(out_dir.join("manifest.json")).unwrap()).unwrap();
+        assert_eq!(manifest.format, VAULT_BACKUP_FORMAT);
+
+        fs::remove_dir_all(base).unwrap();
+    }
+
+    #[test]
+    fn restore_vault_backup_archive_rejects_path_traversal() {
+        let base = std::env::temp_dir().join(format!(
+            "proofctl-restore-bad-test-{}",
+            generate_bundle_id().to_ascii_lowercase()
+        ));
+        let out_dir = base.join("restored");
+        let archive = rewrite_backup_archive_entry_path(
+            &build_test_backup_archive_with_entry("xx/escape.txt"),
+            "xx/escape.txt",
+            "../escape.txt",
+        );
+
+        let err = restore_vault_backup_archive(&archive, &out_dir).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("invalid backup archive entry path ../escape.txt")
+        );
+
+        if base.exists() {
+            fs::remove_dir_all(base).unwrap();
         }
     }
 

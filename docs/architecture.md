@@ -78,7 +78,7 @@ Current SQLite tables:
 - `verify`: offline integrity and signature verification for full and disclosure packages
 - `inspect`: human/JSON diagnostics
 - `pack`: request a vault export pack and write the archive locally, with `full` or `disclosure` bundle members
-- `vault status|metrics|backup|query|retention|systems|export`: thin CLI wrappers over the vault HTTP query/export surfaces
+- `vault status|metrics|backup|restore|query|retention|systems|export`: thin CLI wrappers over the vault HTTP query/export surfaces
 
 Current pack export behavior:
 
@@ -111,6 +111,7 @@ Current config behavior:
 - `proof-service` can also require bearer auth on `/v1/*` when `[auth]` / `[[auth.api_keys]]` or `PROOF_SERVICE_API_KEY` are configured; `/healthz` and `/readyz` stay open.
 - `proof-service` now also exposes `/metrics` in Prometheus text format for infra scraping, with gauges derived from current SQLite bundle/pack/audit state plus auth/TLS/tenant runtime flags.
 - `proof-service` now also exposes authenticated `POST /v1/backup`, which returns a `.tar.gz` archive containing a consistent SQLite snapshot (`VACUUM INTO`), the current non-secret config view, and filesystem blobs/pack exports for one-shot pilot backup/export.
+- `proofctl vault restore` now provides the matching offline import path for that archive format, restoring into a fresh local directory instead of mutating a live service in place.
 - `proof-service` can also enforce a single organization scope when `[tenant].organization_id` or `PROOF_SERVICE_ORGANIZATION_ID` is configured; new captures inherit that `actor.organization_id` when omitted, mismatches are rejected, and startup fails if stored bundles already belong to a different organization.
 - `GET /v1/config` returns the active service view for payload limits, bound address, TLS enabled state, auth enabled state/principal labels, tenant enforcement state, signing algorithm/key id, storage backends, retention grace period, retention policies, and persisted timestamp/transparency provider settings.
 - `GET /v1/config` also reports the retention scan interval currently active in the process.

@@ -213,9 +213,10 @@ Supported runtime config knobs:
 - optional bearer-auth fields: `[auth].enabled`, `[[auth.api_keys]].key`, and `[[auth.api_keys]].label`
 - optional single-tenant field: `[tenant].organization_id`
 - scheduled local backup fields: `[backup].directory`, `[backup].interval_hours`, and `[backup].retention_count`
+- optional backup-encryption fields: `[backup.encryption].enabled`, `[backup.encryption].key_base64` / `[backup.encryption].key_path`, and `[backup.encryption].key_id`
 - trust-aware assurance fields: `[timestamp].assurance`, `[timestamp].trust_anchor_pems` / `[timestamp].trust_anchor_paths`, `[timestamp].crl_pems` / `[timestamp].crl_paths`, `[timestamp].ocsp_responder_urls`, `[timestamp].qualified_signer_pems` / `[timestamp].qualified_signer_paths`, `[timestamp].policy_oids`, and `[transparency].log_public_key_pem` / `[transparency].log_public_key_path`
 - `PROOF_SERVICE_CONFIG_PATH=/path/to/vault.toml` to point at a non-default file
-- env overrides for `PROOF_SERVICE_ADDR`, `PROOF_SERVICE_TLS_CERT_PATH`, `PROOF_SERVICE_TLS_KEY_PATH`, `PROOF_SERVICE_API_KEY`, `PROOF_SERVICE_API_KEY_LABEL`, `PROOF_SERVICE_ORGANIZATION_ID`, `PROOF_SERVICE_STORAGE_DIR`, `PROOF_SERVICE_DB_PATH`, `PROOF_SERVICE_BACKUP_DIR`, `PROOF_SERVICE_BACKUP_INTERVAL_HOURS`, `PROOF_SERVICE_BACKUP_RETENTION_COUNT`, `PROOF_SIGNING_KEY_PATH`, `PROOF_SIGNING_KEY_ID`, `PROOF_SERVICE_MAX_PAYLOAD_BYTES`, `PROOF_SERVICE_RETENTION_GRACE_DAYS`, and `PROOF_SERVICE_RETENTION_SCAN_INTERVAL_HOURS`
+- env overrides for `PROOF_SERVICE_ADDR`, `PROOF_SERVICE_TLS_CERT_PATH`, `PROOF_SERVICE_TLS_KEY_PATH`, `PROOF_SERVICE_API_KEY`, `PROOF_SERVICE_API_KEY_LABEL`, `PROOF_SERVICE_ORGANIZATION_ID`, `PROOF_SERVICE_STORAGE_DIR`, `PROOF_SERVICE_DB_PATH`, `PROOF_SERVICE_BACKUP_DIR`, `PROOF_SERVICE_BACKUP_INTERVAL_HOURS`, `PROOF_SERVICE_BACKUP_RETENTION_COUNT`, `PROOF_SERVICE_BACKUP_ENCRYPTION_KEY_B64`, `PROOF_SERVICE_BACKUP_ENCRYPTION_KEY_PATH`, `PROOF_SERVICE_BACKUP_ENCRYPTION_KEY_ID`, `PROOF_SIGNING_KEY_PATH`, `PROOF_SIGNING_KEY_ID`, `PROOF_SERVICE_MAX_PAYLOAD_BYTES`, `PROOF_SERVICE_RETENTION_GRACE_DAYS`, and `PROOF_SERVICE_RETENTION_SCAN_INTERVAL_HOURS`
 
 Current file-config limitations:
 
@@ -385,6 +386,14 @@ npm install
 npm run dev
 ```
 
+The demo is now aligned with the current vault surface rather than the old PoC bundle simulator:
+
+- it loads `/v1/config` and `/v1/disclosure/templates` to show auth, assurance, tenant, backup, and disclosure capabilities
+- it creates a real v1.0 `llm_interaction` bundle with prompt, response, and trace artefacts through `POST /v1/bundles`
+- it can optionally drive vault timestamping, transparency anchoring, disclosure preview, pack export, and system-summary lookup in one workflow
+- it can export either full or disclosure-format `runtime_logs` packs shaped by a built-in disclosure template
+- if you paste a public key PEM, it also runs service-side bundle verification through `POST /v1/verify`
+
 ## Notes
 
 - Full proof packages are gzip-compressed JSON (`bundle.pkg`) containing named files (`proof_bundle.json`, `proof_bundle.canonical.json`, `proof_bundle.sig`, `artefacts/*`, `manifest.json`).
@@ -418,8 +427,9 @@ npm run dev
 - Optional bearer auth now protects `/v1/*`, and audit rows record the configured principal label instead of the generic `api` actor when requests are authenticated.
 - The vault now exposes a Prometheus-style `/metrics` endpoint for infra scraping, with gauges for bundle/pack/audit totals plus auth/TLS/tenant runtime state.
 - `POST /v1/backup` now returns an authenticated `.tar.gz` snapshot for SQLite-based deployments containing a consistent `VACUUM INTO` metadata copy, current non-secret config, and filesystem blobs/pack exports under the vault storage directory.
-- `proofctl vault restore --in backup.tar.gz --out-dir ./restored-vault` now validates that archive offline, rejects traversal/duplicate entries, and lays it back out as `manifest.json`, `config/vault_config.json`, `metadata/metadata.db`, and `storage/*` for relaunch or inspection.
-- The vault can now also run scheduled local backups into `[backup].directory` / `PROOF_SERVICE_BACKUP_DIR`, pruning old `proof-layer-vault-backup-*.tar.gz` archives down to the configured retention count while excluding `storage/backups/*` from the archive itself to avoid recursive growth.
+- `proofctl vault restore --in backup.tar.gz --out-dir ./restored-vault` now validates that archive offline, rejects traversal/duplicate entries, and lays it back out as `manifest.json`, `config/vault_config.json`, `metadata/metadata.db`, and `storage/*` for relaunch or inspection. Encrypted backups can be restored with `--backup-key ./backup.key` or `PROOF_SERVICE_BACKUP_ENCRYPTION_KEY_B64`.
+- The vault can now also run scheduled local backups into `[backup].directory` / `PROOF_SERVICE_BACKUP_DIR`, pruning old `proof-layer-vault-backup-*.tar.gz` or `.tar.gz.enc` archives down to the configured retention count while excluding `storage/backups/*` from the archive itself to avoid recursive growth.
+- When `[backup.encryption]` or `PROOF_SERVICE_BACKUP_ENCRYPTION_KEY_*` is configured, `POST /v1/backup` and scheduled backups encrypt the archive with an XChaCha20-Poly1305 envelope before writing or returning it; `GET /v1/config` and `proofctl vault status` expose only the non-secret algorithm/key-id view.
 - The vault now exposes `GET /v1/config`, `PUT /v1/config/retention`, `PUT /v1/config/timestamp`, `PUT /v1/config/transparency`, `PUT /v1/config/disclosure`, and `POST /v1/disclosure/preview`; disclosure config persists named disclosure-policy profiles with item-type filters, obligation-ref filters, artefact-metadata rules, and optional artefact-byte inclusion, while timestamp/transparency config carry PEM trust anchors, PEM CRLs, live OCSP responder URLs, qualified TSA signer allowlists, expected RFC 3161 policy OIDs, and transparency-service public keys for trust-aware verification.
 - Retention policies now include an `expiry_mode`; the seeded `gpai_documentation` class uses `until_withdrawn`, so GPAI documentation stays active until operator withdrawal instead of auto-expiring on a fixed date.
 - `POST /v1/bundles/{bundle_id}/timestamp` now uses the configured RFC 3161 provider to timestamp an existing stored bundle and persist the token back into bundle JSON.

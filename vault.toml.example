@@ -30,6 +30,10 @@ blob_path = "./storage"
 directory = "./storage/backups"
 interval_hours = 0
 retention_count = 7
+# [backup.encryption]
+# enabled = true
+# key_path = "./keys/backup.key"
+# key_id = "backup-key-01"
 
 [timestamp]
 enabled = false

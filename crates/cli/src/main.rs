@@ -11,9 +11,9 @@ use proof_layer_core::{
     ScittTransparencyProvider, TimestampAssuranceProfile, TimestampProvider, TimestampToken,
     TimestampTrustPolicy, TransparencyProvider, TransparencyReceipt, TransparencyTrustPolicy,
     anchor_bundle as anchor_bundle_receipt, build_bundle, build_inclusion_proof,
-    capture_input_v01_to_event, decode_private_key_pem, decode_public_key_pem,
-    encode_private_key_pem, encode_public_key_pem, redact_bundle,
-    redact_bundle_with_field_redactions, sha256_prefixed, timestamp_digest,
+    capture_input_v01_to_event, decode_backup_encryption_key, decode_private_key_pem,
+    decode_public_key_pem, decrypt_backup_archive, encode_private_key_pem, encode_public_key_pem,
+    redact_bundle, redact_bundle_with_field_redactions, sha256_prefixed, timestamp_digest,
     validate_bundle_integrity_fields, validate_timestamp_trust_policy, verify_receipt,
     verify_receipt_with_policy, verify_redacted_bundle, verify_timestamp,
     verify_timestamp_with_policy,
@@ -215,6 +215,8 @@ enum VaultCommands {
         input: PathBuf,
         #[arg(long = "out-dir")]
         out_dir: PathBuf,
+        #[arg(long = "backup-key")]
+        backup_key: Option<PathBuf>,
     },
     /// Query stored bundles via the vault API.
     Query {
@@ -1084,6 +1086,14 @@ struct VaultBackupConfigView {
     directory: String,
     interval_hours: i64,
     retention_count: usize,
+    encryption: VaultBackupEncryptionConfigView,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct VaultBackupEncryptionConfigView {
+    enabled: bool,
+    algorithm: Option<String>,
+    key_id: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -1206,6 +1216,9 @@ struct VaultStatusOutput {
     backup_directory: String,
     backup_interval_hours: i64,
     backup_retention_count: usize,
+    backup_encryption_enabled: bool,
+    backup_encryption_algorithm: Option<String>,
+    backup_encryption_key_id: Option<String>,
     timestamp_enabled: bool,
     timestamp_provider: String,
     timestamp_assurance: Option<String>,
@@ -1401,7 +1414,11 @@ fn main() -> Result<()> {
             VaultCommands::Status { vault_url, format } => cmd_vault_status(&vault_url, format),
             VaultCommands::Metrics { vault_url } => cmd_vault_metrics(&vault_url),
             VaultCommands::Backup { vault_url, out } => cmd_vault_backup(&vault_url, &out),
-            VaultCommands::Restore { input, out_dir } => cmd_vault_restore(&input, &out_dir),
+            VaultCommands::Restore {
+                input,
+                out_dir,
+                backup_key,
+            } => cmd_vault_restore(&input, &out_dir, backup_key.as_deref()),
             VaultCommands::Query {
                 vault_url,
                 system_id,
@@ -2420,6 +2437,9 @@ fn cmd_vault_status(vault_url: &str, format: OutputFormat) -> Result<()> {
         backup_directory: config.backup.directory.clone(),
         backup_interval_hours: config.backup.interval_hours,
         backup_retention_count: config.backup.retention_count,
+        backup_encryption_enabled: config.backup.encryption.enabled,
+        backup_encryption_algorithm: config.backup.encryption.algorithm.clone(),
+        backup_encryption_key_id: config.backup.encryption.key_id.clone(),
         timestamp_enabled: config.timestamp.enabled,
         timestamp_provider: config.timestamp.provider.clone(),
         timestamp_assurance: config.timestamp.assurance.clone(),
@@ -2481,10 +2501,15 @@ fn cmd_vault_backup(vault_url: &str, out_path: &Path) -> Result<()> {
     Ok(())
 }
 
-fn cmd_vault_restore(input_path: &Path, out_dir: &Path) -> Result<()> {
+fn cmd_vault_restore(
+    input_path: &Path,
+    out_dir: &Path,
+    backup_key_path: Option<&Path>,
+) -> Result<()> {
     let archive_bytes =
         fs::read(input_path).with_context(|| format!("failed to read {}", input_path.display()))?;
-    let layout = restore_vault_backup_archive(&archive_bytes, out_dir)?;
+    let backup_key = load_backup_decryption_key(backup_key_path)?;
+    let layout = restore_vault_backup_archive(&archive_bytes, out_dir, backup_key.as_ref())?;
     println!("restored: {}", layout.root_dir.display());
     println!("metadata_db: {}", layout.metadata_db.display());
     println!("storage_dir: {}", layout.storage_dir.display());
@@ -2500,7 +2525,11 @@ struct RestoredVaultLayout {
     config_json: PathBuf,
 }
 
-fn restore_vault_backup_archive(bytes: &[u8], out_dir: &Path) -> Result<RestoredVaultLayout> {
+fn restore_vault_backup_archive(
+    bytes: &[u8],
+    out_dir: &Path,
+    backup_key: Option<&[u8; 32]>,
+) -> Result<RestoredVaultLayout> {
     if out_dir.exists() {
         let mut entries = fs::read_dir(out_dir)
             .with_context(|| format!("failed to inspect {}", out_dir.display()))?;
@@ -2527,26 +2556,31 @@ fn restore_vault_backup_archive(bytes: &[u8], out_dir: &Path) -> Result<Restored
     fs::create_dir_all(&staging_dir)
         .with_context(|| format!("failed to create {}", staging_dir.display()))?;
 
-    let restore_result = extract_vault_backup_archive(bytes, &staging_dir).and_then(|layout| {
-        validate_restored_vault_layout(&layout)?;
-        if out_dir.exists() {
-            fs::remove_dir(out_dir)
-                .with_context(|| format!("failed to clear empty {}", out_dir.display()))?;
-        }
-        fs::rename(&staging_dir, out_dir).with_context(|| {
-            format!(
-                "failed to move restored vault from {} to {}",
-                staging_dir.display(),
-                out_dir.display()
-            )
-        })?;
-        Ok(RestoredVaultLayout {
-            root_dir: out_dir.to_path_buf(),
-            metadata_db: out_dir.join("metadata/metadata.db"),
-            storage_dir: out_dir.join("storage"),
-            config_json: out_dir.join("config/vault_config.json"),
-        })
-    });
+    let decrypted_bytes = decrypt_backup_archive(bytes, backup_key)
+        .map_err(|err| anyhow!("failed to decode backup archive: {err}"))?;
+    let archive_bytes = decrypted_bytes.as_deref().unwrap_or(bytes);
+
+    let restore_result =
+        extract_vault_backup_archive(archive_bytes, &staging_dir).and_then(|layout| {
+            validate_restored_vault_layout(&layout)?;
+            if out_dir.exists() {
+                fs::remove_dir(out_dir)
+                    .with_context(|| format!("failed to clear empty {}", out_dir.display()))?;
+            }
+            fs::rename(&staging_dir, out_dir).with_context(|| {
+                format!(
+                    "failed to move restored vault from {} to {}",
+                    staging_dir.display(),
+                    out_dir.display()
+                )
+            })?;
+            Ok(RestoredVaultLayout {
+                root_dir: out_dir.to_path_buf(),
+                metadata_db: out_dir.join("metadata/metadata.db"),
+                storage_dir: out_dir.join("storage"),
+                config_json: out_dir.join("config/vault_config.json"),
+            })
+        });
 
     if restore_result.is_err() {
         match fs::remove_dir_all(&staging_dir) {
@@ -2623,6 +2657,43 @@ fn extract_vault_backup_archive(bytes: &[u8], target_dir: &Path) -> Result<Resto
         storage_dir: target_dir.join("storage"),
         config_json: target_dir.join("config/vault_config.json"),
     })
+}
+
+fn load_backup_decryption_key(backup_key_path: Option<&Path>) -> Result<Option<[u8; 32]>> {
+    let key_base64 = if let Some(path) = backup_key_path {
+        Some(
+            fs::read_to_string(path)
+                .with_context(|| format!("failed to read {}", path.display()))?
+                .trim()
+                .to_string(),
+        )
+    } else if let Some(value) = env::var("PROOF_SERVICE_BACKUP_ENCRYPTION_KEY_B64")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+    {
+        Some(value)
+    } else if let Some(path) = env::var("PROOF_SERVICE_BACKUP_ENCRYPTION_KEY_PATH")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+    {
+        Some(
+            fs::read_to_string(&path)
+                .with_context(|| format!("failed to read {path}"))?
+                .trim()
+                .to_string(),
+        )
+    } else {
+        None
+    };
+
+    key_base64
+        .map(|value| {
+            decode_backup_encryption_key(&value)
+                .map_err(|err| anyhow!("invalid backup decryption key: {err}"))
+        })
+        .transpose()
 }
 
 fn validate_restored_vault_layout(layout: &RestoredVaultLayout) -> Result<()> {
@@ -2816,6 +2887,19 @@ fn print_vault_status_human(status: &VaultStatusOutput, config: &VaultConfigResp
         status.backup_interval_hours,
         status.backup_retention_count,
         status.backup_directory
+    );
+    println!(
+        "backup.encryption: enabled={} algorithm={} key_id={}",
+        if status.backup_encryption_enabled {
+            "yes"
+        } else {
+            "no"
+        },
+        status
+            .backup_encryption_algorithm
+            .as_deref()
+            .unwrap_or("n/a"),
+        status.backup_encryption_key_id.as_deref().unwrap_or("n/a")
     );
     println!(
         "timestamp: enabled={} provider={} assurance={} trust_anchors={} ocsp_urls={} policy_oids={}",
@@ -4253,6 +4337,13 @@ mod tests {
                 directory: "/var/lib/proof-layer/backups".to_string(),
                 interval_hours: 6,
                 retention_count: 8,
+                encryption: VaultBackupEncryptionConfigView {
+                    enabled: true,
+                    algorithm: Some(
+                        proof_layer_core::VAULT_BACKUP_ENCRYPTION_ALGORITHM.to_string(),
+                    ),
+                    key_id: Some("backup-key-01".to_string()),
+                },
             },
             timestamp: VaultTimestampConfig {
                 enabled: false,
@@ -4330,6 +4421,15 @@ mod tests {
         );
 
         builder.into_inner().unwrap().finish().unwrap()
+    }
+
+    fn build_test_encrypted_backup_archive(key: &[u8; 32]) -> Vec<u8> {
+        proof_layer_core::encrypt_backup_archive(
+            &build_test_backup_archive(),
+            key,
+            Some("backup-key-test"),
+        )
+        .unwrap()
     }
 
     fn build_test_backup_archive_with_entry(path: &str) -> Vec<u8> {
@@ -4806,15 +4906,23 @@ mod tests {
             "/tmp/vault-backup.tar.gz",
             "--out-dir",
             "/tmp/restored-vault",
+            "--backup-key",
+            "/tmp/backup.key",
         ])
         .unwrap();
 
         match cli.command {
             Commands::Vault {
-                command: VaultCommands::Restore { input, out_dir },
+                command:
+                    VaultCommands::Restore {
+                        input,
+                        out_dir,
+                        backup_key,
+                    },
             } => {
                 assert_eq!(input, PathBuf::from("/tmp/vault-backup.tar.gz"));
                 assert_eq!(out_dir, PathBuf::from("/tmp/restored-vault"));
+                assert_eq!(backup_key, Some(PathBuf::from("/tmp/backup.key")));
             }
             _ => panic!("unexpected command parsed"),
         }
@@ -4829,7 +4937,7 @@ mod tests {
         let out_dir = base.join("restored");
         let archive = build_test_backup_archive();
 
-        let layout = restore_vault_backup_archive(&archive, &out_dir).unwrap();
+        let layout = restore_vault_backup_archive(&archive, &out_dir, None).unwrap();
 
         assert_eq!(layout.root_dir, out_dir);
         assert!(layout.metadata_db.is_file());
@@ -4859,11 +4967,48 @@ mod tests {
             "../escape.txt",
         );
 
-        let err = restore_vault_backup_archive(&archive, &out_dir).unwrap_err();
+        let err = restore_vault_backup_archive(&archive, &out_dir, None).unwrap_err();
         assert!(
             err.to_string()
                 .contains("invalid backup archive entry path ../escape.txt")
         );
+
+        if base.exists() {
+            fs::remove_dir_all(base).unwrap();
+        }
+    }
+
+    #[test]
+    fn restore_vault_backup_archive_can_decrypt_encrypted_archives() {
+        let base = std::env::temp_dir().join(format!(
+            "proofctl-restore-encrypted-test-{}",
+            generate_bundle_id().to_ascii_lowercase()
+        ));
+        let out_dir = base.join("restored");
+        let key = [17_u8; 32];
+        let archive = build_test_encrypted_backup_archive(&key);
+
+        let layout = restore_vault_backup_archive(&archive, &out_dir, Some(&key)).unwrap();
+
+        assert_eq!(layout.root_dir, out_dir);
+        assert!(layout.metadata_db.is_file());
+        assert!(layout.storage_dir.is_dir());
+        assert!(layout.config_json.is_file());
+
+        fs::remove_dir_all(base).unwrap();
+    }
+
+    #[test]
+    fn restore_vault_backup_archive_rejects_missing_key_for_encrypted_archives() {
+        let base = std::env::temp_dir().join(format!(
+            "proofctl-restore-encrypted-bad-test-{}",
+            generate_bundle_id().to_ascii_lowercase()
+        ));
+        let out_dir = base.join("restored");
+        let archive = build_test_encrypted_backup_archive(&[18_u8; 32]);
+
+        let err = restore_vault_backup_archive(&archive, &out_dir, None).unwrap_err();
+        assert!(err.to_string().contains("decryption key is required"));
 
         if base.exists() {
             fs::remove_dir_all(base).unwrap();

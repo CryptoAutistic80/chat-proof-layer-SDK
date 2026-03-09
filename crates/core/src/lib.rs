@@ -1,3 +1,4 @@
+pub mod backup;
 pub mod build;
 pub mod canon;
 pub mod disclosure;
@@ -28,6 +29,12 @@ pub mod canonicalize {
     pub use crate::canon::*;
 }
 
+pub use backup::{
+    BackupCryptoError, EncryptedVaultBackupEnvelope, VAULT_BACKUP_ENCRYPTION_ALGORITHM,
+    VAULT_BACKUP_ENCRYPTION_KEY_LENGTH, VAULT_BACKUP_ENVELOPE_FORMAT,
+    VaultBackupEncryptionMetadata, decode_backup_encryption_key, decrypt_backup_archive,
+    encrypt_backup_archive, parse_backup_envelope,
+};
 pub use build::{ArtefactInput, BuildBundleError, BundleBuildInput, build_bundle};
 pub use bundle::{
     Actor, ActorRole, ArtefactMeta, ArtefactRef, CaptureEvent, CaptureInput, EncryptionPolicy,

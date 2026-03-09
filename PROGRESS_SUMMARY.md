@@ -226,6 +226,16 @@ Completed:
   background archive export with retention-count pruning,
   `GET /v1/config` / `proofctl vault status` backup-state reporting,
   and archive exclusion for `storage/backups/*` so scheduled backups do not recursively capture themselves.
+- Added the next backup-hardening slice:
+  optional backup encryption via `[backup.encryption]` / `PROOF_SERVICE_BACKUP_ENCRYPTION_KEY_*`,
+  shared XChaCha20-Poly1305 archive envelope logic in `proof-layer-core`,
+  encrypted `POST /v1/backup` and scheduled backup export when configured,
+  and `proofctl vault restore --backup-key ...` / env-based offline decryption support.
+- Refreshed `web-demo` into a real investor-facing vault workflow:
+  it now loads live capability state from `/v1/config` and `/v1/disclosure/templates`,
+  creates a v1.0 `llm_interaction` bundle with prompt/response/trace artefacts through `POST /v1/bundles`,
+  can optionally drive timestamping, transparency anchoring, disclosure preview, pack export, and system-summary lookup end to end,
+  and exports either full or disclosure-format `runtime_logs` packs using built-in disclosure templates instead of the old client-side PoC package simulator.
 - Extended pack export into the selective-disclosure path:
   `POST /v1/packs` now accepts `bundle_format = "full" | "disclosure"`,
   vault `GET /v1/packs/{id}/export` can emit redacted disclosure-package members selected by pack curation rules,
@@ -260,7 +270,7 @@ Still outstanding from `plan.md`:
 - The vault now uses SQLite with legal-hold-aware retention, audit logging, file/env/runtime configuration, background retention scanning, curated pack export, redacted disclosure-pack export, RFC 3161 bundle timestamp attachment, and transparency anchoring, but PostgreSQL and Annex-complete artefact/redaction policy assembly are not built yet.
 - The vault now also supports optional bearer auth with per-principal audit labels on `/v1/*` plus bounded single-tenant org enforcement; broader multi-tenant org isolation and per-query tenant filtering are still future work.
 - The vault now exposes a useful Prometheus-style `/metrics` surface, but it still does not emit OTLP traces/metrics, external log shipping, or richer per-route latency histograms.
-- SQLite pilots now have matched backup export, scheduled local backup rotation, and offline restore/import flows, but there is still no live in-place restore endpoint, remote backup targets, or backup encryption/key management.
+- SQLite pilots now have matched backup export, optional backup encryption, scheduled local backup rotation, and offline restore/import flows, but there is still no live in-place restore endpoint or remote backup targets.
 - TypeScript and Python now both have native FFI bridges, local sealing paths, higher-level `ProofLayer` facades, a local artifact build path for npm tarballs and platform-tagged wheels, and CI-backed multi-platform GitHub artifact builds, but there is still no automated publish step to npm or PyPI.
 - TypeScript and Python SDKs now expose local redacted-bundle helpers (`disclose` / `verifyRedactedBundle` in TypeScript, `disclose` / `verify_redacted_bundle` in Python), including top-level field redaction for local v3 bundles and nested JSON-pointer path redaction for local v4 bundles, plus vault pack helpers for `bundle_format = "full" | "disclosure"` with `disclosure_policy` or inline `disclosure_template`, vault disclosure-config read/update helpers, and disclosure-preview helpers.
 - The main remaining gaps are no longer the evidence catalog itself; they are the harder later-phase items like deeper trust policy work, fuller SCITT interoperability, alternative storage backends, and automated npm/PyPI/prebuilt release publishing hardening.

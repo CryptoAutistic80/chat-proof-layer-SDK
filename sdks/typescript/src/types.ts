@@ -374,6 +374,11 @@ export interface VaultConfigResponse extends JsonObject {
     directory: string;
     interval_hours: number;
     retention_count: number;
+    encryption: JsonObject & {
+      enabled: boolean;
+      algorithm?: string;
+      key_id?: string;
+    };
   };
   timestamp: JsonObject;
   transparency: JsonObject;

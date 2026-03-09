@@ -17,8 +17,9 @@ use proof_layer_core::{
     ReceiptVerification, RedactedBundle, RekorTransparencyProvider, Rfc3161HttpTimestampProvider,
     ScittTransparencyProvider, TimestampAssuranceProfile, TimestampToken, TimestampTrustPolicy,
     TimestampVerification, TransparencyReceipt, TransparencyTrustPolicy,
-    anchor_bundle as anchor_bundle_receipt, build_bundle, canonicalize_value,
-    decode_private_key_pem, decode_public_key_pem, redact_bundle,
+    VAULT_BACKUP_ENCRYPTION_ALGORITHM, anchor_bundle as anchor_bundle_receipt, build_bundle,
+    canonicalize_value, decode_backup_encryption_key, decode_private_key_pem,
+    decode_public_key_pem, encrypt_backup_archive, redact_bundle,
     redact_bundle_with_field_redactions, sha256_prefixed, timestamp_digest,
     validate_bundle_integrity_fields, validate_timestamp_trust_policy,
     validate_transparency_trust_policy, verify_receipt, verify_receipt_with_policy,
@@ -51,6 +52,7 @@ const DEFAULT_RETENTION_GRACE_PERIOD_DAYS: i64 = 30;
 const DEFAULT_RETENTION_SCAN_INTERVAL_HOURS: i64 = 24;
 const DEFAULT_BACKUP_INTERVAL_HOURS: i64 = 0;
 const DEFAULT_BACKUP_RETENTION_COUNT: usize = 7;
+const DEFAULT_BACKUP_ENCRYPTION_KEY_ID: &str = "backup-key-01";
 const DEFAULT_CONFIG_PATH: &str = "./vault.toml";
 const DEFAULT_AUTH_PRINCIPAL_LABEL: &str = "api";
 const PACKAGE_FORMAT: &str = "pl-bundle-pkg-v1";
@@ -94,6 +96,7 @@ struct AppState {
     retention_scan_interval_hours: i64,
     backup_interval_hours: i64,
     backup_retention_count: usize,
+    backup_encryption: Option<RuntimeBackupEncryptionConfig>,
 }
 
 #[derive(Debug, Clone)]
@@ -115,6 +118,7 @@ struct VaultRuntimeConfig {
     retention_scan_interval_hours: i64,
     backup_interval_hours: i64,
     backup_retention_count: usize,
+    backup_encryption: Option<RuntimeBackupEncryptionConfig>,
     retention_policies: Vec<RetentionPolicyConfig>,
     timestamp_config: Option<TimestampConfig>,
     transparency_config: Option<TransparencyConfig>,
@@ -237,6 +241,16 @@ struct VaultBackupFileConfig {
     directory: Option<String>,
     interval_hours: Option<i64>,
     retention_count: Option<usize>,
+    #[serde(default)]
+    encryption: Option<VaultBackupEncryptionFileConfig>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct VaultBackupEncryptionFileConfig {
+    enabled: Option<bool>,
+    key_base64: Option<String>,
+    key_path: Option<String>,
+    key_id: Option<String>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -596,6 +610,14 @@ struct VaultBackupConfigView {
     directory: String,
     interval_hours: i64,
     retention_count: usize,
+    encryption: VaultBackupEncryptionConfigView,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct VaultBackupEncryptionConfigView {
+    enabled: bool,
+    algorithm: Option<String>,
+    key_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -624,6 +646,12 @@ struct VaultBackupManifest {
 struct ScheduledBackupResult {
     file_name: String,
     pruned_count: usize,
+}
+
+#[derive(Debug, Clone)]
+struct RuntimeBackupEncryptionConfig {
+    key: Arc<[u8; 32]>,
+    key_id: String,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -1075,6 +1103,7 @@ async fn main() -> Result<()> {
         retention_scan_interval_hours: runtime_config.retention_scan_interval_hours,
         backup_interval_hours: runtime_config.backup_interval_hours,
         backup_retention_count: runtime_config.backup_retention_count,
+        backup_encryption: runtime_config.backup_encryption.clone(),
     };
 
     let tls_enabled = state.tls_enabled;
@@ -1349,6 +1378,8 @@ fn build_vault_runtime_config(
         .transpose()?
         .or(file_config.backup.retention_count)
         .unwrap_or(DEFAULT_BACKUP_RETENTION_COUNT);
+    let backup_encryption =
+        resolve_backup_encryption_config(config_base_dir, file_config.backup.encryption, env_vars)?;
 
     let retention_policies = file_config
         .retention
@@ -1384,6 +1415,7 @@ fn build_vault_runtime_config(
         retention_scan_interval_hours,
         backup_interval_hours,
         backup_retention_count,
+        backup_encryption,
         retention_policies,
         timestamp_config,
         transparency_config,
@@ -1480,6 +1512,71 @@ fn resolve_tenant_organization_id(
         .map(ToOwned::to_owned)
         .or_else(|| file_config.and_then(|config| config.organization_id));
     normalize_optional_string(raw)
+}
+
+fn resolve_backup_encryption_config(
+    base_dir: &FsPath,
+    file_config: Option<VaultBackupEncryptionFileConfig>,
+    env_vars: &BTreeMap<String, String>,
+) -> Result<Option<RuntimeBackupEncryptionConfig>> {
+    let env_key_base64 = env_value(env_vars, "PROOF_SERVICE_BACKUP_ENCRYPTION_KEY_B64")
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned);
+    let env_key_path = env_value(env_vars, "PROOF_SERVICE_BACKUP_ENCRYPTION_KEY_PATH")
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from);
+    let env_key_id = env_value(env_vars, "PROOF_SERVICE_BACKUP_ENCRYPTION_KEY_ID")
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned);
+
+    let file_enabled = file_config
+        .as_ref()
+        .and_then(|config| config.enabled)
+        .unwrap_or(false);
+    let file_key_base64 = file_config
+        .as_ref()
+        .and_then(|config| normalize_optional_string(config.key_base64.clone()));
+    let file_key_path = file_config
+        .as_ref()
+        .and_then(|config| config.key_path.as_deref())
+        .map(|path| resolve_path_from_config(base_dir, path));
+    let key_id = env_key_id
+        .or_else(|| file_config.and_then(|config| normalize_optional_string(config.key_id)))
+        .unwrap_or_else(|| DEFAULT_BACKUP_ENCRYPTION_KEY_ID.to_string());
+
+    let key_base64 = if let Some(key_base64) = env_key_base64 {
+        Some(key_base64)
+    } else if let Some(path) = env_key_path.or(file_key_path) {
+        Some(
+            fs::read_to_string(&path)
+                .with_context(|| {
+                    format!("failed to read backup encryption key {}", path.display())
+                })?
+                .trim()
+                .to_string(),
+        )
+    } else {
+        file_key_base64
+    };
+
+    let enabled = key_base64.is_some() || file_enabled;
+    if !enabled {
+        return Ok(None);
+    }
+
+    let key_base64 = key_base64.ok_or_else(|| {
+        anyhow::anyhow!("backup encryption requires a base64-encoded 32-byte key")
+    })?;
+    let key = decode_backup_encryption_key(&key_base64)
+        .map_err(|err| anyhow::anyhow!("invalid backup encryption key: {err}"))?;
+
+    Ok(Some(RuntimeBackupEncryptionConfig {
+        key: Arc::new(key),
+        key_id,
+    }))
 }
 
 fn normalize_backend(raw: Option<&str>, default_value: &str, field: &str) -> Result<String> {
@@ -2035,7 +2132,7 @@ async fn export_backup(
     State(state): State<AppState>,
     actor: Option<Extension<AuthenticatedActor>>,
 ) -> Result<impl IntoResponse, ApiError> {
-    let (backup_id, file_name, archive_bytes, manifest) = create_vault_backup_archive(&state)
+    let backup_export = create_vault_backup_archive(&state)
         .await
         .map_err(ApiError::internal_anyhow)?;
     append_audit_log(
@@ -2045,11 +2142,12 @@ async fn export_backup(
         None,
         None,
         serde_json::json!({
-            "backup_id": backup_id,
-            "file_name": file_name,
-            "bytes": archive_bytes.len(),
-            "bundle_total": manifest.metrics.bundle_total,
-            "pack_total": manifest.metrics.pack_total,
+            "backup_id": backup_export.backup_id,
+            "file_name": backup_export.file_name,
+            "bytes": backup_export.archive_bytes.len(),
+            "bundle_total": backup_export.manifest.metrics.bundle_total,
+            "pack_total": backup_export.manifest.metrics.pack_total,
+            "encrypted": backup_export.encrypted,
         }),
     )
     .await
@@ -2057,23 +2155,44 @@ async fn export_backup(
 
     Ok((
         [
-            (header::CONTENT_TYPE, "application/gzip".to_string()),
+            (
+                header::CONTENT_TYPE,
+                if backup_export.encrypted {
+                    "application/octet-stream".to_string()
+                } else {
+                    "application/gzip".to_string()
+                },
+            ),
             (
                 header::CONTENT_DISPOSITION,
-                format!("attachment; filename=\"{file_name}\""),
+                format!("attachment; filename=\"{}\"", backup_export.file_name),
             ),
             (header::CACHE_CONTROL, "no-store".to_string()),
+            (
+                header::HeaderName::from_static("x-proof-layer-backup-encrypted"),
+                if backup_export.encrypted {
+                    "true"
+                } else {
+                    "false"
+                }
+                .to_string(),
+            ),
         ],
-        archive_bytes,
+        backup_export.archive_bytes,
     ))
 }
 
-async fn create_vault_backup_archive(
-    state: &AppState,
-) -> Result<(String, String, Vec<u8>, VaultBackupManifest)> {
+struct VaultBackupArchive {
+    backup_id: String,
+    file_name: String,
+    archive_bytes: Vec<u8>,
+    manifest: VaultBackupManifest,
+    encrypted: bool,
+}
+
+async fn create_vault_backup_archive(state: &AppState) -> Result<VaultBackupArchive> {
     let backup_id = generate_bundle_id();
     let created_at = Utc::now().to_rfc3339();
-    let file_name = format!("proof-layer-vault-backup-{backup_id}.tar.gz");
     let metrics = load_vault_metrics_snapshot(state).await?;
     let manifest = VaultBackupManifest {
         format: VAULT_BACKUP_FORMAT.to_string(),
@@ -2112,8 +2231,29 @@ async fn create_vault_backup_archive(
         }
     }
 
-    let archive_bytes = archive_result?;
-    Ok((backup_id, file_name, archive_bytes, manifest))
+    let mut archive_bytes = archive_result?;
+    let encrypted = state.backup_encryption.is_some();
+    if let Some(encryption) = state.backup_encryption.as_ref() {
+        archive_bytes = encrypt_backup_archive(
+            &archive_bytes,
+            encryption.key.as_ref(),
+            Some(&encryption.key_id),
+        )
+        .map_err(|err| anyhow::anyhow!("failed to encrypt backup archive: {err}"))?;
+    }
+
+    let file_name = if encrypted {
+        format!("proof-layer-vault-backup-{backup_id}.tar.gz.enc")
+    } else {
+        format!("proof-layer-vault-backup-{backup_id}.tar.gz")
+    };
+    Ok(VaultBackupArchive {
+        backup_id,
+        file_name,
+        archive_bytes,
+        manifest,
+        encrypted,
+    })
 }
 
 async fn perform_scheduled_backup(state: &AppState) -> Result<ScheduledBackupResult> {
@@ -2124,10 +2264,9 @@ async fn perform_scheduled_backup(state: &AppState) -> Result<ScheduledBackupRes
         )
     })?;
 
-    let (backup_id, file_name, archive_bytes, manifest) =
-        create_vault_backup_archive(state).await?;
-    let archive_path = state.backup_dir.join(&file_name);
-    persist_backup_archive(&archive_path, &archive_bytes)?;
+    let backup_export = create_vault_backup_archive(state).await?;
+    let archive_path = state.backup_dir.join(&backup_export.file_name);
+    persist_backup_archive(&archive_path, &backup_export.archive_bytes)?;
     let pruned_count = prune_backup_archives(&state.backup_dir, state.backup_retention_count)?;
 
     append_audit_log(
@@ -2137,19 +2276,20 @@ async fn perform_scheduled_backup(state: &AppState) -> Result<ScheduledBackupRes
         None,
         None,
         serde_json::json!({
-            "backup_id": backup_id,
-            "file_name": file_name,
+            "backup_id": backup_export.backup_id,
+            "file_name": backup_export.file_name,
             "path": archive_path.display().to_string(),
-            "bytes": archive_bytes.len(),
-            "bundle_total": manifest.metrics.bundle_total,
-            "pack_total": manifest.metrics.pack_total,
+            "bytes": backup_export.archive_bytes.len(),
+            "bundle_total": backup_export.manifest.metrics.bundle_total,
+            "pack_total": backup_export.manifest.metrics.pack_total,
+            "encrypted": backup_export.encrypted,
             "pruned_count": pruned_count,
         }),
     )
     .await?;
 
     Ok(ScheduledBackupResult {
-        file_name,
+        file_name: backup_export.file_name,
         pruned_count,
     })
 }
@@ -2327,7 +2467,7 @@ fn prune_backup_archives(backup_dir: &FsPath, keep_count: usize) -> Result<usize
             let file_name = path.file_name()?.to_str()?;
             (path.is_file()
                 && file_name.starts_with("proof-layer-vault-backup-")
-                && file_name.ends_with(".tar.gz"))
+                && (file_name.ends_with(".tar.gz") || file_name.ends_with(".tar.gz.enc")))
             .then_some((file_name.to_string(), path))
         })
         .collect::<Vec<_>>();
@@ -2961,6 +3101,8 @@ async fn get_config(
             "backup_enabled": response.backup.enabled,
             "backup_interval_hours": response.backup.interval_hours,
             "backup_retention_count": response.backup.retention_count,
+            "backup_encryption_enabled": response.backup.encryption.enabled,
+            "backup_encryption_key_id": response.backup.encryption.key_id,
             "timestamp_enabled": response.timestamp.enabled,
             "timestamp_provider": &response.timestamp.provider,
             "transparency_enabled": response.transparency.enabled,
@@ -5556,6 +5698,17 @@ async fn build_vault_config_response(state: &AppState) -> Result<VaultConfigResp
             directory: state.backup_dir.display().to_string(),
             interval_hours: state.backup_interval_hours,
             retention_count: state.backup_retention_count,
+            encryption: VaultBackupEncryptionConfigView {
+                enabled: state.backup_encryption.is_some(),
+                algorithm: state
+                    .backup_encryption
+                    .as_ref()
+                    .map(|_| VAULT_BACKUP_ENCRYPTION_ALGORITHM.to_string()),
+                key_id: state
+                    .backup_encryption
+                    .as_ref()
+                    .map(|config| config.key_id.clone()),
+            },
         },
         timestamp: load_timestamp_config(&state.db).await?,
         transparency: load_transparency_config(&state.db).await?,
@@ -7734,7 +7887,7 @@ mod tests {
     use proof_layer_core::{
         REKOR_RFC3161_API_VERSION, REKOR_RFC3161_ENTRY_KIND, REKOR_TRANSPARENCY_KIND,
         RFC3161_TIMESTAMP_KIND, SCITT_STATEMENT_PROFILE, SCITT_TRANSPARENCY_KIND, TimestampToken,
-        TransparencyReceipt, encode_public_key_pem, sha256_prefixed,
+        TransparencyReceipt, decrypt_backup_archive, encode_public_key_pem, sha256_prefixed,
     };
     use sha2::{Digest, Sha256};
     use std::io::{BufRead, BufReader, Cursor, Read, Write};
@@ -7841,6 +7994,7 @@ mod tests {
             retention_scan_interval_hours: DEFAULT_RETENTION_SCAN_INTERVAL_HOURS,
             backup_interval_hours: DEFAULT_BACKUP_INTERVAL_HOURS,
             backup_retention_count: DEFAULT_BACKUP_RETENTION_COUNT,
+            backup_encryption: None,
         }
     }
 
@@ -8157,6 +8311,9 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
         ));
         std::fs::create_dir_all(&config_dir).unwrap();
         let config_path = config_dir.join("vault.toml");
+        let backup_key_path = config_dir.join("keys/backup.key");
+        std::fs::create_dir_all(backup_key_path.parent().unwrap()).unwrap();
+        std::fs::write(&backup_key_path, Base64::encode_string(&[11_u8; 32])).unwrap();
         let (tsa_certificate, _) = build_test_certificate();
         let file_config = VaultFileConfig {
             server: VaultServerFileConfig {
@@ -8214,6 +8371,12 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
                 directory: Some("./scheduled-backups".to_string()),
                 interval_hours: Some(4),
                 retention_count: Some(9),
+                encryption: Some(VaultBackupEncryptionFileConfig {
+                    enabled: Some(true),
+                    key_base64: None,
+                    key_path: Some("./keys/backup.key".to_string()),
+                    key_id: Some("backup-key-file".to_string()),
+                }),
             },
             retention: VaultRetentionFileConfig {
                 grace_period_days: Some(21),
@@ -8277,6 +8440,13 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
         assert_eq!(runtime.retention_scan_interval_hours, 6);
         assert_eq!(runtime.backup_interval_hours, 4);
         assert_eq!(runtime.backup_retention_count, 5);
+        assert_eq!(
+            runtime
+                .backup_encryption
+                .as_ref()
+                .map(|config| config.key_id.as_str()),
+            Some("backup-key-file")
+        );
         assert_eq!(runtime.retention_policies.len(), 1);
         assert_eq!(
             runtime
@@ -8504,6 +8674,74 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
     }
 
     #[tokio::test]
+    async fn backup_endpoint_can_encrypt_snapshot_archive() {
+        let mut state = test_state(DEFAULT_MAX_PAYLOAD_BYTES).await;
+        let backup_key = [29_u8; 32];
+        state.backup_encryption = Some(RuntimeBackupEncryptionConfig {
+            key: Arc::new(backup_key),
+            key_id: "backup-key-test".to_string(),
+        });
+        let app = build_router(state, DEFAULT_MAX_PAYLOAD_BYTES);
+
+        create_bundle_response(
+            &app,
+            &CreateBundleRequest {
+                capture: SealableCaptureInput::Legacy(sample_capture()),
+                artefacts: vec![InlineArtefact {
+                    name: "prompt.json".to_string(),
+                    content_type: "application/json".to_string(),
+                    data_base64: Base64::encode_string(br#"{"prompt":"encrypted"}"#),
+                }],
+            },
+        )
+        .await;
+
+        let backup_req = Request::builder()
+            .method("POST")
+            .uri("/v1/backup")
+            .body(Body::empty())
+            .unwrap();
+        let backup_res = app.oneshot(backup_req).await.unwrap();
+        assert_eq!(backup_res.status(), StatusCode::OK);
+        assert_eq!(
+            backup_res.headers().get(header::CONTENT_TYPE).unwrap(),
+            "application/octet-stream"
+        );
+        assert_eq!(
+            backup_res
+                .headers()
+                .get("x-proof-layer-backup-encrypted")
+                .unwrap(),
+            "true"
+        );
+        assert!(
+            backup_res
+                .headers()
+                .get(header::CONTENT_DISPOSITION)
+                .unwrap()
+                .to_str()
+                .unwrap()
+                .ends_with(".tar.gz.enc\"")
+        );
+        let body = axum::body::to_bytes(backup_res.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let decrypted = decrypt_backup_archive(&body, Some(&backup_key))
+            .unwrap()
+            .unwrap();
+        let files = decode_backup_archive(&decrypted);
+        assert!(files.contains_key("manifest.json"));
+
+        let config: VaultConfigResponse =
+            serde_json::from_slice(files.get("config/vault_config.json").unwrap()).unwrap();
+        assert!(config.backup.encryption.enabled);
+        assert_eq!(
+            config.backup.encryption.key_id.as_deref(),
+            Some("backup-key-test")
+        );
+    }
+
+    #[tokio::test]
     async fn scheduled_backups_persist_archives_and_prune_old_ones() {
         let mut state = test_state(DEFAULT_MAX_PAYLOAD_BYTES).await;
         state.backup_interval_hours = 2;
@@ -8543,7 +8781,7 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
                         .and_then(|name| name.to_str())
                         .is_some_and(|name| {
                             name.starts_with("proof-layer-vault-backup-")
-                                && name.ends_with(".tar.gz")
+                                && (name.ends_with(".tar.gz") || name.ends_with(".tar.gz.enc"))
                         })
             })
             .collect::<Vec<_>>();
@@ -9926,6 +10164,9 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
             config.backup.retention_count,
             DEFAULT_BACKUP_RETENTION_COUNT
         );
+        assert!(!config.backup.encryption.enabled);
+        assert_eq!(config.backup.encryption.algorithm, None);
+        assert_eq!(config.backup.encryption.key_id, None);
         assert_eq!(config.backup.directory, expected_backup_dir);
         assert!(
             config
@@ -9981,6 +10222,7 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
             retention_scan_interval_hours: 8,
             backup_interval_hours: 12,
             backup_retention_count: 6,
+            backup_encryption: None,
             retention_policies: vec![RetentionPolicyConfig {
                 retention_class: "runtime_logs".to_string(),
                 expiry_mode: RetentionExpiryMode::FixedDays,

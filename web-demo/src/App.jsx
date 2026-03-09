@@ -50,10 +50,11 @@ function buildMockResponse(provider, systemPrompt, userPrompt, model) {
   const promptExcerpt = userPrompt.trim().slice(0, 180);
   const policyNote = systemPrompt.trim().slice(0, 70);
   return [
-    `${lead} ${model} response`,
+    `Synthetic ${lead} ${model} demo response.`,
+    "Proof Layer can show investors a complete assurance workflow for one AI interaction: capture the prompt and output, seal them into a signed bundle, verify integrity later, preview policy-driven disclosure, and export a pack from the vault.",
+    "The commercial point is controlled evidence handling rather than chat quality. A reviewer can prove what was captured, decide what to reveal, and hand over a regulator-oriented package without exposing every internal artefact by default.",
     `Prompt focus: ${promptExcerpt || "No prompt provided."}`,
-    `Grounding: ${policyNote || "No system guidance provided."}`,
-    "Recorded for proof-layer verification, disclosure preview, and export."
+    `Grounding note: ${policyNote || "No system guidance provided."}`
   ].join("\n\n");
 }
 
@@ -360,6 +361,21 @@ export function App() {
       ]);
       setVaultConfig(configResponse);
       setTemplateCatalog(templateResponse);
+      const nextVaultKey = typeof configResponse?.signing?.public_key_pem === "string"
+        ? configResponse.signing.public_key_pem.trim()
+        : "";
+      const previousVaultKey = typeof vaultConfig?.signing?.public_key_pem === "string"
+        ? vaultConfig.signing.public_key_pem.trim()
+        : "";
+      if (nextVaultKey) {
+        setPublicKeyPem((current) => {
+          const trimmed = current.trim();
+          if (!trimmed || trimmed === previousVaultKey) {
+            return configResponse.signing.public_key_pem;
+          }
+          return current;
+        });
+      }
 
       const templates = arrayValue(templateResponse?.templates);
       if (templates.length > 0) {
@@ -819,6 +835,15 @@ export function App() {
   const capabilityChips = capabilityValue(vaultConfig, templateCatalog);
   const templateGroups = templateCatalog?.redaction_groups ?? [];
   const previewDisclosedItemIndices = arrayValue(disclosurePreview?.disclosed_item_indices);
+  const vaultVerifyKeyPem =
+    typeof vaultConfig?.signing?.public_key_pem === "string" ? vaultConfig.signing.public_key_pem.trim() : "";
+  const usingVaultVerifyKey = Boolean(vaultVerifyKeyPem) && publicKeyPem.trim() === vaultVerifyKeyPem;
+  const verifyDetail = verifyResponse?.message
+    || (usingVaultVerifyKey
+      ? `Verify will use the connected vault ${vaultConfig?.signing?.ephemeral ? "ephemeral demo" : "configured"} public key.`
+      : publicKeyPem.trim()
+        ? "Verify will use the pasted public key PEM."
+        : "Optional: connect a vault or paste a public key PEM to run service-side verify.");
   const timeline = [
     {
       title: "Vault capabilities",
@@ -843,7 +868,7 @@ export function App() {
         : publicKeyPem.trim()
           ? "idle"
           : "optional",
-      detail: verifyResponse?.message || "Optional: paste a public key PEM to run service-side verify."
+      detail: verifyDetail
     },
     {
       title: "RFC 3161 timestamp",
@@ -879,7 +904,7 @@ export function App() {
       title: "Disclosure preview",
       status: disclosurePreview ? "done" : isPreviewing ? "active" : "idle",
       detail: disclosurePreview
-        ? `${previewDisclosedItemIndices.length} items disclosed via ${disclosurePreview.policy_name}`
+        ? `${previewDisclosedItemIndices.length} items disclosed in the current bundle via ${disclosurePreview.policy_name}`
         : "Render a disclosure template and preview redacted output before export."
     },
     {
@@ -1028,6 +1053,13 @@ export function App() {
               placeholder="-----BEGIN PUBLIC KEY-----"
             />
           </label>
+          <p className="field-hint">
+            {usingVaultVerifyKey
+              ? `Auto-filled from the connected vault ${vaultConfig?.signing?.ephemeral ? "ephemeral demo" : "configured"} signer.`
+              : vaultVerifyKeyPem
+                ? "You can paste a different public key, or keep the connected vault signer key."
+                : "Paste the public verify key that matches the bundle signer."}
+          </p>
 
           <div className="toggle-row">
             <button
@@ -1179,11 +1211,12 @@ export function App() {
                   bundle_id: createMeta.bundle_id,
                   created_at: createMeta.created_at,
                   bundle_root: createMeta.bundle_root,
-                  response_preview: responseText
+                  response_source: "synthetic_demo_capture",
+                  captured_response: responseText
                 }
               : null
           }
-          placeholder="Bundle metadata and the captured response will appear here after sealing."
+          placeholder="Bundle metadata and the demo-captured response will appear here after sealing."
         />
         <DataPanel
           title="Assurance checks"

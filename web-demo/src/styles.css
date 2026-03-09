@@ -281,6 +281,13 @@ label {
   margin-bottom: 14px;
 }
 
+.field-hint {
+  margin: -6px 0 14px;
+  color: var(--ink-soft);
+  font-size: 0.84rem;
+  line-height: 1.45;
+}
+
 input,
 select,
 textarea {

@@ -19,7 +19,7 @@ use proof_layer_core::{
     TimestampVerification, TransparencyReceipt, TransparencyTrustPolicy,
     VAULT_BACKUP_ENCRYPTION_ALGORITHM, anchor_bundle as anchor_bundle_receipt, build_bundle,
     canonicalize_value, decode_backup_encryption_key, decode_private_key_pem,
-    decode_public_key_pem, encrypt_backup_archive, redact_bundle,
+    decode_public_key_pem, encode_public_key_pem, encrypt_backup_archive, redact_bundle,
     redact_bundle_with_field_redactions, sha256_prefixed, timestamp_digest,
     validate_bundle_integrity_fields, validate_timestamp_trust_policy,
     validate_transparency_trust_policy, verify_receipt, verify_receipt_with_policy,
@@ -89,6 +89,7 @@ struct AppState {
     backup_dir: PathBuf,
     signing_key: Arc<SigningKey>,
     signing_kid: String,
+    signing_key_ephemeral: bool,
     metadata_backend: String,
     blob_backend: String,
     max_payload_bytes: usize,
@@ -658,6 +659,8 @@ struct RuntimeBackupEncryptionConfig {
 struct VaultSigningConfigView {
     key_id: String,
     algorithm: String,
+    public_key_pem: String,
+    ephemeral: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -1083,7 +1086,8 @@ async fn main() -> Result<()> {
     backfill_bundle_expiries(&db).await?;
     backfill_item_obligation_refs(&db).await?;
 
-    let signing_key = load_signing_key(runtime_config.signing_key_path.as_deref())?;
+    let (signing_key, signing_key_ephemeral) =
+        load_signing_key(runtime_config.signing_key_path.as_deref())?;
 
     let state = AppState {
         db,
@@ -1096,6 +1100,7 @@ async fn main() -> Result<()> {
         backup_dir: runtime_config.backup_dir.clone(),
         signing_key: Arc::new(signing_key),
         signing_kid: runtime_config.signing_kid.clone(),
+        signing_key_ephemeral,
         metadata_backend: runtime_config.metadata_backend.clone(),
         blob_backend: runtime_config.blob_backend.clone(),
         max_payload_bytes: runtime_config.max_payload_bytes,
@@ -4982,7 +4987,8 @@ fn build_disclosed_item_field_redactions(
         let Some(fields) = policy.redacted_fields_by_item_type.get(item_type) else {
             continue;
         };
-        if fields.is_empty() {
+        let applicable_fields = filter_present_redaction_selectors(&bundle.items[*index], fields)?;
+        if applicable_fields.is_empty() {
             continue;
         }
         if bundle.integrity.bundle_root_algorithm != proof_layer_core::BUNDLE_ROOT_ALGORITHM_V3
@@ -4996,7 +5002,7 @@ fn build_disclosed_item_field_redactions(
             );
         }
         if bundle.integrity.bundle_root_algorithm == proof_layer_core::BUNDLE_ROOT_ALGORITHM_V3
-            && fields.iter().any(|field| field.starts_with('/'))
+            && applicable_fields.iter().any(|field| field.starts_with('/'))
         {
             bail!(
                 "bundle {} uses {} and cannot satisfy nested path redactions for item type {}",
@@ -5005,10 +5011,35 @@ fn build_disclosed_item_field_redactions(
                 item_type
             );
         }
-        field_redactions.insert(*index, fields.clone());
+        field_redactions.insert(*index, applicable_fields);
     }
 
     Ok(field_redactions)
+}
+
+fn filter_present_redaction_selectors(
+    item: &EvidenceItem,
+    selectors: &[String],
+) -> Result<Vec<String>> {
+    let value = serde_json::to_value(item)?;
+    let data = value
+        .get("data")
+        .ok_or_else(|| anyhow::anyhow!("evidence item must serialize data"))?;
+    let data_object = data
+        .as_object()
+        .ok_or_else(|| anyhow::anyhow!("evidence item data must serialize as an object"))?;
+
+    Ok(selectors
+        .iter()
+        .filter(|selector| {
+            if selector.starts_with('/') {
+                data.pointer(selector).is_some()
+            } else {
+                data_object.contains_key(selector.as_str())
+            }
+        })
+        .cloned()
+        .collect())
 }
 
 fn select_disclosed_artefact_indices(
@@ -5683,6 +5714,8 @@ async fn build_vault_config_response(state: &AppState) -> Result<VaultConfigResp
         signing: VaultSigningConfigView {
             key_id: state.signing_kid.clone(),
             algorithm: "ed25519".to_string(),
+            public_key_pem: encode_public_key_pem(&state.signing_key.verifying_key()),
+            ephemeral: state.signing_key_ephemeral,
         },
         storage: VaultStorageConfigView {
             metadata_backend: state.metadata_backend.clone(),
@@ -7140,18 +7173,18 @@ async fn delete_bundle_storage(
     Ok(())
 }
 
-fn load_signing_key(signing_key_path: Option<&FsPath>) -> Result<SigningKey> {
+fn load_signing_key(signing_key_path: Option<&FsPath>) -> Result<(SigningKey, bool)> {
     if let Some(path) = signing_key_path {
         let contents = fs::read_to_string(path)
             .with_context(|| format!("failed to read signing key {}", path.display()))?;
         let key = decode_private_key_pem(&contents)
             .with_context(|| format!("failed to parse private key at {}", path.display()))?;
-        return Ok(key);
+        return Ok((key, false));
     }
 
     warn!("no signing key configured, generating ephemeral signing key");
     let secret = rand::random::<[u8; 32]>();
-    Ok(SigningKey::from_bytes(&secret))
+    Ok((SigningKey::from_bytes(&secret), true))
 }
 
 fn persist_artefacts(base: &FsPath, bundle_id: &str, artefacts: &[ArtefactInput]) -> Result<()> {
@@ -7987,6 +8020,7 @@ mod tests {
             backup_dir,
             signing_key: Arc::new(signing_key),
             signing_kid: "kid-dev-01".to_string(),
+            signing_key_ephemeral: false,
             metadata_backend: "sqlite".to_string(),
             blob_backend: "filesystem".to_string(),
             max_payload_bytes,
@@ -10148,6 +10182,13 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
         assert!(config.tenant.enforced);
         assert_eq!(config.signing.key_id, "kid-dev-01");
         assert_eq!(config.signing.algorithm, "ed25519");
+        assert!(
+            config
+                .signing
+                .public_key_pem
+                .contains("BEGIN PROOF LAYER ED25519 PUBLIC KEY")
+        );
+        assert!(!config.signing.ephemeral);
         assert_eq!(config.storage.metadata_backend, "sqlite");
         assert_eq!(config.storage.blob_backend, "filesystem");
         assert_eq!(
@@ -11458,17 +11499,122 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
                 0usize,
                 vec![
                     "input_commitment".to_string(),
-                    "retrieval_commitment".to_string(),
                     "output_commitment".to_string(),
-                    "tool_outputs_commitment".to_string(),
                     "trace_commitment".to_string(),
                     "/parameters".to_string(),
-                    "/token_usage".to_string(),
-                    "/latency_ms".to_string(),
                     "/trace_semconv_version".to_string(),
                 ]
             )])
         );
+    }
+
+    #[tokio::test]
+    async fn create_pack_with_privacy_review_template_skips_missing_optional_redactions() {
+        let state = test_state(DEFAULT_MAX_PAYLOAD_BYTES).await;
+        let public_key_pem = encode_public_key_pem(&state.signing_key.verifying_key());
+        let app = build_router(state, DEFAULT_MAX_PAYLOAD_BYTES);
+
+        let llm_bundle = create_bundle_response(
+            &app,
+            &CreateBundleRequest {
+                capture: SealableCaptureInput::V10(sample_event_with_profile(
+                    "system-privacy-pack",
+                    proof_layer_core::ActorRole::Provider,
+                    sample_event_with_system("system-privacy-pack").items,
+                    Some("runtime_logs"),
+                )),
+                artefacts: vec![InlineArtefact {
+                    name: "prompt.json".to_string(),
+                    content_type: "application/json".to_string(),
+                    data_base64: Base64::encode_string(br#"{"prompt":"privacy"}"#),
+                }],
+            },
+        )
+        .await;
+
+        let pack_req = Request::builder()
+            .method("POST")
+            .uri("/v1/packs")
+            .header("content-type", "application/json")
+            .body(Body::from(
+                serde_json::to_vec(&CreatePackRequest {
+                    pack_type: "runtime_logs".to_string(),
+                    system_id: Some("system-privacy-pack".to_string()),
+                    from: None,
+                    to: None,
+                    bundle_format: PACK_BUNDLE_FORMAT_DISCLOSURE.to_string(),
+                    disclosure_policy: None,
+                    disclosure_template: Some(DisclosureTemplateRenderRequest {
+                        profile: DEFAULT_DISCLOSURE_POLICY_PRIVACY_REVIEW.to_string(),
+                        name: Some("privacy_review_pack".to_string()),
+                        redaction_groups: Vec::new(),
+                        redacted_fields_by_item_type: BTreeMap::new(),
+                    }),
+                })
+                .unwrap(),
+            ))
+            .unwrap();
+        let pack_res = app.clone().oneshot(pack_req).await.unwrap();
+        assert_eq!(pack_res.status(), StatusCode::CREATED);
+        let body = axum::body::to_bytes(pack_res.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let pack: PackSummaryResponse = serde_json::from_slice(&body).unwrap();
+        assert_eq!(pack.bundle_ids, vec![llm_bundle.bundle_id.clone()]);
+
+        let manifest_req = Request::builder()
+            .method("GET")
+            .uri(format!("/v1/packs/{}/manifest", pack.pack_id))
+            .body(Body::empty())
+            .unwrap();
+        let manifest_res = app.clone().oneshot(manifest_req).await.unwrap();
+        assert_eq!(manifest_res.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(manifest_res.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let manifest: PackManifest = serde_json::from_slice(&body).unwrap();
+        let selectors = manifest.bundles[0]
+            .disclosed_item_field_redactions
+            .get(&0usize)
+            .cloned()
+            .unwrap_or_default();
+        assert!(!selectors.contains(&"retrieval_commitment".to_string()));
+        assert!(!selectors.contains(&"tool_outputs_commitment".to_string()));
+        assert!(!selectors.contains(&"/token_usage".to_string()));
+        assert!(selectors.contains(&"input_commitment".to_string()));
+        assert!(selectors.contains(&"output_commitment".to_string()));
+
+        let export_req = Request::builder()
+            .method("GET")
+            .uri(format!("/v1/packs/{}/export", pack.pack_id))
+            .body(Body::empty())
+            .unwrap();
+        let export_res = app.clone().oneshot(export_req).await.unwrap();
+        assert_eq!(export_res.status(), StatusCode::OK);
+        let export_bytes = axum::body::to_bytes(export_res.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let archive = decode_pack_archive(&export_bytes);
+
+        let verify_req = Request::builder()
+            .method("POST")
+            .uri("/v1/verify")
+            .header("content-type", "application/json")
+            .body(Body::from(
+                serde_json::to_vec(&VerifyRequest::Package(Box::new(PackageVerifyRequest {
+                    bundle_pkg_base64: archive.files[0].data_base64.clone(),
+                    public_key_pem,
+                })))
+                .unwrap(),
+            ))
+            .unwrap();
+        let verify_res = app.oneshot(verify_req).await.unwrap();
+        assert_eq!(verify_res.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(verify_res.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let verify_response: VerifyResponse = serde_json::from_slice(&body).unwrap();
+        assert!(verify_response.valid);
     }
 
     #[tokio::test]

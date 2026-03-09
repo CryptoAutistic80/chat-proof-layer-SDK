@@ -359,6 +359,8 @@ export interface VaultConfigResponse extends JsonObject {
   signing: JsonObject & {
     key_id: string;
     algorithm: string;
+    public_key_pem: string;
+    ephemeral: boolean;
   };
   storage: JsonObject & {
     metadata_backend: string;

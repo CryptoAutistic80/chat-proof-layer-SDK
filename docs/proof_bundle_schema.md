@@ -47,7 +47,7 @@ Current bundles are `bundle_version: "1.0"` and contain:
 
 `proof_bundle.canonical.json` always stores the exact canonical UTF-8 bytes used to derive `integrity.header_digest`.
 
-### Current Default Projection (`pl-merkle-sha256-v2`)
+### Current Default Projection (`pl-merkle-sha256-v3`)
 
 New bundles use the following canonical header projection:
 
@@ -88,7 +88,7 @@ Legacy bundles use:
 
 where each artefact leaf is the digest of the artefact bytes themselves.
 
-### Current Default (`pl-merkle-sha256-v2`)
+### Current Default (`pl-merkle-sha256-v3`)
 
 New bundles use:
 
@@ -96,10 +96,17 @@ New bundles use:
 
 where:
 
-- `item_digest_n = sha256(RFC8785(item_json))`
+- `item_digest_n = sha256(RFC8785({"item_type": item.type, "field_digests": {...}}))`
+- `field_digests[field_name] = sha256(RFC8785(item.data[field_name]))`
 - `artefact_meta_digest_n = sha256(RFC8785(artefact_ref_json))`
 
 Artefact content bytes are still verified separately against each artefact record's `digest` field before trust decisions.
+
+### Compatibility Default (`pl-merkle-sha256-v2`)
+
+Previously issued v2 bundles use the same leaf ordering, but each item leaf is the digest of the full canonicalized item JSON:
+
+- `item_digest_n = sha256(RFC8785(item_json))`
 
 For both algorithms:
 
@@ -109,7 +116,7 @@ For both algorithms:
 4. Duplicate the last node when a level has odd width.
 5. Encode the final root as `sha256:<hex(root_hash)>`.
 
-The proof format still uses `algorithm = "pl-merkle-sha256-v1"` because the Merkle tree construction itself is unchanged; v1 vs v2 only changes which digests become leaves.
+The proof format still uses `algorithm = "pl-merkle-sha256-v1"` because the Merkle tree construction itself is unchanged; v1 vs v2 vs v3 only changes which digests become leaves.
 
 ## Verification Procedure
 
@@ -155,7 +162,7 @@ Required members:
 
 ## Redacted Bundle Shape
 
-Selective disclosure is currently defined for `pl-merkle-sha256-v2` bundles only.
+Selective disclosure is currently defined for `pl-merkle-sha256-v2` and `pl-merkle-sha256-v3` bundles.
 
 `schemas/redacted_bundle.schema.json` describes the redacted bundle object carried inside a disclosure package. It contains:
 
@@ -168,9 +175,9 @@ Selective disclosure is currently defined for `pl-merkle-sha256-v2` bundles only
 - `disclosed_items[]`
 - `disclosed_artefacts[]`
 
-Each disclosed entry carries the original object plus an inclusion proof.
+Each disclosed entry carries either the original item object or a `field_redacted_item` projection plus an inclusion proof.
 
-Leaf indices for v2 disclosure are fixed:
+Leaf indices for v2/v3 disclosure are fixed:
 
 - header leaf: `0`
 - item leaf `n`: `1 + n`
@@ -187,7 +194,7 @@ Redacted disclosure packages are gzip-compressed JSON archives with:
 
 Current CLI support is:
 
-- `proofctl disclose --items ... [--artefacts ...]` for item-level disclosure plus optional artefact-byte carry-through
+- `proofctl disclose --items ... [--artefacts ...] [--redact-field <item_index>:<field>]` for item-level disclosure, top-level field redaction on v3 bundles, and optional artefact-byte carry-through
 - `proofctl verify` auto-detects and verifies both full packages and disclosure packages
 
 Vault-side redacted pack assembly is implemented through `/v1/packs` with `bundle_format = "disclosure"` and optional named `disclosure_policy` selection.

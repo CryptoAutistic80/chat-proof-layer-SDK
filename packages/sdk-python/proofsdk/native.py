@@ -92,6 +92,7 @@ def redact_bundle(
     bundle: Any,
     item_indices: list[int],
     artefact_indices: list[int] | None = None,
+    field_redactions: dict[int, list[str]] | dict[str, list[str]] | None = None,
 ) -> dict[str, Any]:
     bundle_json = bundle if isinstance(bundle, str) else json.dumps(bundle)
     return json.loads(
@@ -99,6 +100,7 @@ def redact_bundle(
             bundle_json,
             json.dumps(item_indices),
             json.dumps(artefact_indices or []),
+            json.dumps(field_redactions or {}),
         )
     )
 

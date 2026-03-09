@@ -3,9 +3,9 @@
   "created_at": "2026-03-02T00:00:00+00:00",
   "signing_kid": "kid-dev-01",
   "header_digest": "sha256:164b2fe2c29228c26534b3ecc1c4b90fece23e6c9e675991a7d19f73cb8bab88",
-  "bundle_root": "sha256:1deaac26882b90a9178d10d20cc367d06e11df2ea56f74731c047329cfd97b4f",
-  "bundle_root_algorithm": "pl-merkle-sha256-v2",
-  "signature_jws": "eyJhbGciOiJFZERTQSIsImtpZCI6ImtpZC1kZXYtMDEifQ.c2hhMjU2OjFkZWFhYzI2ODgyYjkwYTkxNzhkMTBkMjBjYzM2N2QwNmUxMWRmMmVhNTZmNzQ3MzFjMDQ3MzI5Y2ZkOTdiNGY.aHiZlPqNNtoJcufPds76S0BpT4X6jvL9WXWBY6oz9HHTVjVPUQx9eEmTbnjNSgR-J-KGr8HGXONVoOOcjuusAQ",
+  "bundle_root": "sha256:6859aafa5ceee8f0f0e6edfcbc374af9f1b2372cd804c01bb3143fb1eb8bf802",
+  "bundle_root_algorithm": "pl-merkle-sha256-v3",
+  "signature_jws": "eyJhbGciOiJFZERTQSIsImtpZCI6ImtpZC1kZXYtMDEifQ.c2hhMjU2OjY4NTlhYWZhNWNlZWU4ZjBmMGU2ZWRmY2JjMzc0YWY5ZjFiMjM3MmNkODA0YzAxYmIzMTQzZmIxZWI4YmY4MDI.4yEP5LAzQlro-VlHa7SHhZTFa0KMNS29z_-dotp8sJyVuk-bzljs1zBVSLE0vZJFP5dCw_lC1BSLZrQLYVIbAQ",
   "canonical_header_sha256": "sha256:164b2fe2c29228c26534b3ecc1c4b90fece23e6c9e675991a7d19f73cb8bab88",
   "artefact_digests": {
     "prompt.json": "sha256:01f53d6229f0e4a60d3da9d3064a4daa007c0ea5d56b49f620d82a65309c0e94",
@@ -25,11 +25,11 @@
       "size": 708
     },
     "proof_bundle.json": {
-      "digest": "sha256:4d370dafb580b939681c14884c0df7088509af9f20d4ffb2f0bcb16c143bdea8",
+      "digest": "sha256:f32ceba43ae9a2538303b91a553be147812e522e526ce382f81d228a789331a8",
       "size": 2526
     },
     "proof_bundle.sig": {
-      "digest": "sha256:7a92fe3b741815d5f51cc3c04d8b51f42f3f6e60440f8ff72d657c1f7e1d3cf1",
+      "digest": "sha256:a0bcba56b75d9653b86c75ffebe9b524b457934c7450cffaaec7c0f794cf57db",
       "size": 229
     }
   }

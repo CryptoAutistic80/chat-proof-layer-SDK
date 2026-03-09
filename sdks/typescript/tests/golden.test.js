@@ -16,6 +16,25 @@ const goldenDir = path.join(repoRoot, "fixtures", "golden");
 const fixedBundleDir = path.join(goldenDir, "fixed_bundle");
 const rfcVectorPath = path.join(goldenDir, "rfc8785_vectors.json");
 
+function itemCommitmentDigest(item, algorithm) {
+  if (algorithm === "pl-merkle-sha256-v3") {
+    const fieldDigests = Object.fromEntries(
+      Object.entries(item.data).map(([field, value]) => [
+        field,
+        hashSha256(canonicalizeJson(JSON.stringify(value)))
+      ])
+    );
+    return hashSha256(
+      canonicalizeJson({
+        item_type: item.type,
+        field_digests: fieldDigests
+      })
+    );
+  }
+
+  return hashSha256(canonicalizeJson(item));
+}
+
 test("golden fixture digest and signature assertions are deterministic", async () => {
   const expected = JSON.parse(
     await readFile(path.join(goldenDir, "expected_bundle_values.json"), "utf8")
@@ -64,7 +83,7 @@ test("golden fixture digest and signature assertions are deterministic", async (
 
   const orderedDigests = [
     expected.header_digest,
-    ...bundle.items.map((item) => hashSha256(canonicalizeJson(item))),
+    ...bundle.items.map((item) => itemCommitmentDigest(item, bundle.integrity.bundle_root_algorithm)),
     ...bundle.artefacts.map((artefact) => hashSha256(canonicalizeJson(artefact)))
   ];
   const rootOne = computeMerkleRoot(orderedDigests);

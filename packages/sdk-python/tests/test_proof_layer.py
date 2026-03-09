@@ -53,6 +53,26 @@ class TestProofLayer(unittest.TestCase):
             },
         )
 
+    def test_disclose_forwards_field_level_redaction_options(self):
+        signing_key_pem = (GOLDEN_DIR / "signing_key.txt").read_text(encoding="utf-8")
+        bundle = json.loads((GOLDEN_DIR / "fixed_bundle" / "proof_bundle.json").read_text(encoding="utf-8"))
+        proof_layer = ProofLayer(
+            signing_key_pem=signing_key_pem,
+            key_id="kid-dev-01",
+        )
+
+        redacted = proof_layer.disclose(
+            bundle=bundle,
+            item_indices=[0],
+            field_redactions={0: ["output_commitment"]},
+        )
+
+        self.assertIsNone(redacted["disclosed_items"][0].get("item"))
+        self.assertEqual(
+            redacted["disclosed_items"][0]["field_redacted_item"]["redacted_fields"],
+            ["output_commitment"],
+        )
+
     def test_vault_mode_can_update_disclosure_config(self):
         captured = {}
 

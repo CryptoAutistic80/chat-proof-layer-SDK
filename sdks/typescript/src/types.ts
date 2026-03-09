@@ -76,8 +76,22 @@ export interface RedactedBundle extends JsonObject {
   integrity: IntegrityInfo;
   total_items: number;
   total_artefacts: number;
-  disclosed_items: JsonObject[];
+  disclosed_items: DisclosedItem[];
   disclosed_artefacts: JsonObject[];
+}
+
+export interface FieldRedactedItem extends JsonObject {
+  item_type: string;
+  revealed_data?: JsonObject;
+  field_digests: Record<string, string>;
+  redacted_fields?: string[];
+}
+
+export interface DisclosedItem extends JsonObject {
+  index: number;
+  item?: JsonObject;
+  field_redacted_item?: FieldRedactedItem;
+  proof: JsonObject;
 }
 
 export interface CreateBundleResponse extends JsonObject {
@@ -156,6 +170,7 @@ export interface RedactBundleRequest {
   bundle: string | ProofBundle;
   itemIndices: number[];
   artefactIndices?: number[];
+  fieldRedactions?: Record<string, string[]>;
 }
 
 export interface VerifyRedactedBundleRequest {
@@ -545,4 +560,5 @@ export interface ProofLayerDiscloseOptions {
   bundle: string | ProofBundle;
   itemIndices: number[];
   artefactIndices?: number[];
+  fieldRedactions?: Record<string, string[]>;
 }

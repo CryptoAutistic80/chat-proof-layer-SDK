@@ -15,6 +15,24 @@ FIXED_BUNDLE_DIR = GOLDEN_DIR / "fixed_bundle"
 RFC_VECTOR_PATH = GOLDEN_DIR / "rfc8785_vectors.json"
 
 
+def item_commitment_digest(item: dict[str, object], algorithm: str) -> str:
+    if algorithm == "pl-merkle-sha256-v3":
+        field_digests = {
+            field: hash_sha256(canonicalize_json(json.dumps(value)))
+            for field, value in item["data"].items()
+        }
+        return hash_sha256(
+            canonicalize_json(
+                {
+                    "item_type": item["type"],
+                    "field_digests": field_digests,
+                }
+            )
+        )
+
+    return hash_sha256(canonicalize_json(item))
+
+
 class TestGoldenFixture(unittest.TestCase):
     def test_golden_fixture_digest_and_signature_assertions(self):
         expected = json.loads((GOLDEN_DIR / "expected_bundle_values.json").read_text(encoding="utf-8"))
@@ -63,7 +81,8 @@ class TestGoldenFixture(unittest.TestCase):
 
         ordered_digests = [expected["header_digest"]]
         ordered_digests.extend(
-            hash_sha256(canonicalize_json(item)) for item in bundle["items"]
+            item_commitment_digest(item, bundle["integrity"]["bundle_root_algorithm"])
+            for item in bundle["items"]
         )
         ordered_digests.extend(
             hash_sha256(canonicalize_json(artefact)) for artefact in bundle["artefacts"]

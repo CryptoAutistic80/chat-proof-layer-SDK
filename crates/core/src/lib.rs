@@ -14,12 +14,12 @@ pub mod bundle {
     pub use crate::schema::v01::{CaptureInput, Inputs, ModelInfo, Outputs, Trace};
     pub use crate::schema::{
         Actor, ActorRole, ArtefactMeta, ArtefactRef, BUNDLE_ROOT_ALGORITHM,
-        BUNDLE_ROOT_ALGORITHM_V2, BUNDLE_VERSION, BundleValidationError, BundleVerificationError,
-        CANONICALIZATION_ALGORITHM, CaptureEvent, EncryptionPolicy, EvidenceBundle as ProofBundle,
-        EvidenceContext, EvidenceItem, HASH_ALGORITHM, Integrity, LEGACY_BUNDLE_ROOT_ALGORITHM,
-        LlmInteractionEvidence, Policy, SIGNATURE_ALGORITHM, SIGNATURE_FORMAT, SignatureInfo,
-        Subject, TimestampToken, TransparencyReceipt, VerificationSummary,
-        validate_bundle_integrity_fields,
+        BUNDLE_ROOT_ALGORITHM_V2, BUNDLE_ROOT_ALGORITHM_V3, BUNDLE_VERSION, BundleValidationError,
+        BundleVerificationError, CANONICALIZATION_ALGORITHM, CaptureEvent, EncryptionPolicy,
+        EvidenceBundle as ProofBundle, EvidenceContext, EvidenceItem, HASH_ALGORITHM, Integrity,
+        LEGACY_BUNDLE_ROOT_ALGORITHM, LlmInteractionEvidence, Policy, SIGNATURE_ALGORITHM,
+        SIGNATURE_FORMAT, SignatureInfo, Subject, TimestampToken, TransparencyReceipt,
+        VerificationSummary, validate_bundle_integrity_fields,
     };
 }
 
@@ -36,8 +36,9 @@ pub use bundle::{
 };
 pub use canon::{CanonError, canonicalize_json_strict, canonicalize_value, parse_json_strict};
 pub use disclosure::{
-    DisclosedArtefact, DisclosedItem, DisclosureError, RedactedBundle, RedactedVerificationSummary,
-    redact_bundle, verify_redacted_bundle,
+    DisclosedArtefact, DisclosedItem, DisclosureError, FieldRedactedItem, RedactedBundle,
+    RedactedVerificationSummary, redact_bundle, redact_bundle_with_field_redactions,
+    verify_redacted_bundle,
 };
 pub use hash::{DigestError, parse_sha256_prefixed, sha256_prefixed, sha256_prefixed_file};
 pub use merkle::{
@@ -47,8 +48,10 @@ pub use merkle::{
 pub use schema::migration::{capture_input_v01_to_event, migrate_v01_to_v10};
 pub use schema::v01::{CaptureInput as LegacyCaptureInput, ProofBundle as LegacyProofBundle};
 pub use schema::{
-    BUNDLE_ROOT_ALGORITHM_V2, LEGACY_BUNDLE_ROOT_ALGORITHM, artefact_commitment_digest,
-    item_commitment_digest,
+    BUNDLE_ROOT_ALGORITHM_V2, BUNDLE_ROOT_ALGORITHM_V3, LEGACY_BUNDLE_ROOT_ALGORITHM,
+    artefact_commitment_digest, field_commitment_digest, item_commitment_digest,
+    item_commitment_digest_for_algorithm, item_commitment_digest_from_fields,
+    item_field_commitment_digests,
 };
 pub use sign::{
     JwsHeader, KeyEncodingError, SignError, decode_private_key_pem, decode_public_key_pem,

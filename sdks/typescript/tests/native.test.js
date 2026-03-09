@@ -93,3 +93,20 @@ test("native redactBundle and verifyRedactedBundle round-trip a disclosed item",
     disclosed_artefact_count: 0
   });
 });
+
+test("native redactBundle supports field-level redaction for v3 bundles", async () => {
+  const bundle = JSON.parse(
+    await readFile(path.join(goldenDir, "fixed_bundle", "proof_bundle.json"), "utf8")
+  );
+
+  const redacted = redactBundle({
+    bundle,
+    itemIndices: [0],
+    fieldRedactions: { "0": ["output_commitment"] }
+  });
+
+  assert.equal(redacted.disclosed_items[0].item, undefined);
+  assert.deepEqual(redacted.disclosed_items[0].field_redacted_item?.redacted_fields, [
+    "output_commitment"
+  ]);
+});

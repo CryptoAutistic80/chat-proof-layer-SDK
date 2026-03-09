@@ -4,20 +4,34 @@ use crate::{
     schema::{
         Actor, ArtefactRef, BUNDLE_VERSION, EvidenceContext, EvidenceItem, Integrity, Policy,
         ProofBundle, Subject, TimestampToken, TransparencyReceipt, artefact_commitment_digest,
-        item_commitment_digest, validate_bundle_integrity_fields,
+        field_commitment_digest, item_commitment_digest_for_algorithm,
+        item_commitment_digest_from_fields, validate_bundle_integrity_fields,
     },
     verify::{VerifyBundleRootError, verify_bundle_root},
 };
 use ed25519_dalek::VerifyingKey;
 use serde::{Deserialize, Serialize};
-use serde_json::json;
+use serde_json::{Value, json};
 use std::collections::{BTreeMap, BTreeSet};
 use thiserror::Error;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct FieldRedactedItem {
+    pub item_type: String,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub revealed_data: BTreeMap<String, Value>,
+    pub field_digests: BTreeMap<String, String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub redacted_fields: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct DisclosedItem {
     pub index: usize,
-    pub item: EvidenceItem,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub item: Option<EvidenceItem>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub field_redacted_item: Option<FieldRedactedItem>,
     pub proof: InclusionProof,
 }
 
@@ -61,8 +75,12 @@ pub struct RedactedVerificationSummary {
 
 #[derive(Debug, Error)]
 pub enum DisclosureError {
-    #[error("selective disclosure requires bundle root algorithm pl-merkle-sha256-v2")]
+    #[error(
+        "selective disclosure requires bundle root algorithm pl-merkle-sha256-v2 or pl-merkle-sha256-v3"
+    )]
     UnsupportedBundleRootAlgorithm,
+    #[error("field-level redaction requires bundle root algorithm pl-merkle-sha256-v3")]
+    FieldRedactionRequiresV3,
     #[error("redacted bundle version must be {expected}, got {actual}")]
     UnsupportedBundleVersion { expected: String, actual: String },
     #[error("bundle validation failed: {0}")]
@@ -75,6 +93,8 @@ pub enum DisclosureError {
     VerifyBundleRoot(#[from] VerifyBundleRootError),
     #[error("duplicate disclosed item index {0}")]
     DuplicateItemIndex(usize),
+    #[error("field redaction was requested for undisclosed item index {0}")]
+    FieldRedactionItemNotSelected(usize),
     #[error("duplicate disclosed artefact index {0}")]
     DuplicateArtefactIndex(usize),
     #[error("disclosed item index {index} is out of bounds for {len} items")]
@@ -99,8 +119,25 @@ pub enum DisclosureError {
     ItemProofRootMismatch(usize),
     #[error("item proof leaf mismatch at disclosed index {0}")]
     ItemProofLeafMismatch(usize),
+    #[error(
+        "disclosed item at index {index} must include exactly one of item or field_redacted_item"
+    )]
+    InvalidDisclosedItemPayload { index: usize },
     #[error("item proof leaf index mismatch; expected {expected}, got {actual}")]
     ItemProofIndexMismatch { expected: usize, actual: usize },
+    #[error("item field {field} is not present at disclosed index {index}")]
+    UnknownItemField { index: usize, field: String },
+    #[error(
+        "disclosed item field digest mismatch at index {index} for field {field}; expected {expected}, got {actual}"
+    )]
+    FieldDigestMismatch {
+        index: usize,
+        field: String,
+        expected: String,
+        actual: String,
+    },
+    #[error("field redaction metadata mismatch at disclosed index {0}")]
+    FieldRedactionMetadataMismatch(usize),
     #[error(
         "artefact commitment mismatch at disclosed index {index}; expected {expected}, got {actual}"
     )]
@@ -136,9 +173,23 @@ pub fn redact_bundle(
     item_indices: &[usize],
     artefact_indices: &[usize],
 ) -> Result<RedactedBundle, DisclosureError> {
+    redact_bundle_with_field_redactions(bundle, item_indices, artefact_indices, &BTreeMap::new())
+}
+
+pub fn redact_bundle_with_field_redactions(
+    bundle: &ProofBundle,
+    item_indices: &[usize],
+    artefact_indices: &[usize],
+    field_redactions: &BTreeMap<usize, Vec<String>>,
+) -> Result<RedactedBundle, DisclosureError> {
     validate_bundle_integrity_fields(bundle)?;
-    if bundle.integrity.bundle_root_algorithm != crate::schema::BUNDLE_ROOT_ALGORITHM_V2 {
+    if !supports_selective_disclosure(&bundle.integrity.bundle_root_algorithm) {
         return Err(DisclosureError::UnsupportedBundleRootAlgorithm);
+    }
+    if bundle.integrity.bundle_root_algorithm == crate::schema::BUNDLE_ROOT_ALGORITHM_V2
+        && !field_redactions.is_empty()
+    {
+        return Err(DisclosureError::FieldRedactionRequiresV3);
     }
 
     let digests = bundle.commitment_digests()?;
@@ -147,15 +198,39 @@ pub fn redact_bundle(
 
     let item_indices = normalize_indices(item_indices, total_items, true)?;
     let artefact_indices = normalize_indices(artefact_indices, total_artefacts, false)?;
+    for index in field_redactions.keys() {
+        if !item_indices.contains(index) {
+            return Err(DisclosureError::FieldRedactionItemNotSelected(*index));
+        }
+    }
 
     let header_proof = build_inclusion_proof(&digests, 0)?;
     let disclosed_items = item_indices
         .into_iter()
         .map(|index| {
             let proof = build_inclusion_proof(&digests, 1 + index)?;
+            let field_redacted_item = if bundle.integrity.bundle_root_algorithm
+                == crate::schema::BUNDLE_ROOT_ALGORITHM_V3
+            {
+                build_field_redacted_item(
+                    index,
+                    &bundle.items[index],
+                    field_redactions
+                        .get(&index)
+                        .map(Vec::as_slice)
+                        .unwrap_or(&[]),
+                )?
+            } else {
+                None
+            };
             Ok(DisclosedItem {
                 index,
-                item: bundle.items[index].clone(),
+                item: if field_redacted_item.is_some() {
+                    None
+                } else {
+                    Some(bundle.items[index].clone())
+                },
+                field_redacted_item,
                 proof,
             })
         })
@@ -202,7 +277,7 @@ pub fn verify_redacted_bundle(
             actual: bundle.bundle_version.clone(),
         });
     }
-    if bundle.integrity.bundle_root_algorithm != crate::schema::BUNDLE_ROOT_ALGORITHM_V2 {
+    if !supports_selective_disclosure(&bundle.integrity.bundle_root_algorithm) {
         return Err(DisclosureError::UnsupportedBundleRootAlgorithm);
     }
 
@@ -244,7 +319,8 @@ pub fn verify_redacted_bundle(
                 len: bundle.total_items,
             });
         }
-        let expected_digest = item_commitment_digest(&disclosed.item)?;
+        let expected_digest =
+            disclosed_item_digest(disclosed, &bundle.integrity.bundle_root_algorithm)?;
         if disclosed.proof.index != 1 + disclosed.index {
             return Err(DisclosureError::ItemProofIndexMismatch {
                 expected: 1 + disclosed.index,
@@ -364,6 +440,150 @@ fn commitment_header_projection(bundle: &RedactedBundle) -> serde_json::Value {
     })
 }
 
+fn supports_selective_disclosure(algorithm: &str) -> bool {
+    algorithm == crate::schema::BUNDLE_ROOT_ALGORITHM_V2
+        || algorithm == crate::schema::BUNDLE_ROOT_ALGORITHM_V3
+}
+
+fn disclosed_item_digest(
+    disclosed: &DisclosedItem,
+    algorithm: &str,
+) -> Result<String, DisclosureError> {
+    match algorithm {
+        crate::schema::BUNDLE_ROOT_ALGORITHM_V2 => {
+            match (&disclosed.item, &disclosed.field_redacted_item) {
+                (Some(item), None) => item_commitment_digest_for_algorithm(item, algorithm)
+                    .map_err(DisclosureError::Canonicalization),
+                _ => Err(DisclosureError::InvalidDisclosedItemPayload {
+                    index: disclosed.index,
+                }),
+            }
+        }
+        crate::schema::BUNDLE_ROOT_ALGORITHM_V3 => {
+            match (&disclosed.item, &disclosed.field_redacted_item) {
+                (Some(item), None) => item_commitment_digest_for_algorithm(item, algorithm)
+                    .map_err(DisclosureError::Canonicalization),
+                (None, Some(redacted)) => verify_field_redacted_item(disclosed.index, redacted),
+                _ => Err(DisclosureError::InvalidDisclosedItemPayload {
+                    index: disclosed.index,
+                }),
+            }
+        }
+        _ => Err(DisclosureError::UnsupportedBundleRootAlgorithm),
+    }
+}
+
+fn build_field_redacted_item(
+    index: usize,
+    item: &EvidenceItem,
+    requested_fields: &[String],
+) -> Result<Option<FieldRedactedItem>, DisclosureError> {
+    if requested_fields.is_empty() {
+        return Ok(None);
+    }
+
+    let (item_type, data) = item_type_and_data(item)?;
+    let requested_fields = requested_fields.iter().cloned().collect::<BTreeSet<_>>();
+    for field in &requested_fields {
+        if !data.contains_key(field) {
+            return Err(DisclosureError::UnknownItemField {
+                index,
+                field: field.clone(),
+            });
+        }
+    }
+
+    let mut revealed_data = BTreeMap::new();
+    let mut field_digests = BTreeMap::new();
+    for (field, value) in &data {
+        field_digests.insert(
+            field.clone(),
+            field_commitment_digest(value).map_err(DisclosureError::Canonicalization)?,
+        );
+        if !requested_fields.contains(field) {
+            revealed_data.insert(field.clone(), value.clone());
+        }
+    }
+
+    Ok(Some(FieldRedactedItem {
+        item_type,
+        revealed_data,
+        field_digests,
+        redacted_fields: requested_fields.into_iter().collect(),
+    }))
+}
+
+fn verify_field_redacted_item(
+    index: usize,
+    item: &FieldRedactedItem,
+) -> Result<String, DisclosureError> {
+    let revealed_fields = item.revealed_data.keys().cloned().collect::<BTreeSet<_>>();
+    let derived_redacted_fields = item
+        .field_digests
+        .keys()
+        .filter(|field| !revealed_fields.contains(*field))
+        .cloned()
+        .collect::<Vec<_>>();
+    if derived_redacted_fields != item.redacted_fields {
+        return Err(DisclosureError::FieldRedactionMetadataMismatch(index));
+    }
+
+    for (field, value) in &item.revealed_data {
+        let expected_digest = item
+            .field_digests
+            .get(field)
+            .ok_or(DisclosureError::FieldRedactionMetadataMismatch(index))?;
+        let actual_digest =
+            field_commitment_digest(value).map_err(DisclosureError::Canonicalization)?;
+        if &actual_digest != expected_digest {
+            return Err(DisclosureError::FieldDigestMismatch {
+                index,
+                field: field.clone(),
+                expected: expected_digest.clone(),
+                actual: actual_digest,
+            });
+        }
+    }
+
+    item_commitment_digest_from_fields(&item.item_type, &item.field_digests)
+        .map_err(DisclosureError::Canonicalization)
+}
+
+fn item_type_and_data(
+    item: &EvidenceItem,
+) -> Result<(String, BTreeMap<String, Value>), DisclosureError> {
+    let value = serde_json::to_value(item)
+        .map_err(CanonError::from)
+        .map_err(DisclosureError::Canonicalization)?;
+    let object = value.as_object().ok_or_else(|| {
+        DisclosureError::Canonicalization(CanonError::Canonicalization(
+            "evidence item must serialize to an object".to_string(),
+        ))
+    })?;
+    let item_type = object
+        .get("type")
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            DisclosureError::Canonicalization(CanonError::Canonicalization(
+                "evidence item is missing its type tag".to_string(),
+            ))
+        })?
+        .to_string();
+    let data = object
+        .get("data")
+        .and_then(Value::as_object)
+        .ok_or_else(|| {
+            DisclosureError::Canonicalization(CanonError::Canonicalization(
+                "evidence item must serialize object data".to_string(),
+            ))
+        })?;
+    let data = data
+        .iter()
+        .map(|(field, value)| (field.clone(), value.clone()))
+        .collect::<BTreeMap<_, _>>();
+    Ok((item_type, data))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -466,6 +686,73 @@ mod tests {
         assert_eq!(summary.disclosed_artefact_count, 0);
         assert_eq!(redacted.total_items, 2);
         assert_eq!(redacted.header_proof.index, 0);
+    }
+
+    #[test]
+    fn redact_bundle_round_trips_selected_item_with_field_redaction() {
+        let bundle = sample_bundle();
+        let redacted = redact_bundle_with_field_redactions(
+            &bundle,
+            &[0],
+            &[],
+            &BTreeMap::from([(0usize, vec!["output_commitment".to_string()])]),
+        )
+        .unwrap();
+        let verifying_key = SigningKey::from_bytes(&[9_u8; 32]).verifying_key();
+        let summary = verify_redacted_bundle(&redacted, &BTreeMap::new(), &verifying_key).unwrap();
+        assert_eq!(summary.disclosed_item_count, 1);
+        assert!(redacted.disclosed_items[0].item.is_none());
+        let field_redacted_item = redacted.disclosed_items[0]
+            .field_redacted_item
+            .as_ref()
+            .unwrap();
+        assert_eq!(field_redacted_item.item_type, "llm_interaction");
+        assert_eq!(
+            field_redacted_item.redacted_fields,
+            vec!["output_commitment".to_string()]
+        );
+        assert!(
+            !field_redacted_item
+                .revealed_data
+                .contains_key("output_commitment")
+        );
+    }
+
+    #[test]
+    fn verify_redacted_bundle_rejects_tampered_revealed_field() {
+        let bundle = sample_bundle();
+        let mut redacted = redact_bundle_with_field_redactions(
+            &bundle,
+            &[0],
+            &[],
+            &BTreeMap::from([(0usize, vec!["output_commitment".to_string()])]),
+        )
+        .unwrap();
+        let field_redacted_item = redacted.disclosed_items[0]
+            .field_redacted_item
+            .as_mut()
+            .unwrap();
+        field_redacted_item
+            .revealed_data
+            .insert("provider".to_string(), json!("tampered"));
+        let verifying_key = SigningKey::from_bytes(&[9_u8; 32]).verifying_key();
+        let err = verify_redacted_bundle(&redacted, &BTreeMap::new(), &verifying_key).unwrap_err();
+        assert!(matches!(err, DisclosureError::FieldDigestMismatch { .. }));
+    }
+
+    #[test]
+    fn field_redaction_requires_v3_commitment_layout() {
+        let mut bundle = sample_bundle();
+        bundle.integrity.bundle_root_algorithm =
+            crate::schema::BUNDLE_ROOT_ALGORITHM_V2.to_string();
+        let err = redact_bundle_with_field_redactions(
+            &bundle,
+            &[0],
+            &[],
+            &BTreeMap::from([(0usize, vec!["output_commitment".to_string()])]),
+        )
+        .unwrap_err();
+        assert!(matches!(err, DisclosureError::FieldRedactionRequiresV3));
     }
 
     #[test]

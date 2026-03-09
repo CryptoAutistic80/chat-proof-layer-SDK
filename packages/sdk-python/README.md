@@ -92,7 +92,11 @@ summary = verify_bundle(
 
 print(summary["artefact_count"])
 
-redacted = proof_layer.disclose(bundle=locally_sealed["bundle"], item_indices=[0])
+redacted = proof_layer.disclose(
+    bundle=locally_sealed["bundle"],
+    item_indices=[0],
+    field_redactions={0: ["output_commitment"]},
+)
 redacted_summary = proof_layer.verify_redacted_bundle(
     redacted,
     [],

@@ -5,8 +5,8 @@ use napi_derive::napi;
 use proof_layer_core::{
     ArtefactInput, BundleBuildInput, CaptureEvent, LegacyCaptureInput, ProofBundle, RedactedBundle,
     build_bundle, canonicalize_json_strict, compute_commitment, decode_private_key_pem,
-    decode_public_key_pem, redact_bundle, sha256_prefixed, sign_bundle_root,
-    validate_bundle_integrity_fields, verify_bundle_root, verify_redacted_bundle,
+    decode_public_key_pem, redact_bundle, redact_bundle_with_field_redactions, sha256_prefixed,
+    sign_bundle_root, validate_bundle_integrity_fields, verify_bundle_root, verify_redacted_bundle,
 };
 use serde::Deserialize;
 use std::collections::BTreeMap;
@@ -108,6 +108,7 @@ pub fn redact_bundle_native(
     bundle_json: String,
     item_indices_json: String,
     artefact_indices_json: String,
+    field_redactions_json: String,
 ) -> Result<String> {
     let bundle: ProofBundle =
         serde_json::from_str(&bundle_json).map_err(|err| napi_error(err.to_string()))?;
@@ -115,9 +116,20 @@ pub fn redact_bundle_native(
         serde_json::from_str(&item_indices_json).map_err(|err| napi_error(err.to_string()))?;
     let artefact_indices: Vec<usize> =
         serde_json::from_str(&artefact_indices_json).map_err(|err| napi_error(err.to_string()))?;
+    let field_redactions: BTreeMap<usize, Vec<String>> =
+        serde_json::from_str(&field_redactions_json).map_err(|err| napi_error(err.to_string()))?;
 
-    let redacted = redact_bundle(&bundle, &item_indices, &artefact_indices)
-        .map_err(|err| napi_error(err.to_string()))?;
+    let redacted = if field_redactions.is_empty() {
+        redact_bundle(&bundle, &item_indices, &artefact_indices)
+    } else {
+        redact_bundle_with_field_redactions(
+            &bundle,
+            &item_indices,
+            &artefact_indices,
+            &field_redactions,
+        )
+    }
+    .map_err(|err| napi_error(err.to_string()))?;
     serde_json::to_string(&redacted).map_err(|err| napi_error(err.to_string()))
 }
 

@@ -12,9 +12,10 @@ use proof_layer_core::{
     TimestampTrustPolicy, TransparencyProvider, TransparencyReceipt, TransparencyTrustPolicy,
     anchor_bundle as anchor_bundle_receipt, build_bundle, build_inclusion_proof,
     capture_input_v01_to_event, decode_private_key_pem, decode_public_key_pem,
-    encode_private_key_pem, encode_public_key_pem, redact_bundle, sha256_prefixed,
-    timestamp_digest, validate_bundle_integrity_fields, validate_timestamp_trust_policy,
-    verify_receipt, verify_receipt_with_policy, verify_redacted_bundle, verify_timestamp,
+    encode_private_key_pem, encode_public_key_pem, redact_bundle,
+    redact_bundle_with_field_redactions, sha256_prefixed, timestamp_digest,
+    validate_bundle_integrity_fields, validate_timestamp_trust_policy, verify_receipt,
+    verify_receipt_with_policy, verify_redacted_bundle, verify_timestamp,
     verify_timestamp_with_policy,
 };
 use reqwest::{
@@ -173,6 +174,8 @@ struct DiscloseArgs {
     items: String,
     #[arg(long)]
     artefacts: Option<String>,
+    #[arg(long = "redact-field")]
+    redact_field: Vec<String>,
     #[arg(long)]
     out: PathBuf,
 }
@@ -941,6 +944,7 @@ fn main() -> Result<()> {
             &args.input,
             &args.items,
             args.artefacts.as_deref(),
+            &args.redact_field,
             &args.out,
         ),
         Commands::Inspect {
@@ -1471,6 +1475,7 @@ fn cmd_disclose(
     input_path: &Path,
     items: &str,
     artefacts: Option<&str>,
+    redact_fields: &[String],
     out_path: &Path,
 ) -> Result<()> {
     let max_payload_bytes = max_payload_bytes()?;
@@ -1492,8 +1497,18 @@ fn cmd_disclose(
         .map(|value| parse_index_list_for("artefacts", value))
         .transpose()?
         .unwrap_or_default();
-    let redacted = redact_bundle(&bundle, &item_indices, &artefact_indices)
-        .map_err(|err| map_disclosure_error("redact bundle", err))?;
+    let field_redactions = parse_field_redactions(redact_fields)?;
+    let redacted = if field_redactions.is_empty() {
+        redact_bundle(&bundle, &item_indices, &artefact_indices)
+    } else {
+        redact_bundle_with_field_redactions(
+            &bundle,
+            &item_indices,
+            &artefact_indices,
+            &field_redactions,
+        )
+    }
+    .map_err(|err| map_disclosure_error("redact bundle", err))?;
     let redacted_bytes = serde_json::to_vec_pretty(&redacted)?;
 
     let mut package_files = BTreeMap::<String, Vec<u8>>::new();
@@ -2839,6 +2854,32 @@ fn parse_index_list(value: &str) -> Result<Vec<usize>> {
     parse_index_list_for("items", value)
 }
 
+fn parse_field_redactions(values: &[String]) -> Result<BTreeMap<usize, Vec<String>>> {
+    let mut field_redactions = BTreeMap::<usize, Vec<String>>::new();
+    for value in values {
+        let trimmed = value.trim();
+        if trimmed.is_empty() {
+            bail!("redact-field entries must not be empty");
+        }
+        let (index, field) = trimmed
+            .split_once(':')
+            .ok_or_else(|| anyhow!("redact-field must be <item_index>:<field>, got {trimmed}"))?;
+        let index = index
+            .trim()
+            .parse::<usize>()
+            .with_context(|| format!("invalid item index in redact-field {trimmed}"))?;
+        let field = field.trim();
+        if field.is_empty() {
+            bail!("redact-field must specify a field name after ':', got {trimmed}");
+        }
+        field_redactions
+            .entry(index)
+            .or_default()
+            .push(field.to_string());
+    }
+    Ok(field_redactions)
+}
+
 fn parse_index_list_for(label: &str, value: &str) -> Result<Vec<usize>> {
     let trimmed = value.trim();
     if trimmed.is_empty() {
@@ -3582,6 +3623,26 @@ mod tests {
     }
 
     #[test]
+    fn parse_field_redactions_groups_entries_by_item_index() {
+        let parsed = parse_field_redactions(&[
+            "0:output_commitment".to_string(),
+            "0:latency_ms".to_string(),
+            "2:metadata".to_string(),
+        ])
+        .unwrap();
+        assert_eq!(
+            parsed,
+            BTreeMap::from([
+                (
+                    0usize,
+                    vec!["output_commitment".to_string(), "latency_ms".to_string()],
+                ),
+                (2usize, vec!["metadata".to_string()]),
+            ])
+        );
+    }
+
+    #[test]
     fn disclose_command_produces_verifiable_redacted_package() {
         let bundle = sample_bundle();
         let artefact_bytes = br#"{"hello":"world"}"#.to_vec();
@@ -3622,7 +3683,7 @@ mod tests {
         let disclosure_path = tmp_dir.join("bundle.disclosure.pkg");
 
         write_bundle_package(&bundle_path, &package_files).unwrap();
-        cmd_disclose(&bundle_path, "0", None, &disclosure_path).unwrap();
+        cmd_disclose(&bundle_path, "0", None, &[], &disclosure_path).unwrap();
 
         let package = read_package(&disclosure_path).unwrap();
         assert_eq!(package.format, DISCLOSURE_PACKAGE_FORMAT);
@@ -3687,7 +3748,7 @@ mod tests {
         let disclosure_path = tmp_dir.join("bundle.disclosure.pkg");
 
         write_bundle_package(&bundle_path, &package_files).unwrap();
-        cmd_disclose(&bundle_path, "0", Some("0"), &disclosure_path).unwrap();
+        cmd_disclose(&bundle_path, "0", Some("0"), &[], &disclosure_path).unwrap();
 
         let package = read_package(&disclosure_path).unwrap();
         assert_eq!(package.format, DISCLOSURE_PACKAGE_FORMAT);
@@ -3713,6 +3774,72 @@ mod tests {
         assert!(report.signature_ok);
         assert_eq!(report.artefacts_verified, 1);
         assert_eq!(report.message, "VALID");
+
+        fs::remove_dir_all(&tmp_dir).unwrap();
+    }
+
+    #[test]
+    fn disclose_command_supports_field_level_redaction() {
+        let bundle = sample_bundle();
+        let artefact_bytes = br#"{"hello":"world"}"#.to_vec();
+
+        let mut package_files = BTreeMap::<String, Vec<u8>>::new();
+        package_files.insert(
+            "proof_bundle.json".to_string(),
+            serde_json::to_vec_pretty(&bundle).unwrap(),
+        );
+        package_files.insert(
+            "proof_bundle.canonical.json".to_string(),
+            bundle.canonical_header_bytes().unwrap(),
+        );
+        package_files.insert(
+            "proof_bundle.sig".to_string(),
+            bundle.integrity.signature.value.as_bytes().to_vec(),
+        );
+        package_files.insert("artefacts/prompt.json".to_string(), artefact_bytes);
+
+        let manifest = Manifest {
+            files: package_files
+                .iter()
+                .map(|(name, bytes)| ManifestEntry {
+                    name: name.clone(),
+                    digest: sha256_prefixed(bytes),
+                    size: bytes.len() as u64,
+                })
+                .collect(),
+        };
+        package_files.insert(
+            "manifest.json".to_string(),
+            serde_json::to_vec_pretty(&manifest).unwrap(),
+        );
+
+        let tmp_dir =
+            std::env::temp_dir().join(format!("proofctl-disclose-fields-{}", Ulid::new()));
+        fs::create_dir_all(&tmp_dir).unwrap();
+        let bundle_path = tmp_dir.join("bundle.pkg");
+        let disclosure_path = tmp_dir.join("bundle.disclosure.pkg");
+
+        write_bundle_package(&bundle_path, &package_files).unwrap();
+        cmd_disclose(
+            &bundle_path,
+            "0",
+            None,
+            &["0:output_commitment".to_string()],
+            &disclosure_path,
+        )
+        .unwrap();
+
+        let package = read_package(&disclosure_path).unwrap();
+        let redacted = parse_redacted_bundle_file(&package.files).unwrap();
+        assert!(redacted.disclosed_items[0].item.is_none());
+        let field_redacted_item = redacted.disclosed_items[0]
+            .field_redacted_item
+            .as_ref()
+            .unwrap();
+        assert_eq!(
+            field_redacted_item.redacted_fields,
+            vec!["output_commitment".to_string()]
+        );
 
         fs::remove_dir_all(&tmp_dir).unwrap();
     }

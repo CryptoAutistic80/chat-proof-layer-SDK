@@ -30,7 +30,12 @@ interface NativeModule {
     createdAt: string
   ): string;
   verifyBundle(bundleJson: string, artefactsJson: string, publicKeyPem: string): string;
-  redactBundle(bundleJson: string, itemIndicesJson: string, artefactIndicesJson: string): string;
+  redactBundle(
+    bundleJson: string,
+    itemIndicesJson: string,
+    artefactIndicesJson: string,
+    fieldRedactionsJson: string
+  ): string;
   verifyRedactedBundle(bundleJson: string, artefactsJson: string, publicKeyPem: string): string;
 }
 
@@ -146,11 +151,17 @@ export function verifyBundle({
 export function redactBundle({
   bundle,
   itemIndices,
-  artefactIndices = []
+  artefactIndices = [],
+  fieldRedactions = {}
 }: RedactBundleRequest): RedactedBundle {
   const bundleJson = typeof bundle === "string" ? bundle : JSON.stringify(bundle);
   return JSON.parse(
-    native.redactBundle(bundleJson, JSON.stringify(itemIndices), JSON.stringify(artefactIndices))
+    native.redactBundle(
+      bundleJson,
+      JSON.stringify(itemIndices),
+      JSON.stringify(artefactIndices),
+      JSON.stringify(fieldRedactions)
+    )
   ) as RedactedBundle;
 }
 

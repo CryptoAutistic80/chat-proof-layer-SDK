@@ -61,6 +61,28 @@ test("ProofLayer.disclose returns a locally verifiable redacted bundle", async (
   });
 });
 
+test("ProofLayer.disclose forwards field-level redaction options", async () => {
+  const signingKeyPem = await readFile(path.join(goldenDir, "signing_key.txt"), "utf8");
+  const bundle = JSON.parse(
+    await readFile(path.join(goldenDir, "fixed_bundle", "proof_bundle.json"), "utf8")
+  );
+  const proofLayer = new ProofLayer({
+    signingKeyPem,
+    keyId: "kid-dev-01"
+  });
+
+  const redacted = await proofLayer.disclose({
+    bundle,
+    itemIndices: [0],
+    fieldRedactions: { "0": ["output_commitment"] }
+  });
+
+  assert.equal(redacted.disclosed_items[0].item, undefined);
+  assert.deepEqual(redacted.disclosed_items[0].field_redacted_item?.redacted_fields, [
+    "output_commitment"
+  ]);
+});
+
 test("ProofLayer vault mode can update disclosure config", async () => {
   let captured;
   const proofLayer = new ProofLayer({

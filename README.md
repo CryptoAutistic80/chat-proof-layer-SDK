@@ -327,7 +327,7 @@ npm run dev
 - Full proof packages are gzip-compressed JSON (`bundle.pkg`) containing named files (`proof_bundle.json`, `proof_bundle.canonical.json`, `proof_bundle.sig`, `artefacts/*`, `manifest.json`).
 - Redacted disclosure packages use `format = "pl-bundle-disclosure-pkg-v1"` and contain `redacted_bundle.json`, `manifest.json`, and optional `artefacts/*` members for explicitly disclosed artefact bytes.
 - Bundles now serialize as `bundle_version: "1.0"` with typed `items` plus `context`.
-- New bundles now default to `bundle_root_algorithm = "pl-merkle-sha256-v2"` with separate header, item, and artefact-metadata Merkle leaves; `proofctl verify` still accepts legacy `pl-merkle-sha256-v1` bundles.
+- New bundles now default to `bundle_root_algorithm = "pl-merkle-sha256-v3"` with separate header, per-field item, and artefact-metadata Merkle leaves; `proofctl verify` still accepts legacy `pl-merkle-sha256-v1` and `pl-merkle-sha256-v2` bundles.
 - `proofctl create` and `POST /v1/bundles` accept either the legacy PoC capture shape or the v1.0 capture shape during migration.
 - `proofctl create` also supports Phase 2 migration overrides such as `--system-id`, `--retention-class`, and `--evidence-type`.
 - `proofctl create` now supports `--timestamp-url <tsa>` and can attach an RFC 3161 token before packaging.
@@ -336,7 +336,7 @@ npm run dev
 - `proofctl verify --check-timestamp` now validates RFC 3161 tokens against the UTF-8 bytes of `integrity.bundle_root`, and `--check-receipt` now validates both Rekor RFC 3161 receipts and the current draft-aligned SCITT receipt format against the same bundle root.
 - `proofctl verify` also supports `--timestamp-assurance <standard|qualified>`, `--timestamp-trust-anchor <pem>` (repeatable), `--timestamp-crl <pem>` (repeatable), `--timestamp-ocsp-url <url>` (repeatable), `--timestamp-qualified-signer <pem>` (repeatable), `--timestamp-policy-oid <oid>` (repeatable), and `--transparency-public-key <pem>` so optional assurance checks can move from structural validity to configured trust validation.
 - `proofctl verify` now reports the bundle assurance level as `signed`, `timestamped`, or `transparency_anchored`.
-- `proofctl disclose --items ...` now creates item-level redacted packages with Merkle inclusion proofs, and `--artefacts ...` can carry selected artefact bytes into that disclosure package; `proofctl verify` auto-detects full vs disclosure package formats.
+- `proofctl disclose --items ...` now creates redacted packages with Merkle inclusion proofs, `--artefacts ...` can carry selected artefact bytes into that disclosure package, and repeatable `--redact-field <item_index>:<field>` supports top-level field redaction for `pl-merkle-sha256-v3` bundles; `proofctl verify` auto-detects full vs disclosure package formats.
 - The TypeScript and Python SDKs now expose local disclosure helpers, vault pack client methods for `bundle_format = "full" | "disclosure"` and optional `disclosure_policy`, and vault disclosure-config helpers, so SDK callers can request policy-shaped redacted exports or manage disclosure profiles without dropping to raw HTTP.
 - `proofctl vault disclosure-preview` and the TypeScript/Python SDK clients can now preview named or inline disclosure policies against a stored bundle before export, and disclosure policies can now filter by obligation refs as well as evidence item types.
 - `proofctl inspect` now supports `--show-items` and `--show-merkle`.

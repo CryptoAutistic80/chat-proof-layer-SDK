@@ -104,9 +104,10 @@
           "type": "string",
           "enum": [
             "pl-merkle-sha256-v1",
-            "pl-merkle-sha256-v2"
+            "pl-merkle-sha256-v2",
+            "pl-merkle-sha256-v3"
           ],
-          "description": "New bundles use pl-merkle-sha256-v2; pl-merkle-sha256-v1 remains valid for legacy verification."
+          "description": "New bundles use pl-merkle-sha256-v3 with per-field item digests for disclosure; pl-merkle-sha256-v2 and pl-merkle-sha256-v1 remain valid for compatibility."
         },
         "bundle_root": {
           "type": "string",

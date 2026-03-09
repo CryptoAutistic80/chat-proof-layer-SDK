@@ -143,13 +143,15 @@ export class ProofLayer implements BundleCreateClient {
   async disclose({
     bundle,
     itemIndices,
-    artefactIndices
+    artefactIndices,
+    fieldRedactions
   }: ProofLayerDiscloseOptions): Promise<RedactedBundle> {
     if ("discloseBundle" in this.client && typeof this.client.discloseBundle === "function") {
       return (this.client as LocalProofLayerClient).discloseBundle({
         bundle,
         itemIndices,
-        artefactIndices
+        artefactIndices,
+        fieldRedactions
       });
     }
     throw new Error("underlying client does not support disclose; use local signing mode");

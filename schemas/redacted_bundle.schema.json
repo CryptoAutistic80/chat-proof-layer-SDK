@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://proof-layer.dev/schemas/redacted_bundle.schema.json",
   "title": "Redacted Evidence Bundle",
-  "description": "Item-level selective-disclosure bundle carrying Merkle inclusion proofs for a v2 evidence bundle.",
+  "description": "Selective-disclosure bundle carrying Merkle inclusion proofs for a v2 or v3 evidence bundle.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -65,7 +65,10 @@
           "$ref": "#/$defs/sha256Digest"
         },
         "bundle_root_algorithm": {
-          "const": "pl-merkle-sha256-v2"
+          "enum": [
+            "pl-merkle-sha256-v2",
+            "pl-merkle-sha256-v3"
+          ]
         },
         "bundle_root": {
           "$ref": "#/$defs/sha256Digest"
@@ -122,8 +125,19 @@
         "additionalProperties": false,
         "required": [
           "index",
-          "item",
           "proof"
+        ],
+        "oneOf": [
+          {
+            "required": [
+              "item"
+            ]
+          },
+          {
+            "required": [
+              "field_redacted_item"
+            ]
+          }
         ],
         "properties": {
           "index": {
@@ -132,6 +146,9 @@
           },
           "item": {
             "$ref": "./evidence_item.schema.json"
+          },
+          "field_redacted_item": {
+            "$ref": "#/$defs/fieldRedactedItem"
           },
           "proof": {
             "$ref": "#/$defs/inclusionProof"
@@ -192,6 +209,36 @@
     "sha256Digest": {
       "type": "string",
       "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "fieldRedactedItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "item_type",
+        "field_digests"
+      ],
+      "properties": {
+        "item_type": {
+          "type": "string",
+          "minLength": 1
+        },
+        "revealed_data": {
+          "type": "object"
+        },
+        "field_digests": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/sha256Digest"
+          }
+        },
+        "redacted_fields": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
     },
     "proofStep": {
       "type": "object",

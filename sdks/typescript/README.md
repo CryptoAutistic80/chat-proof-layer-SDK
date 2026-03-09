@@ -94,7 +94,8 @@ console.log(proofClient.baseUrl);
 
 const redacted = await proofLayer.disclose({
   bundle: locallySealed.bundle,
-  itemIndices: [0]
+  itemIndices: [0],
+  fieldRedactions: { "0": ["output_commitment"] }
 });
 const redactedSummary = await proofLayer.verifyRedactedBundle({
   bundle: redacted,

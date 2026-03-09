@@ -87,7 +87,7 @@ Current pack export behavior:
 - Exported pack archives can now contain either full `bundle.pkg` members or redacted disclosure packages, selected with `bundle_format = "full" | "disclosure"` on pack creation.
 - Disclosure-pack exports now also accept a named `disclosure_policy`, defaulting by pack type (`regulator_minimum`, `annex_iv_redacted`, `incident_summary`) and applying item-type filters plus optional artefact-metadata and artefact-byte inclusion during redaction.
 - Disclosure policies can now also filter selected items by obligation reference, and the vault exposes a preview endpoint so named or inline policies can be evaluated against a stored bundle before pack export.
-- Richer field-level redaction controls are still a later phase.
+- Richer nested/path-based redaction controls are still a later phase; current field-level disclosure works at the top-level `item.data.<field>` granularity.
 
 Current retention behavior:
 
@@ -157,7 +157,8 @@ Current config behavior:
 6. Canonicalize header projection via RFC 8785 (strict path for untrusted raw JSON).
 7. Compute `header_digest = sha256(canonical_header_bytes)`.
 8. Compute `bundle_root` from the ordered digest list for the selected commitment model:
-   - current default (`pl-merkle-sha256-v2`): `[header_digest, item_digest_1, ..., artefact_meta_digest_1, ...]`
+   - current default (`pl-merkle-sha256-v3`): `[header_digest, item_digest_1, ..., artefact_meta_digest_1, ...]`, where each `item_digest_n = sha256(RFC8785({"item_type": item.type, "field_digests": {...}}))`
+   - compatibility verification (`pl-merkle-sha256-v2`): `[header_digest, item_digest_1, ..., artefact_meta_digest_1, ...]`, where each `item_digest_n = sha256(RFC8785(item_json))`
    - legacy verification (`pl-merkle-sha256-v1`): `[header_digest, artefact_digest_1, artefact_digest_2, ...]`
 9. Sign UTF-8 bytes of `bundle_root` using Ed25519 JWS compact serialization.
 10. Persist bundle metadata + indexes in SQLite and artifact bytes on disk.
@@ -172,7 +173,7 @@ Current config behavior:
 - `header_digest`: SHA-256 over canonical header bytes, formatted `sha256:<64 lower hex>`.
 - Current default canonical header projection fields: `bundle_version`, `bundle_id`, `created_at`, `actor`, `subject`, `context`, `policy`, `item_count`, `artefact_count`.
 - Legacy canonical header projection additionally included full `items` and `artefacts`.
-- Current default Merkle leaves: `header_digest`, then one digest per canonicalized evidence item, then one digest per canonicalized artefact metadata record.
+- Current default Merkle leaves: `header_digest`, then one digest per evidence item commitment projection (`item_type` + per-field digests), then one digest per canonicalized artefact metadata record.
 - Legacy Merkle leaves: `header_digest`, then one digest per artefact byte payload.
 - Merkle leaves are parsed raw 32-byte digest values, never hex strings.
 - Leaf hash: `H(0x00 || digest_bytes)`.
@@ -209,7 +210,7 @@ Timestamp and transparency checks are optional in PoC and report as skipped/miss
 If OCSP responder URLs are configured, the optional timestamp trust check becomes a live networked verification step.
 Current assurance verification checks bundle-root binding, embedded RFC 3161 token validity, optional RFC 3161 policy OID constraints, optional timestamp assurance profiles (`standard` / `qualified`), optional CRL-based TSA revocation checks, optional live OCSP checks, optional qualified TSA signer allowlist matching, Rekor entry UUID to leaf-hash binding, Rekor inclusion proofs against the advertised root hash, and the current draft-aligned SCITT statement/receipt contract; it can optionally verify TSA signer chains and provider receipt signatures when trust material is configured.
 
-Current selective-disclosure verification is also offline for `pl-merkle-sha256-v2` bundles: `proofctl disclose` emits a redacted bundle carrying a header inclusion proof plus inclusion proofs for each disclosed item, and `proofctl verify` can validate that package without access to the original full bundle.
+Current selective-disclosure verification is also offline for `pl-merkle-sha256-v2` and `pl-merkle-sha256-v3` bundles: `proofctl disclose` emits a redacted bundle carrying a header inclusion proof plus inclusion proofs for each disclosed item, and `proofctl verify` can validate that package without access to the original full bundle. On v3 bundles, repeatable `--redact-field <item_index>:<field>` can hide selected top-level item fields while preserving item-leaf verification.
 
 ## Provider-Agnostic Boundary
 

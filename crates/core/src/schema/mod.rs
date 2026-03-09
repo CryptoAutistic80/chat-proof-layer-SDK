@@ -18,7 +18,8 @@ pub const CANONICALIZATION_ALGORITHM: &str = "RFC8785-JCS";
 pub const HASH_ALGORITHM: &str = "SHA-256";
 pub const LEGACY_BUNDLE_ROOT_ALGORITHM: &str = "pl-merkle-sha256-v1";
 pub const BUNDLE_ROOT_ALGORITHM_V2: &str = "pl-merkle-sha256-v2";
-pub const BUNDLE_ROOT_ALGORITHM: &str = BUNDLE_ROOT_ALGORITHM_V2;
+pub const BUNDLE_ROOT_ALGORITHM_V3: &str = "pl-merkle-sha256-v3";
+pub const BUNDLE_ROOT_ALGORITHM: &str = BUNDLE_ROOT_ALGORITHM_V3;
 pub const SIGNATURE_FORMAT: &str = "JWS";
 pub const SIGNATURE_ALGORITHM: &str = "EdDSA";
 
@@ -478,7 +479,12 @@ impl EvidenceBundle {
     }
 
     pub fn item_commitment_digests(&self) -> Result<Vec<String>, CanonError> {
-        self.items.iter().map(item_commitment_digest).collect()
+        self.items
+            .iter()
+            .map(|item| {
+                item_commitment_digest_for_algorithm(item, &self.integrity.bundle_root_algorithm)
+            })
+            .collect()
     }
 
     pub fn artefact_commitment_digests(&self) -> Result<Vec<String>, CanonError> {
@@ -497,6 +503,16 @@ impl EvidenceBundle {
                 Ok(ordered_digests)
             }
             BUNDLE_ROOT_ALGORITHM_V2 => {
+                let item_digests = self.item_commitment_digests()?;
+                let artefact_digests = self.artefact_commitment_digests()?;
+                let mut ordered_digests =
+                    Vec::with_capacity(1 + item_digests.len() + artefact_digests.len());
+                ordered_digests.push(self.integrity.header_digest.clone());
+                ordered_digests.extend(item_digests);
+                ordered_digests.extend(artefact_digests);
+                Ok(ordered_digests)
+            }
+            BUNDLE_ROOT_ALGORITHM_V3 => {
                 let item_digests = self.item_commitment_digests()?;
                 let artefact_digests = self.artefact_commitment_digests()?;
                 let mut ordered_digests =
@@ -528,7 +544,7 @@ impl EvidenceBundle {
 
         let canonical_header = match self.integrity.bundle_root_algorithm.as_str() {
             LEGACY_BUNDLE_ROOT_ALGORITHM => self.legacy_canonical_header_bytes()?,
-            BUNDLE_ROOT_ALGORITHM_V2 => self.canonical_header_bytes()?,
+            BUNDLE_ROOT_ALGORITHM_V2 | BUNDLE_ROOT_ALGORITHM_V3 => self.canonical_header_bytes()?,
             other => {
                 return Err(BundleVerificationError::Canonicalization(
                     CanonError::Canonicalization(format!(
@@ -681,6 +697,7 @@ pub fn validate_bundle_integrity_fields(
     }
     if bundle.integrity.bundle_root_algorithm != LEGACY_BUNDLE_ROOT_ALGORITHM
         && bundle.integrity.bundle_root_algorithm != BUNDLE_ROOT_ALGORITHM_V2
+        && bundle.integrity.bundle_root_algorithm != BUNDLE_ROOT_ALGORITHM_V3
     {
         return Err(BundleValidationError::UnsupportedBundleRootAlgorithm(
             bundle.integrity.bundle_root_algorithm.clone(),
@@ -838,7 +855,70 @@ fn validate_item_digests(index: usize, item: &EvidenceItem) -> Result<(), Bundle
 }
 
 pub fn item_commitment_digest(item: &EvidenceItem) -> Result<String, CanonError> {
-    let canonical = canonicalize_value(&serde_json::to_value(item)?)?;
+    item_commitment_digest_for_algorithm(item, BUNDLE_ROOT_ALGORITHM)
+}
+
+pub fn item_commitment_digest_for_algorithm(
+    item: &EvidenceItem,
+    algorithm: &str,
+) -> Result<String, CanonError> {
+    match algorithm {
+        LEGACY_BUNDLE_ROOT_ALGORITHM | BUNDLE_ROOT_ALGORITHM_V2 => {
+            let canonical = canonicalize_value(&serde_json::to_value(item)?)?;
+            Ok(sha256_prefixed(&canonical))
+        }
+        BUNDLE_ROOT_ALGORITHM_V3 => {
+            let (item_type, field_digests) = item_field_commitment_digests(item)?;
+            item_commitment_digest_from_fields(&item_type, &field_digests)
+        }
+        other => Err(CanonError::Canonicalization(format!(
+            "unsupported bundle root algorithm {other}"
+        ))),
+    }
+}
+
+pub fn item_field_commitment_digests(
+    item: &EvidenceItem,
+) -> Result<(String, BTreeMap<String, String>), CanonError> {
+    let value = serde_json::to_value(item)?;
+    let object = value.as_object().ok_or_else(|| {
+        CanonError::Canonicalization("evidence item must serialize to an object".to_string())
+    })?;
+    let item_type = object
+        .get("type")
+        .and_then(Value::as_str)
+        .ok_or_else(|| {
+            CanonError::Canonicalization("evidence item is missing its type tag".to_string())
+        })?
+        .to_string();
+    let data = object
+        .get("data")
+        .and_then(Value::as_object)
+        .ok_or_else(|| {
+            CanonError::Canonicalization("evidence item must serialize object data".to_string())
+        })?;
+
+    let mut field_digests = BTreeMap::new();
+    for (field, value) in data {
+        field_digests.insert(field.clone(), field_commitment_digest(value)?);
+    }
+
+    Ok((item_type, field_digests))
+}
+
+pub fn item_commitment_digest_from_fields(
+    item_type: &str,
+    field_digests: &BTreeMap<String, String>,
+) -> Result<String, CanonError> {
+    let canonical = canonicalize_value(&json!({
+        "field_digests": field_digests,
+        "item_type": item_type,
+    }))?;
+    Ok(sha256_prefixed(&canonical))
+}
+
+pub fn field_commitment_digest(value: &Value) -> Result<String, CanonError> {
+    let canonical = canonicalize_value(value)?;
     Ok(sha256_prefixed(&canonical))
 }
 

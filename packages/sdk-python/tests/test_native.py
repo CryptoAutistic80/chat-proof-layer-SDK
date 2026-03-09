@@ -85,6 +85,21 @@ class TestNativeBindings(unittest.TestCase):
             },
         )
 
+    def test_native_redact_bundle_supports_field_level_redaction(self):
+        bundle = json.loads((GOLDEN_DIR / "fixed_bundle" / "proof_bundle.json").read_text(encoding="utf-8"))
+
+        redacted = redact_bundle(
+            bundle=bundle,
+            item_indices=[0],
+            field_redactions={0: ["output_commitment"]},
+        )
+
+        self.assertIsNone(redacted["disclosed_items"][0].get("item"))
+        self.assertEqual(
+            redacted["disclosed_items"][0]["field_redacted_item"]["redacted_fields"],
+            ["output_commitment"],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

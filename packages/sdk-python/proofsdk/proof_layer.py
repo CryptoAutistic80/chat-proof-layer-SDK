@@ -96,12 +96,14 @@ class ProofLayer:
         bundle: dict[str, Any],
         item_indices: list[int],
         artefact_indices: list[int] | None = None,
+        field_redactions: dict[int, list[str]] | dict[str, list[str]] | None = None,
     ) -> dict[str, Any]:
         if hasattr(self.client, "disclose_bundle"):
             return self.client.disclose_bundle(
                 bundle,
                 item_indices=item_indices,
                 artefact_indices=artefact_indices or [],
+                field_redactions=field_redactions or {},
             )
         raise ValueError("underlying client does not support disclose; use local signing mode")
 

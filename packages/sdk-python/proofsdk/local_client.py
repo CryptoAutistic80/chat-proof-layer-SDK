@@ -72,11 +72,13 @@ class LocalProofLayerClient:
         *,
         item_indices: list[int],
         artefact_indices: list[int] | None = None,
+        field_redactions: dict[int, list[str]] | dict[str, list[str]] | None = None,
     ) -> dict[str, Any]:
         return redact_bundle(
             bundle=bundle,
             item_indices=item_indices,
             artefact_indices=artefact_indices or [],
+            field_redactions=field_redactions or {},
         )
 
     def verify_redacted_bundle(

@@ -1,4 +1,5 @@
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result, anyhow, bail};
+use async_trait::async_trait;
 use axum::{
     Extension, Json, Router,
     extract::{DefaultBodyLimit, Path, Query, Request, State},
@@ -25,7 +26,9 @@ use proof_layer_core::{
     validate_transparency_trust_policy, verify_receipt, verify_receipt_with_policy,
     verify_redacted_bundle, verify_timestamp, verify_timestamp_with_policy,
 };
+use reqwest::Client;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
+use serde_json::Value;
 use sqlx::{
     FromRow, QueryBuilder, Row, Sqlite, SqlitePool,
     sqlite::{SqliteConnectOptions, SqlitePoolOptions},
@@ -39,7 +42,7 @@ use std::{
     path::{Component, Path as FsPath, PathBuf},
     str::FromStr,
     sync::Arc,
-    time::Duration,
+    time::{Duration, Instant},
 };
 use tar::{Builder as TarBuilder, Header as TarHeader};
 use tower_http::cors::{Any, CorsLayer};
@@ -76,6 +79,9 @@ const DEFAULT_DISCLOSURE_POLICY_ANNEX_IV_REDACTED: &str = "annex_iv_redacted";
 const DEFAULT_DISCLOSURE_POLICY_INCIDENT_SUMMARY: &str = "incident_summary";
 const DEFAULT_DISCLOSURE_POLICY_RUNTIME_MINIMUM: &str = "runtime_minimum";
 const DEFAULT_DISCLOSURE_POLICY_PRIVACY_REVIEW: &str = "privacy_review";
+const OPENAI_RESPONSES_URL: &str = "https://api.openai.com/v1/responses";
+const ANTHROPIC_MESSAGES_URL: &str = "https://api.anthropic.com/v1/messages";
+const ANTHROPIC_API_VERSION: &str = "2023-06-01";
 
 #[derive(Clone)]
 struct AppState {
@@ -98,6 +104,29 @@ struct AppState {
     backup_interval_hours: i64,
     backup_retention_count: usize,
     backup_encryption: Option<RuntimeBackupEncryptionConfig>,
+    demo_providers: Arc<DemoProviderRegistry>,
+}
+
+#[derive(Clone, Default)]
+struct DemoProviderRegistry {
+    openai: Option<Arc<dyn DemoProviderClient>>,
+    anthropic: Option<Arc<dyn DemoProviderClient>>,
+}
+
+#[async_trait]
+trait DemoProviderClient: Send + Sync {
+    async fn generate(&self, request: &DemoProviderResponseRequest)
+    -> Result<DemoProviderResponse>;
+}
+
+struct OpenAiDemoClient {
+    http: Client,
+    api_key: String,
+}
+
+struct AnthropicDemoClient {
+    http: Client,
+    api_key: String,
 }
 
 #[derive(Debug, Clone)]
@@ -266,6 +295,75 @@ struct VaultRetentionFileConfig {
 struct CreateBundleRequest {
     capture: SealableCaptureInput,
     artefacts: Vec<InlineArtefact>,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+enum DemoCaptureMode {
+    Synthetic,
+    Live,
+}
+
+impl DemoCaptureMode {
+    fn response_source(self) -> &'static str {
+        match self {
+            Self::Synthetic => "synthetic_demo_capture",
+            Self::Live => "live_provider_capture",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+enum DemoProviderName {
+    Openai,
+    Anthropic,
+}
+
+impl DemoProviderName {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Openai => "openai",
+            Self::Anthropic => "anthropic",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+struct DemoProviderResponseRequest {
+    mode: DemoCaptureMode,
+    provider: DemoProviderName,
+    model: String,
+    system_prompt: String,
+    user_prompt: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    provider_api_key: Option<String>,
+    #[serde(default = "default_demo_temperature")]
+    temperature: f64,
+    #[serde(default = "default_demo_max_tokens")]
+    max_tokens: u32,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+struct DemoProviderResponse {
+    capture_mode: String,
+    provider: String,
+    model: String,
+    output_text: String,
+    usage: DemoTokenUsage,
+    latency_ms: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    provider_request_id: Option<String>,
+    prompt_payload: Value,
+    response_payload: Value,
+    trace_payload: Value,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+struct DemoTokenUsage {
+    input_tokens: u64,
+    output_tokens: u64,
+    total_tokens: u64,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -583,6 +681,7 @@ struct VaultConfigResponse {
     audit: AuditConfigView,
     auth: VaultAuthConfigView,
     tenant: VaultTenantConfigView,
+    demo: VaultDemoConfigView,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -603,6 +702,23 @@ struct VaultAuthConfigView {
 struct VaultTenantConfigView {
     organization_id: Option<String>,
     enforced: bool,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct VaultDemoConfigView {
+    capture_modes: Vec<String>,
+    providers: VaultDemoProvidersConfigView,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct VaultDemoProvidersConfigView {
+    openai: VaultDemoProviderReadiness,
+    anthropic: VaultDemoProviderReadiness,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct VaultDemoProviderReadiness {
+    live_enabled: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -1088,6 +1204,7 @@ async fn main() -> Result<()> {
 
     let (signing_key, signing_key_ephemeral) =
         load_signing_key(runtime_config.signing_key_path.as_deref())?;
+    let demo_providers = build_demo_provider_registry()?;
 
     let state = AppState {
         db,
@@ -1109,6 +1226,7 @@ async fn main() -> Result<()> {
         backup_interval_hours: runtime_config.backup_interval_hours,
         backup_retention_count: runtime_config.backup_retention_count,
         backup_encryption: runtime_config.backup_encryption.clone(),
+        demo_providers,
     };
 
     let tls_enabled = state.tls_enabled;
@@ -1176,6 +1294,10 @@ fn build_router(state: AppState, max_payload_bytes: usize) -> Router {
         .route("/v1/config/timestamp", put(update_timestamp_config))
         .route("/v1/config/transparency", put(update_transparency_config))
         .route("/v1/config/disclosure", put(update_disclosure_config))
+        .route(
+            "/v1/demo/provider-response",
+            post(generate_demo_provider_response),
+        )
         .route("/v1/disclosure/templates", get(list_disclosure_templates))
         .route(
             "/v1/disclosure/templates/render",
@@ -3101,6 +3223,8 @@ async fn get_config(
         serde_json::json!({
             "retention_policy_count": response.retention.policies.len(),
             "disclosure_policy_count": response.disclosure.policies.len(),
+            "demo_openai_live_enabled": response.demo.providers.openai.live_enabled,
+            "demo_anthropic_live_enabled": response.demo.providers.anthropic.live_enabled,
             "grace_period_days": response.retention.grace_period_days,
             "scan_interval_hours": response.retention.scan_interval_hours,
             "backup_enabled": response.backup.enabled,
@@ -3261,6 +3385,50 @@ async fn update_disclosure_config(
     .map_err(ApiError::internal_anyhow)?;
 
     Ok((StatusCode::OK, Json(config)))
+}
+
+async fn generate_demo_provider_response(
+    State(state): State<AppState>,
+    actor: Option<Extension<AuthenticatedActor>>,
+    Json(request): Json<DemoProviderResponseRequest>,
+) -> Result<impl IntoResponse, ApiError> {
+    let request =
+        validate_demo_provider_response_request(request).map_err(ApiError::bad_request_anyhow)?;
+    let provider_key_source = if request.provider_api_key.is_some() {
+        "temporary_request"
+    } else {
+        "vault_config"
+    };
+    let response = match request.mode {
+        DemoCaptureMode::Synthetic => build_synthetic_demo_provider_response(&request),
+        DemoCaptureMode::Live => resolve_demo_provider_client(&state.demo_providers, &request)
+            .map_err(ApiError::bad_request_anyhow)?
+            .generate(&request)
+            .await
+            .map_err(ApiError::internal_anyhow)?,
+    };
+
+    append_audit_log(
+        &state.db,
+        "generate_demo_provider_response",
+        Some(request_actor_label(&actor)),
+        None,
+        None,
+        serde_json::json!({
+            "mode": request.mode,
+            "provider": request.provider,
+            "model": request.model.clone(),
+            "capture_mode": response.capture_mode.clone(),
+            "provider_key_source": provider_key_source,
+            "provider_request_id": response.provider_request_id.clone(),
+            "total_tokens": response.usage.total_tokens,
+            "latency_ms": response.latency_ms,
+        }),
+    )
+    .await
+    .map_err(ApiError::internal_anyhow)?;
+
+    Ok((StatusCode::OK, Json(response)))
 }
 
 async fn list_disclosure_templates(
@@ -5766,7 +5934,489 @@ async fn build_vault_config_response(state: &AppState) -> Result<VaultConfigResp
             organization_id: state.tenant_organization_id.clone(),
             enforced: state.tenant_organization_id.is_some(),
         },
+        demo: VaultDemoConfigView {
+            capture_modes: vec!["synthetic".to_string(), "live".to_string()],
+            providers: VaultDemoProvidersConfigView {
+                openai: VaultDemoProviderReadiness {
+                    live_enabled: state.demo_providers.openai.is_some(),
+                },
+                anthropic: VaultDemoProviderReadiness {
+                    live_enabled: state.demo_providers.anthropic.is_some(),
+                },
+            },
+        },
     })
+}
+
+impl DemoProviderRegistry {
+    fn provider_for(&self, provider: DemoProviderName) -> Option<Arc<dyn DemoProviderClient>> {
+        match provider {
+            DemoProviderName::Openai => self.openai.clone(),
+            DemoProviderName::Anthropic => self.anthropic.clone(),
+        }
+    }
+}
+
+fn build_temporary_demo_provider_client(
+    provider: DemoProviderName,
+    api_key: String,
+) -> Result<Arc<dyn DemoProviderClient>> {
+    match provider {
+        DemoProviderName::Openai => {
+            Ok(Arc::new(OpenAiDemoClient::new(api_key)?) as Arc<dyn DemoProviderClient>)
+        }
+        DemoProviderName::Anthropic => {
+            Ok(Arc::new(AnthropicDemoClient::new(api_key)?) as Arc<dyn DemoProviderClient>)
+        }
+    }
+}
+
+fn resolve_demo_provider_client(
+    registry: &DemoProviderRegistry,
+    request: &DemoProviderResponseRequest,
+) -> Result<Arc<dyn DemoProviderClient>> {
+    if let Some(api_key) = request.provider_api_key.clone() {
+        return build_temporary_demo_provider_client(request.provider, api_key);
+    }
+    registry.provider_for(request.provider).ok_or_else(|| {
+        anyhow!(
+            "{} live mode requires either vault configuration or a temporary provider_api_key",
+            request.provider.as_str()
+        )
+    })
+}
+
+impl OpenAiDemoClient {
+    fn new(api_key: String) -> Result<Self> {
+        let http = Client::builder()
+            .timeout(Duration::from_secs(30))
+            .build()
+            .context("failed to build OpenAI demo HTTP client")?;
+        Ok(Self { http, api_key })
+    }
+}
+
+impl AnthropicDemoClient {
+    fn new(api_key: String) -> Result<Self> {
+        let http = Client::builder()
+            .timeout(Duration::from_secs(30))
+            .build()
+            .context("failed to build Anthropic demo HTTP client")?;
+        Ok(Self { http, api_key })
+    }
+}
+
+#[async_trait]
+impl DemoProviderClient for OpenAiDemoClient {
+    async fn generate(
+        &self,
+        request: &DemoProviderResponseRequest,
+    ) -> Result<DemoProviderResponse> {
+        let prompt_payload = serde_json::json!({
+            "model": request.model.clone(),
+            "input": [
+                {
+                    "role": "system",
+                    "content": [
+                        {
+                            "type": "input_text",
+                            "text": request.system_prompt.clone(),
+                        }
+                    ]
+                },
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "input_text",
+                            "text": request.user_prompt.clone(),
+                        }
+                    ]
+                }
+            ],
+            "reasoning": {
+                "effort": "minimal"
+            },
+            "text": {
+                "verbosity": "low"
+            },
+            "max_output_tokens": request.max_tokens,
+        });
+        let started_at = Instant::now();
+        let response = self
+            .http
+            .post(OPENAI_RESPONSES_URL)
+            .bearer_auth(&self.api_key)
+            .json(&prompt_payload)
+            .send()
+            .await
+            .context("failed to call OpenAI responses API")?;
+        let status = response.status();
+        let header_request_id = response
+            .headers()
+            .get("x-request-id")
+            .and_then(|value| value.to_str().ok())
+            .map(str::to_string);
+        let response_payload: Value = response
+            .json()
+            .await
+            .context("failed to decode OpenAI responses payload")?;
+        if !status.is_success() {
+            bail!(
+                "OpenAI live capture failed: {}",
+                extract_provider_error_message(&response_payload, status.as_u16())
+            );
+        }
+
+        let output_text = extract_openai_output_text(&response_payload)
+            .ok_or_else(|| anyhow!("OpenAI response did not contain output text"))?;
+        let usage = demo_usage_from_openai_payload(&response_payload);
+        let provider_request_id = header_request_id.or_else(|| {
+            response_payload
+                .get("id")
+                .and_then(Value::as_str)
+                .map(str::to_string)
+        });
+        Ok(build_demo_provider_response(
+            request,
+            output_text,
+            usage,
+            started_at.elapsed().as_millis() as u64,
+            provider_request_id,
+            prompt_payload,
+            response_payload,
+        ))
+    }
+}
+
+#[async_trait]
+impl DemoProviderClient for AnthropicDemoClient {
+    async fn generate(
+        &self,
+        request: &DemoProviderResponseRequest,
+    ) -> Result<DemoProviderResponse> {
+        let prompt_payload = serde_json::json!({
+            "model": request.model.clone(),
+            "system": request.system_prompt.clone(),
+            "max_tokens": request.max_tokens,
+            "temperature": request.temperature,
+            "messages": [
+                {
+                    "role": "user",
+                    "content": request.user_prompt.clone(),
+                }
+            ]
+        });
+        let started_at = Instant::now();
+        let response = self
+            .http
+            .post(ANTHROPIC_MESSAGES_URL)
+            .header("x-api-key", &self.api_key)
+            .header("anthropic-version", ANTHROPIC_API_VERSION)
+            .json(&prompt_payload)
+            .send()
+            .await
+            .context("failed to call Anthropic messages API")?;
+        let status = response.status();
+        let response_payload: Value = response
+            .json()
+            .await
+            .context("failed to decode Anthropic messages payload")?;
+        if !status.is_success() {
+            bail!(
+                "Anthropic live capture failed: {}",
+                extract_provider_error_message(&response_payload, status.as_u16())
+            );
+        }
+
+        let output_text = extract_anthropic_output_text(&response_payload)
+            .ok_or_else(|| anyhow!("Anthropic response did not contain text content"))?;
+        let usage = demo_usage_from_anthropic_payload(&response_payload);
+        let provider_request_id = response_payload
+            .get("id")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        Ok(build_demo_provider_response(
+            request,
+            output_text,
+            usage,
+            started_at.elapsed().as_millis() as u64,
+            provider_request_id,
+            prompt_payload,
+            response_payload,
+        ))
+    }
+}
+
+fn default_demo_temperature() -> f64 {
+    0.2
+}
+
+fn default_demo_max_tokens() -> u32 {
+    256
+}
+
+fn validate_demo_provider_response_request(
+    mut request: DemoProviderResponseRequest,
+) -> Result<DemoProviderResponseRequest> {
+    request.model = request.model.trim().to_string();
+    request.system_prompt = request.system_prompt.trim().to_string();
+    request.user_prompt = request.user_prompt.trim().to_string();
+    request.provider_api_key = request
+        .provider_api_key
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty());
+
+    if request.model.is_empty() {
+        bail!("model must not be empty");
+    }
+    if request.system_prompt.is_empty() {
+        bail!("system_prompt must not be empty");
+    }
+    if request.user_prompt.is_empty() {
+        bail!("user_prompt must not be empty");
+    }
+    if !request.temperature.is_finite() {
+        bail!("temperature must be finite");
+    }
+    if request.temperature < 0.0 {
+        bail!("temperature must be >= 0");
+    }
+    if request.max_tokens == 0 {
+        bail!("max_tokens must be > 0");
+    }
+
+    Ok(request)
+}
+
+fn build_synthetic_demo_provider_response(
+    request: &DemoProviderResponseRequest,
+) -> DemoProviderResponse {
+    let output_text = build_mock_response(
+        request.provider,
+        &request.system_prompt,
+        &request.user_prompt,
+        &request.model,
+    );
+    let input_tokens =
+        estimate_demo_tokens(&request.system_prompt) + estimate_demo_tokens(&request.user_prompt);
+    let output_tokens = estimate_demo_tokens(&output_text).max(24);
+    let usage = DemoTokenUsage {
+        input_tokens,
+        output_tokens,
+        total_tokens: input_tokens + output_tokens,
+    };
+    let prompt_payload = serde_json::json!({
+        "provider": request.provider.as_str(),
+        "model": request.model.clone(),
+        "mode": "synthetic",
+        "messages": [
+            {
+                "role": "system",
+                "content": request.system_prompt.clone(),
+            },
+            {
+                "role": "user",
+                "content": request.user_prompt.clone(),
+            }
+        ],
+        "temperature": request.temperature,
+        "max_tokens": request.max_tokens,
+    });
+    let response_payload = serde_json::json!({
+        "provider": request.provider.as_str(),
+        "model": request.model.clone(),
+        "output": output_text.clone(),
+        "usage": usage.clone(),
+        "response_source": request.mode.response_source(),
+    });
+
+    build_demo_provider_response(
+        request,
+        output_text,
+        usage,
+        180,
+        None,
+        prompt_payload,
+        response_payload,
+    )
+}
+
+fn build_mock_response(
+    provider: DemoProviderName,
+    system_prompt: &str,
+    user_prompt: &str,
+    model: &str,
+) -> String {
+    let lead = match provider {
+        DemoProviderName::Anthropic => "Anthropic",
+        DemoProviderName::Openai => "OpenAI",
+    };
+    let prompt_excerpt = user_prompt.trim().chars().take(180).collect::<String>();
+    let policy_note = system_prompt.trim().chars().take(70).collect::<String>();
+    [
+        format!("Synthetic {lead} {model} demo response."),
+        "Proof Layer can show investors a complete assurance workflow for one AI interaction: capture the prompt and output, seal them into a signed bundle, verify integrity later, preview policy-driven disclosure, and export a pack from the vault.".to_string(),
+        "The commercial point is controlled evidence handling rather than chat quality. A reviewer can prove what was captured, decide what to reveal, and hand over a regulator-oriented package without exposing every internal artefact by default.".to_string(),
+        format!(
+            "Prompt focus: {}",
+            if prompt_excerpt.is_empty() {
+                "No prompt provided."
+            } else {
+                &prompt_excerpt
+            }
+        ),
+        format!(
+            "Grounding note: {}",
+            if policy_note.is_empty() {
+                "No system guidance provided."
+            } else {
+                &policy_note
+            }
+        ),
+    ]
+    .join("\n\n")
+}
+
+fn estimate_demo_tokens(text: &str) -> u64 {
+    ((text.chars().count() as u64) / 4).max(1)
+}
+
+fn build_demo_provider_response(
+    request: &DemoProviderResponseRequest,
+    output_text: String,
+    usage: DemoTokenUsage,
+    latency_ms: u64,
+    provider_request_id: Option<String>,
+    prompt_payload: Value,
+    response_payload: Value,
+) -> DemoProviderResponse {
+    DemoProviderResponse {
+        capture_mode: request.mode.response_source().to_string(),
+        provider: request.provider.as_str().to_string(),
+        model: request.model.clone(),
+        output_text,
+        usage: usage.clone(),
+        latency_ms,
+        provider_request_id: provider_request_id.clone(),
+        prompt_payload,
+        response_payload,
+        trace_payload: serde_json::json!({
+            "request_id": provider_request_id.clone().unwrap_or_else(|| Ulid::new().to_string()),
+            "provider": request.provider.as_str(),
+            "model": request.model.clone(),
+            "capture_mode": request.mode.response_source(),
+            "generated_at": Utc::now().to_rfc3339(),
+            "latency_ms": latency_ms,
+            "usage": usage,
+        }),
+    }
+}
+
+fn extract_provider_error_message(payload: &Value, status_code: u16) -> String {
+    payload
+        .get("error")
+        .and_then(|value| value.get("message").or(Some(value)))
+        .and_then(Value::as_str)
+        .map(str::to_string)
+        .or_else(|| {
+            payload
+                .get("message")
+                .and_then(Value::as_str)
+                .map(str::to_string)
+        })
+        .unwrap_or_else(|| format!("provider returned HTTP {status_code}"))
+}
+
+fn extract_openai_output_text(payload: &Value) -> Option<String> {
+    if let Some(text) = payload.get("output_text").and_then(Value::as_str) {
+        return Some(text.to_string());
+    }
+    if let Some(output) = payload.get("output").and_then(Value::as_array) {
+        let mut parts = Vec::new();
+        for item in output {
+            if let Some(content) = item.get("content").and_then(Value::as_array) {
+                for block in content {
+                    if let Some(text) = block.get("text").and_then(Value::as_str) {
+                        parts.push(text.to_string());
+                    } else if let Some(text) = block
+                        .get("text")
+                        .and_then(|value| value.get("value"))
+                        .and_then(Value::as_str)
+                    {
+                        parts.push(text.to_string());
+                    }
+                }
+            }
+        }
+        if !parts.is_empty() {
+            return Some(parts.join("\n\n"));
+        }
+    }
+    payload
+        .get("choices")
+        .and_then(Value::as_array)
+        .and_then(|choices| choices.first())
+        .and_then(|choice| choice.get("message"))
+        .and_then(|message| message.get("content"))
+        .and_then(Value::as_str)
+        .map(str::to_string)
+}
+
+fn extract_anthropic_output_text(payload: &Value) -> Option<String> {
+    let mut parts = Vec::new();
+    let content = payload.get("content").and_then(Value::as_array)?;
+    for block in content {
+        if block.get("type").and_then(Value::as_str) == Some("text")
+            && let Some(text) = block.get("text").and_then(Value::as_str)
+        {
+            parts.push(text.to_string());
+        }
+    }
+    if parts.is_empty() {
+        None
+    } else {
+        Some(parts.join("\n\n"))
+    }
+}
+
+fn demo_usage_from_openai_payload(payload: &Value) -> DemoTokenUsage {
+    let usage = payload.get("usage").cloned().unwrap_or(Value::Null);
+    let input_tokens = usage
+        .get("input_tokens")
+        .and_then(Value::as_u64)
+        .unwrap_or(0);
+    let output_tokens = usage
+        .get("output_tokens")
+        .and_then(Value::as_u64)
+        .or_else(|| usage.get("output_text_tokens").and_then(Value::as_u64))
+        .unwrap_or(0);
+    let total_tokens = usage
+        .get("total_tokens")
+        .and_then(Value::as_u64)
+        .unwrap_or(input_tokens + output_tokens);
+    DemoTokenUsage {
+        input_tokens,
+        output_tokens,
+        total_tokens,
+    }
+}
+
+fn demo_usage_from_anthropic_payload(payload: &Value) -> DemoTokenUsage {
+    let usage = payload.get("usage").cloned().unwrap_or(Value::Null);
+    let input_tokens = usage
+        .get("input_tokens")
+        .and_then(Value::as_u64)
+        .unwrap_or(0);
+    let output_tokens = usage
+        .get("output_tokens")
+        .and_then(Value::as_u64)
+        .unwrap_or(0);
+    DemoTokenUsage {
+        input_tokens,
+        output_tokens,
+        total_tokens: input_tokens + output_tokens,
+    }
 }
 
 fn validate_update_retention_config_request(
@@ -7187,6 +7837,25 @@ fn load_signing_key(signing_key_path: Option<&FsPath>) -> Result<(SigningKey, bo
     Ok((SigningKey::from_bytes(&secret), true))
 }
 
+fn build_demo_provider_registry() -> Result<Arc<DemoProviderRegistry>> {
+    let openai = env::var("OPENAI_API_KEY")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .map(OpenAiDemoClient::new)
+        .transpose()?
+        .map(|client| Arc::new(client) as Arc<dyn DemoProviderClient>);
+    let anthropic = env::var("ANTHROPIC_API_KEY")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .map(AnthropicDemoClient::new)
+        .transpose()?
+        .map(|client| Arc::new(client) as Arc<dyn DemoProviderClient>);
+
+    Ok(Arc::new(DemoProviderRegistry { openai, anthropic }))
+}
+
 fn persist_artefacts(base: &FsPath, bundle_id: &str, artefacts: &[ArtefactInput]) -> Result<()> {
     let bundle_dir = base.join("artefacts").join(bundle_id);
     fs::create_dir_all(&bundle_dir)
@@ -8029,6 +8698,7 @@ mod tests {
             backup_interval_hours: DEFAULT_BACKUP_INTERVAL_HOURS,
             backup_retention_count: DEFAULT_BACKUP_RETENTION_COUNT,
             backup_encryption: None,
+            demo_providers: Arc::new(DemoProviderRegistry::default()),
         }
     }
 
@@ -8054,6 +8724,40 @@ mod tests {
     async fn test_state_with_tenant(max_payload_bytes: usize, tenant_org_id: &str) -> AppState {
         let mut state = test_state(max_payload_bytes).await;
         state.tenant_organization_id = Some(tenant_org_id.to_string());
+        state
+    }
+
+    struct FakeDemoClient {
+        response: DemoProviderResponse,
+    }
+
+    #[async_trait]
+    impl DemoProviderClient for FakeDemoClient {
+        async fn generate(
+            &self,
+            _request: &DemoProviderResponseRequest,
+        ) -> Result<DemoProviderResponse> {
+            Ok(self.response.clone())
+        }
+    }
+
+    async fn test_state_with_demo_provider(
+        max_payload_bytes: usize,
+        provider: DemoProviderName,
+        response: DemoProviderResponse,
+    ) -> AppState {
+        let mut state = test_state(max_payload_bytes).await;
+        let client = Arc::new(FakeDemoClient { response }) as Arc<dyn DemoProviderClient>;
+        state.demo_providers = Arc::new(match provider {
+            DemoProviderName::Openai => DemoProviderRegistry {
+                openai: Some(client),
+                anthropic: None,
+            },
+            DemoProviderName::Anthropic => DemoProviderRegistry {
+                openai: None,
+                anthropic: Some(client),
+            },
+        });
         state
     }
 
@@ -10323,6 +11027,233 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
                 .await
                 .unwrap();
         assert!(audit_actions.contains(&"startup_config_sync".to_string()));
+    }
+
+    #[tokio::test]
+    async fn get_config_reports_demo_provider_availability() {
+        let state = test_state_with_demo_provider(
+            DEFAULT_MAX_PAYLOAD_BYTES,
+            DemoProviderName::Openai,
+            DemoProviderResponse {
+                capture_mode: "live_provider_capture".to_string(),
+                provider: "openai".to_string(),
+                model: "gpt-5-mini".to_string(),
+                output_text: "demo".to_string(),
+                usage: DemoTokenUsage {
+                    input_tokens: 10,
+                    output_tokens: 5,
+                    total_tokens: 15,
+                },
+                latency_ms: 120,
+                provider_request_id: Some("resp_123".to_string()),
+                prompt_payload: serde_json::json!({"prompt": "demo"}),
+                response_payload: serde_json::json!({"output_text": "demo"}),
+                trace_payload: serde_json::json!({"request_id": "req-demo"}),
+            },
+        )
+        .await;
+        let app = build_router(state, DEFAULT_MAX_PAYLOAD_BYTES);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/v1/config")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let config: VaultConfigResponse = serde_json::from_slice(&body).unwrap();
+        assert!(config.demo.providers.openai.live_enabled);
+        assert!(!config.demo.providers.anthropic.live_enabled);
+        assert_eq!(config.demo.capture_modes, vec!["synthetic", "live"]);
+    }
+
+    #[tokio::test]
+    async fn demo_provider_response_synthetic_mode_returns_structured_payload() {
+        let state = test_state(DEFAULT_MAX_PAYLOAD_BYTES).await;
+        let app = build_router(state, DEFAULT_MAX_PAYLOAD_BYTES);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/v1/demo/provider-response")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        serde_json::to_vec(&DemoProviderResponseRequest {
+                            mode: DemoCaptureMode::Synthetic,
+                            provider: DemoProviderName::Openai,
+                            model: "gpt-5-mini".to_string(),
+                            system_prompt: "Stay concise".to_string(),
+                            user_prompt: "Summarize the proof workflow".to_string(),
+                            provider_api_key: None,
+                            temperature: 0.2,
+                            max_tokens: 256,
+                        })
+                        .unwrap(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let payload: DemoProviderResponse = serde_json::from_slice(&body).unwrap();
+        assert_eq!(payload.capture_mode, "synthetic_demo_capture");
+        assert_eq!(payload.provider, "openai");
+        assert_eq!(payload.model, "gpt-5-mini");
+        assert!(payload.output_text.contains("Proof Layer"));
+        assert!(payload.usage.total_tokens > 0);
+        assert!(payload.prompt_payload.is_object());
+        assert!(payload.response_payload.is_object());
+        assert!(payload.trace_payload.is_object());
+    }
+
+    #[tokio::test]
+    async fn demo_provider_response_live_mode_rejects_unavailable_provider() {
+        let state = test_state(DEFAULT_MAX_PAYLOAD_BYTES).await;
+        let app = build_router(state, DEFAULT_MAX_PAYLOAD_BYTES);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/v1/demo/provider-response")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        serde_json::to_vec(&DemoProviderResponseRequest {
+                            mode: DemoCaptureMode::Live,
+                            provider: DemoProviderName::Anthropic,
+                            model: "claude-sonnet-4-6".to_string(),
+                            system_prompt: "Stay concise".to_string(),
+                            user_prompt: "Summarize the proof workflow".to_string(),
+                            provider_api_key: None,
+                            temperature: 0.2,
+                            max_tokens: 256,
+                        })
+                        .unwrap(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let payload: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert!(
+            payload["error"]
+                .as_str()
+                .unwrap()
+                .contains("requires either vault configuration or a temporary provider_api_key")
+        );
+    }
+
+    #[tokio::test]
+    async fn demo_provider_response_live_mode_supports_fake_provider_clients() {
+        let state = test_state_with_demo_provider(
+            DEFAULT_MAX_PAYLOAD_BYTES,
+            DemoProviderName::Openai,
+            DemoProviderResponse {
+                capture_mode: "live_provider_capture".to_string(),
+                provider: "openai".to_string(),
+                model: "gpt-5.2".to_string(),
+                output_text: "Live provider output".to_string(),
+                usage: DemoTokenUsage {
+                    input_tokens: 23,
+                    output_tokens: 44,
+                    total_tokens: 67,
+                },
+                latency_ms: 412,
+                provider_request_id: Some("resp_live_01".to_string()),
+                prompt_payload: serde_json::json!({"kind": "request"}),
+                response_payload: serde_json::json!({"kind": "response"}),
+                trace_payload: serde_json::json!({"request_id": "req-live-01"}),
+            },
+        )
+        .await;
+        let app = build_router(state, DEFAULT_MAX_PAYLOAD_BYTES);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/v1/demo/provider-response")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        serde_json::to_vec(&DemoProviderResponseRequest {
+                            mode: DemoCaptureMode::Live,
+                            provider: DemoProviderName::Openai,
+                            model: "gpt-5.2".to_string(),
+                            system_prompt: "Stay concise".to_string(),
+                            user_prompt: "Summarize the proof workflow".to_string(),
+                            provider_api_key: None,
+                            temperature: 0.2,
+                            max_tokens: 256,
+                        })
+                        .unwrap(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let payload: DemoProviderResponse = serde_json::from_slice(&body).unwrap();
+        assert_eq!(payload.capture_mode, "live_provider_capture");
+        assert_eq!(payload.provider_request_id.as_deref(), Some("resp_live_01"));
+        assert_eq!(payload.output_text, "Live provider output");
+        assert_eq!(payload.usage.total_tokens, 67);
+    }
+
+    #[tokio::test]
+    async fn demo_provider_response_validates_required_fields() {
+        let state = test_state(DEFAULT_MAX_PAYLOAD_BYTES).await;
+        let app = build_router(state, DEFAULT_MAX_PAYLOAD_BYTES);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/v1/demo/provider-response")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        serde_json::json!({
+                            "mode": "synthetic",
+                            "provider": "openai",
+                            "model": "",
+                            "system_prompt": "",
+                            "user_prompt": "hello",
+                            "temperature": 0.2,
+                            "max_tokens": 0
+                        })
+                        .to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let payload: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert!(
+            payload["error"]
+                .as_str()
+                .unwrap()
+                .contains("model must not be empty")
+        );
     }
 
     #[tokio::test]

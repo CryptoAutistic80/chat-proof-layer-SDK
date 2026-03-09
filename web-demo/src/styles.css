@@ -528,6 +528,208 @@ textarea {
   text-decoration: none;
 }
 
+.top-nav {
+  display: flex;
+  gap: 10px;
+  padding: 14px;
+  margin-bottom: 18px;
+}
+
+.nav-tab {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 12px 16px;
+  border-radius: 999px;
+  text-decoration: none;
+  color: var(--ink-soft);
+  border: 1px solid transparent;
+  transition: background 140ms ease, border-color 140ms ease, color 140ms ease;
+}
+
+.nav-tab.is-active {
+  color: var(--accent-strong);
+  background: rgba(184, 90, 50, 0.08);
+  border-color: rgba(184, 90, 50, 0.14);
+}
+
+.route-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(320px, 0.8fr);
+  gap: 18px;
+  align-items: start;
+}
+
+.route-main,
+.route-rail,
+.page-stack {
+  display: grid;
+  gap: 18px;
+}
+
+.preset-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 18px;
+}
+
+.preset-card {
+  text-align: left;
+  display: grid;
+  gap: 6px;
+  padding: 16px 18px;
+  border-radius: 20px;
+  border: 1px solid var(--line);
+  background: rgba(255, 250, 242, 0.74);
+}
+
+.preset-card strong {
+  font-size: 1rem;
+}
+
+.preset-card span {
+  color: var(--ink-soft);
+  line-height: 1.5;
+  font-size: 0.88rem;
+}
+
+.preset-card.is-active {
+  border-color: rgba(30, 114, 99, 0.32);
+  background: rgba(229, 246, 241, 0.88);
+}
+
+.mode-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  padding: 8px 12px;
+  background: rgba(184, 90, 50, 0.08);
+  color: var(--accent-strong);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 0.78rem;
+}
+
+.response-card {
+  padding: 18px;
+  border-radius: 20px;
+  border: 1px solid var(--line);
+  background: rgba(255, 251, 245, 0.78);
+}
+
+.response-card h3 {
+  margin-top: 0;
+  font-family: "Iowan Old Style", "Palatino Linotype", serif;
+  letter-spacing: -0.02em;
+}
+
+.response-card pre {
+  min-height: 0;
+  white-space: pre-wrap;
+}
+
+.summary-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.summary-card,
+.status-card {
+  padding: 16px 18px;
+  border-radius: 20px;
+  border: 1px solid var(--line);
+  background: rgba(255, 251, 246, 0.78);
+  display: grid;
+  gap: 8px;
+}
+
+.summary-card strong,
+.status-card strong {
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  font-size: 0.75rem;
+  color: var(--ink-soft);
+}
+
+.summary-card span,
+.status-card p {
+  margin: 0;
+  line-height: 1.55;
+}
+
+.status-stack {
+  display: grid;
+  gap: 12px;
+}
+
+.recent-runs {
+  list-style: none;
+  display: grid;
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+}
+
+.recent-runs li {
+  display: grid;
+  gap: 10px;
+  padding: 14px 16px;
+  border-radius: 18px;
+  border: 1px solid var(--line);
+  background: rgba(255, 252, 247, 0.82);
+}
+
+.recent-runs strong,
+.recent-runs span {
+  display: block;
+}
+
+.recent-runs span,
+.empty-copy {
+  color: var(--ink-soft);
+  line-height: 1.45;
+}
+
+.recent-run-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.recent-run-links a {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  text-decoration: none;
+  color: var(--ink);
+  background: rgba(255, 255, 255, 0.74);
+}
+
+.empty-state {
+  min-height: 240px;
+  align-content: center;
+}
+
+.empty-state h2 {
+  margin: 6px 0 10px;
+  font-family: "Iowan Old Style", "Palatino Linotype", serif;
+}
+
+.page-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.run-summary-card {
+  gap: 12px;
+}
+
 .snapshot-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -575,6 +777,7 @@ pre {
   }
 
   .workspace,
+  .route-grid,
   .snapshot-grid {
     grid-template-columns: 1fr;
   }
@@ -590,6 +793,7 @@ pre {
   }
 
   .capability-strip,
+  .preset-grid,
   .form-grid,
   .group-picker {
     grid-template-columns: 1fr;
@@ -605,6 +809,8 @@ pre {
 
   .button-row,
   .toggle-row,
+  .top-nav,
+  .recent-run-links,
   .timeline-step-header,
   .data-panel-head,
   .activity-row,
@@ -616,9 +822,14 @@ pre {
   .download-link,
   .button-row > button:first-child,
   .secondary-btn,
-  .ghost-btn {
+  .ghost-btn,
+  .nav-tab {
     width: 100%;
     justify-content: center;
+  }
+
+  .summary-grid {
+    grid-template-columns: 1fr;
   }
 }
 

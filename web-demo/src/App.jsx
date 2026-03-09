@@ -208,6 +208,13 @@ function arrayValue(value) {
   return Array.isArray(value) ? value : [];
 }
 
+function disclosurePreviewStats(preview) {
+  return {
+    itemCount: arrayValue(preview?.disclosed_item_indices).length,
+    artefactCount: arrayValue(preview?.disclosed_artefact_names).length
+  };
+}
+
 function TimelineStep({ title, status, detail }) {
   return (
     <article className={`timeline-step is-${formatStatusTone(status)}`}>
@@ -364,17 +371,8 @@ export function App() {
       const nextVaultKey = typeof configResponse?.signing?.public_key_pem === "string"
         ? configResponse.signing.public_key_pem.trim()
         : "";
-      const previousVaultKey = typeof vaultConfig?.signing?.public_key_pem === "string"
-        ? vaultConfig.signing.public_key_pem.trim()
-        : "";
       if (nextVaultKey) {
-        setPublicKeyPem((current) => {
-          const trimmed = current.trim();
-          if (!trimmed || trimmed === previousVaultKey) {
-            return configResponse.signing.public_key_pem;
-          }
-          return current;
-        });
+        setPublicKeyPem(configResponse.signing.public_key_pem);
       }
 
       const templates = arrayValue(templateResponse?.templates);
@@ -568,7 +566,12 @@ export function App() {
   }
 
   async function runOptionalVerify(currentBundle, artefacts) {
-    if (!publicKeyPem.trim()) {
+    const verifyKeyPem =
+      typeof vaultConfig?.signing?.public_key_pem === "string" && vaultConfig.signing.public_key_pem.trim()
+        ? vaultConfig.signing.public_key_pem
+        : publicKeyPem;
+
+    if (!verifyKeyPem.trim()) {
       setVerifyResponse({
         valid: false,
         message: "Paste a public key PEM to run service-side bundle verification.",
@@ -585,7 +588,7 @@ export function App() {
       body: JSON.stringify({
         bundle: currentBundle,
         artefacts,
-        public_key_pem: publicKeyPem
+        public_key_pem: verifyKeyPem
       })
     });
     setVerifyResponse(verifyPayload);
@@ -785,8 +788,17 @@ export function App() {
         }
       }
 
-      await previewDisclosureFor(createResponse.bundle_id);
-      await exportPackFor(createResponse.bundle_id, bundleResponse.subject?.system_id ?? systemId.trim());
+      const previewPayload = await previewDisclosureFor(createResponse.bundle_id);
+      const previewStats = disclosurePreviewStats(previewPayload);
+      if (bundleFormat === "disclosure" && previewStats.itemCount === 0 && previewStats.artefactCount === 0) {
+        appendActivity(
+          "Pack export skipped",
+          "Selected disclosure template yields no content for the current bundle. Choose another template or export full.",
+          "warn"
+        );
+      } else {
+        await exportPackFor(createResponse.bundle_id, bundleResponse.subject?.system_id ?? systemId.trim());
+      }
       await loadSystemSummary(bundleResponse.subject?.system_id ?? systemId.trim());
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -821,6 +833,15 @@ export function App() {
     setIsExporting(true);
     setWorkflowError("");
     try {
+      const previewStats = disclosurePreviewStats(disclosurePreview);
+      if (bundleFormat === "disclosure" && previewStats.itemCount === 0 && previewStats.artefactCount === 0) {
+        appendActivity(
+          "Export skipped",
+          "Selected disclosure template yields no content for the current bundle. Choose another template or export full.",
+          "warn"
+        );
+        return;
+      }
       await exportPackFor(createMeta.bundle_id, bundle.subject.system_id);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -835,11 +856,12 @@ export function App() {
   const capabilityChips = capabilityValue(vaultConfig, templateCatalog);
   const templateGroups = templateCatalog?.redaction_groups ?? [];
   const previewDisclosedItemIndices = arrayValue(disclosurePreview?.disclosed_item_indices);
+  const previewStats = disclosurePreviewStats(disclosurePreview);
   const vaultVerifyKeyPem =
     typeof vaultConfig?.signing?.public_key_pem === "string" ? vaultConfig.signing.public_key_pem.trim() : "";
-  const usingVaultVerifyKey = Boolean(vaultVerifyKeyPem) && publicKeyPem.trim() === vaultVerifyKeyPem;
+  const hasVaultVerifyKey = Boolean(vaultVerifyKeyPem);
   const verifyDetail = verifyResponse?.message
-    || (usingVaultVerifyKey
+    || (hasVaultVerifyKey
       ? `Verify will use the connected vault ${vaultConfig?.signing?.ephemeral ? "ephemeral demo" : "configured"} public key.`
       : publicKeyPem.trim()
         ? "Verify will use the pasted public key PEM."
@@ -912,6 +934,8 @@ export function App() {
       status: downloadInfo ? "done" : isExporting ? "active" : "idle",
       detail: downloadInfo
         ? `${downloadInfo.fileName} · ${formatBytes(downloadInfo.size)}`
+        : bundleFormat === "disclosure" && disclosurePreview && previewStats.itemCount === 0 && previewStats.artefactCount === 0
+          ? "No disclosure pack to export for the current bundle with this template."
         : "Export a vault-assembled pack for this system in full or disclosure format."
     }
   ];
@@ -974,7 +998,7 @@ export function App() {
               <input value={serviceUrl} onChange={(event) => setServiceUrl(event.target.value)} />
             </label>
             <label>
-              API key
+              Vault API key
               <input
                 value={apiKey}
                 onChange={(event) => setApiKey(event.target.value)}
@@ -1043,6 +1067,9 @@ export function App() {
             User prompt
             <textarea rows={5} value={userPrompt} onChange={(event) => setUserPrompt(event.target.value)} />
           </label>
+          <p className="field-hint">
+            This investor demo captures a synthetic response locally and seals it through the real vault API. Provider and model selections are recorded as bundle metadata; they do not call the live model API.
+          </p>
 
           <label className="stacked-field">
             Public key PEM for verify
@@ -1054,11 +1081,9 @@ export function App() {
             />
           </label>
           <p className="field-hint">
-            {usingVaultVerifyKey
-              ? `Auto-filled from the connected vault ${vaultConfig?.signing?.ephemeral ? "ephemeral demo" : "configured"} signer.`
-              : vaultVerifyKeyPem
-                ? "You can paste a different public key, or keep the connected vault signer key."
-                : "Paste the public verify key that matches the bundle signer."}
+            {vaultVerifyKeyPem
+              ? `Verification uses the connected vault ${vaultConfig?.signing?.ephemeral ? "ephemeral demo" : "configured"} signer key by default.`
+              : "Paste the public verify key that matches the bundle signer."}
           </p>
 
           <div className="toggle-row">

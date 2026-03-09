@@ -110,6 +110,16 @@ pack = proof_client.create_pack(
     bundle_format="disclosure",
     disclosure_policy="annex_iv_redacted",
 )
+template_pack = proof_client.create_pack(
+    pack_type="runtime_logs",
+    system_id="system-123",
+    bundle_format="disclosure",
+    disclosure_template={
+        "profile": "runtime_minimum",
+        "name": "runtime_minimum_export",
+        "redaction_groups": ["metadata"],
+    },
+)
 template_catalog = proof_client.get_disclosure_templates()
 rendered_template = proof_client.render_disclosure_template(
     profile="privacy_review",
@@ -136,6 +146,15 @@ preview = proof_client.preview_disclosure(
         "allowed_obligation_refs": ["art9"],
     },
 )
+template_preview = proof_client.preview_disclosure(
+    bundle_id="BUNDLE_ID",
+    pack_type="runtime_logs",
+    disclosure_template={
+        "profile": "privacy_review",
+        "name": "privacy_review_internal",
+        "redaction_groups": ["metadata"],
+    },
+)
 archive = proof_client.download_pack_export(pack["pack_id"])
 
 risk_bundle = proof_layer.capture_risk_assessment(
@@ -148,5 +167,6 @@ risk_bundle = proof_layer.capture_risk_assessment(
 print(risk_bundle["bundle"]["items"][0]["type"])
 print(redacted_summary["disclosed_item_count"], len(archive))
 print(preview["disclosed_item_types"])
+print(template_pack["pack_id"], template_preview["disclosed_item_types"])
 print(template_catalog["templates"][0]["profile"], rendered_template["policy"]["name"])
 ```

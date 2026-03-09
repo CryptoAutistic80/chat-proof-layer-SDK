@@ -67,6 +67,49 @@ test("createPack posts vault pack filters including disclosure bundle_format", a
   });
 });
 
+test("createPack can post an inline disclosure template request", async () => {
+  let captured;
+  const fetchImpl = async (url, init) => {
+    captured = { url, init };
+    return new Response(
+      JSON.stringify({
+        pack_id: "P2",
+        pack_type: "runtime_logs",
+        created_at: "2026-03-09T12:00:00Z",
+        bundle_format: "disclosure",
+        disclosure_policy: "runtime_template_pack",
+        bundle_count: 1,
+        bundle_ids: ["B2"]
+      }),
+      { status: 201, headers: { "content-type": "application/json" } }
+    );
+  };
+
+  const client = new ProofLayerClient({ baseUrl: "http://127.0.0.1:8080", fetchImpl });
+  const result = await client.createPack({
+    packType: "runtime_logs",
+    systemId: "system-456",
+    bundleFormat: "disclosure",
+    disclosureTemplate: {
+      profile: "runtime_minimum",
+      name: "runtime_template_pack",
+      redactionGroups: ["metadata"]
+    }
+  });
+
+  assert.equal(result.disclosure_policy, "runtime_template_pack");
+  assert.deepEqual(JSON.parse(captured.init.body), {
+    pack_type: "runtime_logs",
+    system_id: "system-456",
+    bundle_format: "disclosure",
+    disclosure_template: {
+      profile: "runtime_minimum",
+      name: "runtime_template_pack",
+      redaction_groups: ["metadata"]
+    }
+  });
+});
+
 test("downloadPackExport returns raw archive bytes", async () => {
   const payload = new Uint8Array([1, 2, 3, 4]);
   const fetchImpl = async () =>
@@ -277,4 +320,52 @@ test("previewDisclosure posts named or inline disclosure policy selection", asyn
     }
   });
   assert.deepEqual(result.disclosed_item_indices, [1]);
+});
+
+test("previewDisclosure can post an inline disclosure template selection", async () => {
+  let captured;
+  const fetchImpl = async (url, init) => {
+    captured = { url, init };
+    return new Response(
+      JSON.stringify({
+        bundle_id: "B2",
+        policy_name: "privacy_review_internal",
+        pack_type: "runtime_logs",
+        candidate_item_indices: [0],
+        disclosed_item_indices: [0],
+        disclosed_item_types: ["llm_interaction"],
+        disclosed_item_obligation_refs: ["art12_19_26"],
+        disclosed_item_field_redactions: {
+          "0": ["/parameters"]
+        },
+        disclosed_artefact_indices: [],
+        disclosed_artefact_names: [],
+        disclosed_artefact_bytes_included: false
+      }),
+      { status: 200, headers: { "content-type": "application/json" } }
+    );
+  };
+
+  const client = new ProofLayerClient({ baseUrl: "http://127.0.0.1:8080", fetchImpl });
+  const result = await client.previewDisclosure({
+    bundleId: "B2",
+    packType: "runtime_logs",
+    disclosureTemplate: {
+      profile: "privacy_review",
+      name: "privacy_review_internal",
+      redactionGroups: ["metadata"]
+    }
+  });
+
+  assert.equal(captured.url, "http://127.0.0.1:8080/v1/disclosure/preview");
+  assert.deepEqual(JSON.parse(captured.init.body), {
+    bundle_id: "B2",
+    pack_type: "runtime_logs",
+    disclosure_template: {
+      profile: "privacy_review",
+      name: "privacy_review_internal",
+      redaction_groups: ["metadata"]
+    }
+  });
+  assert.deepEqual(result.disclosed_item_field_redactions, { "0": ["/parameters"] });
 });

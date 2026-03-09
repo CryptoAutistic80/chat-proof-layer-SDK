@@ -197,6 +197,7 @@ export interface CreatePackRequest {
   to?: string;
   bundleFormat?: PackBundleFormat;
   disclosurePolicy?: string;
+  disclosureTemplate?: DisclosureTemplateRenderRequest;
 }
 
 export interface PackBundleEntry extends JsonObject {
@@ -299,6 +300,7 @@ export interface DisclosurePreviewRequest extends JsonObject {
   packType?: string;
   disclosurePolicy?: string;
   policy?: DisclosurePolicyConfig;
+  disclosureTemplate?: DisclosureTemplateRenderRequest;
 }
 
 export interface DisclosureTemplateRenderRequest extends JsonObject {

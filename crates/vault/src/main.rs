@@ -661,6 +661,8 @@ struct CreatePackRequest {
     bundle_format: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     disclosure_policy: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    disclosure_template: Option<DisclosureTemplateRenderRequest>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -672,6 +674,8 @@ struct DisclosurePreviewRequest {
     disclosure_policy: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     policy: Option<DisclosurePolicyConfig>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    disclosure_template: Option<DisclosureTemplateRenderRequest>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -2233,6 +2237,7 @@ async fn preview_disclosure(
         &state.db,
         request.disclosure_policy.as_deref(),
         request.policy,
+        request.disclosure_template.as_ref(),
         default_policy_name,
     )
     .await
@@ -3363,6 +3368,10 @@ fn normalize_create_pack_request(mut request: CreatePackRequest) -> Result<Creat
     request.bundle_format = normalize_pack_bundle_format(&request.bundle_format)?;
     request.disclosure_policy =
         normalize_optional_nonempty("disclosure_policy", request.disclosure_policy)?;
+    request.disclosure_template = request
+        .disclosure_template
+        .map(normalize_disclosure_template_render_request)
+        .transpose()?;
 
     if let (Some(from), Some(to)) = (request.from.as_deref(), request.to.as_deref()) {
         let from = chrono::DateTime::parse_from_rfc3339(from)
@@ -3373,8 +3382,13 @@ fn normalize_create_pack_request(mut request: CreatePackRequest) -> Result<Creat
             bail!("from must be <= to");
         }
     }
-    if request.bundle_format == PACK_BUNDLE_FORMAT_FULL && request.disclosure_policy.is_some() {
-        bail!("disclosure_policy requires bundle_format=disclosure");
+    if request.bundle_format == PACK_BUNDLE_FORMAT_FULL
+        && (request.disclosure_policy.is_some() || request.disclosure_template.is_some())
+    {
+        bail!("disclosure_policy or disclosure_template requires bundle_format=disclosure");
+    }
+    if request.disclosure_policy.is_some() && request.disclosure_template.is_some() {
+        bail!("provide either disclosure_policy or disclosure_template, not both");
     }
 
     Ok(request)
@@ -3411,12 +3425,19 @@ fn normalize_disclosure_preview_request(
     };
     request.disclosure_policy =
         normalize_optional_nonempty("disclosure_policy", request.disclosure_policy)?;
+    request.disclosure_template = request
+        .disclosure_template
+        .map(normalize_disclosure_template_render_request)
+        .transpose()?;
     request.policy = request
         .policy
         .map(validate_single_disclosure_policy)
         .transpose()?;
-    if request.disclosure_policy.is_some() && request.policy.is_some() {
-        bail!("provide either disclosure_policy or policy, not both");
+    let selection_count = usize::from(request.disclosure_policy.is_some())
+        + usize::from(request.policy.is_some())
+        + usize::from(request.disclosure_template.is_some());
+    if selection_count > 1 {
+        bail!("provide only one of disclosure_policy, policy, or disclosure_template");
     }
     Ok(request)
 }
@@ -3618,6 +3639,7 @@ async fn resolve_pack_disclosure_policy(
         db,
         request.disclosure_policy.as_deref(),
         None,
+        request.disclosure_template.as_ref(),
         Some(default_disclosure_policy_name(&request.pack_type)),
     )
     .await
@@ -3636,14 +3658,21 @@ async fn resolve_named_or_inline_disclosure_policy(
     db: &SqlitePool,
     disclosure_policy_name: Option<&str>,
     inline_policy: Option<DisclosurePolicyConfig>,
+    disclosure_template: Option<&DisclosureTemplateRenderRequest>,
     default_policy_name: Option<&str>,
 ) -> Result<DisclosurePolicyConfig> {
-    if disclosure_policy_name.is_some() && inline_policy.is_some() {
-        bail!("provide either disclosure_policy or policy, not both");
+    let selection_count = usize::from(disclosure_policy_name.is_some())
+        + usize::from(inline_policy.is_some())
+        + usize::from(disclosure_template.is_some());
+    if selection_count > 1 {
+        bail!("provide only one of disclosure_policy, policy, or disclosure_template");
     }
 
     if let Some(policy) = inline_policy {
         return validate_single_disclosure_policy(policy);
+    }
+    if let Some(template) = disclosure_template {
+        return build_disclosure_template_response(template).map(|response| response.policy);
     }
 
     let policy_name = disclosure_policy_name
@@ -9518,6 +9547,7 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
                             vec!["/metadata/source".to_string()],
                         )]),
                     }),
+                    disclosure_template: None,
                 })
                 .unwrap(),
             ))
@@ -9541,6 +9571,77 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
         );
         assert!(preview.disclosed_artefact_indices.is_empty());
         assert!(!preview.disclosed_artefact_bytes_included);
+    }
+
+    #[tokio::test]
+    async fn preview_disclosure_supports_inline_template_requests() {
+        let state = test_state(DEFAULT_MAX_PAYLOAD_BYTES).await;
+        let app = build_router(state, DEFAULT_MAX_PAYLOAD_BYTES);
+
+        let created = create_bundle_response(
+            &app,
+            &CreateBundleRequest {
+                capture: SealableCaptureInput::V10(sample_event_with_profile(
+                    "system-preview-template",
+                    proof_layer_core::ActorRole::Provider,
+                    sample_event_with_system("system-preview-template").items,
+                    Some("runtime_logs"),
+                )),
+                artefacts: vec![InlineArtefact {
+                    name: "prompt.json".to_string(),
+                    content_type: "application/json".to_string(),
+                    data_base64: Base64::encode_string(br#"{"prompt":"template"}"#),
+                }],
+            },
+        )
+        .await;
+
+        let preview_req = Request::builder()
+            .method("POST")
+            .uri("/v1/disclosure/preview")
+            .header("content-type", "application/json")
+            .body(Body::from(
+                serde_json::to_vec(&DisclosurePreviewRequest {
+                    bundle_id: created.bundle_id.clone(),
+                    pack_type: Some("runtime_logs".to_string()),
+                    disclosure_policy: None,
+                    policy: None,
+                    disclosure_template: Some(DisclosureTemplateRenderRequest {
+                        profile: DEFAULT_DISCLOSURE_POLICY_RUNTIME_MINIMUM.to_string(),
+                        name: Some("runtime_minimum_template".to_string()),
+                        redaction_groups: vec!["metadata".to_string()],
+                        redacted_fields_by_item_type: BTreeMap::new(),
+                    }),
+                })
+                .unwrap(),
+            ))
+            .unwrap();
+        let preview_res = app.clone().oneshot(preview_req).await.unwrap();
+        assert_eq!(preview_res.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(preview_res.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let preview: DisclosurePreviewResponse = serde_json::from_slice(&body).unwrap();
+
+        assert_eq!(preview.policy_name, "runtime_minimum_template");
+        assert_eq!(preview.disclosed_item_types, vec!["llm_interaction"]);
+        assert_eq!(
+            preview.disclosed_item_field_redactions,
+            BTreeMap::from([(
+                0usize,
+                vec![
+                    "input_commitment".to_string(),
+                    "retrieval_commitment".to_string(),
+                    "output_commitment".to_string(),
+                    "tool_outputs_commitment".to_string(),
+                    "trace_commitment".to_string(),
+                    "/parameters".to_string(),
+                    "/token_usage".to_string(),
+                    "/latency_ms".to_string(),
+                    "/trace_semconv_version".to_string(),
+                ]
+            )])
+        );
     }
 
     #[tokio::test]
@@ -9652,6 +9753,7 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
                     to: None,
                     bundle_format: default_pack_bundle_format(),
                     disclosure_policy: None,
+                    disclosure_template: None,
                 })
                 .unwrap(),
             ))
@@ -9806,6 +9908,7 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
                     to: None,
                     bundle_format: PACK_BUNDLE_FORMAT_DISCLOSURE.to_string(),
                     disclosure_policy: None,
+                    disclosure_template: None,
                 })
                 .unwrap(),
             ))
@@ -9963,6 +10066,7 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
                     disclosure_policy: Some(
                         DEFAULT_DISCLOSURE_POLICY_ANNEX_IV_REDACTED.to_string(),
                     ),
+                    disclosure_template: None,
                 })
                 .unwrap(),
             ))
@@ -10056,6 +10160,85 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
     }
 
     #[tokio::test]
+    async fn create_pack_supports_inline_disclosure_template_requests() {
+        let state = test_state(DEFAULT_MAX_PAYLOAD_BYTES).await;
+        let app = build_router(state, DEFAULT_MAX_PAYLOAD_BYTES);
+
+        let llm_bundle = create_bundle_response(
+            &app,
+            &CreateBundleRequest {
+                capture: SealableCaptureInput::V10(sample_event_with_profile(
+                    "system-template-pack",
+                    proof_layer_core::ActorRole::Provider,
+                    sample_event_with_system("system-template-pack").items,
+                    Some("runtime_logs"),
+                )),
+                artefacts: vec![InlineArtefact {
+                    name: "prompt.json".to_string(),
+                    content_type: "application/json".to_string(),
+                    data_base64: Base64::encode_string(br#"{"prompt":"hello"}"#),
+                }],
+            },
+        )
+        .await;
+
+        let pack_req = Request::builder()
+            .method("POST")
+            .uri("/v1/packs")
+            .header("content-type", "application/json")
+            .body(Body::from(
+                serde_json::to_vec(&CreatePackRequest {
+                    pack_type: "runtime_logs".to_string(),
+                    system_id: Some("system-template-pack".to_string()),
+                    from: None,
+                    to: None,
+                    bundle_format: PACK_BUNDLE_FORMAT_DISCLOSURE.to_string(),
+                    disclosure_policy: None,
+                    disclosure_template: Some(DisclosureTemplateRenderRequest {
+                        profile: DEFAULT_DISCLOSURE_POLICY_REGULATOR_MINIMUM.to_string(),
+                        name: Some("regulator_template_pack".to_string()),
+                        redaction_groups: Vec::new(),
+                        redacted_fields_by_item_type: BTreeMap::new(),
+                    }),
+                })
+                .unwrap(),
+            ))
+            .unwrap();
+        let pack_res = app.clone().oneshot(pack_req).await.unwrap();
+        assert_eq!(pack_res.status(), StatusCode::CREATED);
+        let body = axum::body::to_bytes(pack_res.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let pack: PackSummaryResponse = serde_json::from_slice(&body).unwrap();
+        assert_eq!(pack.bundle_ids, vec![llm_bundle.bundle_id.clone()]);
+        assert_eq!(
+            pack.disclosure_policy.as_deref(),
+            Some("regulator_template_pack")
+        );
+
+        let manifest_req = Request::builder()
+            .method("GET")
+            .uri(format!("/v1/packs/{}/manifest", pack.pack_id))
+            .body(Body::empty())
+            .unwrap();
+        let manifest_res = app.clone().oneshot(manifest_req).await.unwrap();
+        assert_eq!(manifest_res.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(manifest_res.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let manifest: PackManifest = serde_json::from_slice(&body).unwrap();
+        assert_eq!(
+            manifest.disclosure_policy.as_deref(),
+            Some("regulator_template_pack")
+        );
+        assert!(
+            manifest.bundles[0]
+                .disclosed_item_field_redactions
+                .is_empty()
+        );
+    }
+
+    #[tokio::test]
     async fn create_pack_applies_named_disclosure_policy_with_field_redactions() {
         let state = test_state(DEFAULT_MAX_PAYLOAD_BYTES).await;
         let public_key_pem = encode_public_key_pem(&state.signing_key.verifying_key());
@@ -10129,6 +10312,7 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
                     to: None,
                     bundle_format: PACK_BUNDLE_FORMAT_DISCLOSURE.to_string(),
                     disclosure_policy: Some("runtime_minimum".to_string()),
+                    disclosure_template: None,
                 })
                 .unwrap(),
             ))
@@ -10255,6 +10439,7 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
                     to: None,
                     bundle_format: default_pack_bundle_format(),
                     disclosure_policy: None,
+                    disclosure_template: None,
                 })
                 .unwrap(),
             ))
@@ -10382,6 +10567,7 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
                     to: None,
                     bundle_format: default_pack_bundle_format(),
                     disclosure_policy: None,
+                    disclosure_template: None,
                 })
                 .unwrap(),
             ))
@@ -10506,6 +10692,7 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
                     to: None,
                     bundle_format: default_pack_bundle_format(),
                     disclosure_policy: None,
+                    disclosure_template: None,
                 })
                 .unwrap(),
             ))
@@ -10628,6 +10815,7 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
                     to: None,
                     bundle_format: default_pack_bundle_format(),
                     disclosure_policy: None,
+                    disclosure_template: None,
                 })
                 .unwrap(),
             ))

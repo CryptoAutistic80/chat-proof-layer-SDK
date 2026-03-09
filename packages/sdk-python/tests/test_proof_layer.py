@@ -176,6 +176,39 @@ class TestProofLayer(unittest.TestCase):
         self.assertEqual(captured["path"], "/v1/disclosure/templates/render")
         self.assertEqual(result["policy"]["name"], "privacy_review_custom")
 
+    def test_vault_mode_can_create_pack_with_disclosure_template(self):
+        captured = {}
+
+        def request_fn(method, path, headers, body):
+            captured["method"] = method
+            captured["path"] = path
+            captured["headers"] = headers
+            captured["body"] = body
+            return {
+                "pack_id": "P-inline",
+                "bundle_format": "disclosure",
+                "disclosure_policy": "runtime_template_pack",
+            }
+
+        proof_layer = ProofLayer(
+            vault_url="http://127.0.0.1:8080",
+            request_fn=request_fn,
+        )
+
+        result = proof_layer.create_pack(
+            pack_type="runtime_logs",
+            bundle_format="disclosure",
+            disclosure_template={
+                "profile": "runtime_minimum",
+                "name": "runtime_template_pack",
+                "redaction_groups": ["metadata"],
+            },
+        )
+
+        self.assertEqual(captured["method"], "POST")
+        self.assertEqual(captured["path"], "/v1/packs")
+        self.assertEqual(result["disclosure_policy"], "runtime_template_pack")
+
     def test_vault_mode_can_preview_disclosure(self):
         captured = {}
 
@@ -208,6 +241,45 @@ class TestProofLayer(unittest.TestCase):
         self.assertEqual(captured["method"], "POST")
         self.assertEqual(captured["path"], "/v1/disclosure/preview")
         self.assertEqual(result["disclosed_item_types"], ["risk_assessment"])
+
+    def test_vault_mode_can_preview_disclosure_from_template(self):
+        captured = {}
+
+        def request_fn(method, path, headers, body):
+            captured["method"] = method
+            captured["path"] = path
+            captured["headers"] = headers
+            captured["body"] = body
+            return {
+                "bundle_id": "B2",
+                "policy_name": "privacy_review_internal",
+                "disclosed_item_indices": [0],
+                "disclosed_item_types": ["llm_interaction"],
+                "disclosed_item_obligation_refs": ["art12_19_26"],
+                "disclosed_item_field_redactions": {"0": ["/parameters"]},
+                "disclosed_artefact_indices": [],
+                "disclosed_artefact_names": [],
+                "disclosed_artefact_bytes_included": False,
+            }
+
+        proof_layer = ProofLayer(
+            vault_url="http://127.0.0.1:8080",
+            request_fn=request_fn,
+        )
+
+        result = proof_layer.preview_disclosure(
+            bundle_id="B2",
+            pack_type="runtime_logs",
+            disclosure_template={
+                "profile": "privacy_review",
+                "name": "privacy_review_internal",
+                "redaction_groups": ["metadata"],
+            },
+        )
+
+        self.assertEqual(captured["method"], "POST")
+        self.assertEqual(captured["path"], "/v1/disclosure/preview")
+        self.assertEqual(result["policy_name"], "privacy_review_internal")
 
     def test_capture_risk_assessment_seals_lifecycle_evidence(self):
         signing_key_pem = (GOLDEN_DIR / "signing_key.txt").read_text(encoding="utf-8")

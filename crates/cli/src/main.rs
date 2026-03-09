@@ -86,6 +86,12 @@ enum Commands {
         bundle_format: PackBundleFormatArg,
         #[arg(long = "disclosure-policy")]
         disclosure_policy: Option<String>,
+        #[arg(long = "disclosure-template-profile")]
+        disclosure_template_profile: Option<DisclosurePolicyTemplateArg>,
+        #[arg(long = "disclosure-template-name")]
+        disclosure_template_name: Option<String>,
+        #[arg(long = "disclosure-group")]
+        disclosure_redaction_group: Vec<DisclosureRedactionGroupArg>,
     },
     /// Query and administer a running vault service.
     Vault {
@@ -250,6 +256,12 @@ enum VaultCommands {
         bundle_format: PackBundleFormatArg,
         #[arg(long = "disclosure-policy")]
         disclosure_policy: Option<String>,
+        #[arg(long = "disclosure-template-profile")]
+        disclosure_template_profile: Option<DisclosurePolicyTemplateArg>,
+        #[arg(long = "disclosure-template-name")]
+        disclosure_template_name: Option<String>,
+        #[arg(long = "disclosure-group")]
+        disclosure_redaction_group: Vec<DisclosureRedactionGroupArg>,
     },
     /// Preview how a named or inline disclosure policy would redact a stored bundle.
     DisclosurePreview {
@@ -263,6 +275,12 @@ enum VaultCommands {
         disclosure_policy: Option<String>,
         #[arg(long = "disclosure-policy-file")]
         disclosure_policy_file: Option<PathBuf>,
+        #[arg(long = "disclosure-template-profile")]
+        disclosure_template_profile: Option<DisclosurePolicyTemplateArg>,
+        #[arg(long = "disclosure-template-name")]
+        disclosure_template_name: Option<String>,
+        #[arg(long = "disclosure-group")]
+        disclosure_redaction_group: Vec<DisclosureRedactionGroupArg>,
         #[arg(long, default_value = "human")]
         format: OutputFormat,
     },
@@ -517,6 +535,9 @@ struct PackCommandInput<'a> {
     pack_type: PackTypeArg,
     bundle_format: PackBundleFormatArg,
     disclosure_policy: Option<&'a str>,
+    disclosure_template_profile: Option<DisclosurePolicyTemplateArg>,
+    disclosure_template_name: Option<&'a str>,
+    disclosure_redaction_groups: &'a [DisclosureRedactionGroupArg],
     vault_url: &'a str,
     out_path: &'a Path,
     system_id: Option<&'a str>,
@@ -545,6 +566,12 @@ enum AssuranceLevel {
     Signed,
     Timestamped,
     TransparencyAnchored,
+}
+
+struct DisclosureTemplateCliInput<'a> {
+    profile: Option<DisclosurePolicyTemplateArg>,
+    name: Option<&'a str>,
+    groups: &'a [DisclosureRedactionGroupArg],
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -581,6 +608,8 @@ struct CreatePackRequest {
     bundle_format: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     disclosure_policy: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    disclosure_template: Option<DisclosureTemplateRenderRequest>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -613,6 +642,8 @@ struct DisclosurePreviewRequest {
     disclosure_policy: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     policy: Option<DisclosurePolicyConfig>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    disclosure_template: Option<DisclosureTemplateRenderRequest>,
 }
 
 #[derive(Debug, Serialize)]
@@ -697,6 +728,30 @@ fn disclosure_policy_template_name(profile: DisclosurePolicyTemplateArg) -> &'st
         DisclosurePolicyTemplateArg::RuntimeMinimum => "runtime_minimum",
         DisclosurePolicyTemplateArg::PrivacyReview => "privacy_review",
     }
+}
+
+fn build_cli_disclosure_template_request(
+    input: DisclosureTemplateCliInput<'_>,
+) -> Result<Option<DisclosureTemplateRenderRequest>> {
+    if input.profile.is_none() {
+        if input.name.is_some() || !input.groups.is_empty() {
+            bail!(
+                "--disclosure-template-name and --disclosure-group require --disclosure-template-profile"
+            );
+        }
+        return Ok(None);
+    }
+
+    Ok(Some(DisclosureTemplateRenderRequest {
+        profile: disclosure_policy_template_name(input.profile.expect("checked above")).to_string(),
+        name: normalize_optional_cli_text("disclosure_template_name", input.name)?,
+        redaction_groups: input
+            .groups
+            .iter()
+            .map(|group| group.to_possible_value().unwrap().get_name().to_string())
+            .collect(),
+        redacted_fields_by_item_type: BTreeMap::new(),
+    }))
 }
 
 fn disclosure_policy_template(
@@ -1263,10 +1318,16 @@ fn main() -> Result<()> {
             to,
             bundle_format,
             disclosure_policy,
+            disclosure_template_profile,
+            disclosure_template_name,
+            disclosure_redaction_group,
         } => cmd_pack(PackCommandInput {
             pack_type,
             bundle_format,
             disclosure_policy: disclosure_policy.as_deref(),
+            disclosure_template_profile,
+            disclosure_template_name: disclosure_template_name.as_deref(),
+            disclosure_redaction_groups: &disclosure_redaction_group,
             vault_url: &vault_url,
             out_path: &out,
             system_id: system_id.as_deref(),
@@ -1319,10 +1380,16 @@ fn main() -> Result<()> {
                 to,
                 bundle_format,
                 disclosure_policy,
+                disclosure_template_profile,
+                disclosure_template_name,
+                disclosure_redaction_group,
             } => cmd_pack(PackCommandInput {
                 pack_type,
                 bundle_format,
                 disclosure_policy: disclosure_policy.as_deref(),
+                disclosure_template_profile,
+                disclosure_template_name: disclosure_template_name.as_deref(),
+                disclosure_redaction_groups: &disclosure_redaction_group,
                 vault_url: &vault_url,
                 out_path: &out,
                 system_id: system_id.as_deref(),
@@ -1335,6 +1402,9 @@ fn main() -> Result<()> {
                 pack_type,
                 disclosure_policy,
                 disclosure_policy_file,
+                disclosure_template_profile,
+                disclosure_template_name,
+                disclosure_redaction_group,
                 format,
             } => cmd_vault_disclosure_preview(
                 &vault_url,
@@ -1342,6 +1412,11 @@ fn main() -> Result<()> {
                 pack_type,
                 disclosure_policy.as_deref(),
                 disclosure_policy_file.as_deref(),
+                DisclosureTemplateCliInput {
+                    profile: disclosure_template_profile,
+                    name: disclosure_template_name.as_deref(),
+                    groups: &disclosure_redaction_group,
+                },
                 format,
             ),
             VaultCommands::DisclosureTemplates { vault_url, format } => {
@@ -1957,6 +2032,14 @@ fn cmd_inspect(
 }
 
 fn cmd_pack(input: PackCommandInput<'_>) -> Result<()> {
+    let disclosure_template = build_cli_disclosure_template_request(DisclosureTemplateCliInput {
+        profile: input.disclosure_template_profile,
+        name: input.disclosure_template_name,
+        groups: input.disclosure_redaction_groups,
+    })?;
+    if input.disclosure_policy.is_some() && disclosure_template.is_some() {
+        bail!("provide either --disclosure-policy or --disclosure-template-profile, not both");
+    }
     let request = CreatePackRequest {
         pack_type: input.pack_type.as_api_value().to_string(),
         system_id: normalize_optional_cli_text("system_id", input.system_id)?,
@@ -1967,6 +2050,7 @@ fn cmd_pack(input: PackCommandInput<'_>) -> Result<()> {
             "disclosure_policy",
             input.disclosure_policy,
         )?,
+        disclosure_template,
     };
     if let (Some(from), Some(to)) = (request.from.as_deref(), request.to.as_deref()) {
         let from = DateTime::parse_from_rfc3339(from)
@@ -2047,10 +2131,16 @@ fn cmd_vault_disclosure_preview(
     pack_type: Option<PackTypeArg>,
     disclosure_policy: Option<&str>,
     disclosure_policy_file: Option<&Path>,
+    disclosure_template: DisclosureTemplateCliInput<'_>,
     format: OutputFormat,
 ) -> Result<()> {
-    if disclosure_policy.is_some() && disclosure_policy_file.is_some() {
-        bail!("provide either --disclosure-policy or --disclosure-policy-file, not both");
+    let selection_count = usize::from(disclosure_policy.is_some())
+        + usize::from(disclosure_policy_file.is_some())
+        + usize::from(disclosure_template.profile.is_some());
+    if selection_count > 1 {
+        bail!(
+            "provide only one of --disclosure-policy, --disclosure-policy-file, or --disclosure-template-profile"
+        );
     }
 
     let request = DisclosurePreviewRequest {
@@ -2060,6 +2150,7 @@ fn cmd_vault_disclosure_preview(
         policy: disclosure_policy_file
             .map(load_disclosure_policy_file)
             .transpose()?,
+        disclosure_template: build_cli_disclosure_template_request(disclosure_template)?,
     };
 
     let client = build_http_client()?;
@@ -3963,6 +4054,54 @@ mod tests {
     }
 
     #[test]
+    fn pack_command_accepts_disclosure_template_args() {
+        let cli = Cli::try_parse_from([
+            "proofctl",
+            "pack",
+            "--type",
+            "runtime-logs",
+            "--vault-url",
+            "http://127.0.0.1:8080",
+            "--out",
+            "./out.pkg",
+            "--bundle-format",
+            "disclosure",
+            "--disclosure-template-profile",
+            "runtime_minimum",
+            "--disclosure-template-name",
+            "runtime_template_pack",
+            "--disclosure-group",
+            "metadata",
+        ])
+        .unwrap();
+
+        match cli.command {
+            Commands::Pack {
+                disclosure_policy,
+                disclosure_template_profile,
+                disclosure_template_name,
+                disclosure_redaction_group,
+                ..
+            } => {
+                assert_eq!(disclosure_policy, None);
+                assert_eq!(
+                    disclosure_template_profile,
+                    Some(DisclosurePolicyTemplateArg::RuntimeMinimum)
+                );
+                assert_eq!(
+                    disclosure_template_name.as_deref(),
+                    Some("runtime_template_pack")
+                );
+                assert_eq!(
+                    disclosure_redaction_group,
+                    vec![DisclosureRedactionGroupArg::Metadata]
+                );
+            }
+            _ => panic!("unexpected command parsed"),
+        }
+    }
+
+    #[test]
     fn vault_disclosure_preview_command_accepts_named_policy_arg() {
         let cli = Cli::try_parse_from([
             "proofctl",
@@ -3992,6 +4131,56 @@ mod tests {
                 assert_eq!(bundle_id, "B1");
                 assert_eq!(pack_type, Some(PackTypeArg::AnnexIv));
                 assert_eq!(disclosure_policy.as_deref(), Some("annex_iv_redacted"));
+            }
+            _ => panic!("unexpected command parsed"),
+        }
+    }
+
+    #[test]
+    fn vault_disclosure_preview_command_accepts_template_args() {
+        let cli = Cli::try_parse_from([
+            "proofctl",
+            "vault",
+            "disclosure-preview",
+            "--vault-url",
+            "http://127.0.0.1:8080",
+            "--bundle-id",
+            "B1",
+            "--disclosure-template-profile",
+            "privacy_review",
+            "--disclosure-template-name",
+            "privacy_review_internal",
+            "--disclosure-group",
+            "metadata",
+        ])
+        .unwrap();
+
+        match cli.command {
+            Commands::Vault {
+                command:
+                    VaultCommands::DisclosurePreview {
+                        disclosure_policy,
+                        disclosure_policy_file,
+                        disclosure_template_profile,
+                        disclosure_template_name,
+                        disclosure_redaction_group,
+                        ..
+                    },
+            } => {
+                assert_eq!(disclosure_policy, None);
+                assert_eq!(disclosure_policy_file, None);
+                assert_eq!(
+                    disclosure_template_profile,
+                    Some(DisclosurePolicyTemplateArg::PrivacyReview)
+                );
+                assert_eq!(
+                    disclosure_template_name.as_deref(),
+                    Some("privacy_review_internal")
+                );
+                assert_eq!(
+                    disclosure_redaction_group,
+                    vec![DisclosureRedactionGroupArg::Metadata]
+                );
             }
             _ => panic!("unexpected command parsed"),
         }
@@ -4036,6 +4225,33 @@ mod tests {
             }
             _ => panic!("unexpected command parsed"),
         }
+    }
+
+    #[test]
+    fn build_cli_disclosure_template_request_requires_profile_when_grouped() {
+        let err = build_cli_disclosure_template_request(DisclosureTemplateCliInput {
+            profile: None,
+            name: None,
+            groups: &[DisclosureRedactionGroupArg::Metadata],
+        })
+        .unwrap_err();
+        assert!(err
+            .to_string()
+            .contains("--disclosure-template-name and --disclosure-group require --disclosure-template-profile"));
+    }
+
+    #[test]
+    fn build_cli_disclosure_template_request_serializes_template_profile() {
+        let template = build_cli_disclosure_template_request(DisclosureTemplateCliInput {
+            profile: Some(DisclosurePolicyTemplateArg::RuntimeMinimum),
+            name: Some("runtime_template"),
+            groups: &[DisclosureRedactionGroupArg::Metadata],
+        })
+        .unwrap()
+        .unwrap();
+        assert_eq!(template.profile, "runtime_minimum");
+        assert_eq!(template.name.as_deref(), Some("runtime_template"));
+        assert_eq!(template.redaction_groups, vec!["metadata"]);
     }
 
     #[test]

@@ -126,6 +126,7 @@ class ProofLayer:
         to_date: str | None = None,
         bundle_format: str | None = None,
         disclosure_policy: str | None = None,
+        disclosure_template: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         if hasattr(self.client, "create_pack"):
             return self.client.create_pack(
@@ -135,6 +136,7 @@ class ProofLayer:
                 to_date=to_date,
                 bundle_format=bundle_format,
                 disclosure_policy=disclosure_policy,
+                disclosure_template=disclosure_template,
             )
         raise ValueError("underlying client does not support create_pack; use vault mode")
 
@@ -194,6 +196,7 @@ class ProofLayer:
         pack_type: str | None = None,
         disclosure_policy: str | None = None,
         policy: dict[str, Any] | None = None,
+        disclosure_template: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         if hasattr(self.client, "preview_disclosure"):
             return self.client.preview_disclosure(
@@ -201,6 +204,7 @@ class ProofLayer:
                 pack_type=pack_type,
                 disclosure_policy=disclosure_policy,
                 policy=policy,
+                disclosure_template=disclosure_template,
             )
         raise ValueError("underlying client does not support preview_disclosure; use vault mode")
 

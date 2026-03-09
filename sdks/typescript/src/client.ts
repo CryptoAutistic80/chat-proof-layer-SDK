@@ -99,15 +99,38 @@ export class ProofLayerClient {
     from,
     to,
     bundleFormat,
-    disclosurePolicy
+    disclosurePolicy,
+    disclosureTemplate
   }: CreatePackRequest): Promise<PackSummaryResponse> {
+    if (disclosurePolicy && disclosureTemplate) {
+      throw new Error("provide either disclosurePolicy or disclosureTemplate, not both");
+    }
     const payload = {
       pack_type: packType,
       system_id: systemId,
       from,
       to,
       ...(bundleFormat ? { bundle_format: bundleFormat } : {}),
-      ...(disclosurePolicy ? { disclosure_policy: disclosurePolicy } : {})
+      ...(disclosurePolicy ? { disclosure_policy: disclosurePolicy } : {}),
+      ...(disclosureTemplate
+        ? {
+            disclosure_template: {
+              profile: disclosureTemplate.profile,
+              ...(disclosureTemplate.name ? { name: disclosureTemplate.name } : {}),
+              ...(disclosureTemplate.redactionGroups &&
+              disclosureTemplate.redactionGroups.length > 0
+                ? { redaction_groups: disclosureTemplate.redactionGroups }
+                : {}),
+              ...(disclosureTemplate.redactedFieldsByItemType &&
+              Object.keys(disclosureTemplate.redactedFieldsByItemType).length > 0
+                ? {
+                    redacted_fields_by_item_type:
+                      disclosureTemplate.redactedFieldsByItemType
+                  }
+                : {})
+            }
+          }
+        : {})
     };
     return this.#post("/v1/packs", payload);
   }
@@ -161,13 +184,41 @@ export class ProofLayerClient {
     bundleId,
     packType,
     disclosurePolicy,
-    policy
+    policy,
+    disclosureTemplate
   }: DisclosurePreviewRequest): Promise<DisclosurePreviewResponse> {
+    const selectionCount = Number(Boolean(disclosurePolicy)) +
+      Number(Boolean(policy)) +
+      Number(Boolean(disclosureTemplate));
+    if (selectionCount > 1) {
+      throw new Error(
+        "provide only one of disclosurePolicy, policy, or disclosureTemplate"
+      );
+    }
     const payload = {
       bundle_id: bundleId,
       ...(packType ? { pack_type: packType } : {}),
       ...(disclosurePolicy ? { disclosure_policy: disclosurePolicy } : {}),
-      ...(policy ? { policy } : {})
+      ...(policy ? { policy } : {}),
+      ...(disclosureTemplate
+        ? {
+            disclosure_template: {
+              profile: disclosureTemplate.profile,
+              ...(disclosureTemplate.name ? { name: disclosureTemplate.name } : {}),
+              ...(disclosureTemplate.redactionGroups &&
+              disclosureTemplate.redactionGroups.length > 0
+                ? { redaction_groups: disclosureTemplate.redactionGroups }
+                : {}),
+              ...(disclosureTemplate.redactedFieldsByItemType &&
+              Object.keys(disclosureTemplate.redactedFieldsByItemType).length > 0
+                ? {
+                    redacted_fields_by_item_type:
+                      disclosureTemplate.redactedFieldsByItemType
+                  }
+                : {})
+            }
+          }
+        : {})
     };
     return this.#post("/v1/disclosure/preview", payload);
   }

@@ -185,6 +185,41 @@ test("ProofLayer vault mode can render disclosure templates", async () => {
   assert.equal(result.policy.name, "privacy_review_custom");
 });
 
+test("ProofLayer vault mode can create packs with inline disclosure templates", async () => {
+  let captured;
+  const proofLayer = new ProofLayer({
+    vaultUrl: "http://127.0.0.1:8080",
+    fetchImpl: async (url, init) => {
+      captured = { url, init };
+      return new Response(
+        JSON.stringify({
+          pack_id: "P-inline",
+          pack_type: "runtime_logs",
+          created_at: "2026-03-09T12:00:00Z",
+          bundle_format: "disclosure",
+          disclosure_policy: "runtime_template_pack",
+          bundle_count: 1,
+          bundle_ids: ["B-inline"]
+        }),
+        { status: 201, headers: { "content-type": "application/json" } }
+      );
+    }
+  });
+
+  const result = await proofLayer.createPack({
+    packType: "runtime_logs",
+    bundleFormat: "disclosure",
+    disclosureTemplate: {
+      profile: "runtime_minimum",
+      name: "runtime_template_pack",
+      redactionGroups: ["metadata"]
+    }
+  });
+
+  assert.equal(captured.url, "http://127.0.0.1:8080/v1/packs");
+  assert.equal(result.disclosure_policy, "runtime_template_pack");
+});
+
 test("ProofLayer vault mode can preview disclosure selection", async () => {
   let captured;
   const proofLayer = new ProofLayer({
@@ -218,6 +253,43 @@ test("ProofLayer vault mode can preview disclosure selection", async () => {
   assert.equal(captured.url, "http://127.0.0.1:8080/v1/disclosure/preview");
   assert.equal(captured.init.method, "POST");
   assert.deepEqual(result.disclosed_item_types, ["risk_assessment"]);
+});
+
+test("ProofLayer vault mode can preview disclosure using a template request", async () => {
+  let captured;
+  const proofLayer = new ProofLayer({
+    vaultUrl: "http://127.0.0.1:8080",
+    fetchImpl: async (url, init) => {
+      captured = { url, init };
+      return new Response(
+        JSON.stringify({
+          bundle_id: "B2",
+          policy_name: "privacy_review_internal",
+          disclosed_item_indices: [0],
+          disclosed_item_types: ["llm_interaction"],
+          disclosed_item_obligation_refs: ["art12_19_26"],
+          disclosed_item_field_redactions: { "0": ["/parameters"] },
+          disclosed_artefact_indices: [],
+          disclosed_artefact_names: [],
+          disclosed_artefact_bytes_included: false
+        }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      );
+    }
+  });
+
+  const result = await proofLayer.previewDisclosure({
+    bundleId: "B2",
+    packType: "runtime_logs",
+    disclosureTemplate: {
+      profile: "privacy_review",
+      name: "privacy_review_internal",
+      redactionGroups: ["metadata"]
+    }
+  });
+
+  assert.equal(captured.url, "http://127.0.0.1:8080/v1/disclosure/preview");
+  assert.equal(result.policy_name, "privacy_review_internal");
 });
 
 test("withProofLayer attaches proof metadata to OpenAI-like responses", async () => {

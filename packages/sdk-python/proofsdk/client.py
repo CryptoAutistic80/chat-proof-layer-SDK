@@ -70,7 +70,10 @@ class ProofLayerClient:
         to_date: str | None = None,
         bundle_format: str | None = None,
         disclosure_policy: str | None = None,
+        disclosure_template: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
+        if disclosure_policy is not None and disclosure_template is not None:
+            raise ValueError("provide either disclosure_policy or disclosure_template, not both")
         payload: dict[str, Any] = {
             "pack_type": pack_type,
             "system_id": system_id,
@@ -81,6 +84,8 @@ class ProofLayerClient:
             payload["bundle_format"] = bundle_format
         if disclosure_policy is not None:
             payload["disclosure_policy"] = disclosure_policy
+        if disclosure_template is not None:
+            payload["disclosure_template"] = disclosure_template
         return self._request_fn("POST", "/v1/packs", self._headers_json(), json.dumps(payload).encode("utf-8"))
 
     def get_pack(self, pack_id: str) -> dict[str, Any]:
@@ -138,7 +143,17 @@ class ProofLayerClient:
         pack_type: str | None = None,
         disclosure_policy: str | None = None,
         policy: dict[str, Any] | None = None,
+        disclosure_template: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
+        selection_count = sum(
+            1
+            for value in (disclosure_policy, policy, disclosure_template)
+            if value is not None
+        )
+        if selection_count > 1:
+            raise ValueError(
+                "provide only one of disclosure_policy, policy, or disclosure_template"
+            )
         payload: dict[str, Any] = {"bundle_id": bundle_id}
         if pack_type is not None:
             payload["pack_type"] = pack_type
@@ -146,6 +161,8 @@ class ProofLayerClient:
             payload["disclosure_policy"] = disclosure_policy
         if policy is not None:
             payload["policy"] = policy
+        if disclosure_template is not None:
+            payload["disclosure_template"] = disclosure_template
         return self._request_fn(
             "POST",
             "/v1/disclosure/preview",

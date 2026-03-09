@@ -110,6 +110,16 @@ const pack = await proofClient.createPack({
   bundleFormat: "disclosure",
   disclosurePolicy: "annex_iv_redacted"
 });
+const templatePack = await proofClient.createPack({
+  packType: "runtime_logs",
+  systemId: "system-123",
+  bundleFormat: "disclosure",
+  disclosureTemplate: {
+    profile: "runtime_minimum",
+    name: "runtime_minimum_export",
+    redactionGroups: ["metadata"]
+  }
+});
 const templateCatalog = await proofClient.getDisclosureTemplates();
 const renderedTemplate = await proofClient.renderDisclosureTemplate({
   profile: "privacy_review",
@@ -133,6 +143,15 @@ const preview = await proofClient.previewDisclosure({
   policy: {
     name: "risk_only",
     allowed_obligation_refs: ["art9"]
+  }
+});
+const templatePreview = await proofClient.previewDisclosure({
+  bundleId: "BUNDLE_ID",
+  packType: "runtime_logs",
+  disclosureTemplate: {
+    profile: "privacy_review",
+    name: "privacy_review_internal",
+    redactionGroups: ["metadata"]
   }
 });
 const archive = await proofClient.downloadPackExport(pack.pack_id);
@@ -161,5 +180,6 @@ const riskBundle = await proofLayer.captureRiskAssessment({
 console.log(riskBundle.bundle?.items[0].type);
 console.log(redactedSummary.disclosed_item_count, archive.length);
 console.log(preview.disclosed_item_types);
+console.log(templatePack.pack_id, templatePreview.disclosedItemTypes);
 console.log(templateCatalog.templates[0].profile, renderedTemplate.policy.name);
 ```

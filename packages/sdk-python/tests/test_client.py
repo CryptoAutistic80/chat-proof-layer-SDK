@@ -68,6 +68,50 @@ class TestProofLayerClient(unittest.TestCase):
             },
         )
 
+    def test_create_pack_serializes_inline_disclosure_template(self):
+        captured = {}
+
+        def request_fn(method, path, headers, body):
+            captured["method"] = method
+            captured["path"] = path
+            captured["headers"] = headers
+            captured["body"] = body
+            return {
+                "pack_id": "P2",
+                "bundle_format": "disclosure",
+                "disclosure_policy": "runtime_template_pack",
+            }
+
+        client = ProofLayerClient(base_url="http://127.0.0.1:8080", request_fn=request_fn)
+        out = client.create_pack(
+            pack_type="runtime_logs",
+            system_id="system-456",
+            bundle_format="disclosure",
+            disclosure_template={
+                "profile": "runtime_minimum",
+                "name": "runtime_template_pack",
+                "redaction_groups": ["metadata"],
+            },
+        )
+
+        self.assertEqual(out["disclosure_policy"], "runtime_template_pack")
+        payload = json.loads(captured["body"].decode("utf-8"))
+        self.assertEqual(
+            payload,
+            {
+                "pack_type": "runtime_logs",
+                "system_id": "system-456",
+                "from": None,
+                "to": None,
+                "bundle_format": "disclosure",
+                "disclosure_template": {
+                    "profile": "runtime_minimum",
+                    "name": "runtime_template_pack",
+                    "redaction_groups": ["metadata"],
+                },
+            },
+        )
+
     def test_get_disclosure_config_reads_nested_vault_config(self):
         captured = {}
 
@@ -244,6 +288,52 @@ class TestProofLayerClient(unittest.TestCase):
         self.assertEqual(payload["pack_type"], "annex_iv")
         self.assertEqual(payload["policy"]["allowed_obligation_refs"], ["art9"])
         self.assertEqual(out["disclosed_item_types"], ["risk_assessment"])
+
+    def test_preview_disclosure_posts_inline_template(self):
+        captured = {}
+
+        def request_fn(method, path, headers, body):
+            captured["method"] = method
+            captured["path"] = path
+            captured["headers"] = headers
+            captured["body"] = body
+            return {
+                "bundle_id": "B2",
+                "policy_name": "privacy_review_internal",
+                "disclosed_item_indices": [0],
+                "disclosed_item_types": ["llm_interaction"],
+                "disclosed_item_field_redactions": {"0": ["/parameters"]},
+                "disclosed_item_obligation_refs": ["art12_19_26"],
+                "disclosed_artefact_indices": [],
+                "disclosed_artefact_names": [],
+                "disclosed_artefact_bytes_included": False,
+            }
+
+        client = ProofLayerClient(base_url="http://127.0.0.1:8080", request_fn=request_fn)
+        out = client.preview_disclosure(
+            bundle_id="B2",
+            pack_type="runtime_logs",
+            disclosure_template={
+                "profile": "privacy_review",
+                "name": "privacy_review_internal",
+                "redaction_groups": ["metadata"],
+            },
+        )
+
+        payload = json.loads(captured["body"].decode("utf-8"))
+        self.assertEqual(
+            payload,
+            {
+                "bundle_id": "B2",
+                "pack_type": "runtime_logs",
+                "disclosure_template": {
+                    "profile": "privacy_review",
+                    "name": "privacy_review_internal",
+                    "redaction_groups": ["metadata"],
+                },
+            },
+        )
+        self.assertEqual(out["policy_name"], "privacy_review_internal")
 
 
 if __name__ == "__main__":

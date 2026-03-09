@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 import sys
@@ -21,10 +22,18 @@ def main() -> None:
     script_path = Path(__file__).resolve()
     package_root = script_path.parents[1]
     repo_root = package_root.parents[1]
-    target_dir = repo_root / "target" / "debug"
+    profile = (
+        "release"
+        if sys.argv[1:] == ["--release"] or os.environ.get("PROOF_SDK_NATIVE_PROFILE") == "release"
+        else "debug"
+    )
+    target_dir = repo_root / "target" / profile
 
+    cargo_cmd = ["cargo", "build", "-p", "proof-layer-pyo3"]
+    if profile == "release":
+        cargo_cmd.append("--release")
     subprocess.run(
-        ["cargo", "build", "-p", "proof-layer-pyo3"],
+        cargo_cmd,
         cwd=repo_root,
         check=True,
     )

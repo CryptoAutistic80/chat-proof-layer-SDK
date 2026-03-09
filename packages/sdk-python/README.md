@@ -11,6 +11,16 @@ The GPAI helpers default `model_evaluation`, `adversarial_test`, and `training_p
 python3 ./scripts/build_native.py
 ```
 
+## Build A Checked Wheel Artifact
+
+```bash
+python3 ./scripts/build_dist.py
+```
+
+This builds a platform-tagged wheel under `dist/`, runs the native build during wheel creation, and verifies that the wheel contains `proofsdk/_native*` plus the typed package markers. The packaging path defaults to `PROOF_SDK_NATIVE_PROFILE=release`.
+
+The repo’s `.github/workflows/sdk-artifacts.yml` workflow runs the same checked wheel build on Linux, macOS, and Windows, and `.github/workflows/sdk-release.yml` attaches those wheels to GitHub releases for `sdk-v*` tags.
+
 ## Quick Usage
 
 ```python

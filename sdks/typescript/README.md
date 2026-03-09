@@ -13,6 +13,16 @@ npm install
 npm run build
 ```
 
+## Build A Checked Package Artifact
+
+```bash
+npm run pack:smoke
+```
+
+This produces a tarball under `dist/artifacts/` and verifies that the package contains compiled `dist/*` output plus `native/proof-layer-napi.node`. The packaging path defaults to `PROOF_SDK_NATIVE_PROFILE=release`.
+
+The repo’s `.github/workflows/sdk-artifacts.yml` workflow runs the same checked tarball build on Linux, macOS, and Windows, and `.github/workflows/sdk-release.yml` attaches those tarballs to GitHub releases for `sdk-v*` tags.
+
 ## Quick Usage
 
 ```js

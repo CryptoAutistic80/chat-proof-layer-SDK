@@ -44,6 +44,8 @@ What it does **not** claim: model determinism or legal finality. It proves what 
 - `crates/pyo3` (`proof-layer-pyo3`): native Python bridge over the Rust core for the same canonicalization, hashing, Merkle root, JWS sign/verify, and offline bundle verification surface.
 - `sdks/typescript`: the TypeScript npm SDK package (`@proof-layer/sdk`), with shared v1 evidence helpers, `ProofLayer`, vault/local sealing clients, typed builders for all evidence items currently implemented in Rust core (`llm_interaction`, `tool_call`, `retrieval`, `human_oversight`, `policy_decision`, `risk_assessment`, `data_governance`, `technical_doc`, `model_evaluation`, `adversarial_test`, `training_provenance`, `literacy_attestation`, `incident_report`, `conformity_assessment`, `declaration`, `registration`), provider wrappers, generic/Vercel AI adapters, and tool/OTel helpers over the Rust NAPI module.
 - `packages/sdk-python`: the Python SDK package, with shared v1 evidence helpers, `ProofLayer`, vault/local sealing clients, provider wrappers, decorator helpers, and callback/tool/OTel helpers, backed by the Rust PyO3 module for integrity-sensitive operations.
+- `.github/workflows/sdk-artifacts.yml`: cross-platform CI builds for checked npm tarballs and Python wheels on Linux, macOS, and Windows.
+- `.github/workflows/sdk-release.yml`: tag/manual GitHub Actions flow that rebuilds those SDK artifacts in `release` mode and attaches them to a GitHub release.
 - `web-demo`: Vite + React single-page demo UI.
 - `examples/`: runnable TypeScript/Python/agent-simulated example scripts.
 
@@ -344,6 +346,18 @@ cd packages/sdk-python
 python3 ./scripts/build_native.py
 python -m unittest discover -s tests -v
 ```
+
+Build local SDK distribution artifacts:
+
+```bash
+python3 ./scripts/build_sdk_artifacts.py --profile release
+```
+
+This produces:
+- a checked npm tarball at `sdks/typescript/dist/artifacts/*.tgz`
+- a checked platform-tagged Python wheel at `packages/sdk-python/dist/*.whl`
+
+CI also builds the same artifacts through `.github/workflows/sdk-artifacts.yml`, and `.github/workflows/sdk-release.yml` attaches them to GitHub releases for `sdk-v*` tags.
 
 Run examples (with proof-service running):
 

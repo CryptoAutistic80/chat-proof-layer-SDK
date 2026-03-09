@@ -144,11 +144,14 @@ Current config behavior:
 - The package also now exposes a higher-level `ProofLayer` facade plus provider-specific `withProofLayer(...)` wrappers for OpenAI-like, Anthropic-like, generic async clients, and Vercel-AI-style functions.
 - The TypeScript SDK now exposes `ProofLayerExporter` and OTel helpers under `@proof-layer/sdk/otel`.
 - The TypeScript provider wrappers and tool helpers now call that shared surface for integrity-sensitive operations instead of reimplementing them in JavaScript.
+- The repo now includes a local artifact smoke path for the TypeScript SDK: `npm run pack:smoke` builds the NAPI-backed package, produces an npm tarball under `sdks/typescript/dist/artifacts`, and verifies that the tarball contains compiled `dist/*` output plus `native/proof-layer-napi.node`. `PROOF_SDK_NATIVE_PROFILE=release` is used by default for artifact packaging.
 - `packages/sdk-python` now loads a local PyO3 module compiled from `crates/pyo3` via the package build helper.
 - The first native Python surface matches Node: canonicalization, SHA-256 digesting, Merkle root computation, Ed25519 JWS sign/verify, deterministic local bundle construction, and offline bundle verification.
 - `packages/sdk-python` now exposes both an HTTP vault client and a `LocalProofLayerClient` that seals bundles locally via the native module.
 - The Python package now also exposes a higher-level `ProofLayer` facade, shared `evidence.py` request builders for all evidence item types currently implemented in Rust core, and provider-specific `with_proof_layer(...)` wrappers for OpenAI-like and Anthropic-like clients, including GPAI evaluation/provenance/test evidence, Art 4 literacy attestations, incident-report lifecycle evidence, and the conformity/declaration/registration group.
 - The Python provider wrappers, decorator helpers, and golden fixture tests now route integrity-sensitive operations through that shared Rust implementation.
+- The repo now also includes a local wheel build path for the Python SDK: `python3 ./scripts/build_dist.py` builds the native PyO3 extension during wheel creation, emits a platform-tagged wheel under `packages/sdk-python/dist`, and verifies that the wheel contains `proofsdk/_native*` plus the typed package markers. Artifact packaging defaults to `PROOF_SDK_NATIVE_PROFILE=release`.
+- `.github/workflows/sdk-artifacts.yml` now runs those npm tarball and Python wheel builds across Linux, macOS, and Windows on PRs, pushes, and manual dispatch; `.github/workflows/sdk-release.yml` rebuilds them and attaches the results to GitHub releases for `sdk-v*` tags.
 - Tool capture and OTel GenAI export helpers for trace pipelines.
 - Provider adapters remain thin and provider-shaped; integrity semantics stay in Rust core/service.
 

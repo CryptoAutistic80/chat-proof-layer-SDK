@@ -184,6 +184,14 @@ Completed:
   `POST /v1/packs` and `POST /v1/disclosure/preview` now accept inline `disclosure_template` render requests,
   `proofctl pack`, `proofctl vault export`, and `proofctl vault disclosure-preview` now expose `--disclosure-template-profile`, `--disclosure-template-name`, and repeatable `--disclosure-group`,
   and the TypeScript / Python vault clients plus `ProofLayer` facades can now request template-based pack exports and disclosure previews directly without first saving policy JSON.
+- Added the first local SDK artifact pipeline:
+  `sdks/typescript` now has `npm run pack:smoke` to build and verify an npm tarball containing `dist/*` plus `native/proof-layer-napi.node`,
+  `packages/sdk-python` now has `python3 ./scripts/build_dist.py` to build and verify a platform-tagged wheel containing `proofsdk/_native*` plus `py.typed`,
+  and the repo root now has `python3 ./scripts/build_sdk_artifacts.py` to run both artifact builds together.
+- Added CI-backed multi-platform SDK artifact workflows:
+  `.github/workflows/sdk-artifacts.yml` now builds checked npm tarballs and Python wheels on Linux, macOS, and Windows for PRs, pushes, and manual runs,
+  `.github/workflows/sdk-release.yml` rebuilds those artifacts in `release` mode for `sdk-v*` tags or manual dispatch,
+  and release runs attach the generated `.tgz` and `.whl` files to the GitHub release.
 - Extended pack export into the selective-disclosure path:
   `POST /v1/packs` now accepts `bundle_format = "full" | "disclosure"`,
   vault `GET /v1/packs/{id}/export` can emit redacted disclosure-package members selected by pack curation rules,
@@ -216,9 +224,9 @@ Still outstanding from `plan.md`:
 
 - JSON schema coverage is now started, with timestamp and Rekor transparency receipt coverage added, but richer export/archive schemas are still incomplete.
 - The vault now uses SQLite with legal-hold-aware retention, audit logging, file/env/runtime configuration, background retention scanning, curated pack export, redacted disclosure-pack export, RFC 3161 bundle timestamp attachment, and transparency anchoring, but PostgreSQL and Annex-complete artefact/redaction policy assembly are not built yet.
-- TypeScript and Python now both have native FFI bridges, local sealing paths, and higher-level `ProofLayer` facades, but there is still no shared native build/release pipeline for SDK artifacts.
+- TypeScript and Python now both have native FFI bridges, local sealing paths, higher-level `ProofLayer` facades, a local artifact build path for npm tarballs and platform-tagged wheels, and CI-backed multi-platform GitHub artifact builds, but there is still no automated publish step to npm or PyPI.
 - TypeScript and Python SDKs now expose local redacted-bundle helpers (`disclose` / `verifyRedactedBundle` in TypeScript, `disclose` / `verify_redacted_bundle` in Python), including top-level field redaction for local v3 bundles and nested JSON-pointer path redaction for local v4 bundles, plus vault pack helpers for `bundle_format = "full" | "disclosure"` with `disclosure_policy` or inline `disclosure_template`, vault disclosure-config read/update helpers, and disclosure-preview helpers.
-- The main remaining gaps are no longer the evidence catalog itself; they are the harder later-phase items like deeper trust policy work, fuller SCITT interoperability, alternative storage/runtime backends, and release hardening.
+- The main remaining gaps are no longer the evidence catalog itself; they are the harder later-phase items like deeper trust policy work, fuller SCITT interoperability, alternative storage/runtime backends, and automated npm/PyPI/prebuilt release publishing hardening.
 - RFC 3161 verification now supports signer-chain validation against configured PEM trust anchors, optional `TSTInfo.policy` OID enforcement, CRL-based revocation checking, optional live OCSP checks, qualified TSA signer allowlist matching, and operational `qualified` profile gating, but full eIDAS-qualified trust-list evaluation and archival OCSP evidence handling are still outstanding.
 - Rekor verification now supports SET signature validation and `logID` binding against a configured PEM log public key; live-log consistency checks beyond the stored inclusion proof remain future work.
 - The current SCITT path is intentionally bounded: it verifies a draft-aligned canonical JSON statement/receipt contract, not a full interoperable COSE/CCF profile.

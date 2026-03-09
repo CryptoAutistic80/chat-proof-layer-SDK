@@ -8,8 +8,9 @@ const execFileAsync = promisify(execFile);
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const packageRoot = path.resolve(scriptDir, "..");
 const repoRoot = path.resolve(packageRoot, "..", "..");
-const targetDir = path.join(repoRoot, "target", "debug");
 const nativeDir = path.join(packageRoot, "native");
+const profile = process.env.PROOF_SDK_NATIVE_PROFILE === "release" ? "release" : "debug";
+const targetDir = path.join(repoRoot, "target", profile);
 
 function sharedLibraryPath() {
   switch (process.platform) {
@@ -25,7 +26,12 @@ function sharedLibraryPath() {
 }
 
 async function main() {
-  await execFileAsync("cargo", ["build", "-p", "proof-layer-napi"], {
+  const cargoArgs = ["build", "-p", "proof-layer-napi"];
+  if (profile === "release") {
+    cargoArgs.push("--release");
+  }
+
+  await execFileAsync("cargo", cargoArgs, {
     cwd: repoRoot,
     env: process.env,
   });

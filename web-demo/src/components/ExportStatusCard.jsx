@@ -16,8 +16,8 @@ export function ExportStatusCard({ run, onExport, isExporting }) {
     <section className="panel">
       <div className="panel-head compact">
         <div>
-          <span className="section-label">Exports</span>
-          <h2>Pack assembly</h2>
+          <span className="section-label">Share package</span>
+          <h2>Export and download</h2>
         </div>
         <button
           type="button"
@@ -30,13 +30,13 @@ export function ExportStatusCard({ run, onExport, isExporting }) {
       </div>
       <div className="status-stack">
         <article className={`status-card is-${canExport ? "good" : "warn"}`}>
-          <strong>{run?.packSummary?.pack_id ?? "No pack exported yet"}</strong>
+          <strong>{run?.packSummary?.pack_id ?? "No share package exported yet"}</strong>
           <p>
             {canExport
               ? run?.downloadInfo
-                ? `${run.bundleFormat} pack ready · ${formatBytes(run.downloadInfo.size)}`
+                ? `${run.bundleFormat} share package ready · ${formatBytes(run.downloadInfo.size)}`
                 : `This run is eligible for ${run.bundleFormat} export.`
-              : "No disclosure pack to export for this run with the selected profile."}
+              : "This proof record does not produce a redacted share package under the selected sharing profile."}
           </p>
         </article>
       </div>

@@ -281,6 +281,28 @@ Completed:
   vault tests now cover the demo provider-response endpoint,
   `web-demo` now has Vitest coverage for routes/presets/export eligibility,
   and a Playwright smoke test verifies the synthetic route flow from Playground to Results, Examination, and Exports.
+- Reframed `web-demo` into a unified product site:
+  the old demo-first shell is replaced by a business-first landing page, product and use-case pages,
+  integrated docs routes under `/docs/*`,
+  a guided demo entrypoint at `/guided`,
+  and business-language run pages for `/what-happened`, `/what-you-can-prove`, and `/what-you-can-share`.
+- Preserved the technical evaluation path inside that unified site:
+  the advanced playground still exposes the full vault-backed configuration surface,
+  while the guided flow now hides most proof-system controls behind a simpler scenario-first experience.
+- Added the supporting narrative/content layer:
+  preset metadata now includes business reason/outcome text,
+  the site now uses a shared proof-record glossary and plain-English narrative summaries,
+  and the recent-runs / assurance / export cards now use business-first labels with technical detail pushed lower in the hierarchy.
+- Extended browser verification coverage for the new surface:
+  Vitest now checks the landing page, guided demo defaults, integrated docs routing, and the new empty-export wording,
+  and the Playwright smoke now runs from `/` through Guided Demo, What Happened, What You Can Prove, What You Can Share, and Docs.
+- Polished the outward-facing site copy for investor and partner use:
+  the main demo and narrative surfaces no longer describe the product in development-history terms,
+  empty disclosure/export states now explain the business outcome instead of sounding like internal workflow diagnostics,
+  and the advanced playground keeps the technical detail without framing the public site as an engineering artifact.
+- Added forwarded-host support for the unified product site dev server:
+  `web-demo/vite.config.js` now explicitly allows the active ngrok host plus `.ngrok-free.dev`,
+  and it also accepts extra forwarded hosts through `WEB_DEMO_ALLOWED_HOSTS` for shareable preview sessions.
 - Restored a clean Rust verification loop: `cargo test --workspace` and `cargo clippy --workspace --all-targets -- -D warnings` both pass.
 
 Still outstanding from `plan.md`:

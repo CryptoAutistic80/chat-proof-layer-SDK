@@ -33,4 +33,13 @@ Then open the local Vite URL shown in the terminal, usually:
 http://127.0.0.1:5173
 ```
 
-If the demo is already open, click `Refresh vault` after starting `proof-service` so the verify field picks up the current public key.
+Useful routes once the site is running:
+
+```bash
+http://127.0.0.1:5173/
+http://127.0.0.1:5173/guided
+http://127.0.0.1:5173/playground
+http://127.0.0.1:5173/docs
+```
+
+If the site is already open, click `Refresh vault` after starting `proof-service` so the verifier and capability panels pick up the current vault state.

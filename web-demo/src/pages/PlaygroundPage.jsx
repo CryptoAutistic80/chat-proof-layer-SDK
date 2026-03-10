@@ -28,7 +28,7 @@ export function PlaygroundPage() {
 
   async function handleRun() {
     const bundleId = await actions.runWorkflow();
-    navigate(`/results/${bundleId}`);
+    navigate(`/what-happened/${bundleId}`);
   }
 
   return (
@@ -36,8 +36,8 @@ export function PlaygroundPage() {
       <section className="panel">
         <div className="panel-head">
           <div>
-            <span className="section-label">Playground</span>
-            <h2>Configure the run</h2>
+            <span className="section-label">Advanced Playground</span>
+            <h2>Configure the full proof workflow</h2>
           </div>
           <button
             type="button"
@@ -48,6 +48,11 @@ export function PlaygroundPage() {
             {isRefreshing ? "Refreshing..." : "Refresh vault"}
           </button>
         </div>
+
+        <p className="section-intro">
+          Use this view when you want the full set of controls for capture, proof, disclosure,
+          and export rather than the simplified guided experience.
+        </p>
 
         <div className="preset-grid">
           {PRESETS.map((preset) => (
@@ -189,8 +194,7 @@ export function PlaygroundPage() {
         </div>
 
         <p className="field-hint">
-          Vault API key is only needed when the vault has bearer auth enabled. If you started the
-          demo vault in open local mode, leave it blank.
+          Vault API key is only needed when the connected vault requires bearer authentication.
         </p>
 
         {draft.mode === "live" ? (
@@ -202,8 +206,8 @@ export function PlaygroundPage() {
               onChange={(event) => actions.updateDraft("providerApiKey", event.target.value)}
               placeholder={
                 liveEnabled
-                  ? "Optional override for the vault-configured provider key"
-                  : `Required unless the vault was started with ${draft.provider.toUpperCase()}_API_KEY`
+                  ? "Optional override when provider access is already configured"
+                  : "Required for live runs when provider access is not already available"
               }
               autoComplete="off"
               spellCheck="false"
@@ -232,9 +236,9 @@ export function PlaygroundPage() {
         <p className="field-hint">
           {draft.mode === "live"
             ? liveEnabled && !usingTemporaryKey
-              ? "The vault is already configured for this provider. You can run live mode without entering a provider key here."
-              : "For demo convenience, you can paste a temporary provider API key here. It is sent only to the vault's demo provider endpoint and is not persisted in bundle storage."
-            : "Synthetic demo mode stays fully local while still using the real vault API for sealing, verification, disclosure, and export."}
+              ? "Live provider access is already available for this connected vault."
+              : "You can add a provider key here for a live run without changing the vault's stored configuration."
+            : "Synthetic sample mode still runs through the real proof workflow for sealing, verification, disclosure, and export."}
         </p>
 
         <div className="toggle-row">

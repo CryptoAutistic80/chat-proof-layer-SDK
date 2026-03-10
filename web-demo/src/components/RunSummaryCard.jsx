@@ -1,4 +1,5 @@
 import React from "react";
+import { humanCaptureMode } from "../lib/narrative";
 
 export function RunSummaryCard({ run, preset }) {
   return (
@@ -12,18 +13,18 @@ export function RunSummaryCard({ run, preset }) {
       <div className="hero-summary run-summary-card">
         <div>
           <strong>Capture mode</strong>
-          <span>{run?.captureMode ?? "Awaiting first run"}</span>
+          <span>{humanCaptureMode(run?.captureMode)}</span>
         </div>
         <div>
-          <strong>Pack type</strong>
-          <span>{run?.packType ?? preset.packType}</span>
+          <strong>Scenario outcome</strong>
+          <span>{preset.outcomeLabel}</span>
         </div>
         <div>
-          <strong>Disclosure profile</strong>
+          <strong>Sharing profile</strong>
           <span>{run?.disclosureProfile ?? preset.disclosureProfile}</span>
         </div>
         <div>
-          <strong>Bundle</strong>
+          <strong>Proof record</strong>
           <span>{run?.bundleId ?? "Not sealed yet"}</span>
         </div>
       </div>

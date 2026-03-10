@@ -24,7 +24,7 @@ Current implemented surface:
 - `proof-service` vault with SQLite storage, filesystem blobs, TLS, bearer auth, single-tenant enforcement, retention, legal holds, audit log, metrics, backup, restore layout export, and pack assembly.
 - TypeScript SDK in `sdks/typescript` published as `@proof-layer/sdk`.
 - Python SDK in `packages/sdk-python` published as `proof-layer-sdk-python`.
-- Web demo in `web-demo` aligned to the live vault API.
+- Unified product site in `web-demo` with landing pages, integrated docs, guided demo, and advanced playground aligned to the live vault API.
 
 Important current limits:
 
@@ -58,7 +58,7 @@ Proof Layer does not claim model determinism or legal finality. It proves what w
 | Python bridge | `crates/pyo3` | Native PyO3 bindings over the Rust core |
 | TS SDK | `sdks/typescript` | `@proof-layer/sdk`, local/vault clients, providers, evidence helpers, OTel helpers |
 | Python SDK | `packages/sdk-python` | `proof-layer-sdk-python`, local/vault clients, providers, decorators, helpers |
-| Demo | `web-demo` | Vite + React demo against the vault API |
+| Product site | `web-demo` | Vite + React site with landing pages, integrated docs, guided demo, and advanced playground against the vault API |
 
 ## Evidence And Assurance Model
 
@@ -497,7 +497,14 @@ npm install
 npm run dev
 ```
 
-The demo now uses the live vault API rather than the old PoC simulator. It can:
+The unified product site uses the live vault API and includes:
+
+- product and use-case pages for business-facing explanation
+- integrated docs under `/docs/*`
+- a guided demo for business-first scenario runs
+- an advanced playground for deeper workflow control
+
+The interactive workflow can:
 
 - read `/v1/config` and `/v1/disclosure/templates`
 - create a real `llm_interaction` bundle through `POST /v1/bundles`
@@ -506,6 +513,13 @@ The demo now uses the live vault API rather than the old PoC simulator. It can:
 - export full or disclosure-format packs
 - fetch system summaries
 - verify through `POST /v1/verify` when given a public key PEM
+
+Start with:
+
+- `/` for the landing/product narrative
+- `/guided` for the business-first demo
+- `/playground` for the advanced technical flow
+- `/docs` for the integrated documentation section
 
 ## Docs Map
 

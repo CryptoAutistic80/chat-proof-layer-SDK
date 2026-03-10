@@ -22,11 +22,11 @@ import {
 import {
   DEFAULT_SERVICE_URL,
   DEFAULT_SYSTEM_ID,
-  PRESETS,
   applyPresetToDraft,
   defaultModelFor,
   defaultTemplateName,
   getPreset,
+  inferPresetKey,
   isProviderLiveEnabled,
   modelOptionsFor
 } from "../lib/presets";
@@ -295,7 +295,7 @@ export function DemoProvider({ children }) {
     ) {
       appendActivity(
         "Disclosure result empty",
-        "No disclosure output for this profile on the current run.",
+        "This sharing profile does not reveal any content for this proof record.",
         "warn"
       );
     }
@@ -376,8 +376,29 @@ export function DemoProvider({ children }) {
     const promptPayload = parsed["prompt.json"] ?? null;
     const tracePayload = parsed["trace.json"] ?? null;
 
+    const hydratedPackType =
+      currentRun?.bundleId === bundleId
+        ? currentRun.packType
+        : tracePayload?.pack_type ?? currentPreset.packType;
+    const hydratedBundleFormat =
+      currentRun?.bundleId === bundleId
+        ? currentRun.bundleFormat
+        : tracePayload?.bundle_format ?? draft.bundleFormat;
+    const hydratedDisclosureProfile =
+      currentRun?.bundleId === bundleId
+        ? currentRun.disclosureProfile
+        : tracePayload?.disclosure_profile ?? draft.templateProfile;
+
     const hydratedRun = {
       bundleId,
+      presetKey:
+        currentRun?.bundleId === bundleId
+          ? currentRun.presetKey
+          : inferPresetKey({
+              packType: hydratedPackType,
+              disclosureProfile: hydratedDisclosureProfile,
+              bundleFormat: hydratedBundleFormat
+            }),
       captureMode:
         responsePayload?.response_source ||
         tracePayload?.capture_mode ||
@@ -385,9 +406,9 @@ export function DemoProvider({ children }) {
       provider: bundle.context?.provider ?? draft.provider,
       model: bundle.context?.model ?? draft.model,
       actorRole: bundle.actor?.role ?? draft.actorRole,
-      packType: currentPreset.packType,
-      bundleFormat: draft.bundleFormat,
-      disclosureProfile: draft.templateProfile,
+      packType: hydratedPackType,
+      bundleFormat: hydratedBundleFormat,
+      disclosureProfile: hydratedDisclosureProfile,
       createMeta: currentRun?.bundleId === bundleId ? currentRun.createMeta : null,
       bundle,
       responseText:
@@ -437,7 +458,7 @@ export function DemoProvider({ children }) {
         !canUseLiveMode(vaultConfig, draft.provider, draft.providerApiKey)
       ) {
         throw new Error(
-          "Live provider mode requires either a vault-configured provider key or a temporary provider API key in the playground."
+          "Live provider mode needs either provider access already available through the vault or a provider API key entered below."
         );
       }
       const providerResult = await fetchDemoProviderResponse(draft.serviceUrl, draft.apiKey, {
@@ -575,7 +596,7 @@ export function DemoProvider({ children }) {
       } else {
         appendActivity(
           "Export skipped",
-          "No disclosure pack to export for this run with the selected profile.",
+          "This proof record does not produce a redacted share package under the selected sharing profile.",
           "warn"
         );
       }
@@ -589,6 +610,7 @@ export function DemoProvider({ children }) {
 
       const nextRun = {
         bundleId: createMeta.bundle_id,
+        presetKey: preset.key,
         captureMode: providerResult.capture_mode,
         provider: providerResult.provider,
         model: providerResult.model,
@@ -658,7 +680,7 @@ export function DemoProvider({ children }) {
       ) {
         appendActivity(
           "Export skipped",
-          "No disclosure pack to export for this run with the selected profile.",
+          "This proof record does not produce a redacted share package under the selected sharing profile.",
           "warn"
         );
         return null;

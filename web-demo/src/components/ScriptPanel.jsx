@@ -8,8 +8,15 @@ export function ScriptPanel({ scenario, scriptSource }) {
           <span className="section-label">Script</span>
           <h3>Prefab example source</h3>
         </div>
-        <span className="code-source">{scenario.sourceRef}</span>
+        <div className="script-panel-meta">
+          <span className="script-language">{scenario.codeLanguage}</span>
+          <span className="code-source">{scenario.sourceRef}</span>
+        </div>
       </div>
+      <p className="field-hint script-note">
+        Read-only generated from the maintained example template for this workflow so the code and
+        the resulting evidence stay in sync.
+      </p>
       <pre className="script-block">
         <code>{scriptSource}</code>
       </pre>

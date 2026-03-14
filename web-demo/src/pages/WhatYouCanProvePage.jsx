@@ -31,7 +31,7 @@ export function WhatYouCanProvePage() {
   const summary = buildRunNarrativeSummary(run, vaultConfig);
 
   return (
-    <section className="page-stack">
+    <section className="page-stack inspection-page prove-page">
       <section className="panel">
         <div className="panel-head">
           <div>
@@ -54,53 +54,67 @@ export function WhatYouCanProvePage() {
         </div>
       </section>
 
-      <section className="panel">
-        <div className="panel-head compact">
-          <div>
-            <span className="section-label">What this means</span>
-            <h2>Trust story for this proof record</h2>
+      <section className="prove-overview-grid">
+        <section className="panel">
+          <div className="panel-head compact">
+            <div>
+              <span className="section-label">What this means</span>
+              <h2>Trust story for this proof record</h2>
+            </div>
           </div>
-        </div>
-        <p className="narrative-copy">
-          {summary.integrityStatus.summary} {summary.timestampStatus.summary}{" "}
-          {summary.transparencyStatus.summary}
-        </p>
+          <p className="narrative-copy">
+            {summary.integrityStatus.summary} {summary.timestampStatus.summary}{" "}
+            {summary.transparencyStatus.summary}
+          </p>
+        </section>
+
+        <DisclosureStatusCard run={run} />
       </section>
 
-      <DisclosureStatusCard run={run} />
-
-      <section className="panel">
+      <section className="panel prove-payload-panel">
         <div className="panel-head compact">
           <div>
             <span className="section-label">Details</span>
             <h2>Raw verification and disclosure payloads</h2>
           </div>
         </div>
-        <div className="snapshot-grid">
+        <div className="prove-payload-layout">
           <DataPanel
             title="Proof record JSON"
             subtitle={run?.bundle?.integrity?.bundle_root_algorithm ?? "Bundle"}
             value={run?.bundle ?? null}
             placeholder="Proof record JSON appears here."
+            className="data-panel--tall"
+            preClassName="pre--tall"
           />
-          <DataPanel
-            title="Integrity payload"
-            subtitle="verify"
-            value={run?.verifyResponse ?? null}
-            placeholder="Verification payload appears here."
-          />
-          <DataPanel
-            title="Timestamp payload"
-            subtitle="timestamp"
-            value={run?.timestampVerification ?? null}
-            placeholder="Timestamp payload appears here."
-          />
-          <DataPanel
-            title="Transparency payload"
-            subtitle="receipt"
-            value={run?.receiptVerification ?? null}
-            placeholder="Transparency payload appears here."
-          />
+          <div className="prove-verification-stack">
+            <DataPanel
+              title="Integrity payload"
+              subtitle="verify"
+              value={run?.verifyResponse ?? null}
+              placeholder="Verification payload appears here."
+              className="data-panel--compact"
+              preClassName="pre--compact"
+            />
+            <DataPanel
+              title="Timestamp payload"
+              subtitle="timestamp"
+              value={run?.timestampVerification ?? null}
+              placeholder="Timestamp payload appears here."
+              className="data-panel--compact"
+              preClassName="pre--compact"
+            />
+            <DataPanel
+              title="Transparency payload"
+              subtitle="receipt"
+              value={run?.receiptVerification ?? null}
+              placeholder="Transparency payload appears here."
+              className="data-panel--compact"
+              preClassName="pre--compact"
+            />
+          </div>
+        </div>
+        <div className="snapshot-grid snapshot-grid-balanced">
           <DataPanel
             title="Disclosure preview"
             subtitle={run?.disclosurePreview?.policy_name ?? "Preview"}

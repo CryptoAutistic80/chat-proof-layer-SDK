@@ -1,10 +1,12 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { useDemo } from "../app/DemoContext";
+import { ActivityFeed } from "../components/ActivityFeed";
 import { BundleRunList } from "../components/BundleRunList";
 import { ComplianceReviewPanel } from "../components/ComplianceReviewPanel";
 import { DataPanel } from "../components/DataPanel";
 import { PrimaryResultSummary } from "../components/PrimaryResultSummary";
+import { RunSummaryCard } from "../components/RunSummaryCard";
 import { ScenarioParameterForm } from "../components/ScenarioParameterForm";
 import { ScriptPanel } from "../components/ScriptPanel";
 import { SdkLaneTabs } from "../components/SdkLaneTabs";
@@ -23,76 +25,175 @@ export function SDKPlaygroundPage() {
     draft,
     currentScenario,
     currentRun,
+    currentPreset,
     vaultConfig,
+    activityLog,
     errors,
     isRunning,
     actions
   } = useDemo();
+  const selectedLane = useMemo(
+    () => PLAYGROUND_LANES.find((lane) => lane.id === draft.lane) ?? PLAYGROUND_LANES[0],
+    [draft.lane]
+  );
   const scenarios = useMemo(
     () => listScenariosForLane(draft.lane),
     [draft.lane]
+  );
+  const laneCounts = useMemo(
+    () =>
+      Object.fromEntries(
+        PLAYGROUND_LANES.map((lane) => [lane.id, listScenariosForLane(lane.id).length])
+      ),
+    []
+  );
+  const totalScenarioCount = useMemo(
+    () => PLAYGROUND_LANES.reduce((count, lane) => count + (laneCounts[lane.id] ?? 0), 0),
+    [laneCounts]
   );
   const liveAvailable = isProviderLiveEnabled(vaultConfig, draft.provider);
   const scriptSource = renderScenarioScript(currentScenario, draft);
   const scenarioRun = currentRun?.scenarioId === currentScenario.id ? currentRun : null;
   const summary = scenarioRun ? buildRunNarrativeSummary(scenarioRun, vaultConfig) : null;
+  const evidenceShape = currentScenario.steps.map((step) => step.itemType);
 
   useEffect(() => {
     actions.ensurePlaygroundDraft();
   }, []);
 
   useEffect(() => {
-    if (scenarioRun?.bundleId) {
+    if (scenarioRun?.primaryBundleId) {
       setActiveTab("result");
     }
-  }, [scenarioRun?.bundleId]);
+  }, [scenarioRun?.primaryBundleId]);
 
   return (
-    <section className="page-stack">
+    <section className="page-stack sdk-playground-page">
       <section className="panel sdk-playground-hero">
-        <div className="panel-head">
-          <div>
+        <div className="sdk-playground-hero-grid">
+          <div className="sdk-playground-hero-copy">
             <span className="section-label">SDK Playground</span>
             <h1>Try the real SDK and CLI flows without leaving the demo</h1>
+            <p className="sdk-playground-lead">
+              Use the page like a controlled lab: choose a real TypeScript, Python, or CLI
+              workflow, tune a bounded set of inputs, inspect the emitted example source, then
+              review the resulting evidence as if you were preparing for compliance review.
+            </p>
+            <div className="sdk-hero-metrics">
+              <div className="sdk-hero-metric">
+                <strong>{PLAYGROUND_LANES.length}</strong>
+                <span>language lanes</span>
+              </div>
+              <div className="sdk-hero-metric">
+                <strong>{totalScenarioCount}</strong>
+                <span>prefab workflows</span>
+              </div>
+              <div className="sdk-hero-metric">
+                <strong>{currentScenario.steps.length}</strong>
+                <span>bundles in this flow</span>
+              </div>
+            </div>
           </div>
-          <Link to="/playground/advanced" className="ghost-btn">
-            Open advanced controls
-          </Link>
+
+          <aside className="sdk-playground-hero-rail">
+            <article className="sdk-selected-card">
+              <div className="sdk-selected-head">
+                <span className="section-label">Selected prefab</span>
+                <span className="sdk-chip">{selectedLane.label}</span>
+              </div>
+              <h2>{currentScenario.label}</h2>
+              <p>{currentScenario.description}</p>
+              <div className="sdk-chip-row">
+                <span className="sdk-chip is-accent">{currentScenario.packType}</span>
+                <span className="sdk-chip">{currentScenario.actorRole}</span>
+                <span className="sdk-chip">{currentScenario.codeLanguage}</span>
+              </div>
+              <div className="sdk-evidence-stack">
+                <span className="sdk-evidence-label">This run creates</span>
+                <div className="sdk-evidence-list">
+                  {evidenceShape.map((itemType) => (
+                    <span key={itemType} className="sdk-evidence-pill">
+                      {itemType}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            </article>
+
+            <div className="sdk-hero-actions">
+              <Link to="/docs/playground" className="secondary-cta">
+                Playground docs
+              </Link>
+              <Link to="/playground/advanced" className="ghost-btn">
+                Open advanced controls
+              </Link>
+            </div>
+          </aside>
         </div>
-        <p className="section-intro">
-          Pick a prefab TypeScript, Python, or CLI scenario, change a few inputs, then run the
-          real vault-backed workflow and inspect the evidence story on the same page.
-        </p>
       </section>
 
-      <SdkLaneTabs lanes={PLAYGROUND_LANES} activeLane={draft.lane} onSelect={actions.selectLane} />
-
-      <div className="scenario-grid sdk-scenario-grid">
-        {scenarios.map((scenario) => (
-          <SdkScenarioCard
-            key={scenario.id}
-            scenario={scenario}
-            active={scenario.id === currentScenario.id}
-            onSelect={actions.selectScenario}
-          />
-        ))}
-      </div>
-
-      <div className="sdk-playground-grid">
-        <ScenarioParameterForm
-          scenario={currentScenario}
-          draft={draft}
-          liveAvailable={liveAvailable}
-          errors={errors}
-          isRunning={isRunning}
-          hasInteraction={currentScenario.steps.some((step) => step.kind === "interaction")}
-          onChange={actions.updateDraft}
-          onRun={actions.runScenarioWorkflow}
+      <section className="panel sdk-selector-panel">
+        <div className="panel-head compact">
+          <div>
+            <span className="section-label">Scenario selector</span>
+            <h2>Pick the lane, then the exact workflow</h2>
+          </div>
+          <p className="selector-note">
+            {selectedLane.description} Switch lanes without losing the connected vault settings.
+          </p>
+        </div>
+        <SdkLaneTabs
+          lanes={PLAYGROUND_LANES}
+          activeLane={draft.lane}
+          laneCounts={laneCounts}
+          onSelect={actions.selectLane}
         />
-        <ScriptPanel scenario={currentScenario} scriptSource={scriptSource} />
+
+        <div className="scenario-grid sdk-scenario-grid">
+          {scenarios.map((scenario) => (
+            <SdkScenarioCard
+              key={scenario.id}
+              scenario={scenario}
+              active={scenario.id === currentScenario.id}
+              onSelect={actions.selectScenario}
+            />
+          ))}
+        </div>
+      </section>
+
+      <div className="sdk-overview-grid">
+        <RunSummaryCard run={currentRun} preset={currentPreset} scenario={currentScenario} />
+        <ActivityFeed activityLog={activityLog} />
       </div>
 
-      <section className="panel">
+      <section className="sdk-workbench-shell">
+        <div className="sdk-workbench-head">
+          <div>
+            <span className="section-label">Workbench</span>
+            <h2>Tune the prefab inputs and inspect the generated source</h2>
+          </div>
+          <p className="section-intro">
+            The left side controls the bounded input surface. The right side shows the maintained
+            example template that corresponds to this workflow.
+          </p>
+        </div>
+
+        <div className="sdk-playground-grid">
+          <ScenarioParameterForm
+            scenario={currentScenario}
+            draft={draft}
+            liveAvailable={liveAvailable}
+            errors={errors}
+            isRunning={isRunning}
+            hasInteraction={currentScenario.steps.some((step) => step.kind === "interaction")}
+            onChange={actions.updateDraft}
+            onRun={actions.runScenarioWorkflow}
+          />
+          <ScriptPanel scenario={currentScenario} scriptSource={scriptSource} />
+        </div>
+      </section>
+
+      <section className="panel sdk-results-panel">
         <div className="panel-head compact">
           <div>
             <span className="section-label">After run</span>
@@ -136,7 +237,10 @@ export function SDKPlaygroundPage() {
         <section className="panel empty-state">
           <span className="section-label">Awaiting run</span>
           <h2>No scenario results yet</h2>
-          <p>Run the selected example to reveal bundle details, export status, and the evidence map.</p>
+          <p>
+            Run the selected example to reveal bundle details, pack output, and the plain-English
+            evidence review for the chosen workflow.
+          </p>
         </section>
       ) : null}
 

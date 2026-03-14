@@ -56,7 +56,7 @@ cargo run -p proofctl -- create \
   --deployment-context public_sector
 ```
 
-If you want to use the demo frontend, copy the public verify key to your clipboard:
+If you want to use the demo frontend and keep the raw public verify key handy, copy it to your clipboard:
 
 ```bash
 cat ./keys/verify.pub | xclip -selection clipboard || cat ./keys/verify.pub | wl-copy || cat ./keys/verify.pub | pbcopy
@@ -68,6 +68,8 @@ If you want the optional self-hosted vault, start it with the matching private s
 export PROOF_SIGNING_KEY_PATH=./keys/signing.pem
 cargo run -p proof-service
 ```
+
+The connected vault exposes the matching public verify key through `/v1/config`, so the demo can verify bundles without a manual paste once it has refreshed.
 
 Once the vault has matching bundles for a system, you can export compliance-oriented packs directly from the CLI:
 
@@ -109,9 +111,8 @@ python3 examples/python-incident-response/run.py
 In a second terminal, you can start the demo frontend:
 
 ```bash
-cd web-demo
-npm install
-npm run dev
+npm --prefix web-demo install
+npm --prefix web-demo run dev -- --host 127.0.0.1 --port 5173
 ```
 
 Then open the local Vite URL shown in the terminal, usually:
@@ -132,3 +133,26 @@ http://127.0.0.1:5173/docs
 `web-demo` is demo-only collateral for walkthroughs and API exercises; it is not the production compliance surface.
 
 If the site is already open, click `Refresh vault` after starting `proof-service` so the verifier and capability panels pick up the current vault state.
+
+If you want both services through Docker instead of two local terminals:
+
+```bash
+docker compose up --build
+```
+
+That starts:
+
+```bash
+proof-service: http://127.0.0.1:8080
+web-demo:      http://127.0.0.1:5173
+```
+
+The Docker stack uses the checked-in `./vault.toml`, mounts `./keys`, and points the vault at `./keys/signing.pem`, so the public verify key exposed by the API matches `./keys/verify.pub`.
+
+If you want a clean local vault before starting again:
+
+```bash
+docker compose down
+rm -rf ./storage/artefacts ./storage/backups ./storage/packs ./storage/sled ./storage/metadata.db
+mkdir -p ./storage/artefacts ./storage/backups ./storage/packs ./storage/sled
+```

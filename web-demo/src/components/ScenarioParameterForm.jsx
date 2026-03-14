@@ -8,7 +8,7 @@ function renderField(field, draft, onChange) {
 
   if (field.key === "model") {
     return (
-      <label key={field.key}>
+      <label key={field.key} className="form-field">
         {field.label}
         <select value={draft.model} onChange={(event) => onChange(field.key, event.target.value)}>
           {modelOptionsFor(draft.provider).map((option) => (
@@ -23,7 +23,7 @@ function renderField(field, draft, onChange) {
 
   if (field.type === "select") {
     return (
-      <label key={field.key}>
+      <label key={field.key} className="form-field">
         {field.label}
         <select value={draft[field.key] ?? ""} onChange={(event) => onChange(field.key, event.target.value)}>
           {field.options.map((option) => (
@@ -38,7 +38,7 @@ function renderField(field, draft, onChange) {
 
   if (field.type === "textarea") {
     return (
-      <label key={field.key} className="stacked-field">
+      <label key={field.key} className="form-field form-field-wide stacked-field">
         {field.label}
         <textarea
           rows={field.rows ?? 4}
@@ -51,7 +51,7 @@ function renderField(field, draft, onChange) {
   }
 
   return (
-    <label key={field.key}>
+    <label key={field.key} className="form-field">
       {field.label}
       <input
         type={field.type === "password" ? "password" : "text"}
@@ -64,6 +64,39 @@ function renderField(field, draft, onChange) {
   );
 }
 
+const FIELD_GROUPS = [
+  {
+    key: "connection",
+    title: "Connection",
+    description: "Choose which vault this prefab writes to and which API credentials it uses.",
+    matches: (fieldKey) => fieldKey === "serviceUrl" || fieldKey === "apiKey"
+  },
+  {
+    key: "capture",
+    title: "Capture inputs",
+    description: "Control the provider path, model, run mode, and main prompt or incident input.",
+    matches: (fieldKey) =>
+      fieldKey === "provider" ||
+      fieldKey === "model" ||
+      fieldKey === "mode" ||
+      fieldKey === "providerApiKey" ||
+      fieldKey === "userPrompt"
+  },
+  {
+    key: "profile",
+    title: "System profile",
+    description: "Reuse the core system context across every bundle created in this workflow.",
+    matches: (fieldKey) =>
+      fieldKey === "systemId" || fieldKey === "intendedUse" || fieldKey === "owner"
+  },
+  {
+    key: "evidence",
+    title: "Scenario evidence",
+    description: "Fill the workflow-specific governance or incident records that make the pack meaningful.",
+    matches: () => true
+  }
+];
+
 export function ScenarioParameterForm({
   scenario,
   draft,
@@ -74,8 +107,23 @@ export function ScenarioParameterForm({
   onChange,
   onRun
 }) {
+  const assignedKeys = new Set();
+  const groupedFields = FIELD_GROUPS.map((group) => {
+    const fields = scenario.fields.filter((field) => {
+      if (assignedKeys.has(field.key)) {
+        return false;
+      }
+      if (!group.matches(field.key)) {
+        return false;
+      }
+      assignedKeys.add(field.key);
+      return true;
+    });
+    return { ...group, fields };
+  }).filter((group) => group.fields.length > 0);
+
   return (
-    <section className="panel">
+    <section className="panel scenario-form-panel">
       <div className="panel-head compact">
         <div>
           <span className="section-label">Parameters</span>
@@ -85,8 +133,18 @@ export function ScenarioParameterForm({
 
       <p className="section-intro">{scenario.description}</p>
 
-      <div className="form-grid">
-        {scenario.fields.map((field) => renderField(field, draft, onChange))}
+      <div className="parameter-sections">
+        {groupedFields.map((group) => (
+          <section key={group.key} className="parameter-section">
+            <div className="parameter-section-head">
+              <strong>{group.title}</strong>
+              <span>{group.description}</span>
+            </div>
+            <div className="form-grid scenario-form-grid">
+              {group.fields.map((field) => renderField(field, draft, onChange))}
+            </div>
+          </section>
+        ))}
       </div>
 
       <p className="field-hint">
@@ -99,27 +157,29 @@ export function ScenarioParameterForm({
           : "Synthetic mode still runs through the real vault workflow for create, verify, preview, and export."}
       </p>
 
-      <div className="toggle-row">
-        <button
-          type="button"
-          className={`toggle-pill ${draft.attachTimestamp ? "is-active" : ""}`}
-          onClick={() => onChange("attachTimestamp", !draft.attachTimestamp)}
-        >
-          Timestamp
-        </button>
-        <button
-          type="button"
-          className={`toggle-pill ${draft.attachTransparency ? "is-active" : ""}`}
-          onClick={() => onChange("attachTransparency", !draft.attachTransparency)}
-        >
-          Transparency
-        </button>
-      </div>
+      <div className="scenario-form-footer">
+        <div className="toggle-row">
+          <button
+            type="button"
+            className={`toggle-pill ${draft.attachTimestamp ? "is-active" : ""}`}
+            onClick={() => onChange("attachTimestamp", !draft.attachTimestamp)}
+          >
+            Timestamp
+          </button>
+          <button
+            type="button"
+            className={`toggle-pill ${draft.attachTransparency ? "is-active" : ""}`}
+            onClick={() => onChange("attachTransparency", !draft.attachTransparency)}
+          >
+            Transparency
+          </button>
+        </div>
 
-      <div className="button-row">
-        <button type="button" className="primary-cta" onClick={onRun} disabled={isRunning}>
-          {isRunning ? "Running workflow..." : "Run prefab example"}
-        </button>
+        <div className="button-row">
+          <button type="button" className="primary-cta" onClick={onRun} disabled={isRunning}>
+            {isRunning ? "Running workflow..." : "Run prefab example"}
+          </button>
+        </div>
       </div>
 
       {errors.workflow ? <p className="inline-error">{errors.workflow}</p> : null}

@@ -7,8 +7,18 @@ services:
       - "8080:8080"
     environment:
       PROOF_SERVICE_CONFIG_PATH: /app/vault.toml
+      PROOF_SIGNING_KEY_PATH: /app/keys/signing.pem
       RUST_LOG: proof_service=info
     volumes:
       - ./storage:/app/storage
       - ./keys:/app/keys:ro
-      - ./vault.toml.example:/app/vault.toml:ro
+      - ./vault.toml:/app/vault.toml:ro
+
+  web-demo:
+    build:
+      context: ./web-demo
+      dockerfile: Dockerfile
+    depends_on:
+      - proof-service
+    ports:
+      - "5173:5173"

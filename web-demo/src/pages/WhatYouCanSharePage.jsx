@@ -31,7 +31,7 @@ export function WhatYouCanSharePage() {
   const summary = buildRunNarrativeSummary(run, vaultConfig);
 
   return (
-    <section className="page-stack">
+    <section className="page-stack inspection-page share-page">
       <section className="panel">
         <div className="panel-head compact">
           <div>
@@ -54,7 +54,7 @@ export function WhatYouCanSharePage() {
             <h2>Share package contents and system rollup</h2>
           </div>
         </div>
-        <div className="snapshot-grid">
+        <div className="snapshot-grid snapshot-grid-triple">
           <DataPanel
             title="Share package summary"
             subtitle={run?.packType ?? "Share package"}
@@ -78,4 +78,3 @@ export function WhatYouCanSharePage() {
     </section>
   );
 }
-

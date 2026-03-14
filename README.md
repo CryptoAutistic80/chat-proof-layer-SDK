@@ -219,8 +219,13 @@ cargo run -p proof-service
 Or with Docker:
 
 ```bash
+cp ./vault.toml.example ./vault.toml
 docker compose up --build
 ```
+
+That starts the vault on `http://127.0.0.1:8080` and the demo site on `http://127.0.0.1:5173`.
+
+The compose stack mounts `./vault.toml`, `./keys`, and `./storage`, and sets `PROOF_SIGNING_KEY_PATH=/app/keys/signing.pem`, so the vault exposes the matching public verify key from `./keys/verify.pub` through `/v1/config`.
 
 The service auto-loads `./vault.toml` when present. Environment variables still override file settings.
 

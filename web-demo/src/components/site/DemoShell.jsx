@@ -9,6 +9,15 @@ export function DemoShell() {
   const location = useLocation();
   const { currentRun, currentPreset, currentScenario, activityLog } = useDemo();
   const useScenarioSummary = location.pathname === "/playground";
+  const useIntegratedPlayground = location.pathname === "/playground";
+
+  if (useIntegratedPlayground) {
+    return (
+      <div className="demo-main demo-main-playground">
+        <Outlet />
+      </div>
+    );
+  }
 
   return (
     <div className="demo-layout">

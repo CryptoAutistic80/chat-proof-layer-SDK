@@ -31,7 +31,7 @@ export function WhatHappenedPage() {
   const summary = buildRunNarrativeSummary(run, vaultConfig);
 
   return (
-    <section className="page-stack">
+    <section className="page-stack inspection-page happened-page">
       <PrimaryResultSummary summary={summary} run={run} />
 
       <section className="panel">
@@ -46,7 +46,7 @@ export function WhatHappenedPage() {
         </div>
       </section>
 
-      <section className="snapshot-grid">
+      <section className="snapshot-grid snapshot-grid-balanced">
         <DataPanel
           title="Proof record summary"
           subtitle="Proof record (bundle)"
@@ -88,7 +88,7 @@ export function WhatHappenedPage() {
             <h2>Technical payloads</h2>
           </div>
         </div>
-        <div className="snapshot-grid">
+        <div className="snapshot-grid snapshot-grid-balanced">
           <DataPanel
             title="Prompt payload"
             subtitle="prompt.json"
@@ -106,4 +106,3 @@ export function WhatHappenedPage() {
     </section>
   );
 }
-

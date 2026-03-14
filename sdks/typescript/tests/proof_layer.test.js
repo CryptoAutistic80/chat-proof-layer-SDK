@@ -16,6 +16,11 @@ test("ProofLayer.capture seals a local llm_interaction bundle", async () => {
     signingKeyPem,
     keyId: "kid-dev-01",
     systemId: "system-123",
+    complianceProfile: {
+      intendedUse: "Internal reviewer assistance",
+      riskTier: "high_risk_candidate",
+      gpaiStatus: "downstream_integrator"
+    },
     issuer: "proof-layer-ts",
     appId: "typescript-sdk",
     env: "test"
@@ -31,6 +36,7 @@ test("ProofLayer.capture seals a local llm_interaction bundle", async () => {
 
   assert.equal(result.bundle?.bundle_version, "1.0");
   assert.equal(result.bundle?.subject?.system_id, "system-123");
+  assert.equal(result.bundle?.compliance_profile?.intended_use, "Internal reviewer assistance");
   assert.equal(result.bundle?.integrity.signature.kid, "kid-dev-01");
   assert.equal(typeof result.bundleRoot, "string");
 });
@@ -365,6 +371,27 @@ test("ProofLayer.captureTechnicalDoc seals inline document evidence locally", as
   assert.ok(result.bundle?.items[0].data.commitment.startsWith("sha256:"));
 });
 
+test("ProofLayer.captureInstructionsForUse seals governance evidence locally", async () => {
+  const signingKeyPem = await readFile(path.join(goldenDir, "signing_key.txt"), "utf8");
+  const proofLayer = new ProofLayer({
+    signingKeyPem,
+    keyId: "kid-dev-01",
+    systemId: "system-ifu-42"
+  });
+
+  const result = await proofLayer.captureInstructionsForUse({
+    documentRef: "docs://ifu/v1",
+    versionTag: "v1.2",
+    section: "operator_controls",
+    document: Buffer.from("review before override", "utf8"),
+    documentName: "instructions.txt"
+  });
+
+  assert.equal(result.bundle?.items[0].type, "instructions_for_use");
+  assert.equal(result.bundle?.subject.system_id, "system-ifu-42");
+  assert.ok(result.bundle?.items[0].data.commitment.startsWith("sha256:"));
+});
+
 test("ProofLayer.captureRetrieval seals retrieval evidence locally", async () => {
   const signingKeyPem = await readFile(path.join(goldenDir, "signing_key.txt"), "utf8");
   const proofLayer = new ProofLayer({
@@ -444,6 +471,50 @@ test("ProofLayer.captureIncidentReport seals incident evidence locally", async (
 
   assert.equal(result.bundle?.items[0].type, "incident_report");
   assert.equal(result.bundle?.subject.system_id, "system-incident-42");
+  assert.ok(result.bundle?.items[0].data.report_commitment.startsWith("sha256:"));
+});
+
+test("ProofLayer.capturePostMarketMonitoring seals monitoring evidence locally", async () => {
+  const signingKeyPem = await readFile(path.join(goldenDir, "signing_key.txt"), "utf8");
+  const proofLayer = new ProofLayer({
+    signingKeyPem,
+    keyId: "kid-dev-01",
+    systemId: "system-monitoring-42"
+  });
+
+  const result = await proofLayer.capturePostMarketMonitoring({
+    planId: "pmm-42",
+    status: "active",
+    summary: "weekly drift review with escalation thresholds",
+    report: { owner: "safety-ops", cadence: "weekly" },
+    retentionClass: "risk_mgmt"
+  });
+
+  assert.equal(result.bundle?.items[0].type, "post_market_monitoring");
+  assert.equal(result.bundle?.subject.system_id, "system-monitoring-42");
+  assert.ok(result.bundle?.items[0].data.report_commitment.startsWith("sha256:"));
+});
+
+test("ProofLayer.captureAuthorityNotification seals authority-reporting evidence locally", async () => {
+  const signingKeyPem = await readFile(path.join(goldenDir, "signing_key.txt"), "utf8");
+  const proofLayer = new ProofLayer({
+    signingKeyPem,
+    keyId: "kid-dev-01",
+    systemId: "system-incident-43"
+  });
+
+  const result = await proofLayer.captureAuthorityNotification({
+    notificationId: "notif-42",
+    authority: "eu_ai_office",
+    status: "drafted",
+    incidentId: "inc-42",
+    dueAt: "2026-03-08T12:00:00Z",
+    report: { incident: "inc-42", severity: "serious" },
+    retentionClass: "risk_mgmt"
+  });
+
+  assert.equal(result.bundle?.items[0].type, "authority_notification");
+  assert.equal(result.bundle?.subject.system_id, "system-incident-43");
   assert.ok(result.bundle?.items[0].data.report_commitment.startsWith("sha256:"));
 });
 

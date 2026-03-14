@@ -5,7 +5,7 @@ use clap::{Args, Parser, Subcommand, ValueEnum};
 use ed25519_dalek::SigningKey;
 use flate2::{Compression, read::GzDecoder, write::GzEncoder};
 use proof_layer_core::{
-    ArtefactInput, CaptureEvent, CaptureInput, DisclosureError, EvidenceItem,
+    ActorRole, ArtefactInput, CaptureEvent, CaptureInput, DisclosureError, EvidenceItem,
     LEGACY_BUNDLE_ROOT_ALGORITHM, ProofBundle, ReceiptVerification, RedactedBundle,
     RekorTransparencyProvider, Rfc3161HttpTimestampProvider, SCITT_TRANSPARENCY_KIND,
     ScittTransparencyProvider, TimestampAssuranceProfile, TimestampProvider, TimestampToken,
@@ -124,6 +124,24 @@ struct CreateArgs {
     retention_class: Option<String>,
     #[arg(long)]
     system_id: Option<String>,
+    #[arg(long)]
+    role: Option<ActorRoleArg>,
+    #[arg(long)]
+    intended_use: Option<String>,
+    #[arg(long)]
+    prohibited_practice_screening: Option<String>,
+    #[arg(long)]
+    risk_tier: Option<String>,
+    #[arg(long)]
+    high_risk_domain: Option<String>,
+    #[arg(long)]
+    gpai_status: Option<String>,
+    #[arg(long)]
+    systemic_risk: Option<bool>,
+    #[arg(long)]
+    fria_required: Option<bool>,
+    #[arg(long)]
+    deployment_context: Option<String>,
     #[arg(long)]
     timestamp_url: Option<String>,
     #[arg(long)]
@@ -354,9 +372,22 @@ enum EvidenceTypeArg {
     RiskAssessment,
     DataGovernance,
     TechnicalDoc,
+    InstructionsForUse,
+    QmsRecord,
+    FundamentalRightsAssessment,
+    StandardsAlignment,
+    PostMarketMonitoring,
+    CorrectiveAction,
+    AuthorityNotification,
+    AuthoritySubmission,
+    ReportingDeadline,
+    RegulatorCorrespondence,
     ModelEvaluation,
     AdversarialTest,
     TrainingProvenance,
+    DownstreamDocumentation,
+    CopyrightPolicy,
+    TrainingSummary,
     ConformityAssessment,
     Declaration,
     Registration,
@@ -370,6 +401,9 @@ enum PackTypeArg {
     AnnexIv,
     AnnexXi,
     AnnexXii,
+    FundamentalRights,
+    ProviderGovernance,
+    PostMarketMonitoring,
     RuntimeLogs,
     RiskMgmt,
     AiLiteracy,
@@ -419,6 +453,10 @@ enum ActorRoleArg {
     Provider,
     Deployer,
     Integrator,
+    Importer,
+    Distributor,
+    AuthorizedRepresentative,
+    GpaiProvider,
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, ValueEnum)]
@@ -500,6 +538,28 @@ struct CreateOverrides {
     evidence_type: Option<EvidenceTypeArg>,
     retention_class: Option<String>,
     system_id: Option<String>,
+    role: Option<ActorRoleArg>,
+    intended_use: Option<String>,
+    prohibited_practice_screening: Option<String>,
+    risk_tier: Option<String>,
+    high_risk_domain: Option<String>,
+    gpai_status: Option<String>,
+    systemic_risk: Option<bool>,
+    fria_required: Option<bool>,
+    deployment_context: Option<String>,
+}
+
+impl CreateOverrides {
+    fn has_compliance_profile_overrides(&self) -> bool {
+        self.intended_use.is_some()
+            || self.prohibited_practice_screening.is_some()
+            || self.risk_tier.is_some()
+            || self.high_risk_domain.is_some()
+            || self.gpai_status.is_some()
+            || self.systemic_risk.is_some()
+            || self.fria_required.is_some()
+            || self.deployment_context.is_some()
+    }
 }
 
 struct CreateCommandInput<'a> {
@@ -733,9 +793,22 @@ const ALL_DISCLOSURE_ITEM_TYPES: &[&str] = &[
     "risk_assessment",
     "data_governance",
     "technical_doc",
+    "instructions_for_use",
+    "qms_record",
+    "fundamental_rights_assessment",
+    "standards_alignment",
+    "post_market_monitoring",
+    "corrective_action",
+    "authority_notification",
+    "authority_submission",
+    "reporting_deadline",
+    "regulator_correspondence",
     "model_evaluation",
     "adversarial_test",
     "training_provenance",
+    "downstream_documentation",
+    "copyright_policy",
+    "training_summary",
     "conformity_assessment",
     "declaration",
     "registration",
@@ -814,6 +887,10 @@ fn disclosure_policy_template(
             name: disclosure_policy_template_name(profile).to_string(),
             allowed_item_types: vec![
                 "incident_report".to_string(),
+                "authority_notification".to_string(),
+                "authority_submission".to_string(),
+                "reporting_deadline".to_string(),
+                "regulator_correspondence".to_string(),
                 "risk_assessment".to_string(),
                 "policy_decision".to_string(),
                 "human_oversight".to_string(),
@@ -936,9 +1013,22 @@ fn disclosure_redaction_group_selectors(
             "human_oversight" => &["notes_commitment"],
             "policy_decision" => &["rationale_commitment"],
             "technical_doc" => &["commitment"],
+            "instructions_for_use" => &["commitment"],
+            "qms_record" => &["record_commitment"],
+            "fundamental_rights_assessment" => &["report_commitment"],
+            "standards_alignment" => &["mapping_commitment"],
+            "post_market_monitoring" => &["report_commitment"],
+            "corrective_action" => &["record_commitment"],
+            "authority_notification" => &["report_commitment"],
+            "authority_submission" => &["document_commitment"],
+            "reporting_deadline" => &[],
+            "regulator_correspondence" => &["message_commitment"],
             "model_evaluation" => &["report_commitment"],
             "adversarial_test" => &["report_commitment"],
             "training_provenance" => &["record_commitment"],
+            "downstream_documentation" => &["commitment"],
+            "copyright_policy" => &["commitment"],
+            "training_summary" => &["commitment"],
             "conformity_assessment" => &["report_commitment"],
             "declaration" => &["document_commitment"],
             "registration" => &["receipt_commitment"],
@@ -952,9 +1042,22 @@ fn disclosure_redaction_group_selectors(
             | "policy_decision"
             | "risk_assessment"
             | "data_governance"
+            | "instructions_for_use"
+            | "qms_record"
+            | "fundamental_rights_assessment"
+            | "standards_alignment"
+            | "post_market_monitoring"
+            | "corrective_action"
+            | "authority_notification"
+            | "authority_submission"
+            | "reporting_deadline"
+            | "regulator_correspondence"
             | "model_evaluation"
             | "adversarial_test"
             | "training_provenance"
+            | "downstream_documentation"
+            | "copyright_policy"
+            | "training_summary"
             | "conformity_assessment"
             | "declaration"
             | "literacy_attestation"
@@ -1246,12 +1349,31 @@ impl EvidenceTypeArg {
                 | (Self::RiskAssessment, EvidenceItem::RiskAssessment(_))
                 | (Self::DataGovernance, EvidenceItem::DataGovernance(_))
                 | (Self::TechnicalDoc, EvidenceItem::TechnicalDoc(_))
+                | (Self::InstructionsForUse, EvidenceItem::InstructionsForUse(_))
+                | (Self::QmsRecord, EvidenceItem::QmsRecord(_))
+                | (
+                    Self::FundamentalRightsAssessment,
+                    EvidenceItem::FundamentalRightsAssessment(_)
+                )
+                | (Self::StandardsAlignment, EvidenceItem::StandardsAlignment(_))
+                | (Self::PostMarketMonitoring, EvidenceItem::PostMarketMonitoring(_))
+                | (Self::CorrectiveAction, EvidenceItem::CorrectiveAction(_))
+                | (Self::AuthorityNotification, EvidenceItem::AuthorityNotification(_))
+                | (Self::AuthoritySubmission, EvidenceItem::AuthoritySubmission(_))
+                | (Self::ReportingDeadline, EvidenceItem::ReportingDeadline(_))
+                | (Self::RegulatorCorrespondence, EvidenceItem::RegulatorCorrespondence(_))
                 | (Self::ModelEvaluation, EvidenceItem::ModelEvaluation(_))
                 | (Self::AdversarialTest, EvidenceItem::AdversarialTest(_))
                 | (
                     Self::TrainingProvenance,
                     EvidenceItem::TrainingProvenance(_)
                 )
+                | (
+                    Self::DownstreamDocumentation,
+                    EvidenceItem::DownstreamDocumentation(_)
+                )
+                | (Self::CopyrightPolicy, EvidenceItem::CopyrightPolicy(_))
+                | (Self::TrainingSummary, EvidenceItem::TrainingSummary(_))
                 | (
                     Self::ConformityAssessment,
                     EvidenceItem::ConformityAssessment(_)
@@ -1276,9 +1398,22 @@ impl EvidenceTypeArg {
             Self::RiskAssessment => "risk_assessment",
             Self::DataGovernance => "data_governance",
             Self::TechnicalDoc => "technical_doc",
+            Self::InstructionsForUse => "instructions_for_use",
+            Self::QmsRecord => "qms_record",
+            Self::FundamentalRightsAssessment => "fundamental_rights_assessment",
+            Self::StandardsAlignment => "standards_alignment",
+            Self::PostMarketMonitoring => "post_market_monitoring",
+            Self::CorrectiveAction => "corrective_action",
+            Self::AuthorityNotification => "authority_notification",
+            Self::AuthoritySubmission => "authority_submission",
+            Self::ReportingDeadline => "reporting_deadline",
+            Self::RegulatorCorrespondence => "regulator_correspondence",
             Self::ModelEvaluation => "model_evaluation",
             Self::AdversarialTest => "adversarial_test",
             Self::TrainingProvenance => "training_provenance",
+            Self::DownstreamDocumentation => "downstream_documentation",
+            Self::CopyrightPolicy => "copyright_policy",
+            Self::TrainingSummary => "training_summary",
             Self::ConformityAssessment => "conformity_assessment",
             Self::Declaration => "declaration",
             Self::Registration => "registration",
@@ -1294,6 +1429,9 @@ impl PackTypeArg {
             Self::AnnexIv => "annex_iv",
             Self::AnnexXi => "annex_xi",
             Self::AnnexXii => "annex_xii",
+            Self::FundamentalRights => "fundamental_rights",
+            Self::ProviderGovernance => "provider_governance",
+            Self::PostMarketMonitoring => "post_market_monitoring",
             Self::RuntimeLogs => "runtime_logs",
             Self::RiskMgmt => "risk_mgmt",
             Self::AiLiteracy => "ai_literacy",
@@ -1310,6 +1448,22 @@ impl ActorRoleArg {
             Self::Provider => "provider",
             Self::Deployer => "deployer",
             Self::Integrator => "integrator",
+            Self::Importer => "importer",
+            Self::Distributor => "distributor",
+            Self::AuthorizedRepresentative => "authorized_representative",
+            Self::GpaiProvider => "gpai_provider",
+        }
+    }
+
+    fn as_schema_role(self) -> ActorRole {
+        match self {
+            Self::Provider => ActorRole::Provider,
+            Self::Deployer => ActorRole::Deployer,
+            Self::Integrator => ActorRole::Integrator,
+            Self::Importer => ActorRole::Importer,
+            Self::Distributor => ActorRole::Distributor,
+            Self::AuthorizedRepresentative => ActorRole::AuthorizedRepresentative,
+            Self::GpaiProvider => ActorRole::GpaiProvider,
         }
     }
 }
@@ -1346,6 +1500,15 @@ fn main() -> Result<()> {
                 evidence_type: args.evidence_type,
                 retention_class: args.retention_class.clone(),
                 system_id: args.system_id.clone(),
+                role: args.role,
+                intended_use: args.intended_use.clone(),
+                prohibited_practice_screening: args.prohibited_practice_screening.clone(),
+                risk_tier: args.risk_tier.clone(),
+                high_risk_domain: args.high_risk_domain.clone(),
+                gpai_status: args.gpai_status.clone(),
+                systemic_risk: args.systemic_risk,
+                fria_required: args.fria_required,
+                deployment_context: args.deployment_context.clone(),
             },
             timestamp_url: args.timestamp_url.as_deref(),
             transparency_log: args.transparency_log.as_deref(),
@@ -3061,6 +3224,55 @@ fn apply_create_overrides(
         capture.policy.retention_class = Some(retention_class.to_string());
     }
 
+    if let Some(role) = overrides.role {
+        capture.actor.role = role.as_schema_role();
+    }
+
+    if overrides.has_compliance_profile_overrides() || capture.compliance_profile.is_some() {
+        let mut profile = capture.compliance_profile.take().unwrap_or_default();
+
+        if let Some(intended_use) =
+            normalize_optional_cli_text("intended_use", overrides.intended_use.as_deref())?
+        {
+            profile.intended_use = Some(intended_use);
+        }
+        if let Some(screening) = normalize_optional_cli_text(
+            "prohibited_practice_screening",
+            overrides.prohibited_practice_screening.as_deref(),
+        )? {
+            profile.prohibited_practice_screening = Some(screening);
+        }
+        if let Some(risk_tier) =
+            normalize_optional_cli_text("risk_tier", overrides.risk_tier.as_deref())?
+        {
+            profile.risk_tier = Some(risk_tier);
+        }
+        if let Some(high_risk_domain) =
+            normalize_optional_cli_text("high_risk_domain", overrides.high_risk_domain.as_deref())?
+        {
+            profile.high_risk_domain = Some(high_risk_domain);
+        }
+        if let Some(gpai_status) =
+            normalize_optional_cli_text("gpai_status", overrides.gpai_status.as_deref())?
+        {
+            profile.gpai_status = Some(gpai_status);
+        }
+        if let Some(systemic_risk) = overrides.systemic_risk {
+            profile.systemic_risk = Some(systemic_risk);
+        }
+        if let Some(fria_required) = overrides.fria_required {
+            profile.fria_required = Some(fria_required);
+        }
+        if let Some(deployment_context) = normalize_optional_cli_text(
+            "deployment_context",
+            overrides.deployment_context.as_deref(),
+        )? {
+            profile.deployment_context = Some(deployment_context);
+        }
+
+        capture.compliance_profile = Some(profile);
+    }
+
     if let Some(evidence_type) = overrides.evidence_type {
         let Some(index) = capture
             .items
@@ -3148,6 +3360,47 @@ fn describe_evidence_item(item: &EvidenceItem) -> String {
         EvidenceItem::TechnicalDoc(data) => {
             format!("technical_doc document_ref={}", data.document_ref)
         }
+        EvidenceItem::InstructionsForUse(data) => format!(
+            "instructions_for_use document_ref={} version={}",
+            data.document_ref,
+            data.version.as_deref().unwrap_or("n/a")
+        ),
+        EvidenceItem::QmsRecord(data) => format!(
+            "qms_record record_id={} process={} status={}",
+            data.record_id, data.process, data.status
+        ),
+        EvidenceItem::FundamentalRightsAssessment(data) => format!(
+            "fundamental_rights_assessment assessment_id={} status={}",
+            data.assessment_id, data.status
+        ),
+        EvidenceItem::StandardsAlignment(data) => format!(
+            "standards_alignment standard_ref={} status={}",
+            data.standard_ref, data.status
+        ),
+        EvidenceItem::PostMarketMonitoring(data) => format!(
+            "post_market_monitoring plan_id={} status={}",
+            data.plan_id, data.status
+        ),
+        EvidenceItem::CorrectiveAction(data) => format!(
+            "corrective_action action_id={} status={}",
+            data.action_id, data.status
+        ),
+        EvidenceItem::AuthorityNotification(data) => format!(
+            "authority_notification notification_id={} authority={} status={}",
+            data.notification_id, data.authority, data.status
+        ),
+        EvidenceItem::AuthoritySubmission(data) => format!(
+            "authority_submission submission_id={} authority={} status={}",
+            data.submission_id, data.authority, data.status
+        ),
+        EvidenceItem::ReportingDeadline(data) => format!(
+            "reporting_deadline deadline_id={} authority={} status={}",
+            data.deadline_id, data.authority, data.status
+        ),
+        EvidenceItem::RegulatorCorrespondence(data) => format!(
+            "regulator_correspondence correspondence_id={} authority={} status={}",
+            data.correspondence_id, data.authority, data.status
+        ),
         EvidenceItem::ModelEvaluation(data) => format!(
             "model_evaluation evaluation_id={} benchmark={} status={}",
             data.evaluation_id, data.benchmark, data.status
@@ -3159,6 +3412,18 @@ fn describe_evidence_item(item: &EvidenceItem) -> String {
         EvidenceItem::TrainingProvenance(data) => format!(
             "training_provenance dataset_ref={} stage={}",
             data.dataset_ref, data.stage
+        ),
+        EvidenceItem::DownstreamDocumentation(data) => format!(
+            "downstream_documentation document_ref={} audience={} status={}",
+            data.document_ref, data.audience, data.status
+        ),
+        EvidenceItem::CopyrightPolicy(data) => format!(
+            "copyright_policy policy_ref={} status={}",
+            data.policy_ref, data.status
+        ),
+        EvidenceItem::TrainingSummary(data) => format!(
+            "training_summary summary_ref={} status={}",
+            data.summary_ref, data.status
         ),
         EvidenceItem::ConformityAssessment(data) => format!(
             "conformity_assessment assessment_id={} procedure={} status={}",
@@ -4072,7 +4337,8 @@ mod tests {
     };
     use flate2::{Compression, write::GzEncoder};
     use proof_layer_core::{
-        Actor, ActorRole, EncryptionPolicy, EvidenceContext, LlmInteractionEvidence, Policy,
+        Actor, ActorRole, ComplianceProfile, EncryptionPolicy, EvidenceContext,
+        LlmInteractionEvidence, Policy,
         REKOR_RFC3161_API_VERSION, REKOR_RFC3161_ENTRY_KIND, REKOR_TRANSPARENCY_KIND,
         RFC3161_TIMESTAMP_KIND, SCITT_STATEMENT_PROFILE, SCITT_TRANSPARENCY_KIND, Subject,
         TimestampError, TimestampToken, TransparencyReceipt,
@@ -4151,6 +4417,7 @@ mod tests {
                 deployment_id: None,
                 version: Some("2026.03".to_string()),
             },
+            compliance_profile: None,
             context: EvidenceContext {
                 provider: Some("anthropic".to_string()),
                 model: Some("claude-sonnet-4-6".to_string()),
@@ -4593,6 +4860,18 @@ mod tests {
     #[test]
     fn pack_type_maps_to_vault_api_value() {
         assert_eq!(PackTypeArg::AnnexIv.as_api_value(), "annex_iv");
+        assert_eq!(
+            PackTypeArg::FundamentalRights.as_api_value(),
+            "fundamental_rights"
+        );
+        assert_eq!(
+            PackTypeArg::ProviderGovernance.as_api_value(),
+            "provider_governance"
+        );
+        assert_eq!(
+            PackTypeArg::PostMarketMonitoring.as_api_value(),
+            "post_market_monitoring"
+        );
         assert_eq!(PackTypeArg::RuntimeLogs.as_api_value(), "runtime_logs");
     }
 
@@ -5094,6 +5373,15 @@ mod tests {
                 evidence_type: Some(EvidenceTypeArg::LlmInteraction),
                 retention_class: Some("runtime_logs".to_string()),
                 system_id: Some("system-123".to_string()),
+                role: None,
+                intended_use: None,
+                prohibited_practice_screening: None,
+                risk_tier: None,
+                high_risk_domain: None,
+                gpai_status: None,
+                systemic_risk: None,
+                fria_required: None,
+                deployment_context: None,
             },
         )
         .unwrap();
@@ -5107,6 +5395,101 @@ mod tests {
             event.items.first(),
             Some(EvidenceItem::LlmInteraction(_))
         ));
+    }
+
+    #[test]
+    fn create_overrides_apply_role_and_compliance_profile() {
+        let event = apply_create_overrides(
+            materialize_capture_event(SealableCaptureInput::Legacy(sample_legacy_capture())),
+            &CreateOverrides {
+                evidence_type: Some(EvidenceTypeArg::LlmInteraction),
+                retention_class: Some("runtime_logs".to_string()),
+                system_id: Some("system-123".to_string()),
+                role: Some(ActorRoleArg::Deployer),
+                intended_use: Some("Internal reviewer assistance".to_string()),
+                prohibited_practice_screening: Some("screened_no_prohibited_use".to_string()),
+                risk_tier: Some("limited_risk".to_string()),
+                high_risk_domain: Some("none".to_string()),
+                gpai_status: Some("downstream_integrator".to_string()),
+                systemic_risk: Some(false),
+                fria_required: Some(false),
+                deployment_context: Some("internal_operations".to_string()),
+            },
+        )
+        .unwrap();
+
+        assert_eq!(event.actor.role, ActorRole::Deployer);
+        assert_eq!(event.subject.system_id.as_deref(), Some("system-123"));
+        assert_eq!(
+            event.compliance_profile.as_ref().and_then(|profile| profile.intended_use.as_deref()),
+            Some("Internal reviewer assistance")
+        );
+        assert_eq!(
+            event.compliance_profile
+                .as_ref()
+                .and_then(|profile| profile.gpai_status.as_deref()),
+            Some("downstream_integrator")
+        );
+        assert_eq!(
+            event.compliance_profile
+                .as_ref()
+                .and_then(|profile| profile.systemic_risk),
+            Some(false)
+        );
+        assert_eq!(
+            event.compliance_profile
+                .as_ref()
+                .and_then(|profile| profile.fria_required),
+            Some(false)
+        );
+    }
+
+    #[test]
+    fn create_overrides_merge_existing_compliance_profile() {
+        let mut event = sample_event();
+        event.compliance_profile = Some(ComplianceProfile {
+            risk_tier: Some("high_risk".to_string()),
+            ..ComplianceProfile::default()
+        });
+
+        let event = apply_create_overrides(
+            event,
+            &CreateOverrides {
+                evidence_type: None,
+                retention_class: None,
+                system_id: None,
+                role: Some(ActorRoleArg::AuthorizedRepresentative),
+                intended_use: Some("Public sector eligibility screening".to_string()),
+                prohibited_practice_screening: None,
+                risk_tier: None,
+                high_risk_domain: None,
+                gpai_status: None,
+                systemic_risk: None,
+                fria_required: Some(true),
+                deployment_context: None,
+            },
+        )
+        .unwrap();
+
+        assert_eq!(event.actor.role, ActorRole::AuthorizedRepresentative);
+        assert_eq!(
+            event.compliance_profile
+                .as_ref()
+                .and_then(|profile| profile.intended_use.as_deref()),
+            Some("Public sector eligibility screening")
+        );
+        assert_eq!(
+            event.compliance_profile
+                .as_ref()
+                .and_then(|profile| profile.risk_tier.as_deref()),
+            Some("high_risk")
+        );
+        assert_eq!(
+            event.compliance_profile
+                .as_ref()
+                .and_then(|profile| profile.fria_required),
+            Some(true)
+        );
     }
 
     #[test]
@@ -5126,6 +5509,15 @@ mod tests {
                 evidence_type: Some(EvidenceTypeArg::LlmInteraction),
                 retention_class: None,
                 system_id: None,
+                role: None,
+                intended_use: None,
+                prohibited_practice_screening: None,
+                risk_tier: None,
+                high_risk_domain: None,
+                gpai_status: None,
+                systemic_risk: None,
+                fria_required: None,
+                deployment_context: None,
             },
         )
         .unwrap_err();
@@ -5134,6 +5526,30 @@ mod tests {
             err.to_string()
                 .contains("does not contain requested evidence type llm_interaction")
         );
+    }
+
+    #[test]
+    fn create_overrides_reject_empty_intended_use() {
+        let err = apply_create_overrides(
+            sample_event(),
+            &CreateOverrides {
+                evidence_type: None,
+                retention_class: None,
+                system_id: None,
+                role: None,
+                intended_use: Some("   ".to_string()),
+                prohibited_practice_screening: None,
+                risk_tier: None,
+                high_risk_domain: None,
+                gpai_status: None,
+                systemic_risk: None,
+                fria_required: None,
+                deployment_context: None,
+            },
+        )
+        .unwrap_err();
+
+        assert!(err.to_string().contains("intended_use must not be empty"));
     }
 
     #[test]

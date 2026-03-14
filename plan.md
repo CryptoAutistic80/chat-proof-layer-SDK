@@ -1,11 +1,12 @@
 # Proof Layer SDK — Full Technical Implementation Plan
 
-## Ground-up rebuild of a production-ready Tamper-Evident AI Compliance Evidence SDK & Evidence Vault
+## SDK-first roadmap for a tamper-evident AI compliance evidence platform with an optional managed service layer
 
-**Target**: EU AI Act (Regulation (EU) 2024/1689) compliance evidence platform
-**Architecture**: Rust core → thin FFI bindings → TypeScript SDK, Python SDK, extensible to more languages
+**Target**: Developer-first SDK and CLI for cryptographically verifiable AI evidence, with an eventual paid evidence-vault service
+**Architecture**: Rust core → thin FFI bindings → TypeScript SDK, Python SDK, extensible to more languages, plus an optional managed vault layer
+**Product scope**: SDK, CLI, and local verification are the primary product surface; the hosted vault is a later paid service; `web-demo` is demo collateral, not a production compliance surface
 **Date**: March 2026
-**Regulatory context**: GPAI obligations already applicable (Aug 2025); AI literacy already applicable (Feb 2025); high-risk system obligations apply Aug 2026–2027
+**Regulatory context**: AI literacy obligations already apply from February 2, 2025; GPAI obligations already apply from August 2, 2025; most AI Act obligations apply from August 2, 2026; some Annex I pathways apply from August 2, 2027. The Commission proposed later high-risk dates on November 19, 2025, but that proposal is not yet the law.
 
 ---
 
@@ -60,6 +61,14 @@
 4. **Offline verification always** — Any Evidence Bundle can be verified with only the bundle file and a public key. No network calls, no vendor dependency.
 5. **Pluggable assurance levels** — Signature only → +RFC 3161 timestamp → +transparency receipt. Customers choose their assurance level via policy configuration.
 
+### Product Scope & Regulatory Boundary
+
+1. **Proof Layer is infrastructure, not the customer's AI system** — The primary product is evidence middleware for providers, deployers, and integrators. The roadmap should not assume Proof Layer itself is a GPAI provider or a standalone AI system unless a future product surface changes that analysis.
+2. **SDK-first, service-optional** — A developer must be able to capture, seal, verify, and selectively disclose evidence without adopting the paid vault. The hosted vault adds retention, audit, disclosure policy management, and export orchestration.
+3. **Frontend is demo-only** — `web-demo` exists to demonstrate the workflow, not to carry product-critical compliance features. It should stay clearly marked as demo collateral and should not drive the core architecture.
+4. **Role model must match the Act** — The target schema and export logic should support provider, deployer, integrator, importer, distributor, authorized representative, and GPAI provider roles, even if the initial UI exposes only a smaller subset.
+5. **Compliance workflows need first-class governance artefacts** — Capturing runtime logs alone is not enough. The target product must also support quality management, instructions for use, FRIA where applicable, post-market monitoring, serious-incident handling, and GPAI-specific documentation streams.
+
 ### Workspace Layout (Target)
 
 ```
@@ -112,7 +121,7 @@ proof-layer-sdk/
 │   ├── typescript/
 │   ├── python/
 │   └── rust/
-└── web-demo/                           # Verification UI
+└── web-demo/                           # Demo-only walkthrough UI, not a production compliance surface
 ```
 
 ### What Changes from the PoC
@@ -230,7 +239,7 @@ pub struct Actor {
     pub app_id: String,
     pub env: String,
     pub signing_key_id: String,
-    pub role: ActorRole,                 // NEW: Provider | Deployer | Integrator
+    pub role: ActorRole,                 // NEW: Provider | Deployer | Integrator | Importer | Distributor | AuthorizedRepresentative | GpaiProvider
     pub organization_id: Option<String>, // NEW: for multi-tenant vaults
 }
 
@@ -259,7 +268,7 @@ pub enum EvidenceItem {
     DataGovernance(DataGovernanceEvidence),
     TechnicalDoc(TechnicalDocEvidence),
 
-    // GPAI evidence (Art 53, 55)
+    // Evaluation and resilience evidence (Art 15, 53, 55)
     ModelEvaluation(ModelEvaluationEvidence),
     AdversarialTest(AdversarialTestEvidence),
     TrainingProvenance(TrainingProvenanceEvidence),
@@ -267,6 +276,19 @@ pub enum EvidenceItem {
 
     // Cross-cutting (Art 4)
     LiteracyAttestation(LiteracyAttestationEvidence),
+
+    // Governance and deployment controls (Art 13, 17, 27, 40, 72, 73)
+    InstructionsForUse(InstructionsForUseEvidence),
+    QmsRecord(QmsRecordEvidence),
+    FundamentalRightsAssessment(FundamentalRightsAssessmentEvidence),
+    StandardsAlignment(StandardsAlignmentEvidence),
+    PostMarketMonitoring(PostMarketMonitoringEvidence),
+    CorrectiveAction(CorrectiveActionEvidence),
+
+    // GPAI governance artefacts (Art 53)
+    DownstreamDocumentation(DownstreamDocumentationEvidence),
+    CopyrightPolicy(CopyrightPolicyEvidence),
+    TrainingSummary(TrainingSummaryEvidence),
 
     // Conformity (Art 43, 47, 49)
     ConformityAssessment(ConformityAssessmentEvidence),
@@ -472,7 +494,8 @@ proofctl create [OPTIONS]
     --key <SIGNING.pem>               Signing key
     --kid <KEY_ID>                    Key identifier
     --system-id <ID>                  AI system identifier
-    --role <provider|deployer>        Actor role
+    --role <provider|deployer|integrator|importer|distributor|authorized-representative|gpai-provider>
+                                      Actor role
     --evidence-type <TYPE>            Evidence item type
     --retention-class <CLASS>         Retention classification
     --timestamp-url <URL>             RFC 3161 TSA URL (optional)
@@ -594,7 +617,7 @@ CREATE TABLE bundles (
     bundle_id       TEXT PRIMARY KEY,
     bundle_version  TEXT NOT NULL,
     created_at      TEXT NOT NULL,           -- ISO 8601
-    actor_role      TEXT NOT NULL,           -- 'provider' | 'deployer' | 'integrator'
+    actor_role      TEXT NOT NULL,           -- provider/deployer/integrator/importer/distributor/authorized_representative/gpai_provider
     actor_org_id    TEXT,
     system_id       TEXT,
     model_id        TEXT,
@@ -1082,9 +1105,18 @@ from proof_layer.otel import ProofLayerExporter
 | `risk_assessment` | Art 9 | High-risk | 10yr (docs) |
 | `data_governance` | Art 10 | High-risk | 10yr (docs) |
 | `technical_doc` | Art 11, Annex IV | High-risk | 10yr (docs) |
+| `instructions_for_use` | Art 13 | High-risk | 10yr (docs) |
+| `qms_record` | Art 17 | High-risk provider | 10yr (docs) |
+| `fundamental_rights_assessment` | Art 27 | Deployer, where applicable | Org policy / legal basis |
+| `standards_alignment` | Art 40, 43 | High-risk, GPAI | 10yr (docs) |
+| `post_market_monitoring` | Art 72 | High-risk | 10yr (docs) |
+| `corrective_action` | Art 20, 73 | High-risk, GPAI systemic | 10yr |
 | `model_evaluation` | Art 53, Annex XI | GPAI | Until withdrawn+ |
 | `adversarial_test` | Art 55 | GPAI systemic | Until withdrawn+ |
 | `training_provenance` | Art 53, Annex XI | GPAI | Until withdrawn+ |
+| `downstream_documentation` | Art 53, Annex XII | GPAI / downstream providers | Until withdrawn+ |
+| `copyright_policy` | Art 53 | GPAI provider | Until withdrawn+ |
+| `training_summary` | Art 53 | GPAI provider | Public version + evidence retention |
 | `incident_report` | Art 55, 73 | High-risk, GPAI systemic | 10yr |
 | `literacy_attestation` | Art 4 | All | Org policy |
 | `conformity_assessment` | Art 43, Annex VI/VII | High-risk | 10yr |
@@ -1095,15 +1127,16 @@ from proof_layer.otel import ProofLayerExporter
 
 | Pack Type | Contents | Primary Audience |
 |---|---|---|
-| `annex_iv` | Technical docs, risk mgmt, data gov, accuracy tests, oversight design, post-market plan | Notified bodies, market surveillance |
-| `annex_xi` | Model description, architecture, training provenance, evaluation results, use policies | AI Office, competent authorities |
-| `annex_xii` | Downstream integration docs, capabilities/limitations, usage recommendations | Downstream system providers |
-| `runtime_logs` | Automatic event logs, monitoring events, risk flags | Deployers, authorities |
-| `risk_management` | Risk register snapshots, mitigations, test attestations | Conformity assessment |
+| `annex_iv` | Technical docs, risk mgmt, data gov, instructions for use, standards alignment, oversight design, post-market monitoring plan, linked accuracy/robustness/cybersecurity evidence | Notified bodies, market surveillance |
+| `annex_xi` | Model description, architecture, training provenance, evaluation results, copyright policy, training summary evidence | AI Office, competent authorities |
+| `annex_xii` | Downstream documentation, capabilities/limitations, usage recommendations, integration constraints | Downstream system providers |
+| `runtime_logs` | Automatic event logs, monitoring events, risk flags, operator overrides | Deployers, authorities |
+| `risk_management` | Risk register snapshots, mitigations, test attestations, corrective actions | Conformity assessment |
 | `ai_literacy` | Training records, role mapping, competence attestations | Authorities, internal audit |
-| `systemic_risk` | Adversarial tests, evaluations, incident reports, cybersecurity evidence | AI Office |
-| `incident_response` | Incident timeline, corrective measures, root cause analysis | AI Office, authorities |
-| `conformity` | Declaration, CE marking evidence, registration receipts | Market surveillance |
+| `systemic_risk` | Adversarial tests, evaluations, incident reports, corrective measures, and cybersecurity posture evidence | AI Office |
+| `incident_response` | Incident timeline, corrective measures, root cause analysis, authority reporting artefacts | AI Office, authorities |
+| `conformity` | Conformity assessment, declaration, CE-marking evidence, registration receipts | Market surveillance |
+| `provider_governance` | QMS records, standards/common specs mapping, release approvals, audit checkpoints | Internal compliance, auditors |
 
 ---
 
@@ -1393,6 +1426,17 @@ pub fn migrate_v01_to_v10(old: V01Bundle) -> Result<EvidenceBundle> {
 
 ## 12. Implementation Phases
 
+### Phase 0: Product Scope & Compliance Model (Week 0)
+
+**Goal**: Lock product boundary before adding more implementation detail.
+
+- [ ] Document Proof Layer as SDK-first infrastructure, not a primary AI application surface
+- [ ] Split roadmap responsibilities into: SDK/CLI core, optional managed vault, demo-only frontend
+- [ ] Expand target actor-role model to include importer, distributor, authorized representative, and GPAI provider
+- [ ] Add first-class target evidence types for QMS, instructions for use, FRIA, post-market monitoring, corrective actions, and GPAI copyright/training-summary duties
+- [ ] Define which compliance features must work fully offline/local versus only through the future paid service layer
+- [ ] Add a risk-classification intake note: prohibited-practice screening, high-risk determination, GPAI track, and public-sector FRIA applicability are customer-system concerns the product must help evidence, not decide silently
+
 ### Phase 1: Foundation (Weeks 1–3)
 
 **Goal**: Restructured workspace, core library with new schema, passing golden tests.
@@ -1465,9 +1509,9 @@ pub fn migrate_v01_to_v10(old: V01Bundle) -> Result<EvidenceBundle> {
 - [ ] pyproject.toml and README
 - [ ] Example: `examples/python/`
 
-### Phase 6: Evidence Vault (Weeks 10–13)
+### Phase 6: Managed Evidence Vault Service (Weeks 10–13)
 
-**Goal**: Production vault service with storage, retention, and export.
+**Goal**: Optional paid service layer for storage, retention, policy, and export orchestration.
 
 - [ ] Axum HTTP server with API routes (Section 4.1)
 - [ ] SQLite storage backend (metadata + query)
@@ -1479,6 +1523,8 @@ pub fn migrate_v01_to_v10(old: V01Bundle) -> Result<EvidenceBundle> {
 - [ ] Retention policy engine (configuration, scan, soft/hard delete)
 - [ ] Evidence pack assembly engine (Section 4.4)
 - [ ] Pack export (Annex IV, XI, XII, runtime logs, risk mgmt, literacy)
+- [ ] Disclosure policy management and reusable export templates
+- [ ] First-class pack support for provider governance, FRIA, post-market monitoring, and serious-incident reporting
 - [ ] Audit trail (append-only access log)
 - [ ] Configuration file support (`vault.toml`)
 - [ ] Docker image + docker-compose
@@ -1524,7 +1570,7 @@ pub fn migrate_v01_to_v10(old: V01Bundle) -> Result<EvidenceBundle> {
 
 ### Phase 10: Hardening & Launch (Weeks 17–18)
 
-**Goal**: Production readiness, documentation, security review.
+**Goal**: Production readiness for SDKs and local tooling, plus beta readiness for the managed vault layer.
 
 - [ ] Security audit of cryptographic code paths
 - [ ] Fuzz testing (canon, verify, unpackage)
@@ -1534,7 +1580,7 @@ pub fn migrate_v01_to_v10(old: V01Bundle) -> Result<EvidenceBundle> {
 - [ ] Threat model update for production architecture
 - [ ] EU AI Act mapping documentation with article references
 - [ ] Example applications (full compliance workflow)
-- [ ] Web demo update for v1.0 bundles
+- [ ] Demo-site copy update making `web-demo` explicitly non-production and demo-only
 - [ ] Release v1.0.0 across all packages
 
 ---
@@ -1578,10 +1624,12 @@ pub fn migrate_v01_to_v10(old: V01Bundle) -> Result<EvidenceBundle> {
 
 | Date | AI Act Event | SDK Must Support |
 |------|-------------|-----------------|
-| Feb 2025 (past) | AI literacy obligations apply | Art 4 literacy evidence capture |
-| Aug 2025 (past) | GPAI obligations apply | Art 53 GPAI packs, Art 55 systemic risk |
-| Aug 2026 | High-risk system obligations apply | Full Annex IV packs, Art 12 logging, Art 9/10/11 evidence |
-| Aug 2027 | High-risk in regulated products | Extended high-risk pack support |
+| February 2, 2025 (already applicable) | AI literacy obligations apply | Art 4 literacy evidence capture and operator training evidence |
+| August 2, 2025 (already applicable) | GPAI obligations apply | Art 53 packs, copyright-policy evidence, training-summary evidence, Art 55 systemic-risk workflows |
+| August 2, 2026 (current binding date) | Main AI Act obligations apply | Full Annex IV packs, Art 12 logging, Art 9/10/11/13/14/17/27/72 evidence |
+| August 2, 2027 (current binding date) | Certain Annex I high-risk systems | Extended high-risk pack support |
+
+Until the November 19, 2025 simplification proposal is enacted, the roadmap should continue to plan against the current binding dates above.
 
 ---
 
@@ -1592,8 +1640,9 @@ This plan rebuilds the Proof Layer SDK from a PoC into a production-grade system
 1. **Keeping the Rust core as the single source of cryptographic truth** — no reimplementation across languages
 2. **Replacing HTTP-client SDKs with native FFI bindings** (NAPI-RS for Node, PyO3 for Python) — eliminating "compliance drift"
 3. **Upgrading from generic "proof bundles" to typed evidence items** mapped directly to EU AI Act articles
-4. **Building an Evidence Vault** with retention policies, pack assembly, and audit-ready exports aligned to Annexes IV, V, XI, XII
+4. **Building an optional managed Evidence Vault service** with retention policies, pack assembly, and audit-ready exports aligned to Annexes IV, V, XI, XII
 5. **Adding production cryptographic features**: RFC 3161 timestamping, pluggable transparency anchoring, Merkle-based selective disclosure
 6. **Supporting three assurance levels**: signed → timestamped → transparency-anchored, letting customers choose their evidence strength
+7. **Closing the governance gap** by planning first-class evidence for QMS, instructions for use, FRIA, post-market monitoring, serious incidents, and GPAI copyright/training-summary duties
 
-The architecture is designed so that when the high-risk obligations hit in August 2026, a customer can open the Vault, produce the pack, and the proof verifies — cleanly, cryptographically, and without hand-waving.
+The architecture is designed so that a developer can adopt Proof Layer locally first, and later add the managed vault when they need retention, policy, and export orchestration. By August 2, 2026, a customer using the full stack should be able to produce a regulator-facing pack that verifies cleanly, cryptographically, and without hand-waving.

@@ -2,24 +2,38 @@ import { Buffer } from "node:buffer";
 import { hashSha256 } from "./native.js";
 import type {
   AdversarialTestRequestOptions,
+  AuthorityNotificationRequestOptions,
+  AuthoritySubmissionRequestOptions,
   BinaryLike,
+  ComplianceProfileInput,
   ConformityAssessmentRequestOptions,
+  CopyrightPolicyRequestOptions,
+  CorrectiveActionRequestOptions,
   CreateBundleRequest,
   DataGovernanceRequestOptions,
   DeclarationRequestOptions,
+  DownstreamDocumentationRequestOptions,
+  FundamentalRightsAssessmentRequestOptions,
   HumanOversightRequestOptions,
   IncidentReportRequestOptions,
+  InstructionsForUseRequestOptions,
   JsonObject,
   JsonValue,
   LiteracyAttestationRequestOptions,
   LlmInteractionRequestOptions,
   ModelEvaluationRequestOptions,
+  PostMarketMonitoringRequestOptions,
   PolicyDecisionRequestOptions,
   ProofArtefactInput,
+  QmsRecordRequestOptions,
+  RegulatorCorrespondenceRequestOptions,
   RegistrationRequestOptions,
+  ReportingDeadlineRequestOptions,
   RetrievalRequestOptions,
   RiskAssessmentRequestOptions,
+  StandardsAlignmentRequestOptions,
   TechnicalDocRequestOptions,
+  TrainingSummaryRequestOptions,
   TrainingProvenanceRequestOptions,
   ToolCallRequestOptions
 } from "./types.js";
@@ -70,7 +84,7 @@ function namedDataArtefact(baseName: string, data: BinaryLike): ProofArtefactInp
 
 interface CaptureEnvelopeOptions {
   keyId: string;
-  role?: "provider" | "deployer" | "integrator";
+  role?: LlmInteractionRequestOptions["role"];
   issuer?: string;
   appId?: string;
   env?: string;
@@ -81,12 +95,29 @@ interface CaptureEnvelopeOptions {
   modelId?: string;
   deploymentId?: string;
   version?: string;
+  complianceProfile?: ComplianceProfileInput;
   context?: JsonObject;
   items: JsonObject[];
   redactions?: string[];
   encryptionEnabled?: boolean;
   retentionClass?: string;
   artefacts: ProofArtefactInput[];
+}
+
+function serializeComplianceProfile(
+  complianceProfile: ComplianceProfileInput
+): JsonObject {
+  return {
+    intended_use: complianceProfile.intendedUse ?? null,
+    prohibited_practice_screening: complianceProfile.prohibitedPracticeScreening ?? null,
+    risk_tier: complianceProfile.riskTier ?? null,
+    high_risk_domain: complianceProfile.highRiskDomain ?? null,
+    gpai_status: complianceProfile.gpaiStatus ?? null,
+    systemic_risk: complianceProfile.systemicRisk ?? null,
+    fria_required: complianceProfile.friaRequired ?? null,
+    deployment_context: complianceProfile.deploymentContext ?? null,
+    metadata: complianceProfile.metadata ?? null
+  };
 }
 
 function createCaptureRequest(options: CaptureEnvelopeOptions): CreateBundleRequest {
@@ -113,6 +144,9 @@ function createCaptureRequest(options: CaptureEnvelopeOptions): CreateBundleRequ
         deployment_id: options.deploymentId ?? null,
         version: options.version ?? null
       },
+      ...(options.complianceProfile
+        ? { compliance_profile: serializeComplianceProfile(options.complianceProfile) }
+        : {}),
       ...(options.context ? { context: options.context } : {}),
       items: options.items,
       policy: {
@@ -164,6 +198,7 @@ export function createLlmInteractionRequest(
     threadId: options.threadId,
     userRef: options.userRef,
     systemId: options.systemId,
+    complianceProfile: options.complianceProfile,
     modelId: `${options.provider}:${options.model}`,
     context: {
       provider: options.provider,
@@ -226,6 +261,7 @@ export function createToolCallRequest(
     systemId: options.systemId,
     deploymentId: options.deploymentId,
     version: options.version,
+    complianceProfile: options.complianceProfile,
     items: [
       {
         type: "tool_call",
@@ -273,6 +309,7 @@ export function createRetrievalRequest(
     systemId: options.systemId,
     deploymentId: options.deploymentId,
     version: options.version,
+    complianceProfile: options.complianceProfile,
     items: [
       {
         type: "retrieval",
@@ -319,6 +356,7 @@ export function createHumanOversightRequest(
     systemId: options.systemId,
     deploymentId: options.deploymentId,
     version: options.version,
+    complianceProfile: options.complianceProfile,
     items: [
       {
         type: "human_oversight",
@@ -365,6 +403,7 @@ export function createPolicyDecisionRequest(
     systemId: options.systemId,
     deploymentId: options.deploymentId,
     version: options.version,
+    complianceProfile: options.complianceProfile,
     items: [
       {
         type: "policy_decision",
@@ -399,6 +438,7 @@ export function createRiskAssessmentRequest(
     systemId: options.systemId,
     deploymentId: options.deploymentId,
     version: options.version,
+    complianceProfile: options.complianceProfile,
     items: [
       {
         type: "risk_assessment",
@@ -443,6 +483,7 @@ export function createDataGovernanceRequest(
     systemId: options.systemId,
     deploymentId: options.deploymentId,
     version: options.version,
+    complianceProfile: options.complianceProfile,
     items: [
       {
         type: "data_governance",
@@ -505,6 +546,7 @@ export function createTechnicalDocRequest(
     systemId: options.systemId,
     deploymentId: options.deploymentId,
     version: options.version,
+    complianceProfile: options.complianceProfile,
     items: [
       {
         type: "technical_doc",
@@ -514,6 +556,537 @@ export function createTechnicalDocRequest(
           commitment:
             options.commitment ??
             (options.document !== undefined ? hashSha256(options.document) : null)
+        }
+      }
+    ],
+    redactions: options.redactions,
+    encryptionEnabled: options.encryptionEnabled,
+    retentionClass: options.retentionClass,
+    artefacts
+  });
+}
+
+export function createInstructionsForUseRequest(
+  options: InstructionsForUseRequestOptions
+): CreateBundleRequest {
+  const artefacts = options.artefacts ? [...options.artefacts] : [];
+  if (artefacts.length === 0) {
+    if (options.document !== undefined) {
+      artefacts.push(
+        inlineArtefact(
+          options.documentName ?? "instructions_for_use.bin",
+          options.document,
+          options.documentContentType
+        )
+      );
+    }
+    artefacts.push(
+      jsonArtefact("instructions_for_use.json", {
+        document_ref: options.documentRef,
+        version: options.versionTag ?? null,
+        section: options.section ?? null,
+        metadata: options.metadata ?? null
+      })
+    );
+  }
+
+  return createCaptureRequest({
+    keyId: options.keyId,
+    role: options.role,
+    issuer: options.issuer,
+    appId: options.appId,
+    env: options.env,
+    requestId: options.requestId,
+    threadId: options.threadId,
+    userRef: options.userRef,
+    systemId: options.systemId,
+    deploymentId: options.deploymentId,
+    version: options.version,
+    complianceProfile: options.complianceProfile,
+    items: [
+      {
+        type: "instructions_for_use",
+        data: {
+          document_ref: options.documentRef,
+          version: options.versionTag ?? null,
+          section: options.section ?? null,
+          commitment:
+            options.commitment ??
+            (options.document !== undefined ? hashSha256(options.document) : null),
+          metadata: options.metadata ?? null
+        }
+      }
+    ],
+    redactions: options.redactions,
+    encryptionEnabled: options.encryptionEnabled,
+    retentionClass: options.retentionClass,
+    artefacts
+  });
+}
+
+export function createQmsRecordRequest(
+  options: QmsRecordRequestOptions
+): CreateBundleRequest {
+  const artefacts = options.artefacts ? [...options.artefacts] : [];
+  if (artefacts.length === 0) {
+    artefacts.push(
+      jsonArtefact("qms_record.json", {
+        record_id: options.recordId,
+        process: options.process,
+        status: options.status,
+        metadata: options.metadata ?? null
+      })
+    );
+    if (options.record !== undefined) {
+      artefacts.push(namedDataArtefact("qms_record_record", options.record));
+    }
+  }
+
+  return createCaptureRequest({
+    keyId: options.keyId,
+    role: options.role,
+    issuer: options.issuer,
+    appId: options.appId,
+    env: options.env,
+    requestId: options.requestId,
+    threadId: options.threadId,
+    userRef: options.userRef,
+    systemId: options.systemId,
+    deploymentId: options.deploymentId,
+    version: options.version,
+    complianceProfile: options.complianceProfile,
+    items: [
+      {
+        type: "qms_record",
+        data: {
+          record_id: options.recordId,
+          process: options.process,
+          status: options.status,
+          record_commitment: options.record !== undefined ? hashSha256(options.record) : null,
+          metadata: options.metadata ?? null
+        }
+      }
+    ],
+    redactions: options.redactions,
+    encryptionEnabled: options.encryptionEnabled,
+    retentionClass: options.retentionClass,
+    artefacts
+  });
+}
+
+export function createFundamentalRightsAssessmentRequest(
+  options: FundamentalRightsAssessmentRequestOptions
+): CreateBundleRequest {
+  const artefacts = options.artefacts ? [...options.artefacts] : [];
+  if (artefacts.length === 0) {
+    artefacts.push(
+      jsonArtefact("fundamental_rights_assessment.json", {
+        assessment_id: options.assessmentId,
+        status: options.status,
+        scope: options.scope ?? null,
+        metadata: options.metadata ?? null
+      })
+    );
+    if (options.report !== undefined) {
+      artefacts.push(
+        namedDataArtefact("fundamental_rights_assessment_report", options.report)
+      );
+    }
+  }
+
+  return createCaptureRequest({
+    keyId: options.keyId,
+    role: options.role,
+    issuer: options.issuer,
+    appId: options.appId,
+    env: options.env,
+    requestId: options.requestId,
+    threadId: options.threadId,
+    userRef: options.userRef,
+    systemId: options.systemId,
+    deploymentId: options.deploymentId,
+    version: options.version,
+    complianceProfile: options.complianceProfile,
+    items: [
+      {
+        type: "fundamental_rights_assessment",
+        data: {
+          assessment_id: options.assessmentId,
+          status: options.status,
+          scope: options.scope ?? null,
+          report_commitment: options.report !== undefined ? hashSha256(options.report) : null,
+          metadata: options.metadata ?? null
+        }
+      }
+    ],
+    redactions: options.redactions,
+    encryptionEnabled: options.encryptionEnabled,
+    retentionClass: options.retentionClass,
+    artefacts
+  });
+}
+
+export function createStandardsAlignmentRequest(
+  options: StandardsAlignmentRequestOptions
+): CreateBundleRequest {
+  const artefacts = options.artefacts ? [...options.artefacts] : [];
+  if (artefacts.length === 0) {
+    artefacts.push(
+      jsonArtefact("standards_alignment.json", {
+        standard_ref: options.standardRef,
+        status: options.status,
+        scope: options.scope ?? null,
+        metadata: options.metadata ?? null
+      })
+    );
+    if (options.mapping !== undefined) {
+      artefacts.push(namedDataArtefact("standards_alignment_mapping", options.mapping));
+    }
+  }
+
+  return createCaptureRequest({
+    keyId: options.keyId,
+    role: options.role,
+    issuer: options.issuer,
+    appId: options.appId,
+    env: options.env,
+    requestId: options.requestId,
+    threadId: options.threadId,
+    userRef: options.userRef,
+    systemId: options.systemId,
+    deploymentId: options.deploymentId,
+    version: options.version,
+    complianceProfile: options.complianceProfile,
+    items: [
+      {
+        type: "standards_alignment",
+        data: {
+          standard_ref: options.standardRef,
+          status: options.status,
+          scope: options.scope ?? null,
+          mapping_commitment:
+            options.mapping !== undefined ? hashSha256(options.mapping) : null,
+          metadata: options.metadata ?? null
+        }
+      }
+    ],
+    redactions: options.redactions,
+    encryptionEnabled: options.encryptionEnabled,
+    retentionClass: options.retentionClass,
+    artefacts
+  });
+}
+
+export function createPostMarketMonitoringRequest(
+  options: PostMarketMonitoringRequestOptions
+): CreateBundleRequest {
+  const artefacts = options.artefacts ? [...options.artefacts] : [];
+  if (artefacts.length === 0) {
+    artefacts.push(
+      jsonArtefact("post_market_monitoring.json", {
+        plan_id: options.planId,
+        status: options.status,
+        summary: options.summary ?? null,
+        metadata: options.metadata ?? null
+      })
+    );
+    if (options.report !== undefined) {
+      artefacts.push(namedDataArtefact("post_market_monitoring_report", options.report));
+    }
+  }
+
+  return createCaptureRequest({
+    keyId: options.keyId,
+    role: options.role,
+    issuer: options.issuer,
+    appId: options.appId,
+    env: options.env,
+    requestId: options.requestId,
+    threadId: options.threadId,
+    userRef: options.userRef,
+    systemId: options.systemId,
+    deploymentId: options.deploymentId,
+    version: options.version,
+    complianceProfile: options.complianceProfile,
+    items: [
+      {
+        type: "post_market_monitoring",
+        data: {
+          plan_id: options.planId,
+          status: options.status,
+          summary: options.summary ?? null,
+          report_commitment: options.report !== undefined ? hashSha256(options.report) : null,
+          metadata: options.metadata ?? null
+        }
+      }
+    ],
+    redactions: options.redactions,
+    encryptionEnabled: options.encryptionEnabled,
+    retentionClass: options.retentionClass,
+    artefacts
+  });
+}
+
+export function createCorrectiveActionRequest(
+  options: CorrectiveActionRequestOptions
+): CreateBundleRequest {
+  const artefacts = options.artefacts ? [...options.artefacts] : [];
+  if (artefacts.length === 0) {
+    artefacts.push(
+      jsonArtefact("corrective_action.json", {
+        action_id: options.actionId,
+        status: options.status,
+        summary: options.summary ?? null,
+        due_at: options.dueAt ?? null,
+        metadata: options.metadata ?? null
+      })
+    );
+    if (options.record !== undefined) {
+      artefacts.push(namedDataArtefact("corrective_action_record", options.record));
+    }
+  }
+
+  return createCaptureRequest({
+    keyId: options.keyId,
+    role: options.role,
+    issuer: options.issuer,
+    appId: options.appId,
+    env: options.env,
+    requestId: options.requestId,
+    threadId: options.threadId,
+    userRef: options.userRef,
+    systemId: options.systemId,
+    deploymentId: options.deploymentId,
+    version: options.version,
+    complianceProfile: options.complianceProfile,
+    items: [
+      {
+        type: "corrective_action",
+        data: {
+          action_id: options.actionId,
+          status: options.status,
+          summary: options.summary ?? null,
+          due_at: options.dueAt ?? null,
+          record_commitment: options.record !== undefined ? hashSha256(options.record) : null,
+          metadata: options.metadata ?? null
+        }
+      }
+    ],
+    redactions: options.redactions,
+    encryptionEnabled: options.encryptionEnabled,
+    retentionClass: options.retentionClass,
+    artefacts
+  });
+}
+
+export function createAuthorityNotificationRequest(
+  options: AuthorityNotificationRequestOptions
+): CreateBundleRequest {
+  const artefacts = options.artefacts ? [...options.artefacts] : [];
+  if (artefacts.length === 0) {
+    artefacts.push(
+      jsonArtefact("authority_notification.json", {
+        notification_id: options.notificationId,
+        authority: options.authority,
+        status: options.status,
+        incident_id: options.incidentId ?? null,
+        due_at: options.dueAt ?? null,
+        metadata: options.metadata ?? null
+      })
+    );
+    if (options.report !== undefined) {
+      artefacts.push(namedDataArtefact("authority_notification_report", options.report));
+    }
+  }
+
+  return createCaptureRequest({
+    keyId: options.keyId,
+    role: options.role,
+    issuer: options.issuer,
+    appId: options.appId,
+    env: options.env,
+    requestId: options.requestId,
+    threadId: options.threadId,
+    userRef: options.userRef,
+    systemId: options.systemId,
+    deploymentId: options.deploymentId,
+    version: options.version,
+    complianceProfile: options.complianceProfile,
+    items: [
+      {
+        type: "authority_notification",
+        data: {
+          notification_id: options.notificationId,
+          authority: options.authority,
+          status: options.status,
+          incident_id: options.incidentId ?? null,
+          due_at: options.dueAt ?? null,
+          report_commitment: options.report !== undefined ? hashSha256(options.report) : null,
+          metadata: options.metadata ?? null
+        }
+      }
+    ],
+    redactions: options.redactions,
+    encryptionEnabled: options.encryptionEnabled,
+    retentionClass: options.retentionClass,
+    artefacts
+  });
+}
+
+export function createAuthoritySubmissionRequest(
+  options: AuthoritySubmissionRequestOptions
+): CreateBundleRequest {
+  const artefacts = options.artefacts ? [...options.artefacts] : [];
+  if (artefacts.length === 0) {
+    artefacts.push(
+      jsonArtefact("authority_submission.json", {
+        submission_id: options.submissionId,
+        authority: options.authority,
+        status: options.status,
+        channel: options.channel ?? null,
+        submitted_at: options.submittedAt ?? null,
+        metadata: options.metadata ?? null
+      })
+    );
+    if (options.document !== undefined) {
+      artefacts.push(namedDataArtefact("authority_submission_document", options.document));
+    }
+  }
+
+  return createCaptureRequest({
+    keyId: options.keyId,
+    role: options.role,
+    issuer: options.issuer,
+    appId: options.appId,
+    env: options.env,
+    requestId: options.requestId,
+    threadId: options.threadId,
+    userRef: options.userRef,
+    systemId: options.systemId,
+    deploymentId: options.deploymentId,
+    version: options.version,
+    complianceProfile: options.complianceProfile,
+    items: [
+      {
+        type: "authority_submission",
+        data: {
+          submission_id: options.submissionId,
+          authority: options.authority,
+          status: options.status,
+          channel: options.channel ?? null,
+          submitted_at: options.submittedAt ?? null,
+          document_commitment:
+            options.document !== undefined ? hashSha256(options.document) : null,
+          metadata: options.metadata ?? null
+        }
+      }
+    ],
+    redactions: options.redactions,
+    encryptionEnabled: options.encryptionEnabled,
+    retentionClass: options.retentionClass,
+    artefacts
+  });
+}
+
+export function createReportingDeadlineRequest(
+  options: ReportingDeadlineRequestOptions
+): CreateBundleRequest {
+  const artefacts = options.artefacts ? [...options.artefacts] : [];
+  if (artefacts.length === 0) {
+    artefacts.push(
+      jsonArtefact("reporting_deadline.json", {
+        deadline_id: options.deadlineId,
+        authority: options.authority,
+        obligation_ref: options.obligationRef,
+        due_at: options.dueAt,
+        status: options.status,
+        incident_id: options.incidentId ?? null,
+        metadata: options.metadata ?? null
+      })
+    );
+  }
+
+  return createCaptureRequest({
+    keyId: options.keyId,
+    role: options.role,
+    issuer: options.issuer,
+    appId: options.appId,
+    env: options.env,
+    requestId: options.requestId,
+    threadId: options.threadId,
+    userRef: options.userRef,
+    systemId: options.systemId,
+    deploymentId: options.deploymentId,
+    version: options.version,
+    complianceProfile: options.complianceProfile,
+    items: [
+      {
+        type: "reporting_deadline",
+        data: {
+          deadline_id: options.deadlineId,
+          authority: options.authority,
+          obligation_ref: options.obligationRef,
+          due_at: options.dueAt,
+          status: options.status,
+          incident_id: options.incidentId ?? null,
+          metadata: options.metadata ?? null
+        }
+      }
+    ],
+    redactions: options.redactions,
+    encryptionEnabled: options.encryptionEnabled,
+    retentionClass: options.retentionClass,
+    artefacts
+  });
+}
+
+export function createRegulatorCorrespondenceRequest(
+  options: RegulatorCorrespondenceRequestOptions
+): CreateBundleRequest {
+  const artefacts = options.artefacts ? [...options.artefacts] : [];
+  if (artefacts.length === 0) {
+    artefacts.push(
+      jsonArtefact("regulator_correspondence.json", {
+        correspondence_id: options.correspondenceId,
+        authority: options.authority,
+        direction: options.direction,
+        status: options.status,
+        occurred_at: options.occurredAt ?? null,
+        metadata: options.metadata ?? null
+      })
+    );
+    if (options.message !== undefined) {
+      artefacts.push(
+        namedDataArtefact("regulator_correspondence_message", options.message)
+      );
+    }
+  }
+
+  return createCaptureRequest({
+    keyId: options.keyId,
+    role: options.role,
+    issuer: options.issuer,
+    appId: options.appId,
+    env: options.env,
+    requestId: options.requestId,
+    threadId: options.threadId,
+    userRef: options.userRef,
+    systemId: options.systemId,
+    deploymentId: options.deploymentId,
+    version: options.version,
+    complianceProfile: options.complianceProfile,
+    items: [
+      {
+        type: "regulator_correspondence",
+        data: {
+          correspondence_id: options.correspondenceId,
+          authority: options.authority,
+          direction: options.direction,
+          status: options.status,
+          occurred_at: options.occurredAt ?? null,
+          message_commitment:
+            options.message !== undefined ? hashSha256(options.message) : null,
+          metadata: options.metadata ?? null
         }
       }
     ],
@@ -555,6 +1128,7 @@ export function createModelEvaluationRequest(
     systemId: options.systemId,
     deploymentId: options.deploymentId,
     version: options.version,
+    complianceProfile: options.complianceProfile,
     items: [
       {
         type: "model_evaluation",
@@ -606,6 +1180,7 @@ export function createAdversarialTestRequest(
     systemId: options.systemId,
     deploymentId: options.deploymentId,
     version: options.version,
+    complianceProfile: options.complianceProfile,
     items: [
       {
         type: "adversarial_test",
@@ -656,6 +1231,7 @@ export function createTrainingProvenanceRequest(
     systemId: options.systemId,
     deploymentId: options.deploymentId,
     version: options.version,
+    complianceProfile: options.complianceProfile,
     items: [
       {
         type: "training_provenance",
@@ -664,6 +1240,156 @@ export function createTrainingProvenanceRequest(
           stage: options.stage,
           lineage_ref: options.lineageRef ?? null,
           record_commitment: options.record !== undefined ? hashSha256(options.record) : null,
+          metadata: options.metadata ?? null
+        }
+      }
+    ],
+    redactions: options.redactions,
+    encryptionEnabled: options.encryptionEnabled,
+    retentionClass: options.retentionClass ?? "gpai_documentation",
+    artefacts
+  });
+}
+
+export function createDownstreamDocumentationRequest(
+  options: DownstreamDocumentationRequestOptions
+): CreateBundleRequest {
+  const artefacts = options.artefacts ? [...options.artefacts] : [];
+  if (artefacts.length === 0) {
+    artefacts.push(
+      jsonArtefact("downstream_documentation.json", {
+        document_ref: options.documentRef,
+        audience: options.audience,
+        status: options.status,
+        metadata: options.metadata ?? null
+      })
+    );
+    if (options.document !== undefined) {
+      artefacts.push(namedDataArtefact("downstream_documentation_document", options.document));
+    }
+  }
+
+  return createCaptureRequest({
+    keyId: options.keyId,
+    role: options.role,
+    issuer: options.issuer,
+    appId: options.appId,
+    env: options.env,
+    requestId: options.requestId,
+    threadId: options.threadId,
+    userRef: options.userRef,
+    systemId: options.systemId,
+    deploymentId: options.deploymentId,
+    version: options.version,
+    complianceProfile: options.complianceProfile,
+    items: [
+      {
+        type: "downstream_documentation",
+        data: {
+          document_ref: options.documentRef,
+          audience: options.audience,
+          status: options.status,
+          commitment: options.document !== undefined ? hashSha256(options.document) : null,
+          metadata: options.metadata ?? null
+        }
+      }
+    ],
+    redactions: options.redactions,
+    encryptionEnabled: options.encryptionEnabled,
+    retentionClass: options.retentionClass ?? "gpai_documentation",
+    artefacts
+  });
+}
+
+export function createCopyrightPolicyRequest(
+  options: CopyrightPolicyRequestOptions
+): CreateBundleRequest {
+  const artefacts = options.artefacts ? [...options.artefacts] : [];
+  if (artefacts.length === 0) {
+    artefacts.push(
+      jsonArtefact("copyright_policy.json", {
+        policy_ref: options.policyRef,
+        status: options.status,
+        jurisdiction: options.jurisdiction ?? null,
+        metadata: options.metadata ?? null
+      })
+    );
+    if (options.document !== undefined) {
+      artefacts.push(namedDataArtefact("copyright_policy_document", options.document));
+    }
+  }
+
+  return createCaptureRequest({
+    keyId: options.keyId,
+    role: options.role,
+    issuer: options.issuer,
+    appId: options.appId,
+    env: options.env,
+    requestId: options.requestId,
+    threadId: options.threadId,
+    userRef: options.userRef,
+    systemId: options.systemId,
+    deploymentId: options.deploymentId,
+    version: options.version,
+    complianceProfile: options.complianceProfile,
+    items: [
+      {
+        type: "copyright_policy",
+        data: {
+          policy_ref: options.policyRef,
+          status: options.status,
+          jurisdiction: options.jurisdiction ?? null,
+          commitment: options.document !== undefined ? hashSha256(options.document) : null,
+          metadata: options.metadata ?? null
+        }
+      }
+    ],
+    redactions: options.redactions,
+    encryptionEnabled: options.encryptionEnabled,
+    retentionClass: options.retentionClass ?? "gpai_documentation",
+    artefacts
+  });
+}
+
+export function createTrainingSummaryRequest(
+  options: TrainingSummaryRequestOptions
+): CreateBundleRequest {
+  const artefacts = options.artefacts ? [...options.artefacts] : [];
+  if (artefacts.length === 0) {
+    artefacts.push(
+      jsonArtefact("training_summary.json", {
+        summary_ref: options.summaryRef,
+        status: options.status,
+        audience: options.audience ?? null,
+        metadata: options.metadata ?? null
+      })
+    );
+    if (options.document !== undefined) {
+      artefacts.push(namedDataArtefact("training_summary_document", options.document));
+    }
+  }
+
+  return createCaptureRequest({
+    keyId: options.keyId,
+    role: options.role,
+    issuer: options.issuer,
+    appId: options.appId,
+    env: options.env,
+    requestId: options.requestId,
+    threadId: options.threadId,
+    userRef: options.userRef,
+    systemId: options.systemId,
+    deploymentId: options.deploymentId,
+    version: options.version,
+    complianceProfile: options.complianceProfile,
+    items: [
+      {
+        type: "training_summary",
+        data: {
+          summary_ref: options.summaryRef,
+          status: options.status,
+          audience: options.audience ?? null,
+          commitment: options.document !== undefined ? hashSha256(options.document) : null,
           metadata: options.metadata ?? null
         }
       }
@@ -705,6 +1431,7 @@ export function createConformityAssessmentRequest(
     systemId: options.systemId,
     deploymentId: options.deploymentId,
     version: options.version,
+    complianceProfile: options.complianceProfile,
     items: [
       {
         type: "conformity_assessment",
@@ -754,6 +1481,7 @@ export function createDeclarationRequest(
     systemId: options.systemId,
     deploymentId: options.deploymentId,
     version: options.version,
+    complianceProfile: options.complianceProfile,
     items: [
       {
         type: "declaration",
@@ -804,6 +1532,7 @@ export function createRegistrationRequest(
     systemId: options.systemId,
     deploymentId: options.deploymentId,
     version: options.version,
+    complianceProfile: options.complianceProfile,
     items: [
       {
         type: "registration",
@@ -854,6 +1583,7 @@ export function createLiteracyAttestationRequest(
     systemId: options.systemId,
     deploymentId: options.deploymentId,
     version: options.version,
+    complianceProfile: options.complianceProfile,
     items: [
       {
         type: "literacy_attestation",
@@ -906,6 +1636,7 @@ export function createIncidentReportRequest(
     systemId: options.systemId,
     deploymentId: options.deploymentId,
     version: options.version,
+    complianceProfile: options.complianceProfile,
     items: [
       {
         type: "incident_report",

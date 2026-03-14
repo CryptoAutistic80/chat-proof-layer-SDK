@@ -281,12 +281,12 @@ Completed:
   vault tests now cover the demo provider-response endpoint,
   `web-demo` now has Vitest coverage for routes/presets/export eligibility,
   and a Playwright smoke test verifies the synthetic route flow from Playground to Results, Examination, and Exports.
-- Reframed `web-demo` into a unified product site:
-  the old demo-first shell is replaced by a business-first landing page, product and use-case pages,
+- Reframed `web-demo` into a demo-oriented site with narrative pages:
+  the old demo-first shell is replaced by a business-first landing page plus use-case pages,
   integrated docs routes under `/docs/*`,
   a guided demo entrypoint at `/guided`,
   and business-language run pages for `/what-happened`, `/what-you-can-prove`, and `/what-you-can-share`.
-- Preserved the technical evaluation path inside that unified site:
+- Preserved the technical evaluation path inside that demo site:
   the advanced playground still exposes the full vault-backed configuration surface,
   while the guided flow now hides most proof-system controls behind a simpler scenario-first experience.
 - Added the supporting narrative/content layer:
@@ -300,10 +300,54 @@ Completed:
   the main demo and narrative surfaces no longer describe the product in development-history terms,
   empty disclosure/export states now explain the business outcome instead of sounding like internal workflow diagnostics,
   and the advanced playground keeps the technical detail without framing the public site as an engineering artifact.
-- Added forwarded-host support for the unified product site dev server:
+- Added forwarded-host support for the demo site dev server:
   `web-demo/vite.config.js` now explicitly allows the active ngrok host plus `.ngrok-free.dev`,
   and it also accepts extra forwarded hosts through `WEB_DEMO_ALLOWED_HOSTS` for shareable preview sessions.
 - Restored a clean Rust verification loop: `cargo test --workspace` and `cargo clippy --workspace --all-targets -- -D warnings` both pass.
+
+## March 14, 2026
+
+Completed:
+
+- Aligned the repo narrative around the real product shape:
+  the primary surface is now clearly the SDK, CLI, and local verification path,
+  the vault is framed as the optional paid or self-hosted service layer,
+  and `web-demo` is now consistently described as demo-only collateral rather than the production compliance interface.
+- Added an SDK-first compliance context model:
+  first-class `ComplianceProfile` support now exists in the shared schema,
+  the actor-role model now covers more of the AI Act role surface,
+  and both the TypeScript and Python `ProofLayer` facades can apply a default compliance profile across captures.
+- Added the missing governance evidence layer:
+  first-class support now exists for `instructions_for_use`, `qms_record`, `fundamental_rights_assessment`, `standards_alignment`, `post_market_monitoring`, `corrective_action`, `downstream_documentation`, `copyright_policy`, and `training_summary`,
+  with matching builder and facade coverage in both SDKs.
+- Added role- and profile-aware export slices in the vault:
+  `provider_governance` now curates provider-side governance evidence,
+  `fundamental_rights` now curates deployer-side FRIA evidence and requires `compliance_profile.fria_required = true`,
+  and those pack families are wired through both the vault API and `proofctl pack`.
+- Extended the CLI create path so classification data can be attached at seal time:
+  `proofctl create` now accepts actor-role and compliance-profile overrides,
+  including intended-use, risk-tier, GPAI status, deployment context, and FRIA-related fields,
+  so local SDK/CLI capture can carry the same classification context as vault-backed flows.
+- Added the first authority-reporting evidence slice:
+  first-class `authority_notification`, `authority_submission`, `reporting_deadline`, and `regulator_correspondence` item types now exist in Rust core,
+  with matching TypeScript/Python builders, `ProofLayer` capture helpers, disclosure-policy support, and vault indexing.
+- Added the next operational monitoring/export slice:
+  the vault now supports a dedicated `post_market_monitoring` pack profile,
+  `incident_response` now includes the authority-reporting artefacts in addition to internal incident/corrective-action material,
+  and both pack families have explicit manifest/match-rule regression coverage.
+- Added end-to-end compliance examples for the new flows:
+  `examples/typescript-compliance` demonstrates provider-governance capture and export,
+  `examples/python-compliance` demonstrates deployer-side FRIA capture and export,
+  `examples/typescript-monitoring` demonstrates post-market monitoring plus authority submission,
+  and `examples/python-incident-response` demonstrates incident response plus authority notification/deadline/correspondence.
+- Refreshed the onboarding and architecture docs to match implemented behavior:
+  `README.md`, `get_started.md`, `docs/architecture.md`, SDK READMEs, and the integrated demo docs now mention the new evidence types, new pack families, the compliance-profile flow, and the new end-to-end examples.
+- Revalidated the current matrix after the compliance/gov/export additions:
+  `cargo test --workspace`,
+  `npm --prefix sdks/typescript test`,
+  `PYTHONPATH=packages/sdk-python python3 -m unittest discover -s packages/sdk-python/tests`,
+  and `npm --prefix web-demo test` all pass,
+  and the new TypeScript/Python monitoring and incident-response examples were also run successfully against a temporary local `proof-service` instance.
 
 Still outstanding from `plan.md`:
 

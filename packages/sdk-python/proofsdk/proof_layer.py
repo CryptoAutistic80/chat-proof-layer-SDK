@@ -6,19 +6,32 @@ from typing import Any, Callable
 from proofsdk.client import ProofLayerClient
 from proofsdk.evidence import (
     create_adversarial_test_request,
+    create_authority_notification_request,
+    create_authority_submission_request,
     create_conformity_assessment_request,
+    create_corrective_action_request,
+    create_copyright_policy_request,
     create_data_governance_request,
     create_declaration_request,
+    create_downstream_documentation_request,
+    create_fundamental_rights_assessment_request,
     create_human_oversight_request,
     create_incident_report_request,
+    create_instructions_for_use_request,
     create_literacy_attestation_request,
     create_llm_interaction_request,
     create_model_evaluation_request,
+    create_post_market_monitoring_request,
     create_policy_decision_request,
+    create_qms_record_request,
+    create_regulator_correspondence_request,
     create_registration_request,
+    create_reporting_deadline_request,
     create_retrieval_request,
     create_risk_assessment_request,
+    create_standards_alignment_request,
     create_technical_doc_request,
+    create_training_summary_request,
     create_training_provenance_request,
     create_tool_call_request,
 )
@@ -37,6 +50,7 @@ class ProofLayer:
         key_id: str = "kid-dev-01",
         system_id: str | None = None,
         role: str = "provider",
+        compliance_profile: dict[str, Any] | None = None,
         issuer: str = "proof-layer-python",
         app_id: str = "python-sdk",
         env: str = "dev",
@@ -49,6 +63,7 @@ class ProofLayer:
         self.key_id = key_id
         self.system_id = system_id
         self.role = role
+        self.compliance_profile = compliance_profile
         self.issuer = issuer
         self.app_id = app_id
         self.env = env
@@ -215,6 +230,8 @@ class ProofLayer:
         bundle_id: str | None = None,
         created_at: str | None = None,
     ) -> dict[str, Any]:
+        if self.compliance_profile is not None and request["capture"].get("compliance_profile") is None:
+            request["capture"]["compliance_profile"] = self.compliance_profile
         return self.create_bundle(
             request["capture"],
             request["artefacts"],
@@ -246,6 +263,7 @@ class ProofLayer:
         trace: Any = None,
         trace_commitment: str | None = None,
         otel_semconv_version: str | None = None,
+        compliance_profile: dict[str, Any] | None = None,
         redactions: list[str] | None = None,
         encryption_enabled: bool = False,
         retention_class: str | None = None,
@@ -274,6 +292,7 @@ class ProofLayer:
                 trace=trace,
                 trace_commitment=trace_commitment,
                 otel_semconv_version=otel_semconv_version,
+                compliance_profile=compliance_profile,
                 redactions=redactions,
                 encryption_enabled=encryption_enabled,
                 retention_class=retention_class,
@@ -511,6 +530,214 @@ class ProofLayer:
         params, bundle_id, created_at = self._split_local_options(kwargs)
         return self._submit_capture(
             create_registration_request(
+                key_id=self.key_id,
+                role=self.role,
+                issuer=self.issuer,
+                app_id=self.app_id,
+                env=self.env,
+                system_id=params.pop("system_id", None) or self.system_id,
+                **params,
+            ),
+            bundle_id=bundle_id,
+            created_at=created_at,
+        )
+
+    def capture_instructions_for_use(self, **kwargs: Any) -> dict[str, Any]:
+        params, bundle_id, created_at = self._split_local_options(kwargs)
+        return self._submit_capture(
+            create_instructions_for_use_request(
+                key_id=self.key_id,
+                role=self.role,
+                issuer=self.issuer,
+                app_id=self.app_id,
+                env=self.env,
+                system_id=params.pop("system_id", None) or self.system_id,
+                **params,
+            ),
+            bundle_id=bundle_id,
+            created_at=created_at,
+        )
+
+    def capture_qms_record(self, **kwargs: Any) -> dict[str, Any]:
+        params, bundle_id, created_at = self._split_local_options(kwargs)
+        return self._submit_capture(
+            create_qms_record_request(
+                key_id=self.key_id,
+                role=self.role,
+                issuer=self.issuer,
+                app_id=self.app_id,
+                env=self.env,
+                system_id=params.pop("system_id", None) or self.system_id,
+                **params,
+            ),
+            bundle_id=bundle_id,
+            created_at=created_at,
+        )
+
+    def capture_fundamental_rights_assessment(self, **kwargs: Any) -> dict[str, Any]:
+        params, bundle_id, created_at = self._split_local_options(kwargs)
+        return self._submit_capture(
+            create_fundamental_rights_assessment_request(
+                key_id=self.key_id,
+                role=self.role,
+                issuer=self.issuer,
+                app_id=self.app_id,
+                env=self.env,
+                system_id=params.pop("system_id", None) or self.system_id,
+                **params,
+            ),
+            bundle_id=bundle_id,
+            created_at=created_at,
+        )
+
+    def capture_standards_alignment(self, **kwargs: Any) -> dict[str, Any]:
+        params, bundle_id, created_at = self._split_local_options(kwargs)
+        return self._submit_capture(
+            create_standards_alignment_request(
+                key_id=self.key_id,
+                role=self.role,
+                issuer=self.issuer,
+                app_id=self.app_id,
+                env=self.env,
+                system_id=params.pop("system_id", None) or self.system_id,
+                **params,
+            ),
+            bundle_id=bundle_id,
+            created_at=created_at,
+        )
+
+    def capture_post_market_monitoring(self, **kwargs: Any) -> dict[str, Any]:
+        params, bundle_id, created_at = self._split_local_options(kwargs)
+        return self._submit_capture(
+            create_post_market_monitoring_request(
+                key_id=self.key_id,
+                role=self.role,
+                issuer=self.issuer,
+                app_id=self.app_id,
+                env=self.env,
+                system_id=params.pop("system_id", None) or self.system_id,
+                **params,
+            ),
+            bundle_id=bundle_id,
+            created_at=created_at,
+        )
+
+    def capture_corrective_action(self, **kwargs: Any) -> dict[str, Any]:
+        params, bundle_id, created_at = self._split_local_options(kwargs)
+        return self._submit_capture(
+            create_corrective_action_request(
+                key_id=self.key_id,
+                role=self.role,
+                issuer=self.issuer,
+                app_id=self.app_id,
+                env=self.env,
+                system_id=params.pop("system_id", None) or self.system_id,
+                **params,
+            ),
+            bundle_id=bundle_id,
+            created_at=created_at,
+        )
+
+    def capture_authority_notification(self, **kwargs: Any) -> dict[str, Any]:
+        params, bundle_id, created_at = self._split_local_options(kwargs)
+        return self._submit_capture(
+            create_authority_notification_request(
+                key_id=self.key_id,
+                role=self.role,
+                issuer=self.issuer,
+                app_id=self.app_id,
+                env=self.env,
+                system_id=params.pop("system_id", None) or self.system_id,
+                **params,
+            ),
+            bundle_id=bundle_id,
+            created_at=created_at,
+        )
+
+    def capture_authority_submission(self, **kwargs: Any) -> dict[str, Any]:
+        params, bundle_id, created_at = self._split_local_options(kwargs)
+        return self._submit_capture(
+            create_authority_submission_request(
+                key_id=self.key_id,
+                role=self.role,
+                issuer=self.issuer,
+                app_id=self.app_id,
+                env=self.env,
+                system_id=params.pop("system_id", None) or self.system_id,
+                **params,
+            ),
+            bundle_id=bundle_id,
+            created_at=created_at,
+        )
+
+    def capture_reporting_deadline(self, **kwargs: Any) -> dict[str, Any]:
+        params, bundle_id, created_at = self._split_local_options(kwargs)
+        return self._submit_capture(
+            create_reporting_deadline_request(
+                key_id=self.key_id,
+                role=self.role,
+                issuer=self.issuer,
+                app_id=self.app_id,
+                env=self.env,
+                system_id=params.pop("system_id", None) or self.system_id,
+                **params,
+            ),
+            bundle_id=bundle_id,
+            created_at=created_at,
+        )
+
+    def capture_regulator_correspondence(self, **kwargs: Any) -> dict[str, Any]:
+        params, bundle_id, created_at = self._split_local_options(kwargs)
+        return self._submit_capture(
+            create_regulator_correspondence_request(
+                key_id=self.key_id,
+                role=self.role,
+                issuer=self.issuer,
+                app_id=self.app_id,
+                env=self.env,
+                system_id=params.pop("system_id", None) or self.system_id,
+                **params,
+            ),
+            bundle_id=bundle_id,
+            created_at=created_at,
+        )
+
+    def capture_downstream_documentation(self, **kwargs: Any) -> dict[str, Any]:
+        params, bundle_id, created_at = self._split_local_options(kwargs)
+        return self._submit_capture(
+            create_downstream_documentation_request(
+                key_id=self.key_id,
+                role=self.role,
+                issuer=self.issuer,
+                app_id=self.app_id,
+                env=self.env,
+                system_id=params.pop("system_id", None) or self.system_id,
+                **params,
+            ),
+            bundle_id=bundle_id,
+            created_at=created_at,
+        )
+
+    def capture_copyright_policy(self, **kwargs: Any) -> dict[str, Any]:
+        params, bundle_id, created_at = self._split_local_options(kwargs)
+        return self._submit_capture(
+            create_copyright_policy_request(
+                key_id=self.key_id,
+                role=self.role,
+                issuer=self.issuer,
+                app_id=self.app_id,
+                env=self.env,
+                system_id=params.pop("system_id", None) or self.system_id,
+                **params,
+            ),
+            bundle_id=bundle_id,
+            created_at=created_at,
+        )
+
+    def capture_training_summary(self, **kwargs: Any) -> dict[str, Any]:
+        params, bundle_id, created_at = self._split_local_options(kwargs)
+        return self._submit_capture(
+            create_training_summary_request(
                 key_id=self.key_id,
                 role=self.role,
                 issuer=self.issuer,

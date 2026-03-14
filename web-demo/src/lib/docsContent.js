@@ -33,22 +33,22 @@ export const DOC_PAGES = {
     audience: ["business", "operator", "engineer"],
     description: "A plain-English overview of what the product does and why teams use it.",
     intro:
-      "Proof Layer creates a tamper-evident proof record of an AI run so you can verify it later and share only what is necessary.",
+      "Proof Layer is an SDK-first capture and verification system for tamper-evident AI compliance records, with an optional vault for retention and export workflows.",
     blocks: [
       {
         heading: "What it does",
         body: [
-          "It captures prompts, responses, traces, and related materials for one AI run.",
-          "It seals them into a signed proof record.",
-          "It lets you verify that record later and export either a full or redacted package."
+          "SDKs and the CLI capture prompts, responses, traces, and governance artefacts for one AI run or decision point.",
+          "They seal that material into a signed proof record that can be verified locally.",
+          "The optional vault adds retention, disclosure policy handling, and export packs for workflows such as provider governance, post-market monitoring, incident response, and deployer-side FRIA reviews."
         ]
       },
       {
         heading: "Who it is for",
         body: [
-          "Business owners who need evidence for investors or customers.",
-          "Operators and compliance teams who need a reviewable audit trail.",
-          "Engineers who need one consistent proof format across workflows."
+          "Engineers who need one consistent proof format across local and service-backed workflows.",
+          "Operators and compliance teams who need a reviewable evidence trail and export path.",
+          "Teams building AI products who want capture, verification, and controlled disclosure without treating the demo UI as the product."
         ]
       }
     ]
@@ -59,25 +59,29 @@ export const DOC_PAGES = {
     audience: ["business", "operator", "engineer"],
     description: "A simple walkthrough of capture, seal, verify, and share.",
     intro:
-      "The product flow is designed to answer four questions: what happened, was it sealed, can it be verified, and what can be shared?",
+      "The product flow is designed to answer four questions: what happened, what system context applied, was it sealed, and what can be shared?",
     blocks: [
       {
         heading: "Capture",
-        body: ["The site collects the prompt, output, and supporting materials for one AI run."]
+        body: [
+          "The SDK or CLI captures the prompt, output, supporting materials, and optional compliance profile for one run or governance event."
+        ]
       },
       {
         heading: "Seal",
-        body: ["The vault turns that run into a signed proof record."]
+        body: ["The local SDK path or the optional vault turns that event into a signed proof record."]
       },
       {
         heading: "Verify",
         body: [
-          "The site checks whether the proof record still matches the signer and, where configured, timestamp and transparency evidence."
+          "Teams can verify whether the proof record still matches the signer and, where configured, timestamp and transparency evidence."
         ]
       },
       {
         heading: "Share",
-        body: ["The site can export either a full package or a redacted package using a sharing profile."]
+        body: [
+          "The vault can export either a full package or a redacted package, including curated packs such as provider governance, post-market monitoring, incident response, or deployer-side fundamental rights evidence."
+        ]
       }
     ]
   },
@@ -85,9 +89,9 @@ export const DOC_PAGES = {
     title: "Guided demo",
     section: "Demo",
     audience: ["business", "operator"],
-    description: "How to use the business-first demo flow.",
+    description: "How to use the guided demo flow.",
     intro:
-      "The guided demo is the fastest way to understand what Proof Layer produces and what a reviewer would see later.",
+      "The guided demo is the fastest way to understand the workflow, but it is a walkthrough surface rather than the primary product interface.",
     blocks: [
       {
         heading: "What you choose",
@@ -99,7 +103,7 @@ export const DOC_PAGES = {
       {
         heading: "What happens next",
         body: [
-          "The site runs the scenario, creates a proof record, checks what can be proven, and shows what can be shared."
+          "The site mirrors the underlying SDK and vault flow: it runs the scenario, creates a proof record, checks what can be proven, and shows what can be shared."
         ]
       }
     ]
@@ -134,6 +138,7 @@ export const DOC_PAGES = {
         heading: "Use it for",
         body: [
           "Local proof record creation.",
+          "Compliance-profile-aware capture that can reuse actor role, intended use, and FRIA or GPAI context across items.",
           "Vault-backed capture and export.",
           "Provider and observability integrations."
         ]
@@ -152,6 +157,7 @@ export const DOC_PAGES = {
         heading: "Use it for",
         body: [
           "Local proof record creation.",
+          "Compliance-profile-aware capture that can reuse actor role, intended use, and FRIA or GPAI context across items.",
           "Vault-backed capture and export.",
           "Decorator and provider integrations."
         ]
@@ -164,13 +170,14 @@ export const DOC_PAGES = {
     audience: ["operator", "engineer"],
     description: "What the vault is responsible for and how to think about local setup.",
     intro:
-      "The vault is the service that seals proof records, stores materials, and handles verification, disclosure, and exports.",
+      "The vault is the optional service layer for teams that need shared retention, disclosure, and export workflows on top of the SDK and CLI path.",
     blocks: [
       {
         heading: "What to configure",
         body: [
           "Signing key, service URL, optional auth, and optional assurance providers.",
-          "Storage, retention, and backup behavior depending on your environment."
+          "Storage, retention, and backup behavior depending on your environment.",
+          "Pack/export workflows such as provider governance, runtime logs, post-market monitoring, incident response, and deployer-side fundamental rights evidence."
         ]
       }
     ]

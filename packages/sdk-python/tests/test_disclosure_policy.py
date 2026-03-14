@@ -60,16 +60,39 @@ class TestDisclosurePolicyBuilders(unittest.TestCase):
     def test_create_disclosure_policy_merges_groups_with_explicit_selectors(self):
         policy = create_disclosure_policy(
             name="custom_incident",
-            allowed_item_types=["incident_report"],
+            allowed_item_types=["authority_submission"],
             redaction_groups=["commitments", "metadata"],
-            redacted_fields_by_item_type={"incident_report": ["/summary"]},
+            redacted_fields_by_item_type={
+                "authority_submission": ["/metadata/submission_case_id"]
+            },
         )
 
         self.assertEqual(
             policy["redacted_fields_by_item_type"],
             {
-                "incident_report": ["report_commitment", "/metadata", "/summary"],
+                "authority_submission": [
+                    "document_commitment",
+                    "/metadata",
+                    "/metadata/submission_case_id",
+                ],
             },
+        )
+
+    def test_incident_summary_template_includes_authority_reporting_types(self):
+        policy = create_disclosure_policy_template("incident_summary")
+
+        self.assertEqual(
+            policy["allowed_item_types"],
+            [
+                "incident_report",
+                "authority_notification",
+                "authority_submission",
+                "reporting_deadline",
+                "regulator_correspondence",
+                "risk_assessment",
+                "policy_decision",
+                "human_oversight",
+            ],
         )
 
 

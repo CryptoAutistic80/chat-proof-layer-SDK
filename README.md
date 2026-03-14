@@ -1,8 +1,8 @@
 # Proof Layer SDK
 
-Rust-first SDK and evidence vault for tamper-evident AI interaction records.
+Rust-first SDK and optional evidence vault for tamper-evident AI compliance records.
 
-Proof Layer turns an AI run into a signed, portable evidence package that can be verified later, including offline. It is built for teams that need more than ordinary logs: auditability, selective disclosure, retention controls, and cryptographic verification of what was captured.
+Proof Layer turns an AI run into a signed, portable evidence package that can be verified later, including offline. The primary product surface is the SDK, CLI, and local verification flow. The vault is an optional operational layer for teams that need retention, auditability, policy management, and export orchestration.
 
 ## What This Project Does
 
@@ -12,19 +12,20 @@ Proof Layer turns an AI run into a signed, portable evidence package that can be
 - Packages the result as `bundle.pkg` for offline verification.
 - Supports RFC 3161 timestamping and transparency anchoring.
 - Supports selective disclosure with verifiable redacted packages.
-- Provides a vault service for storage, retention, audit, export packs, backup, and restore.
+- Provides an optional vault service for storage, retention, audit, export packs, backup, and restore.
 - Exposes native TypeScript and Python SDKs over the Rust core.
+- Includes a demo frontend in `web-demo` for walkthroughs and API exercises.
 
 ## What Works Today
 
 Current implemented surface:
 
 - Rust core for canonicalization, hashing, signing, verification, timestamping, transparency, disclosure, and backup-envelope crypto.
-- `proofctl` CLI for keygen, create, verify, inspect, disclose, vault query/export/backup/restore flows.
-- `proof-service` vault with SQLite storage, filesystem blobs, TLS, bearer auth, single-tenant enforcement, retention, legal holds, audit log, metrics, backup, restore layout export, and pack assembly.
+- `proofctl` CLI for local keygen, create, verify, inspect, disclose, plus optional vault query/export/backup/restore flows.
+- `proof-service` optional self-hosted vault with SQLite storage, filesystem blobs, TLS, bearer auth, single-tenant enforcement, retention, legal holds, audit log, metrics, backup, restore layout export, and pack assembly.
 - TypeScript SDK in `sdks/typescript` published as `@proof-layer/sdk`.
 - Python SDK in `packages/sdk-python` published as `proof-layer-sdk-python`.
-- Unified product site in `web-demo` with landing pages, integrated docs, guided demo, and advanced playground aligned to the live vault API.
+- Demo-only site in `web-demo` with landing pages, integrated docs, guided walkthroughs, and a playground wired to the local vault API.
 
 Important current limits:
 
@@ -53,12 +54,12 @@ Proof Layer does not claim model determinism or legal finality. It proves what w
 | --- | --- | --- |
 | Core | `crates/core` | Canonicalization, hashing, Merkle commitments, signing, verification, timestamping, transparency, disclosure |
 | CLI | `crates/cli` | `proofctl` create/verify/disclose/inspect plus vault operations |
-| Vault | `crates/vault` | `proof-service` with SQLite metadata, local blob storage, retention, audit, packs, backup |
+| Vault | `crates/vault` | Optional self-hosted or managed service layer for retention, audit, packs, backup |
 | TypeScript bridge | `crates/napi` | Native N-API bindings over the Rust core |
 | Python bridge | `crates/pyo3` | Native PyO3 bindings over the Rust core |
 | TS SDK | `sdks/typescript` | `@proof-layer/sdk`, local/vault clients, providers, evidence helpers, OTel helpers |
 | Python SDK | `packages/sdk-python` | `proof-layer-sdk-python`, local/vault clients, providers, decorators, helpers |
-| Product site | `web-demo` | Vite + React site with landing pages, integrated docs, guided demo, and advanced playground against the vault API |
+| Demo site | `web-demo` | Vite + React walkthrough UI for local demos and API exercises; not the production compliance surface |
 
 ## Evidence And Assurance Model
 
@@ -72,9 +73,22 @@ Evidence currently implemented in core and SDKs includes:
 - `risk_assessment`
 - `data_governance`
 - `technical_doc`
+- `instructions_for_use`
+- `qms_record`
+- `fundamental_rights_assessment`
+- `standards_alignment`
+- `post_market_monitoring`
+- `corrective_action`
+- `authority_notification`
+- `authority_submission`
+- `reporting_deadline`
+- `regulator_correspondence`
 - `model_evaluation`
 - `adversarial_test`
 - `training_provenance`
+- `downstream_documentation`
+- `copyright_policy`
+- `training_summary`
 - `literacy_attestation`
 - `incident_report`
 - `conformity_assessment`
@@ -136,8 +150,26 @@ cargo run -p proofctl -- verify --in ./bundle.disclosure.pkg --key ./keys/verify
 Notes:
 
 - `proofctl create` accepts both the legacy PoC capture shape and the current v1.0 `CaptureEvent` shape.
-- Migration overrides are available, for example `--system-id`, `--retention-class`, and `--evidence-type`.
+- Migration overrides are available, for example `--system-id`, `--retention-class`, `--evidence-type`, `--role`, and the `--intended-use` / `--risk-tier` compliance flags.
 - Deterministic fixture inputs live under `fixtures/golden/`.
+
+Example with an SDK-first compliance profile stamped at create time:
+
+```bash
+cargo run -p proofctl -- create \
+  --input ./fixtures/golden/capture.json \
+  --artefact prompt.json=./fixtures/golden/prompt.json \
+  --artefact response.json=./fixtures/golden/response.json \
+  --key ./keys/signing.pem \
+  --out ./bundle.pkg \
+  --role deployer \
+  --system-id support-assistant \
+  --intended-use "Internal reviewer assistance" \
+  --prohibited-practice-screening screened_no_prohibited_use \
+  --risk-tier limited_risk \
+  --gpai-status downstream_integrator \
+  --deployment-context internal_operations
+```
 
 ### 3. Optional Trust-Aware Assurance
 
@@ -209,6 +241,27 @@ cargo run -p proofctl -- pack \
   --vault-url http://127.0.0.1:8080 \
   --system-id system-123 \
   --out ./runtime-logs.pack
+
+# Export a provider governance pack with QMS / release evidence
+cargo run -p proofctl -- pack \
+  --type provider-governance \
+  --vault-url http://127.0.0.1:8080 \
+  --system-id system-123 \
+  --out ./provider-governance.pack
+
+# Export a deployer-side FRIA / fundamental rights pack
+cargo run -p proofctl -- pack \
+  --type fundamental-rights \
+  --vault-url http://127.0.0.1:8080 \
+  --system-id system-123 \
+  --out ./fundamental-rights.pack
+
+# Export a monitoring / authority-reporting pack
+cargo run -p proofctl -- pack \
+  --type post-market-monitoring \
+  --vault-url http://127.0.0.1:8080 \
+  --system-id system-123 \
+  --out ./post-market-monitoring.pack
 
 # Export a disclosure-format pack using a built-in policy
 cargo run -p proofctl -- pack \
@@ -485,11 +538,17 @@ GitHub Actions builds the same artifacts through:
 
 Examples:
 
+- `npm --prefix sdks/typescript build && node examples/typescript-compliance/run.mjs`
+- `npm --prefix sdks/typescript build && node examples/typescript-monitoring/run.mjs`
 - `node examples/typescript/run.mjs`
+- `python3 packages/sdk-python/scripts/build_native.py && python3 examples/python-compliance/run.py`
+- `python3 packages/sdk-python/scripts/build_native.py && python3 examples/python-incident-response/run.py`
 - `python3 examples/python-basic/run.py`
 - `python3 examples/agent-simulated/run.py`
 
-Web demo:
+The compliance examples assume `proof-service` is running locally or `PROOF_SERVICE_URL` points at a reachable vault.
+
+Optional demo frontend:
 
 ```bash
 cd web-demo
@@ -497,14 +556,14 @@ npm install
 npm run dev
 ```
 
-The unified product site uses the live vault API and includes:
+The demo frontend can connect to a local `proof-service` instance. It is there to illustrate the workflow and exercise the API, not to act as the production compliance surface. It includes:
 
-- product and use-case pages for business-facing explanation
+- landing and use-case pages for explanation
 - integrated docs under `/docs/*`
-- a guided demo for business-first scenario runs
+- a guided demo for scenario walkthroughs
 - an advanced playground for deeper workflow control
 
-The interactive workflow can:
+When connected to a running vault, the interactive workflow can:
 
 - read `/v1/config` and `/v1/disclosure/templates`
 - create a real `llm_interaction` bundle through `POST /v1/bundles`
@@ -516,8 +575,8 @@ The interactive workflow can:
 
 Start with:
 
-- `/` for the landing/product narrative
-- `/guided` for the business-first demo
+- `/` for the landing and overview pages
+- `/guided` for the walkthrough flow
 - `/playground` for the advanced technical flow
 - `/docs` for the integrated documentation section
 

@@ -1,19 +1,32 @@
 import { readFileSync } from "node:fs";
 import {
   createAdversarialTestRequest,
+  createAuthorityNotificationRequest,
+  createAuthoritySubmissionRequest,
   createConformityAssessmentRequest,
+  createCopyrightPolicyRequest,
+  createCorrectiveActionRequest,
   createDataGovernanceRequest,
   createDeclarationRequest,
+  createDownstreamDocumentationRequest,
+  createFundamentalRightsAssessmentRequest,
   createHumanOversightRequest,
   createIncidentReportRequest,
+  createInstructionsForUseRequest,
   createLiteracyAttestationRequest,
   createLlmInteractionRequest,
   createModelEvaluationRequest,
+  createPostMarketMonitoringRequest,
   createPolicyDecisionRequest,
+  createQmsRecordRequest,
+  createRegulatorCorrespondenceRequest,
   createRegistrationRequest,
+  createReportingDeadlineRequest,
   createRetrievalRequest,
   createRiskAssessmentRequest,
+  createStandardsAlignmentRequest,
   createTechnicalDocRequest,
+  createTrainingSummaryRequest,
   createTrainingProvenanceRequest,
   createToolCallRequest
 } from "./evidence.js";
@@ -21,9 +34,15 @@ import { LocalProofLayerClient } from "./local_client.js";
 import { ProofLayerClient } from "./client.js";
 import type {
   AdversarialTestRequestOptions,
+  ActorRole,
+  AuthorityNotificationRequestOptions,
+  AuthoritySubmissionRequestOptions,
   BundleCreateClient,
+  ComplianceProfileInput,
   CreatePackRequest,
   ConformityAssessmentRequestOptions,
+  CopyrightPolicyRequestOptions,
+  CorrectiveActionRequestOptions,
   CreateBundleRequest,
   CreateBundleResponse,
   DataGovernanceRequestOptions,
@@ -34,10 +53,14 @@ import type {
   DisclosureTemplateCatalog,
   DisclosureTemplateInfo,
   DisclosureTemplateRenderRequest,
+  DownstreamDocumentationRequestOptions,
+  FundamentalRightsAssessmentRequestOptions,
   HumanOversightRequestOptions,
   IncidentReportRequestOptions,
+  InstructionsForUseRequestOptions,
   LiteracyAttestationRequestOptions,
   ModelEvaluationRequestOptions,
+  PostMarketMonitoringRequestOptions,
   PackManifest,
   PackSummaryResponse,
   PolicyDecisionRequestOptions,
@@ -45,11 +68,16 @@ import type {
   ProofLayerDiscloseOptions,
   ProofLayerOptions,
   ProofLayerResult,
+  QmsRecordRequestOptions,
   RedactedBundle,
+  RegulatorCorrespondenceRequestOptions,
   RegistrationRequestOptions,
+  ReportingDeadlineRequestOptions,
   RetrievalRequestOptions,
   RiskAssessmentRequestOptions,
+  StandardsAlignmentRequestOptions,
   TechnicalDocRequestOptions,
+  TrainingSummaryRequestOptions,
   TrainingProvenanceRequestOptions,
   ToolCallRequestOptions,
   VaultConfigResponse,
@@ -73,7 +101,8 @@ export class ProofLayer implements BundleCreateClient {
   readonly mode: "local" | "vault";
   readonly keyId: string;
   readonly systemId?: string;
-  readonly role: "provider" | "deployer" | "integrator";
+  readonly role: ActorRole;
+  readonly complianceProfile?: ComplianceProfileInput;
   readonly issuer: string;
   readonly appId: string;
   readonly env: string;
@@ -83,6 +112,7 @@ export class ProofLayer implements BundleCreateClient {
     this.keyId = options.keyId ?? "kid-dev-01";
     this.systemId = options.systemId;
     this.role = options.role ?? "provider";
+    this.complianceProfile = options.complianceProfile;
     this.issuer = options.issuer ?? "proof-layer-ts";
     this.appId = options.appId ?? "typescript-sdk";
     this.env = options.env ?? "dev";
@@ -266,6 +296,7 @@ export class ProofLayer implements BundleCreateClient {
       appId: this.appId,
       env: this.env,
       systemId: options.systemId ?? this.systemId,
+      complianceProfile: options.complianceProfile ?? this.complianceProfile,
       provider: options.provider,
       model: options.model,
       input: options.input,
@@ -302,6 +333,7 @@ export class ProofLayer implements BundleCreateClient {
         appId: this.appId,
         env: this.env,
         systemId: options.systemId ?? this.systemId,
+        complianceProfile: options.complianceProfile ?? this.complianceProfile,
         ...options
       }),
       options
@@ -319,6 +351,7 @@ export class ProofLayer implements BundleCreateClient {
         appId: this.appId,
         env: this.env,
         systemId: options.systemId ?? this.systemId,
+        complianceProfile: options.complianceProfile ?? this.complianceProfile,
         ...options
       }),
       options
@@ -336,6 +369,214 @@ export class ProofLayer implements BundleCreateClient {
         appId: this.appId,
         env: this.env,
         systemId: options.systemId ?? this.systemId,
+        complianceProfile: options.complianceProfile ?? this.complianceProfile,
+        ...options
+      }),
+      options
+    );
+  }
+
+  async captureInstructionsForUse(
+    options: Omit<
+      InstructionsForUseRequestOptions,
+      "keyId" | "role" | "issuer" | "appId" | "env"
+    >
+  ): Promise<ProofLayerResult> {
+    return this.#submitCapture(
+      createInstructionsForUseRequest({
+        keyId: this.keyId,
+        role: this.role,
+        issuer: this.issuer,
+        appId: this.appId,
+        env: this.env,
+        systemId: options.systemId ?? this.systemId,
+        complianceProfile: options.complianceProfile ?? this.complianceProfile,
+        ...options
+      }),
+      options
+    );
+  }
+
+  async captureQmsRecord(
+    options: Omit<QmsRecordRequestOptions, "keyId" | "role" | "issuer" | "appId" | "env">
+  ): Promise<ProofLayerResult> {
+    return this.#submitCapture(
+      createQmsRecordRequest({
+        keyId: this.keyId,
+        role: this.role,
+        issuer: this.issuer,
+        appId: this.appId,
+        env: this.env,
+        systemId: options.systemId ?? this.systemId,
+        complianceProfile: options.complianceProfile ?? this.complianceProfile,
+        ...options
+      }),
+      options
+    );
+  }
+
+  async captureFundamentalRightsAssessment(
+    options: Omit<
+      FundamentalRightsAssessmentRequestOptions,
+      "keyId" | "role" | "issuer" | "appId" | "env"
+    >
+  ): Promise<ProofLayerResult> {
+    return this.#submitCapture(
+      createFundamentalRightsAssessmentRequest({
+        keyId: this.keyId,
+        role: this.role,
+        issuer: this.issuer,
+        appId: this.appId,
+        env: this.env,
+        systemId: options.systemId ?? this.systemId,
+        complianceProfile: options.complianceProfile ?? this.complianceProfile,
+        ...options
+      }),
+      options
+    );
+  }
+
+  async captureStandardsAlignment(
+    options: Omit<
+      StandardsAlignmentRequestOptions,
+      "keyId" | "role" | "issuer" | "appId" | "env"
+    >
+  ): Promise<ProofLayerResult> {
+    return this.#submitCapture(
+      createStandardsAlignmentRequest({
+        keyId: this.keyId,
+        role: this.role,
+        issuer: this.issuer,
+        appId: this.appId,
+        env: this.env,
+        systemId: options.systemId ?? this.systemId,
+        complianceProfile: options.complianceProfile ?? this.complianceProfile,
+        ...options
+      }),
+      options
+    );
+  }
+
+  async capturePostMarketMonitoring(
+    options: Omit<
+      PostMarketMonitoringRequestOptions,
+      "keyId" | "role" | "issuer" | "appId" | "env"
+    >
+  ): Promise<ProofLayerResult> {
+    return this.#submitCapture(
+      createPostMarketMonitoringRequest({
+        keyId: this.keyId,
+        role: this.role,
+        issuer: this.issuer,
+        appId: this.appId,
+        env: this.env,
+        systemId: options.systemId ?? this.systemId,
+        complianceProfile: options.complianceProfile ?? this.complianceProfile,
+        ...options
+      }),
+      options
+    );
+  }
+
+  async captureCorrectiveAction(
+    options: Omit<
+      CorrectiveActionRequestOptions,
+      "keyId" | "role" | "issuer" | "appId" | "env"
+    >
+  ): Promise<ProofLayerResult> {
+    return this.#submitCapture(
+      createCorrectiveActionRequest({
+        keyId: this.keyId,
+        role: this.role,
+        issuer: this.issuer,
+        appId: this.appId,
+        env: this.env,
+        systemId: options.systemId ?? this.systemId,
+        complianceProfile: options.complianceProfile ?? this.complianceProfile,
+        ...options
+      }),
+      options
+    );
+  }
+
+  async captureAuthorityNotification(
+    options: Omit<
+      AuthorityNotificationRequestOptions,
+      "keyId" | "role" | "issuer" | "appId" | "env"
+    >
+  ): Promise<ProofLayerResult> {
+    return this.#submitCapture(
+      createAuthorityNotificationRequest({
+        keyId: this.keyId,
+        role: this.role,
+        issuer: this.issuer,
+        appId: this.appId,
+        env: this.env,
+        systemId: options.systemId ?? this.systemId,
+        complianceProfile: options.complianceProfile ?? this.complianceProfile,
+        ...options
+      }),
+      options
+    );
+  }
+
+  async captureAuthoritySubmission(
+    options: Omit<
+      AuthoritySubmissionRequestOptions,
+      "keyId" | "role" | "issuer" | "appId" | "env"
+    >
+  ): Promise<ProofLayerResult> {
+    return this.#submitCapture(
+      createAuthoritySubmissionRequest({
+        keyId: this.keyId,
+        role: this.role,
+        issuer: this.issuer,
+        appId: this.appId,
+        env: this.env,
+        systemId: options.systemId ?? this.systemId,
+        complianceProfile: options.complianceProfile ?? this.complianceProfile,
+        ...options
+      }),
+      options
+    );
+  }
+
+  async captureReportingDeadline(
+    options: Omit<
+      ReportingDeadlineRequestOptions,
+      "keyId" | "role" | "issuer" | "appId" | "env"
+    >
+  ): Promise<ProofLayerResult> {
+    return this.#submitCapture(
+      createReportingDeadlineRequest({
+        keyId: this.keyId,
+        role: this.role,
+        issuer: this.issuer,
+        appId: this.appId,
+        env: this.env,
+        systemId: options.systemId ?? this.systemId,
+        complianceProfile: options.complianceProfile ?? this.complianceProfile,
+        ...options
+      }),
+      options
+    );
+  }
+
+  async captureRegulatorCorrespondence(
+    options: Omit<
+      RegulatorCorrespondenceRequestOptions,
+      "keyId" | "role" | "issuer" | "appId" | "env"
+    >
+  ): Promise<ProofLayerResult> {
+    return this.#submitCapture(
+      createRegulatorCorrespondenceRequest({
+        keyId: this.keyId,
+        role: this.role,
+        issuer: this.issuer,
+        appId: this.appId,
+        env: this.env,
+        systemId: options.systemId ?? this.systemId,
+        complianceProfile: options.complianceProfile ?? this.complianceProfile,
         ...options
       }),
       options
@@ -353,6 +594,7 @@ export class ProofLayer implements BundleCreateClient {
         appId: this.appId,
         env: this.env,
         systemId: options.systemId ?? this.systemId,
+        complianceProfile: options.complianceProfile ?? this.complianceProfile,
         ...options
       }),
       options
@@ -370,6 +612,7 @@ export class ProofLayer implements BundleCreateClient {
         appId: this.appId,
         env: this.env,
         systemId: options.systemId ?? this.systemId,
+        complianceProfile: options.complianceProfile ?? this.complianceProfile,
         ...options
       }),
       options
@@ -387,6 +630,7 @@ export class ProofLayer implements BundleCreateClient {
         appId: this.appId,
         env: this.env,
         systemId: options.systemId ?? this.systemId,
+        complianceProfile: options.complianceProfile ?? this.complianceProfile,
         ...options
       }),
       options
@@ -404,6 +648,7 @@ export class ProofLayer implements BundleCreateClient {
         appId: this.appId,
         env: this.env,
         systemId: options.systemId ?? this.systemId,
+        complianceProfile: options.complianceProfile ?? this.complianceProfile,
         ...options
       }),
       options
@@ -424,6 +669,7 @@ export class ProofLayer implements BundleCreateClient {
         appId: this.appId,
         env: this.env,
         systemId: options.systemId ?? this.systemId,
+        complianceProfile: options.complianceProfile ?? this.complianceProfile,
         ...options
       }),
       options
@@ -441,6 +687,7 @@ export class ProofLayer implements BundleCreateClient {
         appId: this.appId,
         env: this.env,
         systemId: options.systemId ?? this.systemId,
+        complianceProfile: options.complianceProfile ?? this.complianceProfile,
         ...options
       }),
       options
@@ -458,6 +705,7 @@ export class ProofLayer implements BundleCreateClient {
         appId: this.appId,
         env: this.env,
         systemId: options.systemId ?? this.systemId,
+        complianceProfile: options.complianceProfile ?? this.complianceProfile,
         ...options
       }),
       options
@@ -475,6 +723,7 @@ export class ProofLayer implements BundleCreateClient {
         appId: this.appId,
         env: this.env,
         systemId: options.systemId ?? this.systemId,
+        complianceProfile: options.complianceProfile ?? this.complianceProfile,
         ...options
       }),
       options
@@ -495,6 +744,70 @@ export class ProofLayer implements BundleCreateClient {
         appId: this.appId,
         env: this.env,
         systemId: options.systemId ?? this.systemId,
+        complianceProfile: options.complianceProfile ?? this.complianceProfile,
+        ...options
+      }),
+      options
+    );
+  }
+
+  async captureDownstreamDocumentation(
+    options: Omit<
+      DownstreamDocumentationRequestOptions,
+      "keyId" | "role" | "issuer" | "appId" | "env"
+    >
+  ): Promise<ProofLayerResult> {
+    return this.#submitCapture(
+      createDownstreamDocumentationRequest({
+        keyId: this.keyId,
+        role: this.role,
+        issuer: this.issuer,
+        appId: this.appId,
+        env: this.env,
+        systemId: options.systemId ?? this.systemId,
+        complianceProfile: options.complianceProfile ?? this.complianceProfile,
+        ...options
+      }),
+      options
+    );
+  }
+
+  async captureCopyrightPolicy(
+    options: Omit<
+      CopyrightPolicyRequestOptions,
+      "keyId" | "role" | "issuer" | "appId" | "env"
+    >
+  ): Promise<ProofLayerResult> {
+    return this.#submitCapture(
+      createCopyrightPolicyRequest({
+        keyId: this.keyId,
+        role: this.role,
+        issuer: this.issuer,
+        appId: this.appId,
+        env: this.env,
+        systemId: options.systemId ?? this.systemId,
+        complianceProfile: options.complianceProfile ?? this.complianceProfile,
+        ...options
+      }),
+      options
+    );
+  }
+
+  async captureTrainingSummary(
+    options: Omit<
+      TrainingSummaryRequestOptions,
+      "keyId" | "role" | "issuer" | "appId" | "env"
+    >
+  ): Promise<ProofLayerResult> {
+    return this.#submitCapture(
+      createTrainingSummaryRequest({
+        keyId: this.keyId,
+        role: this.role,
+        issuer: this.issuer,
+        appId: this.appId,
+        env: this.env,
+        systemId: options.systemId ?? this.systemId,
+        complianceProfile: options.complianceProfile ?? this.complianceProfile,
         ...options
       }),
       options
@@ -515,6 +828,7 @@ export class ProofLayer implements BundleCreateClient {
         appId: this.appId,
         env: this.env,
         systemId: options.systemId ?? this.systemId,
+        complianceProfile: options.complianceProfile ?? this.complianceProfile,
         ...options
       }),
       options
@@ -532,6 +846,7 @@ export class ProofLayer implements BundleCreateClient {
         appId: this.appId,
         env: this.env,
         systemId: options.systemId ?? this.systemId,
+        complianceProfile: options.complianceProfile ?? this.complianceProfile,
         ...options
       }),
       options

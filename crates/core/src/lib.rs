@@ -17,10 +17,11 @@ pub mod bundle {
         Actor, ActorRole, ArtefactMeta, ArtefactRef, BUNDLE_ROOT_ALGORITHM,
         BUNDLE_ROOT_ALGORITHM_V2, BUNDLE_ROOT_ALGORITHM_V3, BUNDLE_ROOT_ALGORITHM_V4,
         BUNDLE_VERSION, BundleValidationError, BundleVerificationError, CANONICALIZATION_ALGORITHM,
-        CaptureEvent, EncryptionPolicy, EvidenceBundle as ProofBundle, EvidenceContext,
-        EvidenceItem, HASH_ALGORITHM, Integrity, LEGACY_BUNDLE_ROOT_ALGORITHM,
-        LlmInteractionEvidence, Policy, SIGNATURE_ALGORITHM, SIGNATURE_FORMAT, SignatureInfo,
-        Subject, TimestampToken, TransparencyReceipt, VerificationSummary,
+        CaptureEvent, ComplianceProfile, EncryptionPolicy, EvidenceBundle as ProofBundle,
+        EvidenceContext, EvidenceItem, HASH_ALGORITHM, Integrity,
+        LEGACY_BUNDLE_ROOT_ALGORITHM, LlmInteractionEvidence, Policy, SIGNATURE_ALGORITHM,
+        SIGNATURE_FORMAT, SignatureInfo, Subject, TimestampToken, TransparencyReceipt,
+        VerificationSummary,
         validate_bundle_integrity_fields,
     };
 }
@@ -37,10 +38,10 @@ pub use backup::{
 };
 pub use build::{ArtefactInput, BuildBundleError, BundleBuildInput, build_bundle};
 pub use bundle::{
-    Actor, ActorRole, ArtefactMeta, ArtefactRef, CaptureEvent, CaptureInput, EncryptionPolicy,
-    EvidenceContext, EvidenceItem, Inputs, Integrity, LlmInteractionEvidence, ModelInfo, Outputs,
-    Policy, ProofBundle, SignatureInfo, Subject, TimestampToken, Trace, TransparencyReceipt,
-    VerificationSummary, validate_bundle_integrity_fields,
+    Actor, ActorRole, ArtefactMeta, ArtefactRef, CaptureEvent, CaptureInput, ComplianceProfile,
+    EncryptionPolicy, EvidenceContext, EvidenceItem, Inputs, Integrity, LlmInteractionEvidence,
+    ModelInfo, Outputs, Policy, ProofBundle, SignatureInfo, Subject, TimestampToken, Trace,
+    TransparencyReceipt, VerificationSummary, validate_bundle_integrity_fields,
 };
 pub use canon::{CanonError, canonicalize_json_strict, canonicalize_value, parse_json_strict};
 pub use disclosure::{

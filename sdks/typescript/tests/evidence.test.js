@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   createAdversarialTestRequest,
+  createAuthoritySubmissionRequest,
   createConformityAssessmentRequest,
   createDataGovernanceRequest,
   createDeclarationRequest,
@@ -192,6 +193,27 @@ test("createIncidentReportRequest emits incident evidence with report commitment
   assert.ok(request.capture.items[0].data.report_commitment.startsWith("sha256:"));
   assert.equal(request.artefacts[0].name, "incident_report.json");
   assert.equal(request.artefacts[1].name, "incident_report_record.txt");
+});
+
+test("createAuthoritySubmissionRequest emits authority-reporting evidence", () => {
+  const request = createAuthoritySubmissionRequest({
+    keyId: "kid-dev-01",
+    systemId: "system-incident-2",
+    submissionId: "sub-1",
+    authority: "eu_ai_office",
+    status: "submitted",
+    channel: "portal",
+    submittedAt: "2026-03-07T09:30:00Z",
+    document: { case_id: "inc-1", article: "73" },
+    metadata: { owner: "legal-ops" },
+    retentionClass: "risk_mgmt"
+  });
+
+  assert.equal(request.capture.items[0].type, "authority_submission");
+  assert.equal(request.capture.items[0].data.authority, "eu_ai_office");
+  assert.ok(request.capture.items[0].data.document_commitment.startsWith("sha256:"));
+  assert.equal(request.artefacts[0].name, "authority_submission.json");
+  assert.equal(request.artefacts[1].name, "authority_submission_document.json");
 });
 
 test("createModelEvaluationRequest emits GPAI evaluation evidence", () => {

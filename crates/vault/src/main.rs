@@ -1151,6 +1151,7 @@ struct PackProfile {
     item_types: &'static [&'static str],
     retention_classes: &'static [&'static str],
     obligation_refs: &'static [&'static str],
+    requires_fria: Option<bool>,
 }
 
 struct CuratedPackBundle {
@@ -4746,7 +4747,9 @@ fn normalize_pack_type(raw: &str) -> Result<String> {
 
     match normalized.as_str() {
         "annex_iv" | "annex_xi" | "annex_xii" | "runtime_logs" | "risk_mgmt" | "ai_literacy"
-        | "systemic_risk" | "incident_response" | "conformity" => Ok(normalized),
+        | "fundamental_rights" | "provider_governance" | "post_market_monitoring"
+        | "systemic_risk"
+        | "incident_response" | "conformity" => Ok(normalized),
         _ => bail!("unsupported pack_type {}", raw.trim()),
     }
 }
@@ -4803,10 +4806,26 @@ fn pack_profile(pack_type: &str) -> Result<PackProfile> {
                 "technical_doc",
                 "risk_assessment",
                 "data_governance",
+                "instructions_for_use",
+                "qms_record",
+                "standards_alignment",
+                "post_market_monitoring",
+                "corrective_action",
                 "human_oversight",
             ],
             retention_classes: &["technical_doc", "risk_mgmt"],
-            obligation_refs: &["art11_annex_iv", "art9", "art10", "art14"],
+            obligation_refs: &[
+                "art11_annex_iv",
+                "art9",
+                "art10",
+                "art13",
+                "art14",
+                "art17",
+                "art40_43",
+                "art72",
+                "art20_73",
+            ],
+            requires_fria: None,
         }),
         "annex_xi" => Ok(PackProfile {
             pack_type: "annex_xi",
@@ -4819,9 +4838,19 @@ fn pack_profile(pack_type: &str) -> Result<PackProfile> {
                 "risk_assessment",
                 "model_evaluation",
                 "training_provenance",
+                "copyright_policy",
+                "training_summary",
             ],
             retention_classes: &["technical_doc", "risk_mgmt", "gpai_documentation"],
-            obligation_refs: &["art11_annex_iv", "art9", "art12_19_26", "art53_annex_xi"],
+            obligation_refs: &[
+                "art11_annex_iv",
+                "art9",
+                "art12_19_26",
+                "art53_annex_xi",
+                "art53_copyright",
+                "art53_training_summary",
+            ],
+            requires_fria: None,
         }),
         "annex_xii" => Ok(PackProfile {
             pack_type: "annex_xii",
@@ -4831,9 +4860,77 @@ fn pack_profile(pack_type: &str) -> Result<PackProfile> {
                 "human_oversight",
                 "policy_decision",
                 "technical_doc",
+                "downstream_documentation",
+                "instructions_for_use",
             ],
-            retention_classes: &["technical_doc"],
-            obligation_refs: &["art11_annex_iv", "art14"],
+            retention_classes: &["technical_doc", "gpai_documentation"],
+            obligation_refs: &["art11_annex_iv", "art13", "art14", "art53_annex_xii"],
+            requires_fria: None,
+        }),
+        "fundamental_rights" => Ok(PackProfile {
+            pack_type: "fundamental_rights",
+            allowed_roles: &["deployer"],
+            item_types: &[
+                "fundamental_rights_assessment",
+                "human_oversight",
+                "policy_decision",
+                "incident_report",
+                "corrective_action",
+            ],
+            retention_classes: &["risk_mgmt", "technical_doc"],
+            obligation_refs: &["art27", "art14", "art9", "art20_73", "art55_73"],
+            requires_fria: Some(true),
+        }),
+        "provider_governance" => Ok(PackProfile {
+            pack_type: "provider_governance",
+            allowed_roles: &["provider"],
+            item_types: &[
+                "technical_doc",
+                "risk_assessment",
+                "data_governance",
+                "instructions_for_use",
+                "qms_record",
+                "standards_alignment",
+                "post_market_monitoring",
+                "corrective_action",
+            ],
+            retention_classes: &["technical_doc", "risk_mgmt"],
+            obligation_refs: &[
+                "art11_annex_iv",
+                "art9",
+                "art10",
+                "art13",
+                "art17",
+                "art40_43",
+                "art72",
+                "art20_73",
+            ],
+            requires_fria: None,
+        }),
+        "post_market_monitoring" => Ok(PackProfile {
+            pack_type: "post_market_monitoring",
+            allowed_roles: &[],
+            item_types: &[
+                "post_market_monitoring",
+                "incident_report",
+                "corrective_action",
+                "authority_notification",
+                "authority_submission",
+                "reporting_deadline",
+                "regulator_correspondence",
+            ],
+            retention_classes: &["runtime_logs", "risk_mgmt", "technical_doc"],
+            obligation_refs: &[
+                "art12_19_26",
+                "art72",
+                "art20_73",
+                "art55_73",
+                "art73_notification",
+                "art73_submission",
+                "art73_deadline",
+                "art73_correspondence",
+            ],
+            requires_fria: None,
         }),
         "runtime_logs" => Ok(PackProfile {
             pack_type: "runtime_logs",
@@ -4847,6 +4944,7 @@ fn pack_profile(pack_type: &str) -> Result<PackProfile> {
             ],
             retention_classes: &["runtime_logs"],
             obligation_refs: &["art12_19_26"],
+            requires_fria: None,
         }),
         "risk_mgmt" => Ok(PackProfile {
             pack_type: "risk_mgmt",
@@ -4854,6 +4952,7 @@ fn pack_profile(pack_type: &str) -> Result<PackProfile> {
             item_types: &["risk_assessment", "policy_decision", "human_oversight"],
             retention_classes: &["risk_mgmt"],
             obligation_refs: &["art9"],
+            requires_fria: None,
         }),
         "ai_literacy" => Ok(PackProfile {
             pack_type: "ai_literacy",
@@ -4861,6 +4960,7 @@ fn pack_profile(pack_type: &str) -> Result<PackProfile> {
             item_types: &["literacy_attestation"],
             retention_classes: &["ai_literacy"],
             obligation_refs: &["art4"],
+            requires_fria: None,
         }),
         "systemic_risk" => Ok(PackProfile {
             pack_type: "systemic_risk",
@@ -4882,6 +4982,7 @@ fn pack_profile(pack_type: &str) -> Result<PackProfile> {
                 "art55",
                 "art55_73",
             ],
+            requires_fria: None,
         }),
         "incident_response" => Ok(PackProfile {
             pack_type: "incident_response",
@@ -4891,10 +4992,26 @@ fn pack_profile(pack_type: &str) -> Result<PackProfile> {
                 "risk_assessment",
                 "human_oversight",
                 "policy_decision",
+                "corrective_action",
+                "authority_notification",
+                "authority_submission",
+                "reporting_deadline",
+                "regulator_correspondence",
                 "technical_doc",
             ],
             retention_classes: &["risk_mgmt", "technical_doc"],
-            obligation_refs: &["art9", "art11_annex_iv", "art14", "art55_73"],
+            obligation_refs: &[
+                "art9",
+                "art11_annex_iv",
+                "art14",
+                "art20_73",
+                "art55_73",
+                "art73_notification",
+                "art73_submission",
+                "art73_deadline",
+                "art73_correspondence",
+            ],
+            requires_fria: None,
         }),
         "conformity" => Ok(PackProfile {
             pack_type: "conformity",
@@ -4902,6 +5019,7 @@ fn pack_profile(pack_type: &str) -> Result<PackProfile> {
             item_types: &["conformity_assessment", "declaration", "registration"],
             retention_classes: &["technical_doc"],
             obligation_refs: &["art43_annex_vi_vii", "art47_annex_v", "art49_71"],
+            requires_fria: None,
         }),
         _ => bail!("unsupported pack_type {pack_type}"),
     }
@@ -4929,6 +5047,7 @@ async fn resolve_pack_disclosure_policy(
 fn default_disclosure_policy_name(pack_type: &str) -> &'static str {
     match pack_type {
         "annex_iv" => DEFAULT_DISCLOSURE_POLICY_ANNEX_IV_REDACTED,
+        "post_market_monitoring" => DEFAULT_DISCLOSURE_POLICY_INCIDENT_SUMMARY,
         "incident_response" => DEFAULT_DISCLOSURE_POLICY_INCIDENT_SUMMARY,
         _ => DEFAULT_DISCLOSURE_POLICY_REGULATOR_MINIMUM,
     }
@@ -4988,9 +5107,18 @@ fn curate_pack_bundles(
         let item_types = bundle_item_types(&bundle);
         let obligation_refs = bundle_obligation_refs(&bundle);
         let bundle_role = actor_role_name(&bundle);
+        let bundle_fria_required = bundle
+            .compliance_profile
+            .as_ref()
+            .and_then(|profile| profile.fria_required);
 
         if !profile.allowed_roles.is_empty() && !profile.allowed_roles.contains(&bundle_role) {
             continue;
+        }
+        if let Some(required_fria) = profile.requires_fria {
+            if bundle_fria_required != Some(required_fria) {
+                continue;
+            }
         }
 
         let matched_item_types = item_types
@@ -5057,6 +5185,9 @@ fn curate_pack_bundles(
         matched_rules.push(format!("pack_type:{}", profile.pack_type));
         if !profile.allowed_roles.is_empty() {
             matched_rules.push(format!("actor_role:{bundle_role}"));
+        }
+        if let Some(required_fria) = profile.requires_fria {
+            matched_rules.push(format!("compliance_profile.fria_required:{required_fria}"));
         }
         for item_type in matched_item_types {
             matched_rules.push(format!("item_type:{item_type}"));
@@ -5563,10 +5694,23 @@ fn evidence_item_obligation_ref(bundle: &ProofBundle, item: &EvidenceItem) -> Op
         EvidenceItem::TechnicalDoc(_) => Some("art11_annex_iv"),
         EvidenceItem::RiskAssessment(_) => Some("art9"),
         EvidenceItem::DataGovernance(_) => Some("art10"),
+        EvidenceItem::InstructionsForUse(_) => Some("art13"),
         EvidenceItem::HumanOversight(_) => Some("art14"),
+        EvidenceItem::QmsRecord(_) => Some("art17"),
+        EvidenceItem::FundamentalRightsAssessment(_) => Some("art27"),
+        EvidenceItem::StandardsAlignment(_) => Some("art40_43"),
+        EvidenceItem::PostMarketMonitoring(_) => Some("art72"),
+        EvidenceItem::CorrectiveAction(_) => Some("art20_73"),
+        EvidenceItem::AuthorityNotification(_) => Some("art73_notification"),
+        EvidenceItem::AuthoritySubmission(_) => Some("art73_submission"),
+        EvidenceItem::ReportingDeadline(_) => Some("art73_deadline"),
+        EvidenceItem::RegulatorCorrespondence(_) => Some("art73_correspondence"),
         EvidenceItem::ModelEvaluation(_) => Some("art53_annex_xi"),
         EvidenceItem::AdversarialTest(_) => Some("art55"),
         EvidenceItem::TrainingProvenance(_) => Some("art53_annex_xi"),
+        EvidenceItem::DownstreamDocumentation(_) => Some("art53_annex_xii"),
+        EvidenceItem::CopyrightPolicy(_) => Some("art53_copyright"),
+        EvidenceItem::TrainingSummary(_) => Some("art53_training_summary"),
         EvidenceItem::ConformityAssessment(_) => Some("art43_annex_vi_vii"),
         EvidenceItem::Declaration(_) => Some("art47_annex_v"),
         EvidenceItem::Registration(_) => Some("art49_71"),
@@ -6850,9 +6994,22 @@ fn is_known_evidence_item_type(item_type: &str) -> bool {
             | "risk_assessment"
             | "data_governance"
             | "technical_doc"
+            | "instructions_for_use"
+            | "qms_record"
+            | "fundamental_rights_assessment"
+            | "standards_alignment"
+            | "post_market_monitoring"
+            | "corrective_action"
+            | "authority_notification"
+            | "authority_submission"
+            | "reporting_deadline"
+            | "regulator_correspondence"
             | "model_evaluation"
             | "adversarial_test"
             | "training_provenance"
+            | "downstream_documentation"
+            | "copyright_policy"
+            | "training_summary"
             | "conformity_assessment"
             | "declaration"
             | "registration"
@@ -6898,6 +7055,73 @@ fn known_item_fields(item_type: &str) -> &'static [&'static str] {
         "risk_assessment" => &["risk_id", "severity", "status", "summary", "metadata"],
         "data_governance" => &["decision", "dataset_ref", "metadata"],
         "technical_doc" => &["document_ref", "section", "commitment"],
+        "instructions_for_use" => &["document_ref", "version", "section", "commitment", "metadata"],
+        "qms_record" => &["record_id", "process", "status", "record_commitment", "metadata"],
+        "fundamental_rights_assessment" => &[
+            "assessment_id",
+            "status",
+            "scope",
+            "report_commitment",
+            "metadata",
+        ],
+        "standards_alignment" => &[
+            "standard_ref",
+            "status",
+            "scope",
+            "mapping_commitment",
+            "metadata",
+        ],
+        "post_market_monitoring" => &[
+            "plan_id",
+            "status",
+            "summary",
+            "report_commitment",
+            "metadata",
+        ],
+        "corrective_action" => &[
+            "action_id",
+            "status",
+            "summary",
+            "due_at",
+            "record_commitment",
+            "metadata",
+        ],
+        "authority_notification" => &[
+            "notification_id",
+            "authority",
+            "status",
+            "incident_id",
+            "due_at",
+            "report_commitment",
+            "metadata",
+        ],
+        "authority_submission" => &[
+            "submission_id",
+            "authority",
+            "status",
+            "channel",
+            "submitted_at",
+            "document_commitment",
+            "metadata",
+        ],
+        "reporting_deadline" => &[
+            "deadline_id",
+            "authority",
+            "obligation_ref",
+            "due_at",
+            "status",
+            "incident_id",
+            "metadata",
+        ],
+        "regulator_correspondence" => &[
+            "correspondence_id",
+            "authority",
+            "direction",
+            "status",
+            "occurred_at",
+            "message_commitment",
+            "metadata",
+        ],
         "model_evaluation" => &[
             "evaluation_id",
             "benchmark",
@@ -6919,6 +7143,27 @@ fn known_item_fields(item_type: &str) -> &'static [&'static str] {
             "stage",
             "lineage_ref",
             "record_commitment",
+            "metadata",
+        ],
+        "downstream_documentation" => &[
+            "document_ref",
+            "audience",
+            "status",
+            "commitment",
+            "metadata",
+        ],
+        "copyright_policy" => &[
+            "policy_ref",
+            "status",
+            "jurisdiction",
+            "commitment",
+            "metadata",
+        ],
+        "training_summary" => &[
+            "summary_ref",
+            "status",
+            "audience",
+            "commitment",
             "metadata",
         ],
         "conformity_assessment" => &[
@@ -6988,8 +7233,17 @@ fn is_known_obligation_ref(obligation_ref: &str) -> bool {
         "art11_annex_iv"
             | "art9"
             | "art10"
+            | "art13"
             | "art14"
+            | "art17"
+            | "art27"
+            | "art40_43"
+            | "art72"
+            | "art20_73"
             | "art53_annex_xi"
+            | "art53_annex_xii"
+            | "art53_copyright"
+            | "art53_training_summary"
             | "art55"
             | "art43_annex_vi_vii"
             | "art47_annex_v"
@@ -7064,9 +7318,22 @@ const ALL_DISCLOSURE_ITEM_TYPES: &[&str] = &[
     "risk_assessment",
     "data_governance",
     "technical_doc",
+    "instructions_for_use",
+    "qms_record",
+    "fundamental_rights_assessment",
+    "standards_alignment",
+    "post_market_monitoring",
+    "corrective_action",
+    "authority_notification",
+    "authority_submission",
+    "reporting_deadline",
+    "regulator_correspondence",
     "model_evaluation",
     "adversarial_test",
     "training_provenance",
+    "downstream_documentation",
+    "copyright_policy",
+    "training_summary",
     "conformity_assessment",
     "declaration",
     "registration",
@@ -7175,6 +7442,10 @@ fn disclosure_policy_template(
             name: profile.to_string(),
             allowed_item_types: vec![
                 "incident_report".to_string(),
+                "authority_notification".to_string(),
+                "authority_submission".to_string(),
+                "reporting_deadline".to_string(),
+                "regulator_correspondence".to_string(),
                 "risk_assessment".to_string(),
                 "policy_decision".to_string(),
                 "human_oversight".to_string(),
@@ -7352,9 +7623,22 @@ fn disclosure_redaction_group_selectors(
             "human_oversight" => &["notes_commitment"],
             "policy_decision" => &["rationale_commitment"],
             "technical_doc" => &["commitment"],
+            "instructions_for_use" => &["commitment"],
+            "qms_record" => &["record_commitment"],
+            "fundamental_rights_assessment" => &["report_commitment"],
+            "standards_alignment" => &["mapping_commitment"],
+            "post_market_monitoring" => &["report_commitment"],
+            "corrective_action" => &["record_commitment"],
+            "authority_notification" => &["report_commitment"],
+            "authority_submission" => &["document_commitment"],
+            "reporting_deadline" => &[],
+            "regulator_correspondence" => &["message_commitment"],
             "model_evaluation" => &["report_commitment"],
             "adversarial_test" => &["report_commitment"],
             "training_provenance" => &["record_commitment"],
+            "downstream_documentation" => &["commitment"],
+            "copyright_policy" => &["commitment"],
+            "training_summary" => &["commitment"],
             "conformity_assessment" => &["report_commitment"],
             "declaration" => &["document_commitment"],
             "registration" => &["receipt_commitment"],
@@ -7368,9 +7652,22 @@ fn disclosure_redaction_group_selectors(
             | "policy_decision"
             | "risk_assessment"
             | "data_governance"
+            | "instructions_for_use"
+            | "qms_record"
+            | "fundamental_rights_assessment"
+            | "standards_alignment"
+            | "post_market_monitoring"
+            | "corrective_action"
+            | "authority_notification"
+            | "authority_submission"
+            | "reporting_deadline"
+            | "regulator_correspondence"
             | "model_evaluation"
             | "adversarial_test"
             | "training_provenance"
+            | "downstream_documentation"
+            | "copyright_policy"
+            | "training_summary"
             | "conformity_assessment"
             | "declaration"
             | "literacy_attestation"
@@ -8054,6 +8351,10 @@ fn actor_role_name(bundle: &ProofBundle) -> &'static str {
         proof_layer_core::ActorRole::Provider => "provider",
         proof_layer_core::ActorRole::Deployer => "deployer",
         proof_layer_core::ActorRole::Integrator => "integrator",
+        proof_layer_core::ActorRole::Importer => "importer",
+        proof_layer_core::ActorRole::Distributor => "distributor",
+        proof_layer_core::ActorRole::AuthorizedRepresentative => "authorized_representative",
+        proof_layer_core::ActorRole::GpaiProvider => "gpai_provider",
     }
 }
 
@@ -8067,9 +8368,22 @@ fn evidence_item_type(item: &EvidenceItem) -> &'static str {
         EvidenceItem::RiskAssessment(_) => "risk_assessment",
         EvidenceItem::DataGovernance(_) => "data_governance",
         EvidenceItem::TechnicalDoc(_) => "technical_doc",
+        EvidenceItem::InstructionsForUse(_) => "instructions_for_use",
+        EvidenceItem::QmsRecord(_) => "qms_record",
+        EvidenceItem::FundamentalRightsAssessment(_) => "fundamental_rights_assessment",
+        EvidenceItem::StandardsAlignment(_) => "standards_alignment",
+        EvidenceItem::PostMarketMonitoring(_) => "post_market_monitoring",
+        EvidenceItem::CorrectiveAction(_) => "corrective_action",
+        EvidenceItem::AuthorityNotification(_) => "authority_notification",
+        EvidenceItem::AuthoritySubmission(_) => "authority_submission",
+        EvidenceItem::ReportingDeadline(_) => "reporting_deadline",
+        EvidenceItem::RegulatorCorrespondence(_) => "regulator_correspondence",
         EvidenceItem::ModelEvaluation(_) => "model_evaluation",
         EvidenceItem::AdversarialTest(_) => "adversarial_test",
         EvidenceItem::TrainingProvenance(_) => "training_provenance",
+        EvidenceItem::DownstreamDocumentation(_) => "downstream_documentation",
+        EvidenceItem::CopyrightPolicy(_) => "copyright_policy",
+        EvidenceItem::TrainingSummary(_) => "training_summary",
         EvidenceItem::ConformityAssessment(_) => "conformity_assessment",
         EvidenceItem::Declaration(_) => "declaration",
         EvidenceItem::Registration(_) => "registration",
@@ -13331,6 +13645,71 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
         )
         .await;
 
+        let corrective_bundle = create_bundle_response(
+            &app,
+            &CreateBundleRequest {
+                capture: SealableCaptureInput::V10(sample_event_with_profile(
+                    "system-incident",
+                    proof_layer_core::ActorRole::Provider,
+                    vec![EvidenceItem::CorrectiveAction(
+                        proof_layer_core::schema::CorrectiveActionEvidence {
+                            action_id: "ca-42".to_string(),
+                            status: "in_progress".to_string(),
+                            summary: Some("block unsafe prompt template and notify operators".to_string()),
+                            due_at: Some("2026-03-08T12:00:00Z".to_string()),
+                            record_commitment: Some(
+                                "sha256:bcbcbcbcbcbcbcbcbcbcbcbcbcbcbcbcbcbcbcbcbcbcbcbcbcbcbcbcbcbcbcbc"
+                                    .to_string(),
+                            ),
+                            metadata: serde_json::json!({"owner": "safety-ops"}),
+                        },
+                    )],
+                    Some("risk_mgmt"),
+                )),
+                artefacts: vec![InlineArtefact {
+                    name: "corrective-action.json".to_string(),
+                    content_type: "application/json".to_string(),
+                    data_base64: Base64::encode_string(
+                        br#"{"action_id":"ca-42","status":"in_progress"}"#,
+                    ),
+                }],
+            },
+        )
+        .await;
+
+        let authority_bundle = create_bundle_response(
+            &app,
+            &CreateBundleRequest {
+                capture: SealableCaptureInput::V10(sample_event_with_profile(
+                    "system-incident",
+                    proof_layer_core::ActorRole::Provider,
+                    vec![EvidenceItem::AuthorityNotification(
+                        proof_layer_core::schema::AuthorityNotificationEvidence {
+                            notification_id: "notif-42".to_string(),
+                            authority: "eu_ai_office".to_string(),
+                            status: "drafted".to_string(),
+                            incident_id: Some("inc-42".to_string()),
+                            due_at: Some("2026-03-08T12:00:00Z".to_string()),
+                            report_commitment: Some(
+                                "sha256:cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
+                                    .to_string(),
+                            ),
+                            metadata: serde_json::json!({"channel": "portal"}),
+                        },
+                    )],
+                    Some("risk_mgmt"),
+                )),
+                artefacts: vec![InlineArtefact {
+                    name: "authority-notification.json".to_string(),
+                    content_type: "application/json".to_string(),
+                    data_base64: Base64::encode_string(
+                        br#"{"notification_id":"notif-42","authority":"eu_ai_office"}"#,
+                    ),
+                }],
+            },
+        )
+        .await;
+
         let pack_req = Request::builder()
             .method("POST")
             .uri("/v1/packs")
@@ -13354,7 +13733,10 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
             .await
             .unwrap();
         let pack: PackSummaryResponse = serde_json::from_slice(&body).unwrap();
-        assert_eq!(pack.bundle_ids, vec![incident_bundle.bundle_id.clone()]);
+        assert_eq!(pack.bundle_count, 3);
+        assert!(pack.bundle_ids.contains(&incident_bundle.bundle_id));
+        assert!(pack.bundle_ids.contains(&corrective_bundle.bundle_id));
+        assert!(pack.bundle_ids.contains(&authority_bundle.bundle_id));
 
         let manifest_req = Request::builder()
             .method("GET")
@@ -13368,18 +13750,57 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
             .unwrap();
         let manifest: PackManifest = serde_json::from_slice(&body).unwrap();
 
-        assert_eq!(manifest.bundles.len(), 1);
-        assert_eq!(manifest.bundles[0].item_types, vec!["incident_report"]);
-        assert_eq!(manifest.bundles[0].obligation_refs, vec!["art55_73"]);
+        assert_eq!(manifest.bundles.len(), 3);
+        let incident_entry = manifest
+            .bundles
+            .iter()
+            .find(|entry| entry.bundle_id == incident_bundle.bundle_id)
+            .unwrap();
+        let corrective_entry = manifest
+            .bundles
+            .iter()
+            .find(|entry| entry.bundle_id == corrective_bundle.bundle_id)
+            .unwrap();
+        let authority_entry = manifest
+            .bundles
+            .iter()
+            .find(|entry| entry.bundle_id == authority_bundle.bundle_id)
+            .unwrap();
+        assert_eq!(incident_entry.item_types, vec!["incident_report"]);
+        assert_eq!(incident_entry.obligation_refs, vec!["art55_73"]);
         assert!(
-            manifest.bundles[0]
+            incident_entry
                 .matched_rules
                 .contains(&"item_type:incident_report".to_string())
         );
         assert!(
-            manifest.bundles[0]
+            incident_entry
                 .matched_rules
                 .contains(&"obligation_ref:art55_73".to_string())
+        );
+        assert_eq!(corrective_entry.item_types, vec!["corrective_action"]);
+        assert_eq!(corrective_entry.obligation_refs, vec!["art20_73"]);
+        assert!(
+            corrective_entry
+                .matched_rules
+                .contains(&"item_type:corrective_action".to_string())
+        );
+        assert!(
+            corrective_entry
+                .matched_rules
+                .contains(&"obligation_ref:art20_73".to_string())
+        );
+        assert_eq!(authority_entry.item_types, vec!["authority_notification"]);
+        assert_eq!(authority_entry.obligation_refs, vec!["art73_notification"]);
+        assert!(
+            authority_entry
+                .matched_rules
+                .contains(&"item_type:authority_notification".to_string())
+        );
+        assert!(
+            authority_entry
+                .matched_rules
+                .contains(&"obligation_ref:art73_notification".to_string())
         );
 
         let obligation_ref: Option<String> = sqlx::query_scalar(
@@ -13394,6 +13815,242 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
         .await
         .unwrap();
         assert_eq!(obligation_ref.as_deref(), Some("art55_73"));
+
+        let corrective_obligation_ref: Option<String> = sqlx::query_scalar(
+            "SELECT obligation_ref
+             FROM evidence_items
+             WHERE bundle_id = ?
+             ORDER BY item_index
+             LIMIT 1",
+        )
+        .bind(&corrective_bundle.bundle_id)
+        .fetch_one(&db)
+        .await
+        .unwrap();
+        assert_eq!(corrective_obligation_ref.as_deref(), Some("art20_73"));
+
+        let authority_obligation_ref: Option<String> = sqlx::query_scalar(
+            "SELECT obligation_ref
+             FROM evidence_items
+             WHERE bundle_id = ?
+             ORDER BY item_index
+             LIMIT 1",
+        )
+        .bind(&authority_bundle.bundle_id)
+        .fetch_one(&db)
+        .await
+        .unwrap();
+        assert_eq!(authority_obligation_ref.as_deref(), Some("art73_notification"));
+    }
+
+    #[tokio::test]
+    async fn post_market_monitoring_pack_curates_runtime_monitoring_and_reporting_evidence() {
+        let state = test_state(DEFAULT_MAX_PAYLOAD_BYTES).await;
+        let app = build_router(state, DEFAULT_MAX_PAYLOAD_BYTES);
+
+        let runtime_bundle = create_bundle_response(
+            &app,
+            &CreateBundleRequest {
+                capture: SealableCaptureInput::V10(sample_event_with_profile(
+                    "system-monitoring",
+                    proof_layer_core::ActorRole::Provider,
+                    sample_event_with_system("system-monitoring").items,
+                    Some("runtime_logs"),
+                )),
+                artefacts: vec![InlineArtefact {
+                    name: "prompt.json".to_string(),
+                    content_type: "application/json".to_string(),
+                    data_base64: Base64::encode_string(br#"{"prompt":"hello"}"#),
+                }],
+            },
+        )
+        .await;
+
+        let monitoring_bundle = create_bundle_response(
+            &app,
+            &CreateBundleRequest {
+                capture: SealableCaptureInput::V10(sample_event_with_profile(
+                    "system-monitoring",
+                    proof_layer_core::ActorRole::Provider,
+                    vec![EvidenceItem::PostMarketMonitoring(
+                        proof_layer_core::schema::PostMarketMonitoringEvidence {
+                            plan_id: "pmm-42".to_string(),
+                            status: "active".to_string(),
+                            summary: Some("weekly drift review with escalation thresholds".to_string()),
+                            report_commitment: Some(
+                                "sha256:efefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefef"
+                                    .to_string(),
+                            ),
+                            metadata: serde_json::json!({"owner": "safety-ops"}),
+                        },
+                    )],
+                    Some("risk_mgmt"),
+                )),
+                artefacts: vec![InlineArtefact {
+                    name: "post-market-monitoring.json".to_string(),
+                    content_type: "application/json".to_string(),
+                    data_base64: Base64::encode_string(br#"{"plan_id":"pmm-42"}"#),
+                }],
+            },
+        )
+        .await;
+
+        let authority_bundle = create_bundle_response(
+            &app,
+            &CreateBundleRequest {
+                capture: SealableCaptureInput::V10(sample_event_with_profile(
+                    "system-monitoring",
+                    proof_layer_core::ActorRole::Provider,
+                    vec![EvidenceItem::AuthoritySubmission(
+                        proof_layer_core::schema::AuthoritySubmissionEvidence {
+                            submission_id: "sub-42".to_string(),
+                            authority: "eu_ai_office".to_string(),
+                            status: "submitted".to_string(),
+                            channel: Some("portal".to_string()),
+                            submitted_at: Some("2026-03-08T09:30:00Z".to_string()),
+                            document_commitment: Some(
+                                "sha256:f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0"
+                                    .to_string(),
+                            ),
+                            metadata: serde_json::json!({"case": "inc-42"}),
+                        },
+                    )],
+                    Some("risk_mgmt"),
+                )),
+                artefacts: vec![InlineArtefact {
+                    name: "authority-submission.json".to_string(),
+                    content_type: "application/json".to_string(),
+                    data_base64: Base64::encode_string(br#"{"submission_id":"sub-42"}"#),
+                }],
+            },
+        )
+        .await;
+
+        create_bundle_response(
+            &app,
+            &CreateBundleRequest {
+                capture: SealableCaptureInput::V10(sample_event_with_profile(
+                    "system-other",
+                    proof_layer_core::ActorRole::Provider,
+                    vec![EvidenceItem::PostMarketMonitoring(
+                        proof_layer_core::schema::PostMarketMonitoringEvidence {
+                            plan_id: "pmm-99".to_string(),
+                            status: "active".to_string(),
+                            summary: Some("unrelated system monitoring".to_string()),
+                            report_commitment: Some(
+                                "sha256:0101010101010101010101010101010101010101010101010101010101010101"
+                                    .to_string(),
+                            ),
+                            metadata: serde_json::json!({"owner": "other-team"}),
+                        },
+                    )],
+                    Some("risk_mgmt"),
+                )),
+                artefacts: vec![InlineArtefact {
+                    name: "other-monitoring.json".to_string(),
+                    content_type: "application/json".to_string(),
+                    data_base64: Base64::encode_string(br#"{"plan_id":"pmm-99"}"#),
+                }],
+            },
+        )
+        .await;
+
+        let pack_req = Request::builder()
+            .method("POST")
+            .uri("/v1/packs")
+            .header("content-type", "application/json")
+            .body(Body::from(
+                serde_json::to_vec(&CreatePackRequest {
+                    pack_type: "post_market_monitoring".to_string(),
+                    system_id: Some("system-monitoring".to_string()),
+                    from: None,
+                    to: None,
+                    bundle_format: default_pack_bundle_format(),
+                    disclosure_policy: None,
+                    disclosure_template: None,
+                })
+                .unwrap(),
+            ))
+            .unwrap();
+        let pack_res = app.clone().oneshot(pack_req).await.unwrap();
+        assert_eq!(pack_res.status(), StatusCode::CREATED);
+        let body = axum::body::to_bytes(pack_res.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let pack: PackSummaryResponse = serde_json::from_slice(&body).unwrap();
+
+        assert_eq!(pack.bundle_count, 3);
+        assert!(pack.bundle_ids.contains(&runtime_bundle.bundle_id));
+        assert!(pack.bundle_ids.contains(&monitoring_bundle.bundle_id));
+        assert!(pack.bundle_ids.contains(&authority_bundle.bundle_id));
+
+        let manifest_req = Request::builder()
+            .method("GET")
+            .uri(format!("/v1/packs/{}/manifest", pack.pack_id))
+            .body(Body::empty())
+            .unwrap();
+        let manifest_res = app.oneshot(manifest_req).await.unwrap();
+        assert_eq!(manifest_res.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(manifest_res.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let manifest: PackManifest = serde_json::from_slice(&body).unwrap();
+
+        assert_eq!(manifest.bundles.len(), 3);
+        let runtime_entry = manifest
+            .bundles
+            .iter()
+            .find(|entry| entry.bundle_id == runtime_bundle.bundle_id)
+            .unwrap();
+        let monitoring_entry = manifest
+            .bundles
+            .iter()
+            .find(|entry| entry.bundle_id == monitoring_bundle.bundle_id)
+            .unwrap();
+        let authority_entry = manifest
+            .bundles
+            .iter()
+            .find(|entry| entry.bundle_id == authority_bundle.bundle_id)
+            .unwrap();
+
+        assert_eq!(runtime_entry.item_types, vec!["llm_interaction"]);
+        assert_eq!(runtime_entry.obligation_refs, vec!["art12_19_26"]);
+        assert!(
+            runtime_entry
+                .matched_rules
+                .contains(&"retention_class:runtime_logs".to_string())
+        );
+        assert!(
+            runtime_entry
+                .matched_rules
+                .contains(&"obligation_ref:art12_19_26".to_string())
+        );
+
+        assert_eq!(monitoring_entry.item_types, vec!["post_market_monitoring"]);
+        assert_eq!(monitoring_entry.obligation_refs, vec!["art72"]);
+        assert!(
+            monitoring_entry
+                .matched_rules
+                .contains(&"item_type:post_market_monitoring".to_string())
+        );
+        assert!(
+            monitoring_entry
+                .matched_rules
+                .contains(&"obligation_ref:art72".to_string())
+        );
+
+        assert_eq!(authority_entry.item_types, vec!["authority_submission"]);
+        assert_eq!(authority_entry.obligation_refs, vec!["art73_submission"]);
+        assert!(
+            authority_entry
+                .matched_rules
+                .contains(&"item_type:authority_submission".to_string())
+        );
+        assert!(
+            authority_entry
+                .matched_rules
+                .contains(&"obligation_ref:art73_submission".to_string())
+        );
     }
 
     #[tokio::test]
@@ -13425,6 +14082,35 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
                     name: "provider-training-provenance.json".to_string(),
                     content_type: "application/json".to_string(),
                     data_base64: Base64::encode_string(br#"{"dataset":"provider"}"#),
+                }],
+            },
+        )
+        .await;
+
+        let provider_copyright_bundle = create_bundle_response(
+            &app,
+            &CreateBundleRequest {
+                capture: SealableCaptureInput::V10(sample_event_with_profile(
+                    "system-z",
+                    proof_layer_core::ActorRole::Provider,
+                    vec![EvidenceItem::CopyrightPolicy(
+                        proof_layer_core::schema::CopyrightPolicyEvidence {
+                            policy_ref: "copyright://policy/v1".to_string(),
+                            status: "published".to_string(),
+                            jurisdiction: Some("eu".to_string()),
+                            commitment: Some(
+                                "sha256:cacacacacacacacacacacacacacacacacacacacacacacacacacacacacacacaca"
+                                    .to_string(),
+                            ),
+                            metadata: serde_json::json!({"scope": "training data intake"}),
+                        },
+                    )],
+                    Some("gpai_documentation"),
+                )),
+                artefacts: vec![InlineArtefact {
+                    name: "provider-copyright-policy.json".to_string(),
+                    content_type: "application/json".to_string(),
+                    data_base64: Base64::encode_string(br#"{"policy":"provider"}"#),
                 }],
             },
         )
@@ -13483,8 +14169,165 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
             .unwrap();
         let pack: PackSummaryResponse = serde_json::from_slice(&body).unwrap();
 
+        assert_eq!(pack.bundle_count, 2);
+        assert_eq!(
+            pack.bundle_ids,
+            vec![
+                provider_bundle.bundle_id.clone(),
+                provider_copyright_bundle.bundle_id.clone()
+            ]
+        );
+
+        let manifest_req = Request::builder()
+            .method("GET")
+            .uri(format!("/v1/packs/{}/manifest", pack.pack_id))
+            .body(Body::empty())
+            .unwrap();
+        let manifest_res = app.oneshot(manifest_req).await.unwrap();
+        assert_eq!(manifest_res.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(manifest_res.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let manifest: PackManifest = serde_json::from_slice(&body).unwrap();
+
+        assert_eq!(manifest.bundles.len(), 2);
+        let training_entry = manifest
+            .bundles
+            .iter()
+            .find(|entry| entry.bundle_id == provider_bundle.bundle_id)
+            .unwrap();
+        let copyright_entry = manifest
+            .bundles
+            .iter()
+            .find(|entry| entry.bundle_id == provider_copyright_bundle.bundle_id)
+            .unwrap();
+        assert_eq!(training_entry.actor_role, "provider");
+        assert_eq!(training_entry.item_types, vec!["training_provenance"]);
+        assert_eq!(training_entry.obligation_refs, vec!["art53_annex_xi"]);
+        assert!(
+            training_entry
+                .matched_rules
+                .contains(&"actor_role:provider".to_string())
+        );
+        assert!(
+            training_entry
+                .matched_rules
+                .contains(&"item_type:training_provenance".to_string())
+        );
+        assert!(
+            training_entry
+                .matched_rules
+                .contains(&"obligation_ref:art53_annex_xi".to_string())
+        );
+        assert_eq!(copyright_entry.actor_role, "provider");
+        assert_eq!(copyright_entry.item_types, vec!["copyright_policy"]);
+        assert_eq!(copyright_entry.obligation_refs, vec!["art53_copyright"]);
+        assert!(
+            copyright_entry
+                .matched_rules
+                .contains(&"actor_role:provider".to_string())
+        );
+        assert!(
+            copyright_entry
+                .matched_rules
+                .contains(&"item_type:copyright_policy".to_string())
+        );
+        assert!(
+            copyright_entry
+                .matched_rules
+                .contains(&"obligation_ref:art53_copyright".to_string())
+        );
+    }
+
+    #[tokio::test]
+    async fn provider_governance_pack_curates_qms_records_for_provider_role() {
+        let state = test_state(DEFAULT_MAX_PAYLOAD_BYTES).await;
+        let app = build_router(state, DEFAULT_MAX_PAYLOAD_BYTES);
+
+        let provider_bundle = create_bundle_response(
+            &app,
+            &CreateBundleRequest {
+                capture: SealableCaptureInput::V10(sample_event_with_profile(
+                    "system-governance",
+                    proof_layer_core::ActorRole::Provider,
+                    vec![EvidenceItem::QmsRecord(
+                        proof_layer_core::schema::QmsRecordEvidence {
+                            record_id: "qms-77".to_string(),
+                            process: "release-approval".to_string(),
+                            status: "approved".to_string(),
+                            record_commitment: Some(
+                                "sha256:dadadadadadadadadadadadadadadadadadadadadadadadadadadadadadadada"
+                                    .to_string(),
+                            ),
+                            metadata: serde_json::json!({"owner": "quality"}),
+                        },
+                    )],
+                    Some("technical_doc"),
+                )),
+                artefacts: vec![InlineArtefact {
+                    name: "provider-qms-record.json".to_string(),
+                    content_type: "application/json".to_string(),
+                    data_base64: Base64::encode_string(br#"{"record":"provider"}"#),
+                }],
+            },
+        )
+        .await;
+
+        create_bundle_response(
+            &app,
+            &CreateBundleRequest {
+                capture: SealableCaptureInput::V10(sample_event_with_profile(
+                    "system-governance",
+                    proof_layer_core::ActorRole::Integrator,
+                    vec![EvidenceItem::QmsRecord(
+                        proof_layer_core::schema::QmsRecordEvidence {
+                            record_id: "qms-88".to_string(),
+                            process: "release-approval".to_string(),
+                            status: "approved".to_string(),
+                            record_commitment: Some(
+                                "sha256:edededededededededededededededededededededededededededededededed"
+                                    .to_string(),
+                            ),
+                            metadata: serde_json::json!({"owner": "partner-quality"}),
+                        },
+                    )],
+                    Some("technical_doc"),
+                )),
+                artefacts: vec![InlineArtefact {
+                    name: "integrator-qms-record.json".to_string(),
+                    content_type: "application/json".to_string(),
+                    data_base64: Base64::encode_string(br#"{"record":"integrator"}"#),
+                }],
+            },
+        )
+        .await;
+
+        let pack_req = Request::builder()
+            .method("POST")
+            .uri("/v1/packs")
+            .header("content-type", "application/json")
+            .body(Body::from(
+                serde_json::to_vec(&CreatePackRequest {
+                    pack_type: "provider_governance".to_string(),
+                    system_id: Some("system-governance".to_string()),
+                    from: None,
+                    to: None,
+                    bundle_format: default_pack_bundle_format(),
+                    disclosure_policy: None,
+                    disclosure_template: None,
+                })
+                .unwrap(),
+            ))
+            .unwrap();
+        let pack_res = app.clone().oneshot(pack_req).await.unwrap();
+        assert_eq!(pack_res.status(), StatusCode::CREATED);
+        let body = axum::body::to_bytes(pack_res.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let pack: PackSummaryResponse = serde_json::from_slice(&body).unwrap();
+
         assert_eq!(pack.bundle_count, 1);
-        assert_eq!(pack.bundle_ids, vec![provider_bundle.bundle_id]);
+        assert_eq!(pack.bundle_ids, vec![provider_bundle.bundle_id.clone()]);
 
         let manifest_req = Request::builder()
             .method("GET")
@@ -13500,8 +14343,13 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
 
         assert_eq!(manifest.bundles.len(), 1);
         assert_eq!(manifest.bundles[0].actor_role, "provider");
-        assert_eq!(manifest.bundles[0].item_types, vec!["training_provenance"]);
-        assert_eq!(manifest.bundles[0].obligation_refs, vec!["art53_annex_xi"]);
+        assert_eq!(manifest.bundles[0].item_types, vec!["qms_record"]);
+        assert_eq!(manifest.bundles[0].obligation_refs, vec!["art17"]);
+        assert!(
+            manifest.bundles[0]
+                .matched_rules
+                .contains(&"pack_type:provider_governance".to_string())
+        );
         assert!(
             manifest.bundles[0]
                 .matched_rules
@@ -13510,12 +14358,193 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
         assert!(
             manifest.bundles[0]
                 .matched_rules
-                .contains(&"item_type:training_provenance".to_string())
+                .contains(&"item_type:qms_record".to_string())
         );
         assert!(
             manifest.bundles[0]
                 .matched_rules
-                .contains(&"obligation_ref:art53_annex_xi".to_string())
+                .contains(&"obligation_ref:art17".to_string())
+        );
+    }
+
+    #[tokio::test]
+    async fn fundamental_rights_pack_requires_deployer_role_and_fria_flag() {
+        let state = test_state(DEFAULT_MAX_PAYLOAD_BYTES).await;
+        let app = build_router(state, DEFAULT_MAX_PAYLOAD_BYTES);
+
+        let mut deployer_fria_event = sample_event_with_profile(
+            "system-fria",
+            proof_layer_core::ActorRole::Deployer,
+            vec![EvidenceItem::FundamentalRightsAssessment(
+                proof_layer_core::schema::FundamentalRightsAssessmentEvidence {
+                    assessment_id: "fria-77".to_string(),
+                    status: "completed".to_string(),
+                    scope: Some("public-sector benefit eligibility".to_string()),
+                    report_commitment: Some(
+                        "sha256:ababcdcdababcdcdababcdcdababcdcdababcdcdababcdcdababcdcdababcdcd"
+                            .to_string(),
+                    ),
+                    metadata: serde_json::json!({"owner": "rights-review"}),
+                },
+            )],
+            Some("technical_doc"),
+        );
+        deployer_fria_event.compliance_profile = Some(proof_layer_core::ComplianceProfile {
+            intended_use: Some("Benefit eligibility screening".to_string()),
+            risk_tier: Some("high_risk".to_string()),
+            fria_required: Some(true),
+            deployment_context: Some("public_sector".to_string()),
+            ..proof_layer_core::ComplianceProfile::default()
+        });
+
+        let included_bundle = create_bundle_response(
+            &app,
+            &CreateBundleRequest {
+                capture: SealableCaptureInput::V10(deployer_fria_event),
+                artefacts: vec![InlineArtefact {
+                    name: "fria-report.json".to_string(),
+                    content_type: "application/json".to_string(),
+                    data_base64: Base64::encode_string(br#"{"assessment":"included"}"#),
+                }],
+            },
+        )
+        .await;
+
+        let mut deployer_non_fria_event = sample_event_with_profile(
+            "system-fria",
+            proof_layer_core::ActorRole::Deployer,
+            vec![EvidenceItem::FundamentalRightsAssessment(
+                proof_layer_core::schema::FundamentalRightsAssessmentEvidence {
+                    assessment_id: "fria-88".to_string(),
+                    status: "completed".to_string(),
+                    scope: Some("employment support".to_string()),
+                    report_commitment: Some(
+                        "sha256:bcbcdcdcbcbcdcdcbcbcdcdcbcbcdcdcbcbcdcdcbcbcdcdcbcbcdcdcbcbcdcdc"
+                            .to_string(),
+                    ),
+                    metadata: serde_json::json!({"owner": "rights-review"}),
+                },
+            )],
+            Some("technical_doc"),
+        );
+        deployer_non_fria_event.compliance_profile = Some(proof_layer_core::ComplianceProfile {
+            fria_required: Some(false),
+            ..proof_layer_core::ComplianceProfile::default()
+        });
+
+        create_bundle_response(
+            &app,
+            &CreateBundleRequest {
+                capture: SealableCaptureInput::V10(deployer_non_fria_event),
+                artefacts: vec![InlineArtefact {
+                    name: "fria-report-excluded.json".to_string(),
+                    content_type: "application/json".to_string(),
+                    data_base64: Base64::encode_string(br#"{"assessment":"excluded"}"#),
+                }],
+            },
+        )
+        .await;
+
+        let mut provider_fria_event = sample_event_with_profile(
+            "system-fria",
+            proof_layer_core::ActorRole::Provider,
+            vec![EvidenceItem::FundamentalRightsAssessment(
+                proof_layer_core::schema::FundamentalRightsAssessmentEvidence {
+                    assessment_id: "fria-99".to_string(),
+                    status: "completed".to_string(),
+                    scope: Some("provider review".to_string()),
+                    report_commitment: Some(
+                        "sha256:cdcdababcdcdababcdcdababcdcdababcdcdababcdcdababcdcdababcdcdabab"
+                            .to_string(),
+                    ),
+                    metadata: serde_json::json!({"owner": "provider-review"}),
+                },
+            )],
+            Some("technical_doc"),
+        );
+        provider_fria_event.compliance_profile = Some(proof_layer_core::ComplianceProfile {
+            fria_required: Some(true),
+            ..proof_layer_core::ComplianceProfile::default()
+        });
+
+        create_bundle_response(
+            &app,
+            &CreateBundleRequest {
+                capture: SealableCaptureInput::V10(provider_fria_event),
+                artefacts: vec![InlineArtefact {
+                    name: "provider-fria-report.json".to_string(),
+                    content_type: "application/json".to_string(),
+                    data_base64: Base64::encode_string(br#"{"assessment":"provider"}"#),
+                }],
+            },
+        )
+        .await;
+
+        let pack_req = Request::builder()
+            .method("POST")
+            .uri("/v1/packs")
+            .header("content-type", "application/json")
+            .body(Body::from(
+                serde_json::to_vec(&CreatePackRequest {
+                    pack_type: "fundamental_rights".to_string(),
+                    system_id: Some("system-fria".to_string()),
+                    from: None,
+                    to: None,
+                    bundle_format: default_pack_bundle_format(),
+                    disclosure_policy: None,
+                    disclosure_template: None,
+                })
+                .unwrap(),
+            ))
+            .unwrap();
+        let pack_res = app.clone().oneshot(pack_req).await.unwrap();
+        assert_eq!(pack_res.status(), StatusCode::CREATED);
+        let body = axum::body::to_bytes(pack_res.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let pack: PackSummaryResponse = serde_json::from_slice(&body).unwrap();
+
+        assert_eq!(pack.bundle_count, 1);
+        assert_eq!(pack.bundle_ids, vec![included_bundle.bundle_id.clone()]);
+
+        let manifest_req = Request::builder()
+            .method("GET")
+            .uri(format!("/v1/packs/{}/manifest", pack.pack_id))
+            .body(Body::empty())
+            .unwrap();
+        let manifest_res = app.oneshot(manifest_req).await.unwrap();
+        assert_eq!(manifest_res.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(manifest_res.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let manifest: PackManifest = serde_json::from_slice(&body).unwrap();
+
+        assert_eq!(manifest.bundles.len(), 1);
+        assert_eq!(manifest.bundles[0].actor_role, "deployer");
+        assert_eq!(
+            manifest.bundles[0].item_types,
+            vec!["fundamental_rights_assessment"]
+        );
+        assert_eq!(manifest.bundles[0].obligation_refs, vec!["art27"]);
+        assert!(
+            manifest.bundles[0]
+                .matched_rules
+                .contains(&"pack_type:fundamental_rights".to_string())
+        );
+        assert!(
+            manifest.bundles[0]
+                .matched_rules
+                .contains(&"actor_role:deployer".to_string())
+        );
+        assert!(
+            manifest.bundles[0]
+                .matched_rules
+                .contains(&"compliance_profile.fria_required:true".to_string())
+        );
+        assert!(
+            manifest.bundles[0]
+                .matched_rules
+                .contains(&"obligation_ref:art27".to_string())
         );
     }
 

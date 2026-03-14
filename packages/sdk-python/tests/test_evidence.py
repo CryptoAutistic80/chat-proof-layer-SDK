@@ -2,7 +2,9 @@ import unittest
 
 from proofsdk import (
     create_adversarial_test_request,
+    create_authority_submission_request,
     create_conformity_assessment_request,
+    create_instructions_for_use_request,
     create_data_governance_request,
     create_declaration_request,
     create_human_oversight_request,
@@ -42,6 +44,28 @@ class TestEvidenceBuilders(unittest.TestCase):
         self.assertTrue(request["capture"]["items"][0]["data"]["input_commitment"].startswith("sha256:"))
         self.assertEqual(request["artefacts"][0]["name"], "prompt.json")
         self.assertEqual(request["artefacts"][1]["name"], "response.json")
+
+    def test_instructions_for_use_request_emits_governance_evidence(self):
+        request = create_instructions_for_use_request(
+            key_id="kid-dev-01",
+            system_id="system-governance-1",
+            document_ref="docs://ifu/v1",
+            version_tag="1.0.0",
+            section="limitations",
+            document=b"read this first",
+            compliance_profile={
+                "intended_use": "Customer support triage",
+                "risk_tier": "high_risk",
+            },
+        )
+
+        self.assertEqual(request["capture"]["items"][0]["type"], "instructions_for_use")
+        self.assertEqual(
+            request["capture"]["compliance_profile"]["intended_use"],
+            "Customer support triage",
+        )
+        self.assertTrue(request["capture"]["items"][0]["data"]["commitment"].startswith("sha256:"))
+        self.assertEqual(request["artefacts"][0]["name"], "instructions_for_use.bin")
 
     def test_risk_assessment_request_emits_default_artefact(self):
         request = create_risk_assessment_request(
@@ -195,6 +219,28 @@ class TestEvidenceBuilders(unittest.TestCase):
         )
         self.assertEqual(request["artefacts"][0]["name"], "incident_report.json")
         self.assertEqual(request["artefacts"][1]["name"], "incident_report_record.txt")
+
+    def test_authority_submission_request_emits_reporting_evidence(self):
+        request = create_authority_submission_request(
+            key_id="kid-dev-01",
+            system_id="system-incident-2",
+            submission_id="sub-1",
+            authority="eu_ai_office",
+            status="submitted",
+            channel="portal",
+            submitted_at="2026-03-07T09:30:00Z",
+            document={"case_id": "inc-1", "article": "73"},
+            metadata={"owner": "legal-ops"},
+            retention_class="risk_mgmt",
+        )
+
+        self.assertEqual(request["capture"]["items"][0]["type"], "authority_submission")
+        self.assertEqual(request["capture"]["items"][0]["data"]["authority"], "eu_ai_office")
+        self.assertTrue(
+            request["capture"]["items"][0]["data"]["document_commitment"].startswith("sha256:")
+        )
+        self.assertEqual(request["artefacts"][0]["name"], "authority_submission.json")
+        self.assertEqual(request["artefacts"][1]["name"], "authority_submission_document.json")
 
     def test_model_evaluation_request_emits_gpai_evidence(self):
         request = create_model_evaluation_request(

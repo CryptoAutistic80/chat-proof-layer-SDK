@@ -95,7 +95,7 @@ export function SiteNav() {
             What You Can Share
           </NavLink>
           <NavLink to="/playground" className={linkClass(pathname.startsWith("/playground"))}>
-            Advanced Playground
+            SDK Playground
           </NavLink>
         </nav>
       ) : null}

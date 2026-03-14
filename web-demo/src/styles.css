@@ -1282,6 +1282,213 @@ pre {
   line-height: 1.6;
 }
 
+.sdk-lane-tabs {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.sdk-lane-tab {
+  display: grid;
+  gap: 6px;
+  padding: 18px;
+  text-align: left;
+  border: 1px solid var(--line);
+  border-radius: 22px;
+  background: rgba(255, 250, 242, 0.8);
+  color: var(--ink);
+}
+
+.sdk-lane-tab strong {
+  font-size: 1.02rem;
+}
+
+.sdk-lane-tab span:last-child {
+  color: var(--ink-soft);
+  line-height: 1.45;
+  font-size: 0.88rem;
+}
+
+.sdk-lane-tab.is-active {
+  border-color: rgba(184, 90, 50, 0.34);
+  background: rgba(184, 90, 50, 0.08);
+}
+
+.sdk-playground-grid {
+  display: grid;
+  grid-template-columns: minmax(320px, 0.9fr) minmax(0, 1.1fr);
+  gap: 18px;
+  align-items: start;
+}
+
+.sdk-scenario-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.sdk-scenario-card .section-label {
+  color: var(--green);
+}
+
+.script-panel {
+  min-height: 100%;
+}
+
+.code-source {
+  color: var(--ink-soft);
+  font-size: 0.82rem;
+  font-family: "IBM Plex Mono", "SFMono-Regular", monospace;
+}
+
+.script-block {
+  min-height: 520px;
+  border-color: rgba(24, 20, 16, 0.18);
+  background:
+    linear-gradient(180deg, rgba(20, 18, 15, 0.98), rgba(38, 29, 21, 0.98)),
+    linear-gradient(135deg, rgba(184, 90, 50, 0.2), transparent 40%);
+  color: #f8eee2;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+.script-block code {
+  display: block;
+  white-space: pre;
+}
+
+.playground-tab-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.bundle-run-list,
+.review-grid,
+.deeper-links-grid {
+  display: grid;
+  gap: 14px;
+}
+
+.bundle-run-card,
+.review-card,
+.deeper-link-card {
+  padding: 16px 18px;
+  border-radius: 20px;
+  border: 1px solid var(--line);
+  background: rgba(255, 251, 246, 0.82);
+}
+
+.bundle-run-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: start;
+}
+
+.bundle-run-head strong,
+.deeper-link-card strong,
+.review-card h4 {
+  display: block;
+  margin: 0 0 6px;
+  font-family: "Iowan Old Style", "Palatino Linotype", serif;
+  letter-spacing: -0.02em;
+}
+
+.bundle-run-head span:last-child {
+  color: var(--ink-soft);
+  font-family: "IBM Plex Mono", "SFMono-Regular", monospace;
+  font-size: 0.78rem;
+}
+
+.bundle-run-card p,
+.review-card p,
+.deeper-link-card span {
+  margin: 0;
+  color: var(--ink-soft);
+  line-height: 1.5;
+}
+
+.bundle-run-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.status-pill.is-good {
+  color: var(--green);
+  background: var(--green-soft);
+}
+
+.status-pill.is-warn {
+  color: var(--amber);
+  background: var(--amber-soft);
+}
+
+.status-pill.is-accent {
+  color: var(--accent-strong);
+  background: rgba(184, 90, 50, 0.1);
+}
+
+.status-pill.is-muted {
+  color: var(--ink-soft);
+  background: rgba(24, 20, 16, 0.06);
+}
+
+.review-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.review-list {
+  display: grid;
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.review-list li strong,
+.review-list li span {
+  display: block;
+}
+
+.review-list li span {
+  color: var(--ink-soft);
+  font-family: "IBM Plex Mono", "SFMono-Regular", monospace;
+  font-size: 0.78rem;
+}
+
+.review-list.compact {
+  list-style: disc;
+  padding-left: 18px;
+}
+
+.review-list.compact li {
+  color: var(--ink-soft);
+  line-height: 1.5;
+}
+
+.deeper-links-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.deeper-link-card {
+  display: grid;
+  gap: 8px;
+  text-decoration: none;
+  color: var(--ink);
+}
+
 @media (max-width: 1240px) {
   .capability-strip {
     grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -1289,6 +1496,7 @@ pre {
 
   .workspace,
   .route-grid,
+  .sdk-playground-grid,
   .snapshot-grid,
   .demo-layout,
   .docs-layout {
@@ -1302,7 +1510,10 @@ pre {
   .feature-steps,
   .use-cases-grid,
   .docs-index-grid,
-  .scenario-grid {
+  .scenario-grid,
+  .sdk-lane-tabs,
+  .review-grid,
+  .deeper-links-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
@@ -1330,7 +1541,10 @@ pre {
   .feature-steps,
   .use-cases-grid,
   .docs-index-grid,
-  .scenario-grid {
+  .scenario-grid,
+  .sdk-lane-tabs,
+  .review-grid,
+  .deeper-links-grid {
     grid-template-columns: 1fr;
   }
 

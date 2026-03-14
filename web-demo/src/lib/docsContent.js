@@ -109,19 +109,25 @@ export const DOC_PAGES = {
     ]
   },
   "playground": {
-    title: "Advanced playground",
+    title: "SDK playground",
     section: "Demo",
     audience: ["engineer", "operator"],
-    description: "Full controls for teams who want to inspect and tune the workflow in detail.",
+    description: "Prefab TypeScript, Python, and CLI examples that run through the real demo workflow.",
     intro:
-      "The advanced playground exposes the full configuration surface for teams who want more control than the guided flow provides.",
+      "The SDK playground is the main engineer-facing demo surface: pick a prefab TypeScript, Python, or CLI example, change a few inputs, run the real vault-backed flow, then inspect the resulting evidence without leaving the page.",
     blocks: [
       {
         heading: "What it includes",
         body: [
-          "Vault URL and auth controls.",
-          "Capture mode, provider, prompt, and configuration details.",
-          "Disclosure profile, bundle format, and related export settings."
+          "Language lanes for TypeScript, Python, and the Rust-native CLI path.",
+          "Read-only prefab scripts backed by constrained parameter forms rather than free-form code execution.",
+          "Inline result, compliance-review, and drill-down links to the deeper walkthrough pages."
+        ]
+      },
+      {
+        heading: "Where advanced controls live",
+        body: [
+          "The raw workflow console still exists at `/playground/advanced` for teams who want the full disclosure and export control surface."
         ]
       }
     ]

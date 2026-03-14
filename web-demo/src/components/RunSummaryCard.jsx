@@ -1,13 +1,18 @@
 import React from "react";
 import { humanCaptureMode } from "../lib/narrative";
 
-export function RunSummaryCard({ run, preset }) {
+export function RunSummaryCard({ run, preset, scenario }) {
+  const title = run?.scenarioLabel ?? scenario?.label ?? preset.label;
+  const outcomeLabel = run?.scenarioOutcomeLabel ?? scenario?.description ?? preset.outcomeLabel;
+  const disclosureProfile =
+    run?.disclosureProfile ?? scenario?.disclosureProfile ?? preset.disclosureProfile;
+
   return (
     <section className="panel">
       <div className="panel-head compact">
         <div>
           <span className="section-label">Current Run</span>
-          <h2>{preset.label}</h2>
+          <h2>{title}</h2>
         </div>
       </div>
       <div className="hero-summary run-summary-card">
@@ -17,11 +22,11 @@ export function RunSummaryCard({ run, preset }) {
         </div>
         <div>
           <strong>Scenario outcome</strong>
-          <span>{preset.outcomeLabel}</span>
+          <span>{outcomeLabel}</span>
         </div>
         <div>
           <strong>Sharing profile</strong>
-          <span>{run?.disclosureProfile ?? preset.disclosureProfile}</span>
+          <span>{disclosureProfile}</span>
         </div>
         <div>
           <strong>Proof record</strong>

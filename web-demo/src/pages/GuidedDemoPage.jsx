@@ -149,7 +149,7 @@ export function GuidedDemoPage() {
             {showAdvanced ? "Hide advanced options" : "Show advanced options"}
           </button>
           <button type="button" className="ghost-btn" onClick={() => navigate("/playground")}>
-            Open full playground
+            Open SDK playground
           </button>
         </div>
 

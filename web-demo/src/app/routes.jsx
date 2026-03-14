@@ -7,7 +7,8 @@ import { HomePage } from "../pages/HomePage";
 import { ProductPage } from "../pages/ProductPage";
 import { UseCasesPage } from "../pages/UseCasesPage";
 import { GuidedDemoPage } from "../pages/GuidedDemoPage";
-import { PlaygroundPage } from "../pages/PlaygroundPage";
+import { SDKPlaygroundPage } from "../pages/SDKPlaygroundPage";
+import { AdvancedPlaygroundPage } from "../pages/AdvancedPlaygroundPage";
 import { WhatHappenedPage } from "../pages/WhatHappenedPage";
 import { WhatYouCanProvePage } from "../pages/WhatYouCanProvePage";
 import { WhatYouCanSharePage } from "../pages/WhatYouCanSharePage";
@@ -24,7 +25,8 @@ export function AppRoutes() {
 
         <Route element={<DemoShell />}>
           <Route path="/guided" element={<GuidedDemoPage />} />
-          <Route path="/playground" element={<PlaygroundPage />} />
+          <Route path="/playground" element={<SDKPlaygroundPage />} />
+          <Route path="/playground/advanced" element={<AdvancedPlaygroundPage />} />
           <Route path="/what-happened" element={<WhatHappenedPage />} />
           <Route path="/what-happened/:bundleId" element={<WhatHappenedPage />} />
           <Route path="/what-you-can-prove" element={<WhatYouCanProvePage />} />

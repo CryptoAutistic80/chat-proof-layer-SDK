@@ -1,6 +1,7 @@
 {
   "name": "@proof-layer/sdk",
   "version": "0.1.0",
+  "description": "TypeScript SDK for Proof Layer tamper-evident AI evidence capture and verification.",
   "private": true,
   "type": "module",
   "main": "./dist/index.js",
@@ -67,6 +68,12 @@
   "engines": {
     "node": ">=20"
   },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/proof-layer/proof-layer-sdk.git",
+    "directory": "sdks/typescript"
+  },
+  "license": "MIT",
   "scripts": {
     "build:native": "node ./scripts/build-native.mjs",
     "build": "npm run build:native && tsc -p tsconfig.json",

@@ -1,0 +1,72 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://proof-layer.dev/schemas/schema_manifest.json",
+  "title": "Proof Layer Schema Manifest",
+  "release_version": "0.1.0",
+  "bundle_version": "1.0",
+  "canonicalization": "RFC8785-JCS",
+  "hash_algorithm": "SHA-256",
+  "default_bundle_root_algorithm": "pl-merkle-sha256-v4",
+  "supported_bundle_root_algorithms": [
+    "pl-merkle-sha256-v1",
+    "pl-merkle-sha256-v2",
+    "pl-merkle-sha256-v3",
+    "pl-merkle-sha256-v4"
+  ],
+  "package_formats": {
+    "bundle": "pl-bundle-pkg-v1",
+    "disclosure_bundle": "pl-bundle-disclosure-pkg-v1",
+    "evidence_pack": "pl-evidence-pack-v1"
+  },
+  "curation_profile": "pack-rules-v1",
+  "actor_roles": [
+    "provider",
+    "deployer",
+    "integrator",
+    "importer",
+    "distributor",
+    "authorized_representative",
+    "gpai_provider"
+  ],
+  "evidence_item_types": [
+    "llm_interaction",
+    "tool_call",
+    "retrieval",
+    "human_oversight",
+    "policy_decision",
+    "risk_assessment",
+    "data_governance",
+    "technical_doc",
+    "model_evaluation",
+    "adversarial_test",
+    "training_provenance",
+    "conformity_assessment",
+    "declaration",
+    "registration",
+    "literacy_attestation",
+    "instructions_for_use",
+    "qms_record",
+    "fundamental_rights_assessment",
+    "standards_alignment",
+    "post_market_monitoring",
+    "corrective_action",
+    "authority_notification",
+    "authority_submission",
+    "reporting_deadline",
+    "regulator_correspondence",
+    "downstream_documentation",
+    "copyright_policy",
+    "training_summary",
+    "incident_report"
+  ],
+  "pack_types": [
+    "conformity"
+  ],
+  "schema_files": {
+    "capture_event": "schemas/capture_event.schema.json",
+    "evidence_item": "schemas/evidence_item.schema.json",
+    "evidence_bundle": "schemas/evidence_bundle.schema.json",
+    "redacted_bundle": "schemas/redacted_bundle.schema.json",
+    "evidence_pack": "schemas/evidence_pack.schema.json"
+  }
+}

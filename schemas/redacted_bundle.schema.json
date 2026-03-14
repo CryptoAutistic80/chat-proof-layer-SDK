@@ -37,6 +37,9 @@
     "subject": {
       "$ref": "./capture_event.schema.json#/properties/subject"
     },
+    "compliance_profile": {
+      "$ref": "./capture_event.schema.json#/properties/compliance_profile"
+    },
     "context": {
       "$ref": "./capture_event.schema.json#/properties/context"
     },
@@ -65,6 +68,7 @@
           "$ref": "#/$defs/sha256Digest"
         },
         "bundle_root_algorithm": {
+          "type": "string",
           "enum": [
             "pl-merkle-sha256-v2",
             "pl-merkle-sha256-v3",
@@ -103,10 +107,45 @@
       }
     },
     "timestamp": {
-      "$ref": "./evidence_bundle.schema.json#/properties/timestamp"
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "token_base64"
+      ],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "minLength": 1
+        },
+        "provider": {
+          "type": "string",
+          "minLength": 1
+        },
+        "token_base64": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
     },
     "receipt": {
-      "$ref": "./evidence_bundle.schema.json#/properties/receipt"
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "body"
+      ],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "minLength": 1
+        },
+        "provider": {
+          "type": "string",
+          "minLength": 1
+        },
+        "body": true
+      }
     },
     "total_items": {
       "type": "integer",
@@ -127,18 +166,6 @@
         "required": [
           "index",
           "proof"
-        ],
-        "oneOf": [
-          {
-            "required": [
-              "item"
-            ]
-          },
-          {
-            "required": [
-              "field_redacted_item"
-            ]
-          }
         ],
         "properties": {
           "index": {
@@ -173,31 +200,7 @@
             "minimum": 0
           },
           "meta": {
-            "type": "object",
-            "additionalProperties": false,
-            "required": [
-              "name",
-              "digest",
-              "size",
-              "content_type"
-            ],
-            "properties": {
-              "name": {
-                "type": "string",
-                "minLength": 1
-              },
-              "digest": {
-                "$ref": "#/$defs/sha256Digest"
-              },
-              "size": {
-                "type": "integer",
-                "minimum": 0
-              },
-              "content_type": {
-                "type": "string",
-                "minLength": 1
-              }
-            }
+            "$ref": "#/$defs/artefactRef"
           },
           "proof": {
             "$ref": "#/$defs/inclusionProof"
@@ -211,58 +214,30 @@
       "type": "string",
       "pattern": "^sha256:[0-9a-f]{64}$"
     },
-    "fieldRedactedItem": {
+    "artefactRef": {
       "type": "object",
       "additionalProperties": false,
       "required": [
-        "item_type"
+        "name",
+        "digest",
+        "size",
+        "content_type"
       ],
       "properties": {
-        "item_type": {
+        "name": {
           "type": "string",
           "minLength": 1
         },
-        "revealed_data": {
-          "type": "object"
+        "digest": {
+          "$ref": "#/$defs/sha256Digest"
         },
-        "field_digests": {
-          "type": "object",
-          "additionalProperties": {
-            "$ref": "#/$defs/sha256Digest"
-          }
+        "size": {
+          "type": "integer",
+          "minimum": 0
         },
-        "redacted_fields": {
-          "type": "array",
-          "items": {
-            "type": "string",
-            "minLength": 1
-          }
-        },
-        "container_kinds": {
-          "type": "object",
-          "additionalProperties": {
-            "type": "string",
-            "enum": [
-              "object",
-              "array"
-            ]
-          }
-        },
-        "revealed_paths": {
-          "type": "object"
-        },
-        "path_digests": {
-          "type": "object",
-          "additionalProperties": {
-            "$ref": "#/$defs/sha256Digest"
-          }
-        },
-        "redacted_paths": {
-          "type": "array",
-          "items": {
-            "type": "string",
-            "minLength": 1
-          }
+        "content_type": {
+          "type": "string",
+          "minLength": 1
         }
       }
     },
@@ -314,6 +289,61 @@
           "type": "array",
           "items": {
             "$ref": "#/$defs/proofStep"
+          }
+        }
+      }
+    },
+    "fieldRedactedItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "item_type"
+      ],
+      "properties": {
+        "item_type": {
+          "type": "string",
+          "minLength": 1
+        },
+        "revealed_data": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "field_digests": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string",
+            "pattern": "^sha256:[0-9a-f]{64}$"
+          }
+        },
+        "redacted_fields": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "container_kinds": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "revealed_paths": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "path_digests": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string",
+            "pattern": "^sha256:[0-9a-f]{64}$"
+          }
+        },
+        "redacted_paths": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
           }
         }
       }

@@ -23,8 +23,8 @@ Current implemented surface:
 - Rust core for canonicalization, hashing, signing, verification, timestamping, transparency, disclosure, and backup-envelope crypto.
 - `proofctl` CLI for local keygen, create, verify, inspect, disclose, plus optional vault query/export/backup/restore flows.
 - `proof-service` optional self-hosted vault with SQLite storage, filesystem blobs, TLS, bearer auth, single-tenant enforcement, retention, legal holds, audit log, metrics, backup, restore layout export, and pack assembly.
-- TypeScript SDK in `sdks/typescript` published as `@proof-layer/sdk`.
-- Python SDK in `packages/sdk-python` published as `proof-layer-sdk-python`.
+- TypeScript SDK in `sdks/typescript`, packaged as `@proof-layer/sdk`.
+- Python SDK in `packages/sdk-python`, packaged as `proof-layer-sdk-python`.
 - Demo-only site in `web-demo` with landing pages, integrated docs, guided walkthroughs, and a playground wired to the local vault API.
 
 Important current limits:
@@ -480,6 +480,13 @@ Path: `sdks/typescript`
 - Provider wrappers for OpenAI, Anthropic, generic, and Vercel AI style flows
 - Evidence builders, disclosure-policy helpers, and OTel helpers
 
+Install surfaces today:
+
+- local repo build: `cd sdks/typescript && npm install && npm run build`
+- checked release tarball: install the OS-matching `.tgz` asset attached to `sdk-v*` GitHub releases
+
+The TypeScript package is still distributed as an OS-specific release tarball because it currently embeds a platform-specific native N-API module. Public npm publishing is intentionally not enabled until that native packaging model is generalized.
+
 Basic loop:
 
 ```bash
@@ -503,6 +510,11 @@ Path: `packages/sdk-python`
 - Local and vault clients
 - `ProofLayer` facade
 - Provider wrappers, decorators, disclosure-policy helpers, and OTel helpers
+
+Install surfaces today:
+
+- local repo build: `cd packages/sdk-python && python3 ./scripts/build_native.py`
+- checked release wheel: install the matching `.whl` asset attached to `sdk-v*` GitHub releases
 
 Basic loop:
 
@@ -533,6 +545,11 @@ GitHub Actions builds the same artifacts through:
 
 - `.github/workflows/sdk-artifacts.yml`
 - `.github/workflows/sdk-release.yml`
+
+Release contract checks:
+
+- `python3 ./scripts/generate_schemas.py --check`
+- `python3 ./scripts/check_release_metadata.py`
 
 ## Demo And Examples
 
@@ -599,6 +616,7 @@ JSON schemas:
 - `schemas/capture_event.schema.json`
 - `schemas/evidence_item.schema.json`
 - `schemas/evidence_pack.schema.json`
+- `schemas/schema_manifest.json`
 
 ## Current Caveats
 

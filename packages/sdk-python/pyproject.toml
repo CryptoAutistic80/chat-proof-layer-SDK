@@ -5,9 +5,14 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "proof-layer-sdk-python"
 version = "0.1.0"
-description = "PoC Python SDK for Proof Layer"
+description = "Python SDK for Proof Layer tamper-evident AI evidence capture and verification."
 readme = "README.md"
 requires-python = ">=3.10"
+license = "MIT"
+
+[project.urls]
+Homepage = "https://github.com/proof-layer/proof-layer-sdk"
+Repository = "https://github.com/proof-layer/proof-layer-sdk"
 
 [tool.setuptools]
 include-package-data = true

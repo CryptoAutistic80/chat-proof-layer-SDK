@@ -6,6 +6,15 @@ Integrity-sensitive helpers are backed by the local Rust NAPI module in `crates/
 The SDK now has typed builders and `ProofLayer` convenience methods for every evidence item currently implemented in Rust core: `llm_interaction`, `tool_call`, `retrieval`, `human_oversight`, `policy_decision`, `risk_assessment`, `data_governance`, `technical_doc`, `instructions_for_use`, `qms_record`, `fundamental_rights_assessment`, `standards_alignment`, `post_market_monitoring`, `corrective_action`, `authority_notification`, `authority_submission`, `reporting_deadline`, `regulator_correspondence`, `model_evaluation`, `adversarial_test`, `training_provenance`, `downstream_documentation`, `copyright_policy`, `training_summary`, `literacy_attestation`, `incident_report`, `conformity_assessment`, `declaration`, and `registration`.
 The GPAI helpers default `model_evaluation`, `adversarial_test`, and `training_provenance` captures to the vault's `gpai_documentation` retention class.
 
+## Install
+
+Use one of these paths:
+
+- local repo build: `npm install && npm run build`
+- checked release tarball: install the OS-matching `.tgz` asset attached to a `sdk-v*` GitHub release
+
+The package is not published to the public npm registry yet because the current release artifact embeds a platform-specific native N-API module.
+
 ## Build Native Bindings
 
 ```bash

@@ -2,9 +2,9 @@ use crate::{
     canon::{CanonError, canonicalize_value},
     merkle::{InclusionProof, MerkleError, build_inclusion_proof, verify_inclusion_proof},
     schema::{
-        Actor, ArtefactRef, BUNDLE_VERSION, EvidenceContext, EvidenceItem, Integrity, Policy,
-        ProofBundle, Subject, TimestampToken, TransparencyReceipt, artefact_commitment_digest,
-        field_commitment_digest, item_commitment_digest_for_algorithm,
+        Actor, ArtefactRef, BUNDLE_VERSION, ComplianceProfile, EvidenceContext, EvidenceItem,
+        Integrity, Policy, ProofBundle, Subject, TimestampToken, TransparencyReceipt,
+        artefact_commitment_digest, field_commitment_digest, item_commitment_digest_for_algorithm,
         item_commitment_digest_from_fields, item_commitment_digest_from_paths,
         item_path_commitment_digests, validate_bundle_integrity_fields,
     },
@@ -59,6 +59,8 @@ pub struct RedactedBundle {
     pub created_at: String,
     pub actor: Actor,
     pub subject: Subject,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub compliance_profile: Option<ComplianceProfile>,
     #[serde(default)]
     pub context: EvidenceContext,
     #[serde(default)]
@@ -286,6 +288,7 @@ pub fn redact_bundle_with_field_redactions(
         created_at: bundle.created_at.clone(),
         actor: bundle.actor.clone(),
         subject: bundle.subject.clone(),
+        compliance_profile: bundle.compliance_profile.clone(),
         context: bundle.context.clone(),
         policy: bundle.policy.clone(),
         integrity: bundle.integrity.clone(),
@@ -460,17 +463,20 @@ fn normalize_indices(
 }
 
 fn commitment_header_projection(bundle: &RedactedBundle) -> serde_json::Value {
-    json!({
-        "bundle_version": bundle.bundle_version,
-        "bundle_id": bundle.bundle_id,
-        "created_at": bundle.created_at,
-        "actor": bundle.actor,
-        "subject": bundle.subject,
-        "context": bundle.context,
-        "policy": bundle.policy,
-        "item_count": bundle.total_items,
-        "artefact_count": bundle.total_artefacts,
-    })
+    let mut header = serde_json::Map::new();
+    header.insert("bundle_version".to_string(), json!(bundle.bundle_version));
+    header.insert("bundle_id".to_string(), json!(bundle.bundle_id));
+    header.insert("created_at".to_string(), json!(bundle.created_at));
+    header.insert("actor".to_string(), json!(bundle.actor));
+    header.insert("subject".to_string(), json!(bundle.subject));
+    if let Some(profile) = &bundle.compliance_profile {
+        header.insert("compliance_profile".to_string(), json!(profile));
+    }
+    header.insert("context".to_string(), json!(bundle.context));
+    header.insert("policy".to_string(), json!(bundle.policy));
+    header.insert("item_count".to_string(), json!(bundle.total_items));
+    header.insert("artefact_count".to_string(), json!(bundle.total_artefacts));
+    Value::Object(header)
 }
 
 fn supports_selective_disclosure(algorithm: &str) -> bool {
@@ -920,6 +926,7 @@ mod tests {
                     deployment_id: None,
                     version: Some("2026.03".to_string()),
                 },
+                compliance_profile: None,
                 context: EvidenceContext {
                     provider: Some("anthropic".to_string()),
                     model: Some("claude-sonnet-4-6".to_string()),

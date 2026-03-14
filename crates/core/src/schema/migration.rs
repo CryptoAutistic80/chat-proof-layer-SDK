@@ -22,6 +22,7 @@ pub fn capture_input_v01_to_event(old: v01::CaptureInput) -> CaptureEvent {
             deployment_id: None,
             version: None,
         },
+        compliance_profile: None,
         context: EvidenceContext::from_v01_capture(&old.model, &old.trace),
         items: vec![EvidenceItem::LlmInteraction(LlmInteractionEvidence {
             provider: old.model.provider,
@@ -57,6 +58,7 @@ pub fn migrate_v01_to_v10(old: v01::ProofBundle) -> EvidenceBundle {
         created_at: old.created_at,
         actor: event.actor,
         subject: event.subject,
+        compliance_profile: event.compliance_profile,
         context: event.context,
         items: event.items,
         artefacts: old.artefacts,

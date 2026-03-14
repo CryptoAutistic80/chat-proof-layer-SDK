@@ -9,7 +9,10 @@ Machine-readable schemas:
 
 - `schemas/evidence_bundle.schema.json`
 - `schemas/redacted_bundle.schema.json`
+- `schemas/schema_manifest.json`
 - `docs/proof_bundle.schema.json` is a compatibility wrapper that points at `schemas/evidence_bundle.schema.json`
+
+Schema artifacts are generated from the checked-in contract tooling. Re-run `python3 ./scripts/generate_schemas.py` after changing bundle, evidence-item, or pack-manifest shapes, and use `python3 ./scripts/generate_schemas.py --check` in CI or release validation.
 
 ## Top-Level Bundle Shape
 

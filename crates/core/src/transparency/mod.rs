@@ -1438,6 +1438,7 @@ mod tests {
             },
             subject: crate::schema::Subject::default(),
             context: crate::schema::EvidenceContext::default(),
+            compliance_profile: None,
             items: Vec::new(),
             artefacts: Vec::new(),
             policy: crate::schema::Policy::default(),

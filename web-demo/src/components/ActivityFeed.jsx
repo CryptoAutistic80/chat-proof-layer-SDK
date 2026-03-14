@@ -18,7 +18,7 @@ export function ActivityFeed({ activityLog }) {
       <div className="panel-head compact">
         <div>
           <span className="section-label">Activity</span>
-          <h2>Recent actions</h2>
+          <h2>Recent workflow steps</h2>
         </div>
       </div>
       <ul className="activity-list">

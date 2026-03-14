@@ -14,7 +14,7 @@ export function DisclosureStatusCard({ run }) {
       <div className="panel-head compact">
         <div>
           <span className="section-label">Disclosure</span>
-          <h2>Policy outcome</h2>
+          <h2>What could be shared</h2>
         </div>
       </div>
       <div className="status-stack">
@@ -23,8 +23,8 @@ export function DisclosureStatusCard({ run }) {
           <p>
             {preview
               ? itemCount > 0 || artefactCount > 0
-                ? `${itemCount} items and ${artefactCount} artefacts survive the current disclosure profile.`
-                : "No disclosure output for this profile on the current run."
+                ? `${itemCount} items and ${artefactCount} artefacts are included under the selected sharing profile.`
+                : "This sharing profile does not reveal any content for this proof record."
               : "Run or reload a bundle to inspect disclosure decisions."}
           </p>
         </article>

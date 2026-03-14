@@ -42,7 +42,11 @@
           "enum": [
             "provider",
             "deployer",
-            "integrator"
+            "integrator",
+            "importer",
+            "distributor",
+            "authorized_representative",
+            "gpai_provider"
           ]
         },
         "organization_id": {
@@ -77,6 +81,37 @@
         }
       }
     },
+    "compliance_profile": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "intended_use": {
+          "type": "string"
+        },
+        "prohibited_practice_screening": {
+          "type": "string"
+        },
+        "risk_tier": {
+          "type": "string"
+        },
+        "high_risk_domain": {
+          "type": "string"
+        },
+        "gpai_status": {
+          "type": "string"
+        },
+        "systemic_risk": {
+          "type": "boolean"
+        },
+        "fria_required": {
+          "type": "boolean"
+        },
+        "deployment_context": {
+          "type": "string"
+        },
+        "metadata": true
+      }
+    },
     "context": {
       "type": "object",
       "additionalProperties": false,
@@ -89,8 +124,7 @@
         },
         "parameters": true,
         "trace_commitment": {
-          "type": "string",
-          "pattern": "^sha256:[0-9a-f]{64}$"
+          "$ref": "#/$defs/sha256Digest"
         },
         "otel_genai_semconv_version": {
           "type": "string"

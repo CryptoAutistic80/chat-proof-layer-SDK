@@ -15,6 +15,11 @@ class TestProofLayer(unittest.TestCase):
             signing_key_pem=signing_key_pem,
             key_id="kid-dev-01",
             system_id="system-123",
+            compliance_profile={
+                "intended_use": "Internal reviewer assistance",
+                "risk_tier": "limited_risk",
+                "gpai_status": "downstream_integrator",
+            },
             issuer="proof-layer-python",
             app_id="python-sdk",
             env="test",
@@ -30,6 +35,10 @@ class TestProofLayer(unittest.TestCase):
 
         self.assertEqual(result["bundle"]["bundle_version"], "1.0")
         self.assertEqual(result["bundle"]["subject"]["system_id"], "system-123")
+        self.assertEqual(
+            result["bundle"]["compliance_profile"]["intended_use"],
+            "Internal reviewer assistance",
+        )
         self.assertEqual(result["bundle"]["integrity"]["signature"]["kid"], "kid-dev-01")
 
     def test_disclose_returns_a_locally_verifiable_redacted_bundle(self):
@@ -299,6 +308,25 @@ class TestProofLayer(unittest.TestCase):
         self.assertEqual(result["bundle"]["items"][0]["type"], "risk_assessment")
         self.assertEqual(result["bundle"]["subject"]["system_id"], "system-risk-42")
 
+    def test_capture_instructions_for_use_seals_governance_evidence(self):
+        signing_key_pem = (GOLDEN_DIR / "signing_key.txt").read_text(encoding="utf-8")
+        proof_layer = ProofLayer(
+            signing_key_pem=signing_key_pem,
+            key_id="kid-dev-01",
+            system_id="system-governance-42",
+        )
+
+        result = proof_layer.capture_instructions_for_use(
+            document_ref="docs://ifu/v1",
+            version_tag="1.0.0",
+            section="limitations",
+            document=b"read this first",
+        )
+
+        self.assertEqual(result["bundle"]["items"][0]["type"], "instructions_for_use")
+        self.assertEqual(result["bundle"]["subject"]["system_id"], "system-governance-42")
+        self.assertTrue(result["bundle"]["items"][0]["data"]["commitment"].startswith("sha256:"))
+
     def test_capture_retrieval_seals_retrieval_evidence(self):
         signing_key_pem = (GOLDEN_DIR / "signing_key.txt").read_text(encoding="utf-8")
         proof_layer = ProofLayer(
@@ -359,6 +387,52 @@ class TestProofLayer(unittest.TestCase):
 
         self.assertEqual(result["bundle"]["items"][0]["type"], "incident_report")
         self.assertEqual(result["bundle"]["subject"]["system_id"], "system-incident-42")
+        self.assertTrue(
+            result["bundle"]["items"][0]["data"]["report_commitment"].startswith("sha256:")
+        )
+
+    def test_capture_post_market_monitoring_seals_monitoring_evidence(self):
+        signing_key_pem = (GOLDEN_DIR / "signing_key.txt").read_text(encoding="utf-8")
+        proof_layer = ProofLayer(
+            signing_key_pem=signing_key_pem,
+            key_id="kid-dev-01",
+            system_id="system-monitoring-42",
+        )
+
+        result = proof_layer.capture_post_market_monitoring(
+            plan_id="pmm-42",
+            status="active",
+            summary="weekly drift review with escalation thresholds",
+            report={"owner": "safety-ops", "cadence": "weekly"},
+            retention_class="risk_mgmt",
+        )
+
+        self.assertEqual(result["bundle"]["items"][0]["type"], "post_market_monitoring")
+        self.assertEqual(result["bundle"]["subject"]["system_id"], "system-monitoring-42")
+        self.assertTrue(
+            result["bundle"]["items"][0]["data"]["report_commitment"].startswith("sha256:")
+        )
+
+    def test_capture_authority_notification_seals_reporting_evidence(self):
+        signing_key_pem = (GOLDEN_DIR / "signing_key.txt").read_text(encoding="utf-8")
+        proof_layer = ProofLayer(
+            signing_key_pem=signing_key_pem,
+            key_id="kid-dev-01",
+            system_id="system-incident-43",
+        )
+
+        result = proof_layer.capture_authority_notification(
+            notification_id="notif-42",
+            authority="eu_ai_office",
+            status="drafted",
+            incident_id="inc-42",
+            due_at="2026-03-08T12:00:00Z",
+            report={"incident": "inc-42", "severity": "serious"},
+            retention_class="risk_mgmt",
+        )
+
+        self.assertEqual(result["bundle"]["items"][0]["type"], "authority_notification")
+        self.assertEqual(result["bundle"]["subject"]["system_id"], "system-incident-43")
         self.assertTrue(
             result["bundle"]["items"][0]["data"]["report_commitment"].startswith("sha256:")
         )

@@ -7,7 +7,7 @@ export function RecentRunsRail({ runs }) {
       <div className="panel-head compact">
         <div>
           <span className="section-label">Recent runs</span>
-          <h2>Current system</h2>
+          <h2>Other proof records for this system</h2>
         </div>
       </div>
       {runs.length === 0 ? (
@@ -21,9 +21,9 @@ export function RecentRunsRail({ runs }) {
                 <span>{run.actor_role} · {run.assurance_level}</span>
               </div>
               <div className="recent-run-links">
-                <NavLink to={`/results/${run.bundle_id}`}>Results</NavLink>
-                <NavLink to={`/examination/${run.bundle_id}`}>Examination</NavLink>
-                <NavLink to={`/exports/${run.bundle_id}`}>Exports</NavLink>
+                <NavLink to={`/what-happened/${run.bundle_id}`}>What happened</NavLink>
+                <NavLink to={`/what-you-can-prove/${run.bundle_id}`}>What you can prove</NavLink>
+                <NavLink to={`/what-you-can-share/${run.bundle_id}`}>What you can share</NavLink>
               </div>
             </li>
           ))}

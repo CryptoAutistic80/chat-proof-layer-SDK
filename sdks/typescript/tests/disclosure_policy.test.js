@@ -54,14 +54,33 @@ test("createDisclosurePolicyTemplate builds runtime minimum selectors", () => {
 test("createDisclosurePolicy merges template groups with explicit selectors", () => {
   const policy = createDisclosurePolicy({
     name: "custom_incident",
-    allowedItemTypes: ["incident_report"],
+    allowedItemTypes: ["authority_submission"],
     redactionGroups: ["commitments", "metadata"],
     redactedFieldsByItemType: {
-      incident_report: ["/summary"]
+      authority_submission: ["/metadata/submission_case_id"]
     }
   });
 
   assert.deepEqual(policy.redacted_fields_by_item_type, {
-    incident_report: ["report_commitment", "/metadata", "/summary"]
+    authority_submission: [
+      "document_commitment",
+      "/metadata",
+      "/metadata/submission_case_id"
+    ]
   });
+});
+
+test("createDisclosurePolicyTemplate incident summary includes authority-reporting item types", () => {
+  const policy = createDisclosurePolicyTemplate("incident_summary");
+
+  assert.deepEqual(policy.allowed_item_types, [
+    "incident_report",
+    "authority_notification",
+    "authority_submission",
+    "reporting_deadline",
+    "regulator_correspondence",
+    "risk_assessment",
+    "policy_decision",
+    "human_oversight"
+  ]);
 });

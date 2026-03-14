@@ -14,20 +14,12 @@
         "data": {
           "type": "object",
           "additionalProperties": false,
-          "required": [
-            "provider",
-            "model",
-            "input_commitment",
-            "output_commitment"
-          ],
           "properties": {
             "provider": {
-              "type": "string",
-              "minLength": 1
+              "type": "string"
             },
             "model": {
-              "type": "string",
-              "minLength": 1
+              "type": "string"
             },
             "parameters": true,
             "input_commitment": {
@@ -43,22 +35,7 @@
               "$ref": "#/$defs/sha256Digest"
             },
             "token_usage": {
-              "type": "object",
-              "additionalProperties": false,
-              "properties": {
-                "input_tokens": {
-                  "type": "integer",
-                  "minimum": 0
-                },
-                "output_tokens": {
-                  "type": "integer",
-                  "minimum": 0
-                },
-                "total_tokens": {
-                  "type": "integer",
-                  "minimum": 0
-                }
-              }
+              "$ref": "#/$defs/tokenUsage"
             },
             "latency_ms": {
               "type": "integer",
@@ -70,251 +47,13 @@
             "trace_semconv_version": {
               "type": "string"
             }
-          }
-        }
-      },
-      "required": [
-        "type",
-        "data"
-      ]
-    },
-    {
-      "type": "object",
-      "additionalProperties": false,
-      "properties": {
-        "type": {
-          "const": "conformity_assessment"
-        },
-        "data": {
-          "type": "object",
-          "additionalProperties": false,
+          },
           "required": [
-            "assessment_id",
-            "procedure",
-            "status"
-          ],
-          "properties": {
-            "assessment_id": {
-              "type": "string",
-              "minLength": 1
-            },
-            "procedure": {
-              "type": "string",
-              "minLength": 1
-            },
-            "status": {
-              "type": "string",
-              "minLength": 1
-            },
-            "report_commitment": {
-              "$ref": "#/$defs/sha256Digest"
-            },
-            "metadata": true
-          }
-        }
-      },
-      "required": [
-        "type",
-        "data"
-      ]
-    },
-    {
-      "type": "object",
-      "additionalProperties": false,
-      "properties": {
-        "type": {
-          "const": "declaration"
-        },
-        "data": {
-          "type": "object",
-          "additionalProperties": false,
-          "required": [
-            "declaration_id",
-            "jurisdiction",
-            "status"
-          ],
-          "properties": {
-            "declaration_id": {
-              "type": "string",
-              "minLength": 1
-            },
-            "jurisdiction": {
-              "type": "string",
-              "minLength": 1
-            },
-            "status": {
-              "type": "string",
-              "minLength": 1
-            },
-            "document_commitment": {
-              "$ref": "#/$defs/sha256Digest"
-            },
-            "metadata": true
-          }
-        }
-      },
-      "required": [
-        "type",
-        "data"
-      ]
-    },
-    {
-      "type": "object",
-      "additionalProperties": false,
-      "properties": {
-        "type": {
-          "const": "registration"
-        },
-        "data": {
-          "type": "object",
-          "additionalProperties": false,
-          "required": [
-            "registration_id",
-            "authority",
-            "status"
-          ],
-          "properties": {
-            "registration_id": {
-              "type": "string",
-              "minLength": 1
-            },
-            "authority": {
-              "type": "string",
-              "minLength": 1
-            },
-            "status": {
-              "type": "string",
-              "minLength": 1
-            },
-            "receipt_commitment": {
-              "$ref": "#/$defs/sha256Digest"
-            },
-            "metadata": true
-          }
-        }
-      },
-      "required": [
-        "type",
-        "data"
-      ]
-    },
-    {
-      "type": "object",
-      "additionalProperties": false,
-      "properties": {
-        "type": {
-          "const": "model_evaluation"
-        },
-        "data": {
-          "type": "object",
-          "additionalProperties": false,
-          "required": [
-            "evaluation_id",
-            "benchmark",
-            "status"
-          ],
-          "properties": {
-            "evaluation_id": {
-              "type": "string",
-              "minLength": 1
-            },
-            "benchmark": {
-              "type": "string",
-              "minLength": 1
-            },
-            "status": {
-              "type": "string",
-              "minLength": 1
-            },
-            "summary": {
-              "type": "string"
-            },
-            "report_commitment": {
-              "$ref": "#/$defs/sha256Digest"
-            },
-            "metadata": true
-          }
-        }
-      },
-      "required": [
-        "type",
-        "data"
-      ]
-    },
-    {
-      "type": "object",
-      "additionalProperties": false,
-      "properties": {
-        "type": {
-          "const": "adversarial_test"
-        },
-        "data": {
-          "type": "object",
-          "additionalProperties": false,
-          "required": [
-            "test_id",
-            "focus",
-            "status"
-          ],
-          "properties": {
-            "test_id": {
-              "type": "string",
-              "minLength": 1
-            },
-            "focus": {
-              "type": "string",
-              "minLength": 1
-            },
-            "status": {
-              "type": "string",
-              "minLength": 1
-            },
-            "finding_severity": {
-              "type": "string"
-            },
-            "report_commitment": {
-              "$ref": "#/$defs/sha256Digest"
-            },
-            "metadata": true
-          }
-        }
-      },
-      "required": [
-        "type",
-        "data"
-      ]
-    },
-    {
-      "type": "object",
-      "additionalProperties": false,
-      "properties": {
-        "type": {
-          "const": "training_provenance"
-        },
-        "data": {
-          "type": "object",
-          "additionalProperties": false,
-          "required": [
-            "dataset_ref",
-            "stage"
-          ],
-          "properties": {
-            "dataset_ref": {
-              "type": "string",
-              "minLength": 1
-            },
-            "stage": {
-              "type": "string",
-              "minLength": 1
-            },
-            "lineage_ref": {
-              "type": "string"
-            },
-            "record_commitment": {
-              "$ref": "#/$defs/sha256Digest"
-            },
-            "metadata": true
-          }
+            "provider",
+            "model",
+            "input_commitment",
+            "output_commitment"
+          ]
         }
       },
       "required": [
@@ -332,13 +71,9 @@
         "data": {
           "type": "object",
           "additionalProperties": false,
-          "required": [
-            "tool_name"
-          ],
           "properties": {
             "tool_name": {
-              "type": "string",
-              "minLength": 1
+              "type": "string"
             },
             "input_commitment": {
               "$ref": "#/$defs/sha256Digest"
@@ -347,7 +82,10 @@
               "$ref": "#/$defs/sha256Digest"
             },
             "metadata": true
-          }
+          },
+          "required": [
+            "tool_name"
+          ]
         }
       },
       "required": [
@@ -365,14 +103,9 @@
         "data": {
           "type": "object",
           "additionalProperties": false,
-          "required": [
-            "corpus",
-            "result_commitment"
-          ],
           "properties": {
             "corpus": {
-              "type": "string",
-              "minLength": 1
+              "type": "string"
             },
             "result_commitment": {
               "$ref": "#/$defs/sha256Digest"
@@ -381,7 +114,11 @@
               "$ref": "#/$defs/sha256Digest"
             },
             "metadata": true
-          }
+          },
+          "required": [
+            "corpus",
+            "result_commitment"
+          ]
         }
       },
       "required": [
@@ -399,13 +136,9 @@
         "data": {
           "type": "object",
           "additionalProperties": false,
-          "required": [
-            "action"
-          ],
           "properties": {
             "action": {
-              "type": "string",
-              "minLength": 1
+              "type": "string"
             },
             "reviewer": {
               "type": "string"
@@ -413,7 +146,10 @@
             "notes_commitment": {
               "$ref": "#/$defs/sha256Digest"
             }
-          }
+          },
+          "required": [
+            "action"
+          ]
         }
       },
       "required": [
@@ -431,24 +167,22 @@
         "data": {
           "type": "object",
           "additionalProperties": false,
-          "required": [
-            "policy_name",
-            "decision"
-          ],
           "properties": {
             "policy_name": {
-              "type": "string",
-              "minLength": 1
+              "type": "string"
             },
             "decision": {
-              "type": "string",
-              "minLength": 1
+              "type": "string"
             },
             "rationale_commitment": {
               "$ref": "#/$defs/sha256Digest"
             },
             "metadata": true
-          }
+          },
+          "required": [
+            "policy_name",
+            "decision"
+          ]
         }
       },
       "required": [
@@ -466,29 +200,26 @@
         "data": {
           "type": "object",
           "additionalProperties": false,
-          "required": [
-            "risk_id",
-            "severity",
-            "status"
-          ],
           "properties": {
             "risk_id": {
-              "type": "string",
-              "minLength": 1
+              "type": "string"
             },
             "severity": {
-              "type": "string",
-              "minLength": 1
+              "type": "string"
             },
             "status": {
-              "type": "string",
-              "minLength": 1
+              "type": "string"
             },
             "summary": {
               "type": "string"
             },
             "metadata": true
-          }
+          },
+          "required": [
+            "risk_id",
+            "severity",
+            "status"
+          ]
         }
       },
       "required": [
@@ -506,19 +237,18 @@
         "data": {
           "type": "object",
           "additionalProperties": false,
-          "required": [
-            "decision"
-          ],
           "properties": {
             "decision": {
-              "type": "string",
-              "minLength": 1
+              "type": "string"
             },
             "dataset_ref": {
               "type": "string"
             },
             "metadata": true
-          }
+          },
+          "required": [
+            "decision"
+          ]
         }
       },
       "required": [
@@ -536,13 +266,9 @@
         "data": {
           "type": "object",
           "additionalProperties": false,
-          "required": [
-            "document_ref"
-          ],
           "properties": {
             "document_ref": {
-              "type": "string",
-              "minLength": 1
+              "type": "string"
             },
             "section": {
               "type": "string"
@@ -550,7 +276,237 @@
             "commitment": {
               "$ref": "#/$defs/sha256Digest"
             }
-          }
+          },
+          "required": [
+            "document_ref"
+          ]
+        }
+      },
+      "required": [
+        "type",
+        "data"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "model_evaluation"
+        },
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "evaluation_id": {
+              "type": "string"
+            },
+            "benchmark": {
+              "type": "string"
+            },
+            "status": {
+              "type": "string"
+            },
+            "summary": {
+              "type": "string"
+            },
+            "report_commitment": {
+              "$ref": "#/$defs/sha256Digest"
+            },
+            "metadata": true
+          },
+          "required": [
+            "evaluation_id",
+            "benchmark",
+            "status"
+          ]
+        }
+      },
+      "required": [
+        "type",
+        "data"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "adversarial_test"
+        },
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "test_id": {
+              "type": "string"
+            },
+            "focus": {
+              "type": "string"
+            },
+            "status": {
+              "type": "string"
+            },
+            "finding_severity": {
+              "type": "string"
+            },
+            "report_commitment": {
+              "$ref": "#/$defs/sha256Digest"
+            },
+            "metadata": true
+          },
+          "required": [
+            "test_id",
+            "focus",
+            "status"
+          ]
+        }
+      },
+      "required": [
+        "type",
+        "data"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "training_provenance"
+        },
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "dataset_ref": {
+              "type": "string"
+            },
+            "stage": {
+              "type": "string"
+            },
+            "lineage_ref": {
+              "type": "string"
+            },
+            "record_commitment": {
+              "$ref": "#/$defs/sha256Digest"
+            },
+            "metadata": true
+          },
+          "required": [
+            "dataset_ref",
+            "stage"
+          ]
+        }
+      },
+      "required": [
+        "type",
+        "data"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "conformity_assessment"
+        },
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "assessment_id": {
+              "type": "string"
+            },
+            "procedure": {
+              "type": "string"
+            },
+            "status": {
+              "type": "string"
+            },
+            "report_commitment": {
+              "$ref": "#/$defs/sha256Digest"
+            },
+            "metadata": true
+          },
+          "required": [
+            "assessment_id",
+            "procedure",
+            "status"
+          ]
+        }
+      },
+      "required": [
+        "type",
+        "data"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "declaration"
+        },
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "declaration_id": {
+              "type": "string"
+            },
+            "jurisdiction": {
+              "type": "string"
+            },
+            "status": {
+              "type": "string"
+            },
+            "document_commitment": {
+              "$ref": "#/$defs/sha256Digest"
+            },
+            "metadata": true
+          },
+          "required": [
+            "declaration_id",
+            "jurisdiction",
+            "status"
+          ]
+        }
+      },
+      "required": [
+        "type",
+        "data"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "registration"
+        },
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "registration_id": {
+              "type": "string"
+            },
+            "authority": {
+              "type": "string"
+            },
+            "status": {
+              "type": "string"
+            },
+            "receipt_commitment": {
+              "$ref": "#/$defs/sha256Digest"
+            },
+            "metadata": true
+          },
+          "required": [
+            "registration_id",
+            "authority",
+            "status"
+          ]
         }
       },
       "required": [
@@ -568,18 +524,12 @@
         "data": {
           "type": "object",
           "additionalProperties": false,
-          "required": [
-            "attested_role",
-            "status"
-          ],
           "properties": {
             "attested_role": {
-              "type": "string",
-              "minLength": 1
+              "type": "string"
             },
             "status": {
-              "type": "string",
-              "minLength": 1
+              "type": "string"
             },
             "training_ref": {
               "type": "string"
@@ -588,7 +538,519 @@
               "$ref": "#/$defs/sha256Digest"
             },
             "metadata": true
-          }
+          },
+          "required": [
+            "attested_role",
+            "status"
+          ]
+        }
+      },
+      "required": [
+        "type",
+        "data"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "instructions_for_use"
+        },
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "document_ref": {
+              "type": "string"
+            },
+            "version": {
+              "type": "string"
+            },
+            "section": {
+              "type": "string"
+            },
+            "commitment": {
+              "$ref": "#/$defs/sha256Digest"
+            },
+            "metadata": true
+          },
+          "required": [
+            "document_ref"
+          ]
+        }
+      },
+      "required": [
+        "type",
+        "data"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "qms_record"
+        },
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "record_id": {
+              "type": "string"
+            },
+            "process": {
+              "type": "string"
+            },
+            "status": {
+              "type": "string"
+            },
+            "record_commitment": {
+              "$ref": "#/$defs/sha256Digest"
+            },
+            "metadata": true
+          },
+          "required": [
+            "record_id",
+            "process",
+            "status"
+          ]
+        }
+      },
+      "required": [
+        "type",
+        "data"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "fundamental_rights_assessment"
+        },
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "assessment_id": {
+              "type": "string"
+            },
+            "status": {
+              "type": "string"
+            },
+            "scope": {
+              "type": "string"
+            },
+            "report_commitment": {
+              "$ref": "#/$defs/sha256Digest"
+            },
+            "metadata": true
+          },
+          "required": [
+            "assessment_id",
+            "status"
+          ]
+        }
+      },
+      "required": [
+        "type",
+        "data"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "standards_alignment"
+        },
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "standard_ref": {
+              "type": "string"
+            },
+            "status": {
+              "type": "string"
+            },
+            "scope": {
+              "type": "string"
+            },
+            "mapping_commitment": {
+              "$ref": "#/$defs/sha256Digest"
+            },
+            "metadata": true
+          },
+          "required": [
+            "standard_ref",
+            "status"
+          ]
+        }
+      },
+      "required": [
+        "type",
+        "data"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "post_market_monitoring"
+        },
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "plan_id": {
+              "type": "string"
+            },
+            "status": {
+              "type": "string"
+            },
+            "summary": {
+              "type": "string"
+            },
+            "report_commitment": {
+              "$ref": "#/$defs/sha256Digest"
+            },
+            "metadata": true
+          },
+          "required": [
+            "plan_id",
+            "status"
+          ]
+        }
+      },
+      "required": [
+        "type",
+        "data"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "corrective_action"
+        },
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "action_id": {
+              "type": "string"
+            },
+            "status": {
+              "type": "string"
+            },
+            "summary": {
+              "type": "string"
+            },
+            "due_at": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "record_commitment": {
+              "$ref": "#/$defs/sha256Digest"
+            },
+            "metadata": true
+          },
+          "required": [
+            "action_id",
+            "status"
+          ]
+        }
+      },
+      "required": [
+        "type",
+        "data"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "authority_notification"
+        },
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "notification_id": {
+              "type": "string"
+            },
+            "authority": {
+              "type": "string"
+            },
+            "status": {
+              "type": "string"
+            },
+            "incident_id": {
+              "type": "string"
+            },
+            "due_at": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "report_commitment": {
+              "$ref": "#/$defs/sha256Digest"
+            },
+            "metadata": true
+          },
+          "required": [
+            "notification_id",
+            "authority",
+            "status"
+          ]
+        }
+      },
+      "required": [
+        "type",
+        "data"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "authority_submission"
+        },
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "submission_id": {
+              "type": "string"
+            },
+            "authority": {
+              "type": "string"
+            },
+            "status": {
+              "type": "string"
+            },
+            "channel": {
+              "type": "string"
+            },
+            "submitted_at": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "document_commitment": {
+              "$ref": "#/$defs/sha256Digest"
+            },
+            "metadata": true
+          },
+          "required": [
+            "submission_id",
+            "authority",
+            "status"
+          ]
+        }
+      },
+      "required": [
+        "type",
+        "data"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "reporting_deadline"
+        },
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "deadline_id": {
+              "type": "string"
+            },
+            "authority": {
+              "type": "string"
+            },
+            "obligation_ref": {
+              "type": "string"
+            },
+            "due_at": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "status": {
+              "type": "string"
+            },
+            "incident_id": {
+              "type": "string"
+            },
+            "metadata": true
+          },
+          "required": [
+            "deadline_id",
+            "authority",
+            "obligation_ref",
+            "due_at",
+            "status"
+          ]
+        }
+      },
+      "required": [
+        "type",
+        "data"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "regulator_correspondence"
+        },
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "correspondence_id": {
+              "type": "string"
+            },
+            "authority": {
+              "type": "string"
+            },
+            "direction": {
+              "type": "string"
+            },
+            "status": {
+              "type": "string"
+            },
+            "occurred_at": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "message_commitment": {
+              "$ref": "#/$defs/sha256Digest"
+            },
+            "metadata": true
+          },
+          "required": [
+            "correspondence_id",
+            "authority",
+            "direction",
+            "status"
+          ]
+        }
+      },
+      "required": [
+        "type",
+        "data"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "downstream_documentation"
+        },
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "document_ref": {
+              "type": "string"
+            },
+            "audience": {
+              "type": "string"
+            },
+            "status": {
+              "type": "string"
+            },
+            "commitment": {
+              "$ref": "#/$defs/sha256Digest"
+            },
+            "metadata": true
+          },
+          "required": [
+            "document_ref",
+            "audience",
+            "status"
+          ]
+        }
+      },
+      "required": [
+        "type",
+        "data"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "copyright_policy"
+        },
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "policy_ref": {
+              "type": "string"
+            },
+            "status": {
+              "type": "string"
+            },
+            "jurisdiction": {
+              "type": "string"
+            },
+            "commitment": {
+              "$ref": "#/$defs/sha256Digest"
+            },
+            "metadata": true
+          },
+          "required": [
+            "policy_ref",
+            "status"
+          ]
+        }
+      },
+      "required": [
+        "type",
+        "data"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "training_summary"
+        },
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "summary_ref": {
+              "type": "string"
+            },
+            "status": {
+              "type": "string"
+            },
+            "audience": {
+              "type": "string"
+            },
+            "commitment": {
+              "$ref": "#/$defs/sha256Digest"
+            },
+            "metadata": true
+          },
+          "required": [
+            "summary_ref",
+            "status"
+          ]
         }
       },
       "required": [
@@ -606,26 +1068,19 @@
         "data": {
           "type": "object",
           "additionalProperties": false,
-          "required": [
-            "incident_id",
-            "severity",
-            "status"
-          ],
           "properties": {
             "incident_id": {
-              "type": "string",
-              "minLength": 1
+              "type": "string"
             },
             "severity": {
-              "type": "string",
-              "minLength": 1
+              "type": "string"
             },
             "status": {
-              "type": "string",
-              "minLength": 1
+              "type": "string"
             },
             "occurred_at": {
-              "type": "string"
+              "type": "string",
+              "format": "date-time"
             },
             "summary": {
               "type": "string"
@@ -634,7 +1089,12 @@
               "$ref": "#/$defs/sha256Digest"
             },
             "metadata": true
-          }
+          },
+          "required": [
+            "incident_id",
+            "severity",
+            "status"
+          ]
         }
       },
       "required": [
@@ -647,6 +1107,24 @@
     "sha256Digest": {
       "type": "string",
       "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "tokenUsage": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "input_tokens": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "output_tokens": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "total_tokens": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
     }
   }
 }

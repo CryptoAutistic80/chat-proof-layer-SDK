@@ -24,7 +24,9 @@ describe("ExportStatusCard", () => {
     );
 
     expect(
-      screen.getByText("No disclosure pack to export for this run with the selected profile.")
+      screen.getByText(
+        "This proof record does not produce a redacted share package under the selected sharing profile."
+      )
     ).toBeTruthy();
     expect(screen.getByRole("button", { name: "Export pack" }).disabled).toBe(true);
   });

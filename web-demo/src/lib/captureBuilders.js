@@ -4,7 +4,27 @@ function prettyJson(value) {
   return JSON.stringify(value, null, 2);
 }
 
-function encodeBase64(bytes) {
+function coerceBytes(data) {
+  if (data instanceof Uint8Array) {
+    return data;
+  }
+  if (typeof data === "string") {
+    return enc.encode(data);
+  }
+  return enc.encode(prettyJson(data));
+}
+
+function defaultContentType(data) {
+  if (data instanceof Uint8Array) {
+    return "application/octet-stream";
+  }
+  if (typeof data === "string") {
+    return "text/plain; charset=utf-8";
+  }
+  return "application/json";
+}
+
+export function encodeBase64(bytes) {
   let binary = "";
   const chunkSize = 0x8000;
   for (let index = 0; index < bytes.length; index += chunkSize) {
@@ -14,7 +34,7 @@ function encodeBase64(bytes) {
   return btoa(binary);
 }
 
-async function sha256Prefixed(bytes) {
+export async function sha256Prefixed(bytes) {
   const digest = await crypto.subtle.digest("SHA-256", bytes);
   const hex = Array.from(new Uint8Array(digest))
     .map((value) => value.toString(16).padStart(2, "0"))
@@ -28,6 +48,158 @@ function summarizeText(text, maxLength = 220) {
     return normalized;
   }
   return `${normalized.slice(0, maxLength - 1)}…`;
+}
+
+function nullIfBlank(value) {
+  if (value === undefined || value === null) {
+    return null;
+  }
+  const text = String(value).trim();
+  return text ? text : null;
+}
+
+export function serializeComplianceProfile(profile) {
+  if (!profile) {
+    return null;
+  }
+  return {
+    intended_use: nullIfBlank(profile.intendedUse),
+    prohibited_practice_screening: nullIfBlank(profile.prohibitedPracticeScreening),
+    risk_tier: nullIfBlank(profile.riskTier),
+    high_risk_domain: nullIfBlank(profile.highRiskDomain),
+    gpai_status: nullIfBlank(profile.gpaiStatus),
+    systemic_risk:
+      typeof profile.systemicRisk === "boolean" ? profile.systemicRisk : null,
+    fria_required:
+      typeof profile.friaRequired === "boolean" ? profile.friaRequired : null,
+    deployment_context: nullIfBlank(profile.deploymentContext),
+    metadata: profile.metadata ?? null
+  };
+}
+
+export function inlineArtefact(name, data, contentType) {
+  const bytes = coerceBytes(data);
+  return {
+    name,
+    content_type: contentType ?? defaultContentType(data),
+    data_base64: encodeBase64(bytes)
+  };
+}
+
+export function jsonArtefact(name, value) {
+  return inlineArtefact(name, value, "application/json");
+}
+
+export function textArtefact(name, value, contentType = "text/plain; charset=utf-8") {
+  return inlineArtefact(name, value, contentType);
+}
+
+export function buildCaptureRequest({
+  actor,
+  subject,
+  complianceProfile,
+  context,
+  items,
+  retentionClass,
+  redactions = [],
+  encryptionEnabled = false,
+  artefacts = []
+}) {
+  const capture = {
+    actor,
+    subject,
+    ...(complianceProfile ? { compliance_profile: complianceProfile } : {}),
+    ...(context ? { context } : {}),
+    items,
+    policy: {
+      redactions,
+      encryption: { enabled: Boolean(encryptionEnabled) },
+      retention_class: retentionClass ?? null
+    }
+  };
+
+  return {
+    capture,
+    artefacts
+  };
+}
+
+export function buildActor({
+  issuer = "proof-layer-web-demo",
+  appId = "web-demo",
+  env = "demo",
+  signingKeyId = "vault-managed",
+  role = "provider"
+}) {
+  return {
+    issuer,
+    app_id: appId,
+    env,
+    signing_key_id: signingKeyId,
+    role
+  };
+}
+
+export function buildSubject({
+  requestId = null,
+  threadId = null,
+  userRef = "demo-user",
+  systemId = null,
+  modelId = null,
+  deploymentId = null,
+  version = "2026.03"
+}) {
+  return {
+    request_id: requestId,
+    thread_id: threadId,
+    user_ref: userRef,
+    system_id: systemId,
+    model_id: modelId,
+    deployment_id: deploymentId,
+    version
+  };
+}
+
+export async function buildDocumentArtefact(name, value, contentType) {
+  const bytes = coerceBytes(value);
+  return {
+    artefact: {
+      name,
+      content_type: contentType ?? defaultContentType(value),
+      data_base64: encodeBase64(bytes)
+    },
+    commitment: await sha256Prefixed(bytes),
+    bytes
+  };
+}
+
+export async function buildSimpleEvidenceCapture({
+  actor,
+  subject,
+  complianceProfile,
+  context,
+  item,
+  artefacts,
+  retentionClass,
+  label,
+  summary,
+  localPayloads = {}
+}) {
+  return {
+    label,
+    itemTypes: [item.type],
+    summary,
+    localPayloads,
+    createPayload: buildCaptureRequest({
+      actor,
+      subject,
+      complianceProfile,
+      context,
+      items: [item],
+      retentionClass,
+      artefacts
+    })
+  };
 }
 
 function buildIncidentArtefact(providerResult, requestId) {
@@ -115,13 +287,20 @@ async function buildDerivedEvidence(preset, providerResult, requestId) {
   return { items, artefacts };
 }
 
-export async function buildCaptureEnvelope({
-  preset,
-  providerResult,
+export async function buildLlmInteractionCapture({
   actorRole,
   systemId,
+  providerResult,
   temperature,
-  maxTokens
+  maxTokens,
+  packType,
+  bundleFormat,
+  disclosureProfile,
+  complianceProfile,
+  appId = "web-demo",
+  issuer = "proof-layer-web-demo",
+  env = "demo",
+  retentionClass = "runtime_logs"
 }) {
   const requestId = providerResult.trace_payload?.request_id || crypto.randomUUID();
   const systemIdValue = systemId.trim();
@@ -138,9 +317,9 @@ export async function buildCaptureEnvelope({
     request_id: requestId,
     system_id: systemIdValue,
     actor_role: actorRole,
-    pack_type: preset.packType,
-    bundle_format: preset.bundleFormat,
-    disclosure_profile: preset.disclosureProfile
+    pack_type: packType,
+    bundle_format: bundleFormat,
+    disclosure_profile: disclosureProfile
   };
 
   const promptBytes = enc.encode(prettyJson(promptPayload));
@@ -151,74 +330,61 @@ export async function buildCaptureEnvelope({
   const responseCommitment = await sha256Prefixed(responseBytes);
   const traceCommitment = await sha256Prefixed(traceBytes);
 
-  const { items: derivedItems, artefacts: derivedArtefacts } = await buildDerivedEvidence(
-    preset,
-    providerResult,
-    requestId
-  );
-
   return {
+    label: "Primary interaction",
+    itemTypes: ["llm_interaction"],
     responseText: providerResult.output_text,
     captureMode: providerResult.capture_mode,
     promptPayload,
     responsePayload,
     tracePayload,
-    createPayload: {
-      capture: {
-        actor: {
-          issuer: "proof-layer-web-demo",
-          app_id: "web-demo",
-          env: "demo",
-          signing_key_id: "vault-managed",
-          role: actorRole
+    localPayloads: {
+      promptPayload,
+      responsePayload,
+      tracePayload
+    },
+    createPayload: buildCaptureRequest({
+      actor: buildActor({ role: actorRole, appId, issuer, env }),
+      subject: buildSubject({
+        requestId,
+        threadId: `thread-${requestId.slice(0, 8)}`,
+        systemId: systemIdValue,
+        modelId: `${providerResult.provider}:${providerResult.model}`,
+        deploymentId: `${systemIdValue}-demo`
+      }),
+      complianceProfile: serializeComplianceProfile(complianceProfile),
+      context: {
+        provider: providerResult.provider,
+        model: providerResult.model,
+        parameters: {
+          temperature,
+          max_tokens: maxTokens,
+          capture_mode: providerResult.capture_mode
         },
-        subject: {
-          request_id: requestId,
-          thread_id: `thread-${requestId.slice(0, 8)}`,
-          user_ref: "demo-user",
-          system_id: systemIdValue,
-          model_id: `${providerResult.provider}:${providerResult.model}`,
-          deployment_id: `${systemIdValue}-demo`,
-          version: "2026.03"
-        },
-        context: {
-          provider: providerResult.provider,
-          model: providerResult.model,
-          parameters: {
-            temperature,
-            max_tokens: maxTokens,
-            capture_mode: providerResult.capture_mode
-          },
-          trace_commitment: traceCommitment,
-          otel_genai_semconv_version: "1.0.0"
-        },
-        items: [
-          {
-            type: "llm_interaction",
-            data: {
-              provider: providerResult.provider,
-              model: providerResult.model,
-              parameters: {
-                temperature,
-                max_tokens: maxTokens,
-                capture_mode: providerResult.capture_mode
-              },
-              input_commitment: promptCommitment,
-              output_commitment: responseCommitment,
-              token_usage: providerResult.usage,
-              latency_ms: providerResult.latency_ms,
-              trace_commitment: traceCommitment,
-              trace_semconv_version: "1.0.0"
-            }
-          },
-          ...derivedItems
-        ],
-        policy: {
-          redactions: [],
-          encryption: { enabled: false },
-          retention_class: preset.retentionClass
-        }
+        trace_commitment: traceCommitment,
+        otel_genai_semconv_version: "1.0.0"
       },
+      items: [
+        {
+          type: "llm_interaction",
+          data: {
+            provider: providerResult.provider,
+            model: providerResult.model,
+            parameters: {
+              temperature,
+              max_tokens: maxTokens,
+              capture_mode: providerResult.capture_mode
+            },
+            input_commitment: promptCommitment,
+            output_commitment: responseCommitment,
+            token_usage: providerResult.usage,
+            latency_ms: providerResult.latency_ms,
+            trace_commitment: traceCommitment,
+            trace_semconv_version: "1.0.0"
+          }
+        }
+      ],
+      retentionClass,
       artefacts: [
         {
           name: "prompt.json",
@@ -234,11 +400,41 @@ export async function buildCaptureEnvelope({
           name: "trace.json",
           content_type: "application/json",
           data_base64: encodeBase64(traceBytes)
-        },
-        ...derivedArtefacts
+        }
       ]
-    }
+    })
   };
+}
+
+export async function buildCaptureEnvelope({
+  preset,
+  providerResult,
+  actorRole,
+  systemId,
+  temperature,
+  maxTokens
+}) {
+  const baseEnvelope = await buildLlmInteractionCapture({
+    actorRole,
+    systemId,
+    providerResult,
+    temperature,
+    maxTokens,
+    packType: preset.packType,
+    bundleFormat: preset.bundleFormat,
+    disclosureProfile: preset.disclosureProfile,
+    retentionClass: preset.retentionClass
+  });
+  const requestId = baseEnvelope.tracePayload.request_id;
+  const { items: derivedItems, artefacts: derivedArtefacts } = await buildDerivedEvidence(
+    preset,
+    providerResult,
+    requestId
+  );
+  baseEnvelope.createPayload.capture.items.push(...derivedItems);
+  baseEnvelope.createPayload.artefacts.push(...derivedArtefacts);
+  baseEnvelope.itemTypes = baseEnvelope.createPayload.capture.items.map((item) => item.type);
+  return baseEnvelope;
 }
 
 export function decodeJsonBytes(arrayBuffer) {

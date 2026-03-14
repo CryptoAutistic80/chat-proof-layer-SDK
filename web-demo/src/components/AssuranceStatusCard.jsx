@@ -22,15 +22,15 @@ export function AssuranceStatusCard({ run, vaultConfig }) {
       <div className="panel-head compact">
         <div>
           <span className="section-label">Assurance</span>
-          <h2>Trust checks</h2>
+          <h2>What a reviewer can verify</h2>
         </div>
       </div>
       <div className="status-stack">
         <article className={`status-card is-${statusTone(run?.verifyResponse?.valid, true)}`}>
-          <strong>Bundle verification</strong>
+          <strong>Integrity check</strong>
           <p>
             {run?.verifyResponse?.valid
-              ? "Verified: bundle signature and artefacts match the connected vault signer key."
+              ? "Verified: this proof record and its captured materials match the connected signer."
               : run?.verifyResponse?.message || "Verification will run after the bundle is sealed."}
           </p>
         </article>
@@ -40,7 +40,7 @@ export function AssuranceStatusCard({ run, vaultConfig }) {
             timestampConfigured
           )}`}
         >
-          <strong>RFC 3161 timestamp</strong>
+          <strong>Timestamp status</strong>
           <p>
             {timestampConfigured
               ? run?.timestampVerification?.valid
@@ -55,7 +55,7 @@ export function AssuranceStatusCard({ run, vaultConfig }) {
             receiptConfigured
           )}`}
         >
-          <strong>Transparency receipt</strong>
+          <strong>Transparency status</strong>
           <p>
             {receiptConfigured
               ? run?.receiptVerification?.valid

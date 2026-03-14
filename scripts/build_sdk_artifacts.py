@@ -26,6 +26,12 @@ def main() -> None:
     env["PROOF_SDK_NATIVE_PROFILE"] = args.profile
 
     subprocess.run(
+        [sys.executable, "./scripts/check_release_metadata.py"],
+        cwd=repo_root,
+        env=env,
+        check=True,
+    )
+    subprocess.run(
         ["npm", "run", "pack:smoke"],
         cwd=repo_root / "sdks" / "typescript",
         env=env,

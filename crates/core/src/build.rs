@@ -109,6 +109,7 @@ pub fn build_bundle(
         created_at: created_at.to_rfc3339(),
         actor: event.actor,
         subject: event.subject,
+        compliance_profile: event.compliance_profile,
         context: event.context,
         items: event.items,
         artefacts: artefact_meta,
@@ -220,6 +221,7 @@ mod tests {
                 deployment_id: None,
                 version: Some("2026.03".to_string()),
             },
+            compliance_profile: None,
             context: EvidenceContext {
                 provider: Some("anthropic".to_string()),
                 model: Some("claude-sonnet-4-6".to_string()),

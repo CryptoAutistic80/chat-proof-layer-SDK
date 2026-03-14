@@ -11,6 +11,9 @@ export const PRESETS = [
     key: "investor_summary",
     label: "Investor summary",
     description: "Show one sealed AI interaction, plain-English integrity checks, and a minimal disclosure export.",
+    businessReason: "Show an investor exactly what an AI system did and what evidence can be shared later without exposing everything.",
+    audience: "business",
+    outcomeLabel: "One AI proof record plus a minimal share package for diligence conversations.",
     actorRole: "provider",
     packType: "runtime_logs",
     disclosureProfile: "regulator_minimum",
@@ -25,6 +28,9 @@ export const PRESETS = [
     key: "deployer_runtime_log",
     label: "Deployer runtime log",
     description: "Capture one operational interaction and export a runtime-focused disclosure pack.",
+    businessReason: "Show what operational evidence exists for a production-style run and what a deployment team could later prove.",
+    audience: "operator",
+    outcomeLabel: "One operational proof record focused on runtime evidence and export readiness.",
     actorRole: "deployer",
     packType: "runtime_logs",
     disclosureProfile: "runtime_minimum",
@@ -39,6 +45,9 @@ export const PRESETS = [
     key: "incident_review",
     label: "Incident review",
     description: "Capture an interaction, derive an incident wrapper, and preview an incident-focused disclosure policy.",
+    businessReason: "Show how an AI issue can be captured, reviewed, and turned into a controlled disclosure package for incident handling.",
+    audience: "operator",
+    outcomeLabel: "One proof-backed incident review with a derived incident wrapper and selective sharing preview.",
     actorRole: "integrator",
     packType: "incident_response",
     disclosureProfile: "incident_summary",
@@ -53,6 +62,9 @@ export const PRESETS = [
     key: "annex_iv_filing",
     label: "Annex IV filing",
     description: "Capture a technical summary and wrap it in documentation-oriented artefacts for Annex IV style review.",
+    businessReason: "Show how technical documentation evidence can be assembled for regulator or conformity review without building a full filing by hand.",
+    audience: "compliance",
+    outcomeLabel: "One documentation-oriented proof record with artefacts suitable for Annex IV style review.",
     actorRole: "provider",
     packType: "annex_iv",
     disclosureProfile: "annex_iv_redacted",
@@ -67,6 +79,16 @@ export const PRESETS = [
 
 export function getPreset(presetKey) {
   return PRESETS.find((preset) => preset.key === presetKey) ?? PRESETS[0];
+}
+
+export function inferPresetKey({ packType, disclosureProfile, bundleFormat }) {
+  const matched = PRESETS.find(
+    (preset) =>
+      preset.packType === packType &&
+      preset.disclosureProfile === disclosureProfile &&
+      preset.bundleFormat === bundleFormat
+  );
+  return matched?.key ?? PRESETS[0].key;
 }
 
 export function modelOptionsFor(provider) {

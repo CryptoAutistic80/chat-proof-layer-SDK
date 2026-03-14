@@ -2,7 +2,26 @@ export type JsonPrimitive = string | number | boolean | null;
 export type JsonValue = JsonPrimitive | JsonValue[] | { [key: string]: JsonValue };
 export type JsonObject = Record<string, unknown>;
 export type BinaryLike = Uint8Array | string | JsonValue | JsonObject;
-export type ActorRole = "provider" | "deployer" | "integrator";
+export type ActorRole =
+  | "provider"
+  | "deployer"
+  | "integrator"
+  | "importer"
+  | "distributor"
+  | "authorized_representative"
+  | "gpai_provider";
+
+export interface ComplianceProfileInput extends JsonObject {
+  intendedUse?: string;
+  prohibitedPracticeScreening?: string;
+  riskTier?: string;
+  highRiskDomain?: string;
+  gpaiStatus?: string;
+  systemicRisk?: boolean;
+  friaRequired?: boolean;
+  deploymentContext?: string;
+  metadata?: JsonValue;
+}
 
 export interface EvidenceSubjectOptions {
   requestId?: string;
@@ -32,6 +51,7 @@ export interface LifecycleCaptureOptions
   extends EvidenceActorOptions,
     EvidenceSubjectOptions,
     EvidencePolicyOptions {
+  complianceProfile?: ComplianceProfileInput;
   artefacts?: ProofArtefactInput[];
   bundleId?: string;
   createdAt?: string;
@@ -439,6 +459,7 @@ export interface LlmInteractionRequestOptions {
   appId?: string;
   env?: string;
   systemId?: string;
+  complianceProfile?: ComplianceProfileInput;
   provider: string;
   model: string;
   input: JsonValue | JsonObject;
@@ -482,6 +503,98 @@ export interface TechnicalDocRequestOptions extends LifecycleCaptureOptions {
   documentName?: string;
   documentContentType?: string;
   descriptor?: JsonValue | JsonObject;
+}
+
+export interface InstructionsForUseRequestOptions extends LifecycleCaptureOptions {
+  documentRef: string;
+  versionTag?: string;
+  section?: string;
+  commitment?: string;
+  document?: BinaryLike;
+  documentName?: string;
+  documentContentType?: string;
+  metadata?: JsonValue;
+}
+
+export interface QmsRecordRequestOptions extends LifecycleCaptureOptions {
+  recordId: string;
+  process: string;
+  status: string;
+  record?: BinaryLike;
+  metadata?: JsonValue;
+}
+
+export interface FundamentalRightsAssessmentRequestOptions extends LifecycleCaptureOptions {
+  assessmentId: string;
+  status: string;
+  scope?: string;
+  report?: BinaryLike;
+  metadata?: JsonValue;
+}
+
+export interface StandardsAlignmentRequestOptions extends LifecycleCaptureOptions {
+  standardRef: string;
+  status: string;
+  scope?: string;
+  mapping?: BinaryLike;
+  metadata?: JsonValue;
+}
+
+export interface PostMarketMonitoringRequestOptions extends LifecycleCaptureOptions {
+  planId: string;
+  status: string;
+  summary?: string;
+  report?: BinaryLike;
+  metadata?: JsonValue;
+}
+
+export interface CorrectiveActionRequestOptions extends LifecycleCaptureOptions {
+  actionId: string;
+  status: string;
+  summary?: string;
+  dueAt?: string;
+  record?: BinaryLike;
+  metadata?: JsonValue;
+}
+
+export interface AuthorityNotificationRequestOptions extends LifecycleCaptureOptions {
+  notificationId: string;
+  authority: string;
+  status: string;
+  incidentId?: string;
+  dueAt?: string;
+  report?: BinaryLike;
+  metadata?: JsonValue;
+}
+
+export interface AuthoritySubmissionRequestOptions extends LifecycleCaptureOptions {
+  submissionId: string;
+  authority: string;
+  status: string;
+  channel?: string;
+  submittedAt?: string;
+  document?: BinaryLike;
+  metadata?: JsonValue;
+}
+
+export interface ReportingDeadlineRequestOptions extends LifecycleCaptureOptions {
+  deadlineId: string;
+  authority: string;
+  obligationRef: string;
+  dueAt: string;
+  status: string;
+  incidentId?: string;
+  metadata?: JsonValue;
+}
+
+export interface RegulatorCorrespondenceRequestOptions extends LifecycleCaptureOptions {
+  correspondenceId: string;
+  authority: string;
+  direction: string;
+  status: string;
+  occurredAt?: string;
+  message?: BinaryLike;
+  metadata?: JsonValue;
 }
 
 export interface ToolCallRequestOptions extends LifecycleCaptureOptions {
@@ -555,6 +668,30 @@ export interface TrainingProvenanceRequestOptions extends LifecycleCaptureOption
   metadata?: JsonValue;
 }
 
+export interface DownstreamDocumentationRequestOptions extends LifecycleCaptureOptions {
+  documentRef: string;
+  audience: string;
+  status: string;
+  document?: BinaryLike;
+  metadata?: JsonValue;
+}
+
+export interface CopyrightPolicyRequestOptions extends LifecycleCaptureOptions {
+  policyRef: string;
+  status: string;
+  jurisdiction?: string;
+  document?: BinaryLike;
+  metadata?: JsonValue;
+}
+
+export interface TrainingSummaryRequestOptions extends LifecycleCaptureOptions {
+  summaryRef: string;
+  status: string;
+  audience?: string;
+  document?: BinaryLike;
+  metadata?: JsonValue;
+}
+
 export interface ConformityAssessmentRequestOptions extends LifecycleCaptureOptions {
   assessmentId: string;
   procedure: string;
@@ -588,6 +725,7 @@ export interface ProofLayerOptions {
   keyId?: string;
   systemId?: string;
   role?: ActorRole;
+  complianceProfile?: ComplianceProfileInput;
   issuer?: string;
   appId?: string;
   env?: string;
@@ -602,6 +740,7 @@ export interface ProofLayerCaptureOptions {
   input: JsonValue | JsonObject;
   output: JsonValue | JsonObject;
   systemId?: string;
+  complianceProfile?: ComplianceProfileInput;
   requestId?: string;
   threadId?: string | null;
   userRef?: string | null;

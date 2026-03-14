@@ -22,15 +22,26 @@ import {
 import {
   DEFAULT_SERVICE_URL,
   DEFAULT_SYSTEM_ID,
-  PRESETS,
   applyPresetToDraft,
   defaultModelFor,
   defaultTemplateName,
   getPreset,
+  inferPresetKey,
   isProviderLiveEnabled,
   modelOptionsFor
 } from "../lib/presets";
 import { buildCaptureEnvelope, decodeJsonBytes } from "../lib/captureBuilders";
+import { buildComplianceReview } from "../lib/complianceReview";
+import {
+  applyScenarioToDraft,
+  firstScenarioForLane,
+  findScenarioByPackType,
+  getPlaygroundScenario,
+  inferPackTypeFromItems,
+  initialPlaygroundScenario
+} from "../lib/sdkPlaygroundScenarios";
+import { renderScenarioScript } from "../lib/sdkScriptTemplates";
+import { buildScenarioWorkflow } from "../lib/sdkWorkflowBuilders";
 
 const DemoContext = createContext(null);
 
@@ -55,6 +66,7 @@ function canUseLiveMode(vaultConfig, provider, providerApiKey) {
 
 function createInitialDraft() {
   const preset = getPreset("investor_summary");
+  const scenario = initialPlaygroundScenario();
   return {
     serviceUrl: DEFAULT_SERVICE_URL,
     apiKey: "",
@@ -74,7 +86,32 @@ function createInitialDraft() {
     bundleFormat: preset.bundleFormat,
     templateProfile: preset.disclosureProfile,
     templateName: defaultTemplateName(preset.disclosureProfile),
-    selectedGroups: []
+    selectedGroups: [],
+    lane: scenario.lane,
+    scenarioId: scenario.id,
+    playgroundHydrated: false,
+    intendedUse: "",
+    prohibitedPracticeScreening: "",
+    riskTier: "",
+    highRiskDomain: "",
+    gpaiStatus: "",
+    systemicRisk: false,
+    friaRequired: false,
+    deploymentContext: "",
+    owner: "",
+    market: "",
+    instructionsSummary: "",
+    instructionsSection: "",
+    qmsStatus: "",
+    qmsApprover: "",
+    monitoringSummary: "",
+    authority: "",
+    submissionSummary: "",
+    friaSummary: "",
+    reviewer: "",
+    incidentSummary: "",
+    dueAt: "",
+    correspondenceSubject: ""
   };
 }
 
@@ -92,6 +129,7 @@ export function DemoProvider({ children }) {
   const [isExporting, setIsExporting] = useState(false);
 
   const currentPreset = useMemo(() => getPreset(draft.presetKey), [draft.presetKey]);
+  const currentScenario = useMemo(() => getPlaygroundScenario(draft.scenarioId), [draft.scenarioId]);
 
   useEffect(() => {
     void refreshVaultCapabilities();
@@ -212,14 +250,36 @@ export function DemoProvider({ children }) {
 
   function selectPreset(presetKey) {
     const preset = getPreset(presetKey);
-    setDraft((current) => syncTemplateDefaults(templateCatalog, applyPresetToDraft(current, preset, vaultConfig)));
+    setDraft((current) => ({
+      ...syncTemplateDefaults(templateCatalog, applyPresetToDraft(current, preset, vaultConfig)),
+      playgroundHydrated: false
+    }));
   }
 
-  function buildTemplateRequest() {
+  function selectLane(lane) {
+    const scenario = firstScenarioForLane(lane);
+    setDraft((current) => applyScenarioToDraft(current, scenario));
+  }
+
+  function selectScenario(scenarioId) {
+    const scenario = getPlaygroundScenario(scenarioId);
+    setDraft((current) => applyScenarioToDraft(current, scenario));
+  }
+
+  function ensurePlaygroundDraft() {
+    setDraft((current) => {
+      if (current.playgroundHydrated) {
+        return current;
+      }
+      return applyScenarioToDraft(current, getPlaygroundScenario(current.scenarioId));
+    });
+  }
+
+  function buildTemplateRequest(templateProfile = draft.templateProfile, selectedGroups = draft.selectedGroups, templateName = draft.templateName) {
     return {
-      profile: draft.templateProfile,
-      name: draft.templateName.trim() || defaultTemplateName(draft.templateProfile),
-      redaction_groups: draft.selectedGroups,
+      profile: templateProfile,
+      name: templateName?.trim() || defaultTemplateName(templateProfile),
+      redaction_groups: selectedGroups,
       redacted_fields_by_item_type: {}
     };
   }
@@ -276,11 +336,33 @@ export function DemoProvider({ children }) {
     });
   }
 
-  async function previewFor(bundleId, systemId, currentBundleFormat = draft.bundleFormat) {
+  async function verifyCreatedBundle(bundle, artefacts) {
+    const publicKeyPem = vaultConfig?.signing?.public_key_pem;
+    if (!publicKeyPem) {
+      return {
+        valid: false,
+        message: "The connected vault did not expose a public verify key.",
+        artefacts_verified: 0
+      };
+    }
+    return verifyBundle(draft.serviceUrl, draft.apiKey, {
+      bundle,
+      artefacts: artefacts.map((artefact) => ({
+        name: artefact.name,
+        data_base64: artefact.data_base64
+      })),
+      public_key_pem: publicKeyPem
+    });
+  }
+
+  async function previewFor(bundleId, systemId, options = {}) {
+    const templateProfile = options.templateProfile ?? draft.templateProfile;
+    const selectedGroups = options.selectedGroups ?? draft.selectedGroups;
+    const bundleFormat = options.bundleFormat ?? draft.bundleFormat;
     const payload = {
       bundle_id: bundleId,
-      pack_type: currentPreset.packType,
-      disclosure_template: buildTemplateRequest()
+      pack_type: options.packType ?? currentPreset.packType,
+      disclosure_template: buildTemplateRequest(templateProfile, selectedGroups)
     };
     const response = await previewDisclosure(draft.serviceUrl, draft.apiKey, payload);
     appendActivity(
@@ -289,27 +371,30 @@ export function DemoProvider({ children }) {
       "accent"
     );
     if (
-      currentBundleFormat === "disclosure" &&
+      bundleFormat === "disclosure" &&
       previewStats(response).itemCount === 0 &&
       previewStats(response).artefactCount === 0
     ) {
       appendActivity(
         "Disclosure result empty",
-        "No disclosure output for this profile on the current run.",
+        "This sharing profile does not reveal any content for this proof record.",
         "warn"
       );
     }
     return response;
   }
 
-  async function exportFor(bundleId, systemId, currentBundleFormat = draft.bundleFormat) {
+  async function exportFor(bundleId, systemId, options = {}) {
+    const bundleFormat = options.bundleFormat ?? draft.bundleFormat;
+    const templateProfile = options.templateProfile ?? draft.templateProfile;
+    const selectedGroups = options.selectedGroups ?? draft.selectedGroups;
     const requestBody = {
-      pack_type: currentPreset.packType,
+      pack_type: options.packType ?? currentPreset.packType,
       system_id: systemId,
-      bundle_format: currentBundleFormat
+      bundle_format: bundleFormat
     };
-    if (currentBundleFormat === "disclosure") {
-      requestBody.disclosure_template = buildTemplateRequest();
+    if (bundleFormat === "disclosure") {
+      requestBody.disclosure_template = buildTemplateRequest(templateProfile, selectedGroups);
     }
     const packSummary = await createPack(draft.serviceUrl, draft.apiKey, requestBody);
     const packManifest = await fetchPackManifest(draft.serviceUrl, draft.apiKey, packSummary.pack_id);
@@ -322,8 +407,8 @@ export function DemoProvider({ children }) {
       type: exportPayload.contentType ?? "application/gzip"
     });
     const downloadInfo = {
-      url: URL.createObjectURL(blob),
-      fileName: `${currentBundleFormat === "disclosure" ? "disclosure" : "full"}-${bundleId}.pack`,
+      url: typeof URL.createObjectURL === "function" ? URL.createObjectURL(blob) : "",
+      fileName: `${bundleFormat === "disclosure" ? "disclosure" : "full"}-${bundleId}.pack`,
       size: blob.size
     };
     appendActivity(
@@ -338,10 +423,27 @@ export function DemoProvider({ children }) {
     const bundle = await fetchBundle(draft.serviceUrl, draft.apiKey, bundleId);
     const { files, parsed } = await fetchArtefacts(bundleId, bundle.artefacts);
     const verifyResponse = await runInlineVerification(bundle, files);
+    const inferredPackType =
+      currentRun?.bundleId === bundleId
+        ? currentRun.packType
+        : parsed["trace.json"]?.pack_type ?? inferPackTypeFromItems(bundle.items);
+    const scenario = findScenarioByPackType(inferredPackType);
+    const bundleFormat =
+      currentRun?.bundleId === bundleId
+        ? currentRun.bundleFormat
+        : parsed["trace.json"]?.bundle_format ?? draft.bundleFormat;
+    const disclosureProfile =
+      currentRun?.bundleId === bundleId
+        ? currentRun.disclosureProfile
+        : parsed["trace.json"]?.disclosure_profile ?? draft.templateProfile;
     const previewResponse = await previewFor(
       bundleId,
       bundle.subject?.system_id ?? draft.systemId,
-      draft.bundleFormat
+      {
+        packType: inferredPackType,
+        bundleFormat,
+        templateProfile: disclosureProfile
+      }
     );
     const systemSummary = await fetchSystemSummary(
       draft.serviceUrl,
@@ -375,25 +477,42 @@ export function DemoProvider({ children }) {
     const responsePayload = parsed["response.json"] ?? null;
     const promptPayload = parsed["prompt.json"] ?? null;
     const tracePayload = parsed["trace.json"] ?? null;
+    const scenarioId = currentRun?.bundleId === bundleId ? currentRun.scenarioId : scenario?.id ?? null;
 
     const hydratedRun = {
       bundleId,
+      primaryBundleId: bundleId,
+      presetKey:
+        currentRun?.bundleId === bundleId
+          ? currentRun.presetKey
+          : inferPresetKey({
+              packType: inferredPackType,
+              disclosureProfile,
+              bundleFormat
+            }),
+      scenarioId,
+      scenarioLabel: currentRun?.bundleId === bundleId ? currentRun.scenarioLabel : scenario?.label ?? "Loaded bundle",
+      scenarioOutcomeLabel:
+        currentRun?.bundleId === bundleId
+          ? currentRun.scenarioOutcomeLabel
+          : "Loaded from the vault without the original playground state.",
+      lane: currentRun?.bundleId === bundleId ? currentRun.lane : scenario?.lane ?? "typescript",
       captureMode:
         responsePayload?.response_source ||
         tracePayload?.capture_mode ||
-        "synthetic_demo_capture",
+        "governance_bundle_capture",
       provider: bundle.context?.provider ?? draft.provider,
       model: bundle.context?.model ?? draft.model,
       actorRole: bundle.actor?.role ?? draft.actorRole,
-      packType: currentPreset.packType,
-      bundleFormat: draft.bundleFormat,
-      disclosureProfile: draft.templateProfile,
+      packType: inferredPackType,
+      bundleFormat,
+      disclosureProfile,
       createMeta: currentRun?.bundleId === bundleId ? currentRun.createMeta : null,
       bundle,
       responseText:
         responsePayload?.output ||
         responsePayload?.output_text ||
-        "Response payload not available.",
+        "No direct model response payload is attached to this bundle.",
       promptPayload,
       responsePayload,
       tracePayload,
@@ -410,7 +529,45 @@ export function DemoProvider({ children }) {
       packSummary: currentRun?.bundleId === bundleId ? currentRun.packSummary : null,
       packManifest: currentRun?.bundleId === bundleId ? currentRun.packManifest : null,
       downloadInfo: currentRun?.bundleId === bundleId ? currentRun.downloadInfo : null,
-      systemSummary
+      systemSummary,
+      bundleRuns:
+        currentRun?.bundleId === bundleId
+          ? currentRun.bundleRuns
+          : [
+              {
+                bundleId,
+                label: scenario?.label ?? "Loaded bundle",
+                bundleRole: "primary",
+                itemTypes: bundle.items.map((item) => item.type),
+                summary: "Loaded from the vault.",
+                verifyResponse,
+                timestampVerification,
+                receiptVerification
+              }
+            ],
+      scriptSource:
+        currentRun?.bundleId === bundleId
+          ? currentRun.scriptSource
+          : scenarioId
+            ? renderScenarioScript(scenarioId, draft)
+            : "",
+      review:
+        currentRun?.bundleId === bundleId
+          ? currentRun.review
+          : scenario
+            ? buildComplianceReview(scenario, {
+                bundleRuns: [
+                  {
+                    bundleId,
+                    label: scenario.label,
+                    itemTypes: bundle.items.map((item) => item.type)
+                  }
+                ],
+                packManifest: currentRun?.packManifest,
+                packSummary: currentRun?.packSummary,
+                downloadInfo: currentRun?.downloadInfo
+              })
+            : null
     };
     setCurrentRun(hydratedRun);
     return hydratedRun;
@@ -426,6 +583,81 @@ export function DemoProvider({ children }) {
     return loadRun(bundleId);
   }
 
+  async function runBundleLifecycle(step) {
+    const createMeta = await createBundle(draft.serviceUrl, draft.apiKey, step.createPayload);
+    appendActivity(
+      "Bundle sealed",
+      `${step.label} · ${createMeta.bundle_id}`,
+      "good"
+    );
+
+    let bundle = await fetchBundle(draft.serviceUrl, draft.apiKey, createMeta.bundle_id);
+    const verifyResponse = await verifyCreatedBundle(bundle, step.createPayload.artefacts);
+    appendActivity(
+      verifyResponse.valid ? "Bundle verified" : "Bundle verification warning",
+      verifyResponse.valid
+        ? `${step.label} verified against the connected signer key.`
+        : verifyResponse.message,
+      verifyResponse.valid ? "good" : "warn"
+    );
+
+    let timestampResponse = null;
+    let timestampVerification = null;
+    if (draft.attachTimestamp && vaultConfig?.timestamp?.enabled) {
+      try {
+        timestampResponse = await attachTimestamp(
+          draft.serviceUrl,
+          draft.apiKey,
+          createMeta.bundle_id
+        );
+        timestampVerification = await verifyTimestamp(
+          draft.serviceUrl,
+          draft.apiKey,
+          createMeta.bundle_id
+        );
+      } catch (error) {
+        timestampVerification = {
+          valid: false,
+          message: error instanceof Error ? error.message : String(error)
+        };
+      }
+    }
+
+    let anchorResponse = null;
+    let receiptVerification = null;
+    if (draft.attachTransparency && vaultConfig?.transparency?.enabled && timestampResponse) {
+      try {
+        anchorResponse = await anchorBundle(draft.serviceUrl, draft.apiKey, createMeta.bundle_id);
+        receiptVerification = await verifyReceipt(
+          draft.serviceUrl,
+          draft.apiKey,
+          createMeta.bundle_id
+        );
+      } catch (error) {
+        receiptVerification = {
+          valid: false,
+          message: error instanceof Error ? error.message : String(error)
+        };
+      }
+    }
+
+    if (timestampResponse || anchorResponse) {
+      bundle = await fetchBundle(draft.serviceUrl, draft.apiKey, createMeta.bundle_id);
+    }
+
+    return {
+      ...step,
+      bundleId: createMeta.bundle_id,
+      createMeta,
+      bundle,
+      verifyResponse,
+      timestampResponse,
+      timestampVerification,
+      anchorResponse,
+      receiptVerification
+    };
+  }
+
   async function runWorkflow() {
     setIsRunning(true);
     setErrors((current) => ({ ...current, workflow: "" }));
@@ -437,7 +669,7 @@ export function DemoProvider({ children }) {
         !canUseLiveMode(vaultConfig, draft.provider, draft.providerApiKey)
       ) {
         throw new Error(
-          "Live provider mode requires either a vault-configured provider key or a temporary provider API key in the playground."
+          "Live provider mode needs either provider access already available through the vault or a provider API key entered below."
         );
       }
       const providerResult = await fetchDemoProviderResponse(draft.serviceUrl, draft.apiKey, {
@@ -475,14 +707,7 @@ export function DemoProvider({ children }) {
       );
 
       let bundle = await fetchBundle(draft.serviceUrl, draft.apiKey, createMeta.bundle_id);
-      const verifyResponse = await verifyBundle(draft.serviceUrl, draft.apiKey, {
-        bundle,
-        artefacts: envelope.createPayload.artefacts.map((artefact) => ({
-          name: artefact.name,
-          data_base64: artefact.data_base64
-        })),
-        public_key_pem: vaultConfig?.signing?.public_key_pem ?? ""
-      });
+      const verifyResponse = await verifyCreatedBundle(bundle, envelope.createPayload.artefacts);
       appendActivity(
         verifyResponse.valid ? "Bundle verified" : "Bundle verification warning",
         verifyResponse.valid
@@ -558,7 +783,10 @@ export function DemoProvider({ children }) {
       const disclosurePreview = await previewFor(
         createMeta.bundle_id,
         bundle.subject?.system_id ?? draft.systemId,
-        draft.bundleFormat
+        {
+          packType: preset.packType,
+          bundleFormat: draft.bundleFormat
+        }
       );
       const stats = previewStats(disclosurePreview);
       let exportState = {
@@ -570,12 +798,15 @@ export function DemoProvider({ children }) {
         exportState = await exportFor(
           createMeta.bundle_id,
           bundle.subject?.system_id ?? draft.systemId,
-          draft.bundleFormat
+          {
+            packType: preset.packType,
+            bundleFormat: draft.bundleFormat
+          }
         );
       } else {
         appendActivity(
           "Export skipped",
-          "No disclosure pack to export for this run with the selected profile.",
+          "This proof record does not produce a redacted share package under the selected sharing profile.",
           "warn"
         );
       }
@@ -589,6 +820,8 @@ export function DemoProvider({ children }) {
 
       const nextRun = {
         bundleId: createMeta.bundle_id,
+        primaryBundleId: createMeta.bundle_id,
+        presetKey: preset.key,
         captureMode: providerResult.capture_mode,
         provider: providerResult.provider,
         model: providerResult.model,
@@ -612,7 +845,19 @@ export function DemoProvider({ children }) {
         packSummary: exportState.packSummary,
         packManifest: exportState.packManifest,
         downloadInfo: exportState.downloadInfo,
-        systemSummary
+        systemSummary,
+        bundleRuns: [
+          {
+            bundleId: createMeta.bundle_id,
+            label: preset.label,
+            bundleRole: "primary",
+            itemTypes: envelope.itemTypes ?? envelope.createPayload.capture.items.map((item) => item.type),
+            summary: preset.outcomeLabel,
+            verifyResponse,
+            timestampVerification,
+            receiptVerification
+          }
+        ]
       };
       setCurrentRun(nextRun);
       return createMeta.bundle_id;
@@ -620,6 +865,126 @@ export function DemoProvider({ children }) {
       const message = error instanceof Error ? error.message : String(error);
       setErrors((current) => ({ ...current, workflow: message }));
       appendActivity("Workflow failed", message, "bad");
+      throw error;
+    } finally {
+      setIsRunning(false);
+    }
+  }
+
+  async function runScenarioWorkflow() {
+    setIsRunning(true);
+    setErrors((current) => ({ ...current, workflow: "" }));
+    const scenario = currentScenario;
+
+    try {
+      let providerResult = null;
+      const needsInteraction = scenario.steps.some((step) => step.kind === "interaction");
+      if (needsInteraction) {
+        if (
+          draft.mode === "live" &&
+          !canUseLiveMode(vaultConfig, draft.provider, draft.providerApiKey)
+        ) {
+          throw new Error(
+            "Live provider mode needs either provider access already available through the vault or a provider API key entered below."
+          );
+        }
+        providerResult = await fetchDemoProviderResponse(draft.serviceUrl, draft.apiKey, {
+          mode: draft.mode,
+          provider: draft.provider,
+          model: draft.model,
+          system_prompt: draft.systemPrompt,
+          user_prompt: draft.userPrompt,
+          provider_api_key: hasTemporaryProviderKey(draft.providerApiKey)
+            ? draft.providerApiKey.trim()
+            : undefined,
+          temperature: Number.parseFloat(draft.temperature) || 0.2,
+          max_tokens: Number.parseInt(draft.maxTokens, 10) || 256
+        });
+        appendActivity(
+          "Scenario capture generated",
+          `${providerResult.capture_mode} · ${providerResult.provider}:${providerResult.model}`,
+          draft.mode === "live" ? "accent" : "muted"
+        );
+      }
+
+      const steps = await buildScenarioWorkflow(scenario, draft, providerResult);
+      const bundleRuns = [];
+      for (const step of steps) {
+        bundleRuns.push(await runBundleLifecycle(step));
+      }
+
+      const primaryBundle =
+        bundleRuns.find((bundleRun) => bundleRun.bundleRole === "primary") ?? bundleRuns[0];
+      const disclosurePreview = await previewFor(primaryBundle.bundleId, draft.systemId, {
+        packType: scenario.packType,
+        bundleFormat: scenario.bundleFormat,
+        templateProfile: scenario.disclosureProfile
+      });
+      const exportState = await exportFor(primaryBundle.bundleId, draft.systemId, {
+        packType: scenario.packType,
+        bundleFormat: scenario.bundleFormat,
+        templateProfile: scenario.disclosureProfile
+      });
+      const systemSummary = await fetchSystemSummary(
+        draft.serviceUrl,
+        draft.apiKey,
+        draft.systemId
+      );
+      await loadRecentRuns(draft.systemId);
+
+      const scriptSource = renderScenarioScript(scenario, draft);
+      const review = buildComplianceReview(scenario, {
+        bundleRuns,
+        packSummary: exportState.packSummary,
+        packManifest: exportState.packManifest,
+        downloadInfo: exportState.downloadInfo
+      });
+      const nextRun = {
+        bundleId: primaryBundle.bundleId,
+        primaryBundleId: primaryBundle.bundleId,
+        scenarioId: scenario.id,
+        scenarioLabel: scenario.label,
+        scenarioOutcomeLabel: scenario.description,
+        lane: scenario.lane,
+        captureMode:
+          providerResult?.capture_mode ??
+          (scenario.lane === "cli" ? "cli_playground_capture" : "governance_bundle_capture"),
+        provider: providerResult?.provider ?? null,
+        model: providerResult?.model ?? null,
+        actorRole: scenario.actorRole,
+        packType: scenario.packType,
+        bundleFormat: scenario.bundleFormat,
+        disclosureProfile: scenario.disclosureProfile,
+        createMeta: primaryBundle.createMeta,
+        bundle: primaryBundle.bundle,
+        responseText:
+          primaryBundle.responseText ??
+          primaryBundle.localPayloads?.report?.summary ??
+          "This scenario focuses on governance evidence rather than a direct model response.",
+        promptPayload: primaryBundle.promptPayload ?? null,
+        responsePayload: primaryBundle.responsePayload ?? null,
+        tracePayload: primaryBundle.tracePayload ?? null,
+        artefacts: primaryBundle.createPayload.artefacts,
+        verifyResponse: primaryBundle.verifyResponse,
+        timestampResponse: primaryBundle.timestampResponse,
+        timestampVerification: primaryBundle.timestampVerification,
+        anchorResponse: primaryBundle.anchorResponse,
+        receiptVerification: primaryBundle.receiptVerification,
+        disclosurePreview,
+        packSummary: exportState.packSummary,
+        packManifest: exportState.packManifest,
+        downloadInfo: exportState.downloadInfo,
+        systemSummary,
+        bundleRuns,
+        scriptSource,
+        review
+      };
+      setCurrentRun(nextRun);
+      return primaryBundle.bundleId;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setErrors((current) => ({ ...current, workflow: message }));
+      appendActivity("Scenario workflow failed", message, "bad");
       throw error;
     } finally {
       setIsRunning(false);
@@ -635,7 +1000,11 @@ export function DemoProvider({ children }) {
       const response = await previewFor(
         currentRun.bundleId,
         currentRun.bundle?.subject?.system_id ?? draft.systemId,
-        currentRun.bundleFormat
+        {
+          packType: currentRun.packType,
+          bundleFormat: currentRun.bundleFormat,
+          templateProfile: currentRun.disclosureProfile
+        }
       );
       setCurrentRun((run) => (run ? { ...run, disclosurePreview: response } : run));
       return response;
@@ -658,7 +1027,7 @@ export function DemoProvider({ children }) {
       ) {
         appendActivity(
           "Export skipped",
-          "No disclosure pack to export for this run with the selected profile.",
+          "This proof record does not produce a redacted share package under the selected sharing profile.",
           "warn"
         );
         return null;
@@ -666,7 +1035,11 @@ export function DemoProvider({ children }) {
       const exportState = await exportFor(
         currentRun.bundleId,
         currentRun.bundle.subject.system_id,
-        currentRun.bundleFormat
+        {
+          packType: currentRun.packType,
+          bundleFormat: currentRun.bundleFormat,
+          templateProfile: currentRun.disclosureProfile
+        }
       );
       setCurrentRun((run) =>
         run
@@ -689,6 +1062,7 @@ export function DemoProvider({ children }) {
     vaultConfig,
     templateCatalog,
     currentPreset,
+    currentScenario,
     currentRun,
     recentRuns,
     activityLog,
@@ -701,7 +1075,11 @@ export function DemoProvider({ children }) {
       refreshVaultCapabilities,
       updateDraft,
       selectPreset,
+      selectLane,
+      selectScenario,
+      ensurePlaygroundDraft,
       runWorkflow,
+      runScenarioWorkflow,
       previewCurrentRun,
       exportCurrentRun,
       ensureRunLoaded,

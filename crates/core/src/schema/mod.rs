@@ -35,6 +35,10 @@ pub enum ActorRole {
     Provider,
     Deployer,
     Integrator,
+    Importer,
+    Distributor,
+    AuthorizedRepresentative,
+    GpaiProvider,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -65,6 +69,44 @@ pub struct Subject {
     pub deployment_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub version: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ComplianceProfile {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub intended_use: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prohibited_practice_screening: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub risk_tier: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub high_risk_domain: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gpai_status: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub systemic_risk: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fria_required: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub deployment_context: Option<String>,
+    #[serde(default = "null_json", skip_serializing_if = "Value::is_null")]
+    pub metadata: Value,
+}
+
+impl Default for ComplianceProfile {
+    fn default() -> Self {
+        Self {
+            intended_use: None,
+            prohibited_practice_screening: None,
+            risk_tier: None,
+            high_risk_domain: None,
+            gpai_status: None,
+            systemic_risk: None,
+            fria_required: None,
+            deployment_context: None,
+            metadata: Value::Null,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -290,6 +332,172 @@ pub struct LiteracyAttestationEvidence {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct InstructionsForUseEvidence {
+    pub document_ref: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub version: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub section: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub commitment: Option<String>,
+    #[serde(default = "null_json", skip_serializing_if = "Value::is_null")]
+    pub metadata: Value,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct QmsRecordEvidence {
+    pub record_id: String,
+    pub process: String,
+    pub status: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub record_commitment: Option<String>,
+    #[serde(default = "null_json", skip_serializing_if = "Value::is_null")]
+    pub metadata: Value,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct FundamentalRightsAssessmentEvidence {
+    pub assessment_id: String,
+    pub status: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scope: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub report_commitment: Option<String>,
+    #[serde(default = "null_json", skip_serializing_if = "Value::is_null")]
+    pub metadata: Value,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct StandardsAlignmentEvidence {
+    pub standard_ref: String,
+    pub status: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scope: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mapping_commitment: Option<String>,
+    #[serde(default = "null_json", skip_serializing_if = "Value::is_null")]
+    pub metadata: Value,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct PostMarketMonitoringEvidence {
+    pub plan_id: String,
+    pub status: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub summary: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub report_commitment: Option<String>,
+    #[serde(default = "null_json", skip_serializing_if = "Value::is_null")]
+    pub metadata: Value,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct CorrectiveActionEvidence {
+    pub action_id: String,
+    pub status: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub summary: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub due_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub record_commitment: Option<String>,
+    #[serde(default = "null_json", skip_serializing_if = "Value::is_null")]
+    pub metadata: Value,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct AuthorityNotificationEvidence {
+    pub notification_id: String,
+    pub authority: String,
+    pub status: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub incident_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub due_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub report_commitment: Option<String>,
+    #[serde(default = "null_json", skip_serializing_if = "Value::is_null")]
+    pub metadata: Value,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct AuthoritySubmissionEvidence {
+    pub submission_id: String,
+    pub authority: String,
+    pub status: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub channel: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub submitted_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub document_commitment: Option<String>,
+    #[serde(default = "null_json", skip_serializing_if = "Value::is_null")]
+    pub metadata: Value,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ReportingDeadlineEvidence {
+    pub deadline_id: String,
+    pub authority: String,
+    pub obligation_ref: String,
+    pub due_at: String,
+    pub status: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub incident_id: Option<String>,
+    #[serde(default = "null_json", skip_serializing_if = "Value::is_null")]
+    pub metadata: Value,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct RegulatorCorrespondenceEvidence {
+    pub correspondence_id: String,
+    pub authority: String,
+    pub direction: String,
+    pub status: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub occurred_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub message_commitment: Option<String>,
+    #[serde(default = "null_json", skip_serializing_if = "Value::is_null")]
+    pub metadata: Value,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct DownstreamDocumentationEvidence {
+    pub document_ref: String,
+    pub audience: String,
+    pub status: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub commitment: Option<String>,
+    #[serde(default = "null_json", skip_serializing_if = "Value::is_null")]
+    pub metadata: Value,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct CopyrightPolicyEvidence {
+    pub policy_ref: String,
+    pub status: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub jurisdiction: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub commitment: Option<String>,
+    #[serde(default = "null_json", skip_serializing_if = "Value::is_null")]
+    pub metadata: Value,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct TrainingSummaryEvidence {
+    pub summary_ref: String,
+    pub status: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub audience: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub commitment: Option<String>,
+    #[serde(default = "null_json", skip_serializing_if = "Value::is_null")]
+    pub metadata: Value,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct IncidentReportEvidence {
     pub incident_id: String,
     pub severity: String,
@@ -322,6 +530,19 @@ pub enum EvidenceItem {
     Declaration(DeclarationEvidence),
     Registration(RegistrationEvidence),
     LiteracyAttestation(LiteracyAttestationEvidence),
+    InstructionsForUse(InstructionsForUseEvidence),
+    QmsRecord(QmsRecordEvidence),
+    FundamentalRightsAssessment(FundamentalRightsAssessmentEvidence),
+    StandardsAlignment(StandardsAlignmentEvidence),
+    PostMarketMonitoring(PostMarketMonitoringEvidence),
+    CorrectiveAction(CorrectiveActionEvidence),
+    AuthorityNotification(AuthorityNotificationEvidence),
+    AuthoritySubmission(AuthoritySubmissionEvidence),
+    ReportingDeadline(ReportingDeadlineEvidence),
+    RegulatorCorrespondence(RegulatorCorrespondenceEvidence),
+    DownstreamDocumentation(DownstreamDocumentationEvidence),
+    CopyrightPolicy(CopyrightPolicyEvidence),
+    TrainingSummary(TrainingSummaryEvidence),
     IncidentReport(IncidentReportEvidence),
 }
 
@@ -414,6 +635,8 @@ pub struct TransparencyReceipt {
 pub struct CaptureEvent {
     pub actor: Actor,
     pub subject: Subject,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub compliance_profile: Option<ComplianceProfile>,
     #[serde(default)]
     pub context: EvidenceContext,
     pub items: Vec<EvidenceItem>,
@@ -428,6 +651,8 @@ pub struct EvidenceBundle {
     pub created_at: String,
     pub actor: Actor,
     pub subject: Subject,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub compliance_profile: Option<ComplianceProfile>,
     #[serde(default)]
     pub context: EvidenceContext,
     pub items: Vec<EvidenceItem>,
@@ -445,31 +670,37 @@ pub type ProofBundle = EvidenceBundle;
 
 impl EvidenceBundle {
     pub fn legacy_canonical_header_projection(&self) -> Value {
-        json!({
-            "bundle_version": self.bundle_version,
-            "bundle_id": self.bundle_id,
-            "created_at": self.created_at,
-            "actor": self.actor,
-            "subject": self.subject,
-            "context": self.context,
-            "items": self.items,
-            "artefacts": self.artefacts,
-            "policy": self.policy,
-        })
+        let mut header = serde_json::Map::new();
+        header.insert("bundle_version".to_string(), json!(self.bundle_version));
+        header.insert("bundle_id".to_string(), json!(self.bundle_id));
+        header.insert("created_at".to_string(), json!(self.created_at));
+        header.insert("actor".to_string(), json!(self.actor));
+        header.insert("subject".to_string(), json!(self.subject));
+        if let Some(profile) = &self.compliance_profile {
+            header.insert("compliance_profile".to_string(), json!(profile));
+        }
+        header.insert("context".to_string(), json!(self.context));
+        header.insert("items".to_string(), json!(self.items));
+        header.insert("artefacts".to_string(), json!(self.artefacts));
+        header.insert("policy".to_string(), json!(self.policy));
+        Value::Object(header)
     }
 
     pub fn canonical_header_projection(&self) -> Value {
-        json!({
-            "bundle_version": self.bundle_version,
-            "bundle_id": self.bundle_id,
-            "created_at": self.created_at,
-            "actor": self.actor,
-            "subject": self.subject,
-            "context": self.context,
-            "policy": self.policy,
-            "item_count": self.items.len(),
-            "artefact_count": self.artefacts.len(),
-        })
+        let mut header = serde_json::Map::new();
+        header.insert("bundle_version".to_string(), json!(self.bundle_version));
+        header.insert("bundle_id".to_string(), json!(self.bundle_id));
+        header.insert("created_at".to_string(), json!(self.created_at));
+        header.insert("actor".to_string(), json!(self.actor));
+        header.insert("subject".to_string(), json!(self.subject));
+        if let Some(profile) = &self.compliance_profile {
+            header.insert("compliance_profile".to_string(), json!(profile));
+        }
+        header.insert("context".to_string(), json!(self.context));
+        header.insert("policy".to_string(), json!(self.policy));
+        header.insert("item_count".to_string(), json!(self.items.len()));
+        header.insert("artefact_count".to_string(), json!(self.artefacts.len()));
+        Value::Object(header)
     }
 
     pub fn legacy_canonical_header_bytes(&self) -> Result<Vec<u8>, CanonError> {
@@ -808,9 +1039,55 @@ fn validate_item_digests(index: usize, item: &EvidenceItem) -> Result<(), Bundle
                 validate_named_digest(index, "rationale_commitment", value)?;
             }
         }
+        EvidenceItem::InstructionsForUse(evidence) => {
+            if let Some(value) = &evidence.commitment {
+                validate_named_digest(index, "commitment", value)?;
+            }
+        }
         EvidenceItem::TechnicalDoc(evidence) => {
             if let Some(value) = &evidence.commitment {
                 validate_named_digest(index, "commitment", value)?;
+            }
+        }
+        EvidenceItem::QmsRecord(evidence) => {
+            if let Some(value) = &evidence.record_commitment {
+                validate_named_digest(index, "record_commitment", value)?;
+            }
+        }
+        EvidenceItem::FundamentalRightsAssessment(evidence) => {
+            if let Some(value) = &evidence.report_commitment {
+                validate_named_digest(index, "report_commitment", value)?;
+            }
+        }
+        EvidenceItem::StandardsAlignment(evidence) => {
+            if let Some(value) = &evidence.mapping_commitment {
+                validate_named_digest(index, "mapping_commitment", value)?;
+            }
+        }
+        EvidenceItem::PostMarketMonitoring(evidence) => {
+            if let Some(value) = &evidence.report_commitment {
+                validate_named_digest(index, "report_commitment", value)?;
+            }
+        }
+        EvidenceItem::CorrectiveAction(evidence) => {
+            if let Some(value) = &evidence.record_commitment {
+                validate_named_digest(index, "record_commitment", value)?;
+            }
+        }
+        EvidenceItem::AuthorityNotification(evidence) => {
+            if let Some(value) = &evidence.report_commitment {
+                validate_named_digest(index, "report_commitment", value)?;
+            }
+        }
+        EvidenceItem::AuthoritySubmission(evidence) => {
+            if let Some(value) = &evidence.document_commitment {
+                validate_named_digest(index, "document_commitment", value)?;
+            }
+        }
+        EvidenceItem::ReportingDeadline(_) => {}
+        EvidenceItem::RegulatorCorrespondence(evidence) => {
+            if let Some(value) = &evidence.message_commitment {
+                validate_named_digest(index, "message_commitment", value)?;
             }
         }
         EvidenceItem::ModelEvaluation(evidence) => {
@@ -841,6 +1118,21 @@ fn validate_item_digests(index: usize, item: &EvidenceItem) -> Result<(), Bundle
         EvidenceItem::Registration(evidence) => {
             if let Some(value) = &evidence.receipt_commitment {
                 validate_named_digest(index, "receipt_commitment", value)?;
+            }
+        }
+        EvidenceItem::DownstreamDocumentation(evidence) => {
+            if let Some(value) = &evidence.commitment {
+                validate_named_digest(index, "commitment", value)?;
+            }
+        }
+        EvidenceItem::CopyrightPolicy(evidence) => {
+            if let Some(value) = &evidence.commitment {
+                validate_named_digest(index, "commitment", value)?;
+            }
+        }
+        EvidenceItem::TrainingSummary(evidence) => {
+            if let Some(value) = &evidence.commitment {
+                validate_named_digest(index, "commitment", value)?;
             }
         }
         EvidenceItem::LiteracyAttestation(evidence) => {
@@ -1066,6 +1358,17 @@ mod tests {
                 deployment_id: Some("deploy-1".to_string()),
                 version: Some("2026.03".to_string()),
             },
+            compliance_profile: Some(ComplianceProfile {
+                intended_use: Some("Internal reviewer assistance".to_string()),
+                prohibited_practice_screening: Some("screened_not_prohibited".to_string()),
+                risk_tier: Some("high_risk_candidate".to_string()),
+                high_risk_domain: Some("annex_iii_employment".to_string()),
+                gpai_status: Some("downstream_integrator".to_string()),
+                systemic_risk: Some(false),
+                fria_required: Some(false),
+                deployment_context: Some("private_sector_internal".to_string()),
+                metadata: json!({"owner": "compliance"}),
+            }),
             context: EvidenceContext {
                 provider: Some("anthropic".to_string()),
                 model: Some("claude-sonnet-4-6".to_string()),
@@ -1143,6 +1446,7 @@ mod tests {
             created_at: "2026-03-02T00:00:00+00:00".to_string(),
             actor: sample_event().actor,
             subject: sample_event().subject,
+            compliance_profile: sample_event().compliance_profile,
             context: sample_event().context,
             items: sample_event().items,
             artefacts: vec![
@@ -1211,6 +1515,7 @@ mod tests {
             created_at: "2026-03-02T00:00:00+00:00".to_string(),
             actor: event.actor,
             subject: event.subject,
+            compliance_profile: event.compliance_profile,
             context: event.context,
             items: event.items,
             artefacts: vec![ArtefactRef {
@@ -1266,6 +1571,7 @@ mod tests {
             created_at: "2026-03-02T00:00:00+00:00".to_string(),
             actor: event.actor,
             subject: event.subject,
+            compliance_profile: event.compliance_profile,
             context: event.context,
             items: event.items,
             artefacts: vec![ArtefactRef {
@@ -1319,6 +1625,7 @@ mod tests {
             created_at: "2026-03-02T00:00:00+00:00".to_string(),
             actor: event.actor,
             subject: event.subject,
+            compliance_profile: event.compliance_profile,
             context: event.context,
             items: event.items,
             artefacts: vec![ArtefactRef {

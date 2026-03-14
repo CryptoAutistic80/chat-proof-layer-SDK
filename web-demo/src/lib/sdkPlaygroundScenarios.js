@@ -4,20 +4,20 @@ export const PLAYGROUND_LANES = [
   {
     id: "typescript",
     label: "TypeScript",
-    eyebrow: "SDK lane",
-    description: "Show the JavaScript and TypeScript facade with reusable compliance context."
+    eyebrow: "Language lane",
+    description: "Use the JavaScript and TypeScript SDK for app-side AI capture."
   },
   {
     id: "python",
     label: "Python",
-    eyebrow: "SDK lane",
-    description: "Show Python capture flows for deployer-side governance and incident response."
+    eyebrow: "Language lane",
+    description: "Use the Python SDK for reviewed workflows and incident handling."
   },
   {
     id: "cli",
     label: "CLI",
-    eyebrow: "Rust-native lane",
-    description: "Show the `proofctl` path without pretending there is a separate published Rust SDK."
+    eyebrow: "Language lane",
+    description: "Use the Rust-native proofctl CLI when you want a scriptable terminal path."
   }
 ];
 
@@ -69,7 +69,7 @@ const INTERACTION_FIELDS = [
   },
   {
     key: "userPrompt",
-    label: "Primary prompt",
+    label: "Prompt",
     type: "textarea",
     rows: 5
   }
@@ -94,13 +94,75 @@ const COMMON_PROFILE_FIELDS = [
   }
 ];
 
+function explainer(expectation, record, outsideTool) {
+  return { expectation, record, outsideTool };
+}
+
 export const PLAYGROUND_SCENARIOS = [
   {
-    id: "ts_provider_governance",
+    id: "ts_chatbot_support",
     lane: "typescript",
-    label: "Provider governance",
+    label: "Customer support chatbot",
+    category: "Chatbot",
     description:
-      "Capture one interaction plus operator instructions and QMS evidence, then export a provider governance pack.",
+      "The simplest example: capture one support-style conversation and inspect the sealed record later.",
+    audienceSummary: "A support chatbot or general assistant embedded in an application.",
+    lawExplainer: explainer(
+      "The law usually expects teams to understand what their AI system did and to keep evidence that can later explain a meaningful run.",
+      "This example records the prompt, output, model details, and system context for one chatbot interaction.",
+      "Your team still needs to decide whether this workflow triggers transparency or higher-risk duties and what notices or controls belong around it."
+    ),
+    sourceRef: "playground/typescript-chatbot.ts",
+    codeLanguage: "javascript",
+    packType: null,
+    reviewKind: "chatbot_support",
+    actorRole: "provider",
+    bundleFormat: "full",
+    disclosureProfile: "runtime_minimum",
+    templateId: "ts_chatbot_support",
+    primaryStepId: "interaction",
+    recordExplorerIntro:
+      "This record shows a single chatbot run: what the user asked, what the model returned, and which system context applied.",
+    defaults: {
+      serviceUrl: DEFAULT_SERVICE_URL,
+      provider: "openai",
+      model: defaultModelFor("openai"),
+      mode: "synthetic",
+      systemId: "support-chatbot",
+      systemPrompt:
+        "You are a helpful support assistant. Answer clearly, stay within policy, and ask for a human handoff when needed.",
+      intendedUse: "Customer support chatbot for routine account and product questions",
+      prohibitedPracticeScreening: "screened_no_prohibited_use",
+      riskTier: "limited_risk",
+      highRiskDomain: "",
+      deploymentContext: "eu_use",
+      owner: "support-platform-team",
+      market: "eu",
+      userPrompt: "A customer says they cannot access their account. Draft a helpful reply."
+    },
+    fields: [...COMMON_CONNECTION_FIELDS, ...INTERACTION_FIELDS, ...COMMON_PROFILE_FIELDS],
+    steps: [
+      { id: "interaction", kind: "interaction", itemType: "llm_interaction", bundleRole: "primary" }
+    ],
+    missingEvidence: [
+      "Add policy or transparency notices if users need to be clearly told they are interacting with AI.",
+      "Add human handoff or escalation records if reviewers need to see how difficult cases leave the chatbot path.",
+      "Add operating rules or monitoring records if this moves from a simple demo into a governed production workflow."
+    ]
+  },
+  {
+    id: "ts_support_rules",
+    lane: "typescript",
+    label: "Support assistant with operating rules",
+    category: "Support workflow",
+    description:
+      "Capture the AI run plus the instructions and sign-off around it, then export a provider governance pack.",
+    audienceSummary: "A support or triage assistant that must operate under clear human rules.",
+    lawExplainer: explainer(
+      "The law usually expects more than a raw model output when a workflow needs operating controls and internal review evidence.",
+      "This example records the model run plus instructions for operators and a quality-management sign-off record.",
+      "Your team still needs to maintain the real operating process, decide which standards apply, and add monitoring once the workflow is live."
+    ),
     sourceRef: "examples/typescript-compliance/run.mjs",
     codeLanguage: "javascript",
     packType: "provider_governance",
@@ -108,27 +170,29 @@ export const PLAYGROUND_SCENARIOS = [
     actorRole: "provider",
     bundleFormat: "full",
     disclosureProfile: "annex_iv_redacted",
-    templateId: "ts_provider_governance",
+    templateId: "ts_support_rules",
     primaryStepId: "interaction",
+    recordExplorerIntro:
+      "This record set shows the model run plus the operating material around it, so a reviewer sees both behavior and controls.",
     defaults: {
       serviceUrl: DEFAULT_SERVICE_URL,
       provider: "openai",
       model: defaultModelFor("openai"),
       mode: "synthetic",
-      systemId: "hiring-assistant",
+      systemId: "support-assistant",
       systemPrompt:
-        "You are a recruiter support assistant. Stay concrete, highlight review steps, and avoid autonomous decisions.",
-      intendedUse: "Recruiter support for first-pass candidate review",
+        "You are a support operations assistant. Summarize the issue, stay factual, and escalate edge cases for human review.",
+      intendedUse: "Support-assistant workflow with human review for sensitive or unusual cases",
       prohibitedPracticeScreening: "screened_no_prohibited_use",
-      riskTier: "high_risk",
-      highRiskDomain: "employment",
+      riskTier: "limited_risk",
+      highRiskDomain: "",
       deploymentContext: "eu_market_placement",
       owner: "quality-team",
       market: "eu",
-      userPrompt: "Summarize the candidate profile for a human recruiter.",
+      userPrompt: "Summarize a customer complaint and suggest the next safe support step.",
       instructionsSummary:
-        "Operators must review all negative or borderline candidate recommendations.",
-      instructionsSection: "human-review-required",
+        "Agents must review high-risk refund, safety, and account-lock decisions before anything is sent.",
+      instructionsSection: "agent-review-required",
       qmsStatus: "approved",
       qmsApprover: "quality-lead"
     },
@@ -138,13 +202,13 @@ export const PLAYGROUND_SCENARIOS = [
       ...COMMON_PROFILE_FIELDS,
       {
         key: "instructionsSummary",
-        label: "Instructions note",
+        label: "Operating rules summary",
         type: "textarea",
         rows: 3
       },
       {
         key: "qmsApprover",
-        label: "QMS approver",
+        label: "Quality approver",
         type: "text"
       }
     ],
@@ -158,90 +222,25 @@ export const PLAYGROUND_SCENARIOS = [
       },
       { id: "qms_record", kind: "evidence", itemType: "qms_record", bundleRole: "support" }
     ],
-    reviewGaps: [
-      "Add standards alignment evidence to show which harmonized standards or internal controls back the release.",
-      "Add post-market monitoring records once the system is in production.",
-      "Add conformity or declaration material if this example needs to represent a fuller provider file."
+    missingEvidence: [
+      "Add monitoring records once the workflow is live and you need to show how it is watched over time.",
+      "Add standards-alignment or release records if this needs to represent a fuller provider file.",
+      "Add incident or corrective-action records when the workflow has real operational issues to review."
     ]
   },
   {
-    id: "ts_post_market_monitoring",
-    lane: "typescript",
-    label: "Post-market monitoring",
-    description:
-      "Capture one operational interaction, a monitoring plan, and an authority submission for follow-up export.",
-    sourceRef: "examples/typescript-monitoring/run.mjs",
-    codeLanguage: "javascript",
-    packType: "post_market_monitoring",
-    reviewKind: "post_market_monitoring",
-    actorRole: "provider",
-    bundleFormat: "full",
-    disclosureProfile: "incident_summary",
-    templateId: "ts_post_market_monitoring",
-    primaryStepId: "interaction",
-    defaults: {
-      serviceUrl: DEFAULT_SERVICE_URL,
-      provider: "openai",
-      model: defaultModelFor("openai"),
-      mode: "synthetic",
-      systemId: "claims-assistant",
-      systemPrompt:
-        "You are a claims triage assistant. Summarize the case for a human reviewer and flag missing evidence without making a final decision.",
-      intendedUse: "Claims triage support with human review",
-      prohibitedPracticeScreening: "screened_no_prohibited_use",
-      riskTier: "high_risk",
-      deploymentContext: "eu_market_placement",
-      owner: "safety-ops",
-      market: "eu",
-      userPrompt: "Summarize the claim for a human reviewer and flag missing documents.",
-      monitoringSummary:
-        "Weekly drift review with incident escalation thresholds for adverse outcomes.",
-      authority: "eu_ai_office",
-      submissionSummary: "Initial notification package for monitoring follow-up."
-    },
-    fields: [
-      ...COMMON_CONNECTION_FIELDS,
-      ...INTERACTION_FIELDS,
-      ...COMMON_PROFILE_FIELDS,
-      {
-        key: "monitoringSummary",
-        label: "Monitoring summary",
-        type: "textarea",
-        rows: 3
-      },
-      {
-        key: "authority",
-        label: "Authority",
-        type: "text"
-      }
-    ],
-    steps: [
-      { id: "interaction", kind: "interaction", itemType: "llm_interaction", bundleRole: "primary" },
-      {
-        id: "post_market_monitoring",
-        kind: "evidence",
-        itemType: "post_market_monitoring",
-        bundleRole: "support"
-      },
-      {
-        id: "authority_submission",
-        kind: "evidence",
-        itemType: "authority_submission",
-        bundleRole: "support"
-      }
-    ],
-    reviewGaps: [
-      "Add incident reports and corrective actions when monitoring turns up adverse outcomes.",
-      "Add retained runtime slices if the reviewer needs evidence from a specific production window.",
-      "Add downstream instructions or notices if this monitoring flow needs to show operator communication."
-    ]
-  },
-  {
-    id: "py_fundamental_rights",
+    id: "py_hiring_review",
     lane: "python",
-    label: "Fundamental rights",
+    label: "Hiring review assistant",
+    category: "Hiring workflow",
     description:
-      "Capture one deployer-side interaction, a FRIA record, and a human oversight action for a deployer review pack.",
+      "Show how a human-reviewed hiring or review workflow can capture the model output, assessment record, and oversight action together.",
+    audienceSummary: "A higher-impact review workflow where people remain in the loop.",
+    lawExplainer: explainer(
+      "For higher-impact workflows, teams usually need to show not only the AI output but also how human review and impact assessment were handled.",
+      "This example records the model interaction, a fundamental-rights assessment, and a human-oversight action.",
+      "Your team still needs the real assessment process, deployment decision, and any operational safeguards or notices that sit outside the capture tool."
+    ),
     sourceRef: "examples/python-compliance/run.py",
     codeLanguage: "python",
     packType: "fundamental_rights",
@@ -249,25 +248,29 @@ export const PLAYGROUND_SCENARIOS = [
     actorRole: "deployer",
     bundleFormat: "full",
     disclosureProfile: "regulator_minimum",
-    templateId: "py_fundamental_rights",
+    templateId: "py_hiring_review",
     primaryStepId: "interaction",
+    recordExplorerIntro:
+      "This record set shows a reviewed hiring-style workflow where the AI output is only one part of the evidence story.",
     defaults: {
       serviceUrl: DEFAULT_SERVICE_URL,
       provider: "openai",
       model: defaultModelFor("openai"),
       mode: "synthetic",
-      systemId: "benefits-review",
+      systemId: "hiring-review",
       systemPrompt:
-        "You are a public-sector review assistant. Summarize the case for human review and emphasize borderline factors.",
-      intendedUse: "Public-sector benefit eligibility review",
+        "You are a hiring review assistant. Summarize candidate information for a human reviewer and avoid final decisions.",
+      intendedUse: "Candidate review support with mandatory human oversight",
+      prohibitedPracticeScreening: "screened_no_prohibited_use",
       riskTier: "high_risk",
-      deploymentContext: "public_sector",
+      highRiskDomain: "employment",
+      deploymentContext: "eu_use",
       friaRequired: true,
-      owner: "rights-review-team",
+      owner: "people-ops-review-team",
       market: "eu",
-      userPrompt: "Summarize the eligibility factors for human review.",
-      friaSummary: "Human escalation required for borderline cases.",
-      reviewer: "rights-panel"
+      userPrompt: "Summarize the candidate profile for a hiring manager and flag open questions.",
+      friaSummary: "Borderline or negative recommendations require manual review and documented justification.",
+      reviewer: "hiring-panel"
     },
     fields: [
       ...COMMON_CONNECTION_FIELDS,
@@ -275,13 +278,13 @@ export const PLAYGROUND_SCENARIOS = [
       ...COMMON_PROFILE_FIELDS,
       {
         key: "friaSummary",
-        label: "FRIA finding",
+        label: "Assessment finding",
         type: "textarea",
         rows: 3
       },
       {
         key: "reviewer",
-        label: "Oversight reviewer",
+        label: "Human reviewer",
         type: "text"
       }
     ],
@@ -300,18 +303,25 @@ export const PLAYGROUND_SCENARIOS = [
         bundleRole: "support"
       }
     ],
-    reviewGaps: [
-      "Add consultation records or stakeholder input if the deployer needs to show how affected groups were considered.",
-      "Add post-deployment monitoring evidence if the review needs to show how the deployer watches for rights impact after launch.",
-      "Add any notices or escalation procedures that explain how human review reaches affected decisions."
+    missingEvidence: [
+      "Add stakeholder consultation or deployment approval records if the review needs to show how the workflow was accepted for use.",
+      "Add post-deployment monitoring if reviewers need to see how the process is watched after launch.",
+      "Add notices, escalation steps, or appeal procedures if affected people need to be part of the record."
     ]
   },
   {
-    id: "py_incident_response",
+    id: "py_incident_escalation",
     lane: "python",
-    label: "Incident response",
+    label: "Incident escalation",
+    category: "Incident workflow",
     description:
-      "Capture an incident, an authority notification, a reporting deadline, and correspondence in one deployer-side response flow.",
+      "Capture an incident, the draft authority notification, the reporting deadline, and regulator correspondence in one workflow.",
+    audienceSummary: "An operational incident path where teams need a reviewable escalation trail.",
+    lawExplainer: explainer(
+      "When something goes wrong, teams usually need a clear incident trail that shows what happened, who was notified, and what follow-up is due.",
+      "This example records the incident itself plus authority and deadline material needed for follow-up.",
+      "Your team still needs to decide whether the event is reportable, complete the real submission process, and carry out corrective action outside the tool."
+    ),
     sourceRef: "examples/python-incident-response/run.py",
     codeLanguage: "python",
     packType: "incident_response",
@@ -319,13 +329,17 @@ export const PLAYGROUND_SCENARIOS = [
     actorRole: "deployer",
     bundleFormat: "full",
     disclosureProfile: "incident_summary",
-    templateId: "py_incident_response",
+    templateId: "py_incident_escalation",
     primaryStepId: "incident_report",
+    recordExplorerIntro:
+      "This record set shows how an incident trail can be built from the first report through regulator-facing follow-up.",
     defaults: {
       serviceUrl: DEFAULT_SERVICE_URL,
       systemId: "benefits-review",
-      intendedUse: "Public-sector benefit eligibility review",
+      intendedUse: "Public-facing eligibility review with incident escalation",
+      prohibitedPracticeScreening: "screened_no_prohibited_use",
       riskTier: "high_risk",
+      highRiskDomain: "",
       deploymentContext: "public_sector",
       friaRequired: true,
       owner: "incident-ops",
@@ -353,6 +367,11 @@ export const PLAYGROUND_SCENARIOS = [
         key: "dueAt",
         label: "Reporting deadline",
         type: "text"
+      },
+      {
+        key: "correspondenceSubject",
+        label: "Correspondence subject",
+        type: "text"
       }
     ],
     steps: [
@@ -376,77 +395,61 @@ export const PLAYGROUND_SCENARIOS = [
         bundleRole: "support"
       }
     ],
-    reviewGaps: [
-      "Add the final authority submission receipt if the reviewer needs to prove the notification left draft state.",
-      "Add corrective action and closure records once the incident response moves beyond initial reporting.",
-      "Add any runtime or model-evaluation evidence that explains what caused the incident in operational terms."
+    missingEvidence: [
+      "Add the final submission receipt if the review needs proof that a regulator actually received the filing.",
+      "Add corrective-action and closure records once the incident moves beyond initial escalation.",
+      "Add the operational evidence that explains what caused the incident if the reviewer needs deeper root-cause material."
     ]
   },
   {
-    id: "cli_provider_governance",
+    id: "cli_chatbot_support",
     lane: "cli",
-    label: "Provider governance via CLI",
+    label: "Customer support chatbot via CLI",
+    category: "CLI workflow",
     description:
-      "Show the Rust-native `proofctl` create and pack flow for the same provider-governance outcome.",
-    sourceRef: "README.md#getting-started",
+      "Show the same single-run chatbot capture path through proofctl commands instead of an SDK facade.",
+    audienceSummary: "A scriptable terminal path for teams who want to automate capture from the CLI.",
+    lawExplainer: explainer(
+      "The same basic expectation applies in a CLI workflow: keep enough evidence to explain a meaningful AI run later.",
+      "This example records one chatbot interaction and the key system context around it.",
+      "Your team still needs to decide which controls, notices, and sharing rules should sit around the workflow in production."
+    ),
+    sourceRef: "playground/proofctl-chatbot.sh",
     codeLanguage: "bash",
-    packType: "provider_governance",
-    reviewKind: "provider_governance",
+    packType: null,
+    reviewKind: "chatbot_support",
     actorRole: "provider",
     bundleFormat: "full",
-    disclosureProfile: "annex_iv_redacted",
-    templateId: "cli_provider_governance",
+    disclosureProfile: "runtime_minimum",
+    templateId: "cli_chatbot_support",
     primaryStepId: "interaction",
+    recordExplorerIntro:
+      "This record shows the terminal-first version of the same chatbot evidence flow.",
     defaults: {
       serviceUrl: DEFAULT_SERVICE_URL,
       provider: "openai",
       model: defaultModelFor("openai"),
       mode: "synthetic",
-      systemId: "cli-hiring-assistant",
+      systemId: "cli-support-chatbot",
       systemPrompt:
-        "You are a recruiter support assistant. Stay concrete, highlight review steps, and avoid autonomous decisions.",
-      intendedUse: "Recruiter support for first-pass candidate review",
+        "You are a support assistant. Stay clear, accurate, and escalate account-sensitive issues.",
+      intendedUse: "Customer support chatbot captured through proofctl",
       prohibitedPracticeScreening: "screened_no_prohibited_use",
-      riskTier: "high_risk",
-      highRiskDomain: "employment",
-      deploymentContext: "eu_market_placement",
-      owner: "quality-team",
+      riskTier: "limited_risk",
+      highRiskDomain: "",
+      deploymentContext: "eu_use",
+      owner: "platform-engineering",
       market: "eu",
-      userPrompt: "Summarize the candidate profile for a human recruiter.",
-      instructionsSummary:
-        "Operators must review all negative or borderline candidate recommendations.",
-      qmsApprover: "quality-lead"
+      userPrompt: "Draft a helpful account access reply for a customer."
     },
-    fields: [
-      ...COMMON_CONNECTION_FIELDS,
-      ...INTERACTION_FIELDS,
-      ...COMMON_PROFILE_FIELDS,
-      {
-        key: "instructionsSummary",
-        label: "Instructions note",
-        type: "textarea",
-        rows: 3
-      },
-      {
-        key: "qmsApprover",
-        label: "QMS approver",
-        type: "text"
-      }
-    ],
+    fields: [...COMMON_CONNECTION_FIELDS, ...INTERACTION_FIELDS, ...COMMON_PROFILE_FIELDS],
     steps: [
-      { id: "interaction", kind: "interaction", itemType: "llm_interaction", bundleRole: "primary" },
-      {
-        id: "instructions_for_use",
-        kind: "evidence",
-        itemType: "instructions_for_use",
-        bundleRole: "support"
-      },
-      { id: "qms_record", kind: "evidence", itemType: "qms_record", bundleRole: "support" }
+      { id: "interaction", kind: "interaction", itemType: "llm_interaction", bundleRole: "primary" }
     ],
-    reviewGaps: [
-      "Add standards alignment evidence to show which controls back the release.",
-      "Add monitoring and corrective-action evidence when the example needs to move beyond pre-release governance.",
-      "Add any conformity or declaration artefacts required for a fuller provider evidence file."
+    missingEvidence: [
+      "Add operating rules if the CLI path is being used for a governed production workflow rather than a simple capture example.",
+      "Add disclosure and export policy decisions if this record needs to be shared outside the engineering team.",
+      "Add monitoring and incident material if the workflow moves into higher-impact operational use."
     ]
   }
 ];
@@ -503,9 +506,19 @@ export function inferPackTypeFromItems(items = []) {
   if (types.includes("instructions_for_use") || types.includes("qms_record")) {
     return "provider_governance";
   }
-  return "runtime_logs";
+  return null;
 }
 
-export function findScenarioByPackType(packType) {
-  return PLAYGROUND_SCENARIOS.find((scenario) => scenario.packType === packType) ?? null;
+export function findScenarioByPackType(packType, items = []) {
+  if (packType === null) {
+    return PLAYGROUND_SCENARIOS.find((scenario) => scenario.id === "ts_chatbot_support") ?? null;
+  }
+  const scenario = PLAYGROUND_SCENARIOS.find((entry) => entry.packType === packType);
+  if (scenario) {
+    return scenario;
+  }
+  if (items.some((item) => item.type === "llm_interaction")) {
+    return PLAYGROUND_SCENARIOS.find((entry) => entry.id === "ts_chatbot_support") ?? null;
+  }
+  return null;
 }

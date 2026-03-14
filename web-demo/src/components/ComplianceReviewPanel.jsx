@@ -5,7 +5,7 @@ export function ComplianceReviewPanel({ review }) {
     <section className="panel">
       <div className="panel-head compact">
         <div>
-          <span className="section-label">Compliance review</span>
+          <span className="section-label">Why this helps with compliance</span>
           <h3>{review.title}</h3>
         </div>
       </div>
@@ -14,7 +14,7 @@ export function ComplianceReviewPanel({ review }) {
 
       <div className="review-grid">
         <section className="review-card">
-          <h4>Captured now</h4>
+          <h4>What was captured</h4>
           <ul className="review-list">
             {review.capturedNow.map((entry) => (
               <li key={entry.bundleId}>
@@ -27,15 +27,21 @@ export function ComplianceReviewPanel({ review }) {
         </section>
 
         <section className="review-card">
-          <h4>Supports this pack</h4>
-          <p>
-            <strong>{review.supportsPack.packType}</strong>
-          </p>
-          <p>{review.supportsPack.bundleCount} bundle(s) currently support the export.</p>
-          <p>{review.supportsPack.exportState}</p>
+          <h4>What the law usually expects</h4>
+          <p>{review.lawExplainer.expectation}</p>
+          <h4>What Proof Layer helps you record</h4>
+          <p>{review.lawExplainer.record}</p>
+          <h4>What your team still has to do outside this tool</h4>
+          <p>{review.lawExplainer.outsideTool}</p>
         </section>
 
         <section className="review-card">
+          <h4>Share or export status</h4>
+          <p>
+            <strong>{review.supportsPack.packType}</strong>
+          </p>
+          <p>{review.supportsPack.bundleCount} record(s) are in the current run.</p>
+          <p>{review.supportsPack.exportState}</p>
           <h4>Still missing for a fuller review</h4>
           <ul className="review-list compact">
             {review.missingEvidence.map((entry) => (

@@ -1,6 +1,8 @@
 import React from "react";
 
 export function SdkScenarioCard({ scenario, active, onSelect }) {
+  const itemTypes = scenario.steps.map((step) => step.itemType);
+
   return (
     <button
       type="button"
@@ -8,17 +10,26 @@ export function SdkScenarioCard({ scenario, active, onSelect }) {
       onClick={() => onSelect(scenario.id)}
     >
       <div className="scenario-card-top">
-        <span className="section-label">{scenario.lane}</span>
+        <span className="section-label">{scenario.category}</span>
         <span className="scenario-role-tag">{scenario.actorRole}</span>
       </div>
       <strong>{scenario.label}</strong>
-      <p>{scenario.description}</p>
-      <div className="scenario-chip-row">
-        <span className="scenario-chip">{scenario.packType}</span>
-        <span className="scenario-chip">{scenario.steps.length} bundle steps</span>
+      <p>{scenario.audienceSummary}</p>
+      <div className="scenario-copy-stack">
+        <div>
+          <span className="scenario-copy-label">What gets recorded</span>
+          <span>{itemTypes.join(" + ")}</span>
+        </div>
+        <div>
+          <span className="scenario-copy-label">Why it helps</span>
+          <span>{scenario.lawExplainer.record}</span>
+        </div>
       </div>
-      <div className="scenario-meta">
-        <span>{scenario.steps.map((step) => step.itemType).join(" + ")}</span>
+      <div className="scenario-chip-row">
+        <span className="scenario-chip">
+          {scenario.packType ?? "No pack by default"}
+        </span>
+        <span className="scenario-chip">{scenario.codeLanguage}</span>
       </div>
     </button>
   );

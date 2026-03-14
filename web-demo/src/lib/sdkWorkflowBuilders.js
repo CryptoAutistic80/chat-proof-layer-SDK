@@ -88,7 +88,7 @@ async function buildInstructionsStep(scenario, draft) {
     item: {
       type: "instructions_for_use",
       data: {
-        document_ref: "docs://hiring-assistant/operator-handbook",
+        document_ref: `docs://${draft.systemId}/operator-handbook`,
         version: "2026.03",
         section: draft.instructionsSection ?? null,
         commitment: documentArtefact.commitment,
@@ -101,7 +101,7 @@ async function buildInstructionsStep(scenario, draft) {
     artefacts: [
       documentArtefact.artefact,
       jsonArtefact("instructions_for_use.json", {
-        document_ref: "docs://hiring-assistant/operator-handbook",
+        document_ref: `docs://${draft.systemId}/operator-handbook`,
         version: "2026.03",
         section: draft.instructionsSection ?? null,
         metadata: {
@@ -112,7 +112,7 @@ async function buildInstructionsStep(scenario, draft) {
     ],
     retentionClass: "technical_doc",
     label: "Instructions for use",
-    summary: "Operator handbook evidence captured for the governance pack.",
+    summary: "Operating-rules evidence captured for this workflow.",
     localPayloads: { document }
   });
 }
@@ -160,7 +160,7 @@ async function buildQmsRecordStep(scenario, draft) {
     ],
     retentionClass: "technical_doc",
     label: "QMS record",
-    summary: "Release approval evidence added to the provider governance story.",
+    summary: "Quality sign-off evidence added to the workflow.",
     localPayloads: { record }
   });
 }
@@ -306,7 +306,7 @@ async function buildFriaStep(scenario, draft) {
     ],
     retentionClass: "technical_doc",
     label: "Fundamental rights assessment",
-    summary: "FRIA evidence added to the deployer review pack.",
+    summary: "Fundamental-rights assessment evidence added to the hiring review workflow.",
     localPayloads: { report }
   });
 }
@@ -346,7 +346,7 @@ async function buildHumanOversightStep(scenario, draft) {
     ],
     retentionClass: "risk_mgmt",
     label: "Human oversight",
-    summary: "Human review evidence added to the deployer pack.",
+    summary: "Human review evidence added to the hiring review workflow.",
     localPayloads: { notes }
   });
 }

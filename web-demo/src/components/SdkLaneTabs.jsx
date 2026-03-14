@@ -14,7 +14,7 @@ export function SdkLaneTabs({ lanes, activeLane, laneCounts = {}, onSelect }) {
         >
           <div className="sdk-lane-tab-top">
             <span className="section-label">{lane.eyebrow}</span>
-            <span className="sdk-lane-count">{laneCounts[lane.id] ?? 0} flows</span>
+            <span className="sdk-lane-count">{laneCounts[lane.id] ?? 0} examples</span>
           </div>
           <strong>{lane.label}</strong>
           <span>{lane.description}</span>

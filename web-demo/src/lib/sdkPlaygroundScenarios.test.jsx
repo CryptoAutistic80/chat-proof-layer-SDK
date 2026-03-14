@@ -7,9 +7,9 @@ import {
 
 describe("sdkPlaygroundScenarios", () => {
   test("returns the first scenario for each lane", () => {
-    expect(firstScenarioForLane("typescript").id).toBe("ts_provider_governance");
-    expect(firstScenarioForLane("python").id).toBe("py_fundamental_rights");
-    expect(firstScenarioForLane("cli").id).toBe("cli_provider_governance");
+    expect(firstScenarioForLane("typescript").id).toBe("ts_chatbot_support");
+    expect(firstScenarioForLane("python").id).toBe("py_hiring_review");
+    expect(firstScenarioForLane("cli").id).toBe("cli_chatbot_support");
   });
 
   test("applies scenario defaults without losing connection settings", () => {
@@ -22,13 +22,13 @@ describe("sdkPlaygroundScenarios", () => {
       temperature: "0.4",
       maxTokens: "512"
     };
-    const scenario = getPlaygroundScenario("ts_provider_governance");
+    const scenario = getPlaygroundScenario("ts_support_rules");
     const nextDraft = applyScenarioToDraft(draft, scenario);
 
     expect(nextDraft.serviceUrl).toBe("http://vault.example.test");
     expect(nextDraft.apiKey).toBe("secret");
     expect(nextDraft.providerApiKey).toBe("provider-secret");
-    expect(nextDraft.systemId).toBe("hiring-assistant");
+    expect(nextDraft.systemId).toBe("support-assistant");
     expect(nextDraft.templateProfile).toBe("annex_iv_redacted");
     expect(nextDraft.playgroundHydrated).toBe(true);
   });

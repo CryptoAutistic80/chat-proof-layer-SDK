@@ -14,9 +14,9 @@ export function SiteShell() {
       <footer className="site-footer">
         <div>
           <strong>Proof Layer</strong>
-          <span>Capture, seal, verify, and share AI proof records.</span>
+          <span>Capture, inspect, verify, and share AI evidence records.</span>
         </div>
-        <span>Supports both live provider runs and presentation-safe sample runs.</span>
+        <span>Developer playground for understanding EU AI Act evidence workflows in plain English.</span>
       </footer>
     </div>
   );

@@ -45,12 +45,12 @@ function renderPyComplianceProfile(draft) {
 }`;
 }
 
-function renderTsProviderGovernance(draft) {
+function renderTsChatbotSupport(draft) {
   return `import { ProofLayer } from "@proof-layer/sdk";
 
 const proofLayer = new ProofLayer({
   vaultUrl: ${q(draft.serviceUrl)},
-  appId: "typescript-provider-governance-example",
+  appId: "typescript-chatbot-example",
   env: "dev",
   systemId: ${q(draft.systemId)},
   role: "provider",
@@ -60,18 +60,46 @@ const proofLayer = new ProofLayer({
 const interaction = await proofLayer.capture({
   provider: ${q(draft.provider)},
   model: ${q(draft.model)},
-  requestId: "req-hiring-001",
+  requestId: "req-support-001",
   input: {
     prompt: ${q(draft.userPrompt)}
   },
   output: {
-    summary: "Review completed in the playground result tab."
+    summary: "Captured support reply ready for later review."
+  },
+  retentionClass: "runtime_logs"
+});
+
+await interaction.verify();`;
+}
+
+function renderTsSupportRules(draft) {
+  return `import { ProofLayer } from "@proof-layer/sdk";
+
+const proofLayer = new ProofLayer({
+  vaultUrl: ${q(draft.serviceUrl)},
+  appId: "typescript-support-rules-example",
+  env: "dev",
+  systemId: ${q(draft.systemId)},
+  role: "provider",
+  complianceProfile: ${indent(renderTsComplianceProfile(draft), 2).trimStart()}
+});
+
+const interaction = await proofLayer.capture({
+  provider: ${q(draft.provider)},
+  model: ${q(draft.model)},
+  requestId: "req-support-002",
+  input: {
+    prompt: ${q(draft.userPrompt)}
+  },
+  output: {
+    summary: "Support reply captured for review."
   },
   retentionClass: "runtime_logs"
 });
 
 const instructions = await proofLayer.captureInstructionsForUse({
-  documentRef: "docs://hiring-assistant/operator-handbook",
+  documentRef: "docs://support-assistant/operating-rules",
   versionTag: "2026.03",
   section: ${q(draft.instructionsSection)},
   document: {
@@ -84,7 +112,7 @@ const instructions = await proofLayer.captureInstructionsForUse({
 const qmsRecord = await proofLayer.captureQmsRecord({
   recordId: "qms-release-approval-42",
   process: "release_approval",
-  status: ${q(draft.qmsStatus)},
+  status: "approved",
   record: {
     approver: ${q(draft.qmsApprover)},
     release: "2026.03"
@@ -99,68 +127,12 @@ const pack = await proofLayer.createPack({
 });`;
 }
 
-function renderTsMonitoring(draft) {
-  return `import { ProofLayer } from "@proof-layer/sdk";
-
-const proofLayer = new ProofLayer({
-  vaultUrl: ${q(draft.serviceUrl)},
-  appId: "typescript-monitoring-example",
-  env: "dev",
-  systemId: ${q(draft.systemId)},
-  role: "provider",
-  complianceProfile: ${indent(renderTsComplianceProfile(draft), 2).trimStart()}
-});
-
-const interaction = await proofLayer.capture({
-  provider: ${q(draft.provider)},
-  model: ${q(draft.model)},
-  requestId: "req-monitoring-001",
-  input: {
-    prompt: ${q(draft.userPrompt)}
-  },
-  output: {
-    summary: "Monitoring summary available in the playground result tab."
-  },
-  retentionClass: "runtime_logs"
-});
-
-const monitoring = await proofLayer.capturePostMarketMonitoring({
-  planId: "pmm-claims-2026-03",
-  status: "active",
-  summary: ${q(draft.monitoringSummary)},
-  report: {
-    cadence: "weekly",
-    owner: ${q(draft.owner)}
-  },
-  retentionClass: "risk_mgmt"
-});
-
-const submission = await proofLayer.captureAuthoritySubmission({
-  submissionId: "sub-claims-42",
-  authority: ${q(draft.authority)},
-  status: "submitted",
-  channel: "portal",
-  submittedAt: "2026-03-08T09:30:00Z",
-  document: {
-    article: "73",
-    summary: ${q(draft.submissionSummary)}
-  },
-  retentionClass: "risk_mgmt"
-});
-
-const pack = await proofLayer.createPack({
-  packType: "post_market_monitoring",
-  systemId: ${q(draft.systemId)},
-  bundleFormat: "full"
-});`;
-}
-
-function renderPyFundamentalRights(draft) {
+function renderPyHiringReview(draft) {
   return `from proofsdk.proof_layer import ProofLayer
 
 proof_layer = ProofLayer(
     vault_url=${q(draft.serviceUrl)},
-    app_id="python-fundamental-rights-example",
+    app_id="python-hiring-review-example",
     env="dev",
     system_id=${q(draft.systemId)},
     role="deployer",
@@ -170,9 +142,9 @@ proof_layer = ProofLayer(
 interaction = proof_layer.capture(
     provider=${q(draft.provider)},
     model=${q(draft.model)},
-    request_id="req-benefits-001",
+    request_id="req-hiring-001",
     input={"prompt": ${q(draft.userPrompt)}},
-    output={"summary": "Review completed in the playground result tab."},
+    output={"summary": "Hiring review support captured for later inspection."},
     retention_class="runtime_logs",
 )
 
@@ -201,12 +173,12 @@ pack = proof_layer.create_pack(
 )`;
 }
 
-function renderPyIncidentResponse(draft) {
+function renderPyIncidentEscalation(draft) {
   return `from proofsdk.proof_layer import ProofLayer
 
 proof_layer = ProofLayer(
     vault_url=${q(draft.serviceUrl)},
-    app_id="python-incident-response-example",
+    app_id="python-incident-escalation-example",
     env="dev",
     system_id=${q(draft.systemId)},
     role="deployer",
@@ -260,7 +232,7 @@ pack = proof_layer.create_pack(
 )`;
 }
 
-function renderCliProviderGovernance(draft) {
+function renderCliChatbotSupport(draft) {
   const captureJson = pretty({
     actor: {
       issuer: "proofctl",
@@ -270,7 +242,7 @@ function renderCliProviderGovernance(draft) {
       role: "provider"
     },
     subject: {
-      request_id: "req-hiring-001",
+      request_id: "req-support-001",
       system_id: draft.systemId,
       model_id: `${draft.provider}:${draft.model}`,
       deployment_id: `${draft.systemId}-cli`,
@@ -317,20 +289,17 @@ JSON
 cargo run -p proofctl -- create \\
   --input ./capture.json \\
   --key ./keys/signing.pem \\
-  --out ./interaction.pkg \\
+  --out ./chatbot-record.pkg \\
   --role provider \\
   --system-id ${draft.systemId} \\
   --intended-use ${q(draft.intendedUse)} \\
   --prohibited-practice-screening ${draft.prohibitedPracticeScreening} \\
-  --risk-tier ${draft.riskTier} \\
-  --high-risk-domain ${draft.highRiskDomain} \\
-  --deployment-context ${draft.deploymentContext}
+  --risk-tier ${q(draft.riskTier)} \\
+  --deployment-context ${q(draft.deploymentContext)}
 
-cargo run -p proofctl -- pack \\
-  --type provider-governance \\
-  --vault-url ${draft.serviceUrl} \\
-  --system-id ${draft.systemId} \\
-  --out ./provider-governance.pack`;
+cargo run -p proofctl -- verify \\
+  --bundle ./chatbot-record.pkg \\
+  --public-key ./keys/verify.pub`;
 }
 
 export function renderScenarioScript(scenarioInput, draft) {
@@ -339,16 +308,16 @@ export function renderScenarioScript(scenarioInput, draft) {
       ? getPlaygroundScenario(scenarioInput)
       : scenarioInput;
   switch (scenario.templateId) {
-    case "ts_provider_governance":
-      return renderTsProviderGovernance(draft);
-    case "ts_post_market_monitoring":
-      return renderTsMonitoring(draft);
-    case "py_fundamental_rights":
-      return renderPyFundamentalRights(draft);
-    case "py_incident_response":
-      return renderPyIncidentResponse(draft);
-    case "cli_provider_governance":
-      return renderCliProviderGovernance(draft);
+    case "ts_chatbot_support":
+      return renderTsChatbotSupport(draft);
+    case "ts_support_rules":
+      return renderTsSupportRules(draft);
+    case "py_hiring_review":
+      return renderPyHiringReview(draft);
+    case "py_incident_escalation":
+      return renderPyIncidentEscalation(draft);
+    case "cli_chatbot_support":
+      return renderCliChatbotSupport(draft);
     default:
       return "// Scenario template unavailable";
   }

@@ -31,8 +31,8 @@ const draft = {
 };
 
 describe("renderScenarioScript", () => {
-  test("renders a TypeScript provider-governance script with draft values", () => {
-    const script = renderScenarioScript(getPlaygroundScenario("ts_provider_governance"), draft);
+  test("renders a TypeScript support workflow script with draft values", () => {
+    const script = renderScenarioScript(getPlaygroundScenario("ts_support_rules"), draft);
     expect(script).toContain('new ProofLayer');
     expect(script).toContain('"benefits-review"');
     expect(script).toContain('captureInstructionsForUse');
@@ -40,9 +40,9 @@ describe("renderScenarioScript", () => {
   });
 
   test("renders a CLI script with proofctl commands", () => {
-    const script = renderScenarioScript(getPlaygroundScenario("cli_provider_governance"), draft);
+    const script = renderScenarioScript(getPlaygroundScenario("cli_chatbot_support"), draft);
     expect(script).toContain("cargo run -p proofctl -- create");
-    expect(script).toContain("--type provider-governance");
+    expect(script).toContain("cargo run -p proofctl -- verify");
     expect(script).toContain('"system_id": "benefits-review"');
   });
 });

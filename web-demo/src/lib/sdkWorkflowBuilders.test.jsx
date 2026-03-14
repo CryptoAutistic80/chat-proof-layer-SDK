@@ -32,8 +32,8 @@ const baseDraft = {
 };
 
 describe("buildScenarioWorkflow", () => {
-  test("builds a multi-step TypeScript provider-governance workflow", async () => {
-    const scenario = getPlaygroundScenario("ts_provider_governance");
+  test("builds a multi-step TypeScript support workflow", async () => {
+    const scenario = getPlaygroundScenario("ts_support_rules");
     const providerResult = {
       capture_mode: "synthetic_demo_capture",
       provider: "openai",
@@ -56,8 +56,8 @@ describe("buildScenarioWorkflow", () => {
     expect(steps[0].createPayload.capture.compliance_profile.risk_tier).toBe("high_risk");
   });
 
-  test("builds a governance-only incident-response workflow", async () => {
-    const scenario = getPlaygroundScenario("py_incident_response");
+  test("builds a governance-only incident-escalation workflow", async () => {
+    const scenario = getPlaygroundScenario("py_incident_escalation");
     const steps = await buildScenarioWorkflow(scenario, baseDraft, null);
 
     expect(steps.map((step) => step.itemTypes[0])).toEqual([

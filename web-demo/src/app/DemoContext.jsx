@@ -31,7 +31,7 @@ import {
   modelOptionsFor
 } from "../lib/presets";
 import { buildCaptureEnvelope, decodeJsonBytes } from "../lib/captureBuilders";
-import { buildComplianceReview } from "../lib/complianceReview";
+import { buildComplianceReview, buildRecordExplainer } from "../lib/complianceReview";
 import {
   applyScenarioToDraft,
   firstScenarioForLane,
@@ -359,9 +359,12 @@ export function DemoProvider({ children }) {
     const templateProfile = options.templateProfile ?? draft.templateProfile;
     const selectedGroups = options.selectedGroups ?? draft.selectedGroups;
     const bundleFormat = options.bundleFormat ?? draft.bundleFormat;
+    const packType = Object.prototype.hasOwnProperty.call(options, "packType")
+      ? options.packType
+      : currentPreset.packType;
     const payload = {
       bundle_id: bundleId,
-      pack_type: options.packType ?? currentPreset.packType,
+      pack_type: packType,
       disclosure_template: buildTemplateRequest(templateProfile, selectedGroups)
     };
     const response = await previewDisclosure(draft.serviceUrl, draft.apiKey, payload);
@@ -388,8 +391,11 @@ export function DemoProvider({ children }) {
     const bundleFormat = options.bundleFormat ?? draft.bundleFormat;
     const templateProfile = options.templateProfile ?? draft.templateProfile;
     const selectedGroups = options.selectedGroups ?? draft.selectedGroups;
+    const packType = Object.prototype.hasOwnProperty.call(options, "packType")
+      ? options.packType
+      : currentPreset.packType;
     const requestBody = {
-      pack_type: options.packType ?? currentPreset.packType,
+      pack_type: packType,
       system_id: systemId,
       bundle_format: bundleFormat
     };
@@ -423,28 +429,36 @@ export function DemoProvider({ children }) {
     const bundle = await fetchBundle(draft.serviceUrl, draft.apiKey, bundleId);
     const { files, parsed } = await fetchArtefacts(bundleId, bundle.artefacts);
     const verifyResponse = await runInlineVerification(bundle, files);
+    const responsePayload = parsed["response.json"] ?? null;
+    const promptPayload = parsed["prompt.json"] ?? null;
+    const tracePayload = parsed["trace.json"] ?? null;
+    const itemTypes = bundle.items.map((item) => item.type);
     const inferredPackType =
       currentRun?.bundleId === bundleId
         ? currentRun.packType
-        : parsed["trace.json"]?.pack_type ?? inferPackTypeFromItems(bundle.items);
-    const scenario = findScenarioByPackType(inferredPackType);
+        : tracePayload && Object.prototype.hasOwnProperty.call(tracePayload, "pack_type")
+          ? tracePayload.pack_type
+          : inferPackTypeFromItems(bundle.items);
+    const scenario =
+      currentRun?.bundleId === bundleId && currentRun?.scenarioId
+        ? getPlaygroundScenario(currentRun.scenarioId)
+        : findScenarioByPackType(inferredPackType, bundle.items);
     const bundleFormat =
       currentRun?.bundleId === bundleId
         ? currentRun.bundleFormat
-        : parsed["trace.json"]?.bundle_format ?? draft.bundleFormat;
+        : tracePayload?.bundle_format ?? draft.bundleFormat;
     const disclosureProfile =
       currentRun?.bundleId === bundleId
         ? currentRun.disclosureProfile
-        : parsed["trace.json"]?.disclosure_profile ?? draft.templateProfile;
-    const previewResponse = await previewFor(
-      bundleId,
-      bundle.subject?.system_id ?? draft.systemId,
-      {
-        packType: inferredPackType,
-        bundleFormat,
-        templateProfile: disclosureProfile
-      }
-    );
+        : tracePayload?.disclosure_profile ?? draft.templateProfile;
+    const previewResponse =
+      inferredPackType !== null
+        ? await previewFor(bundleId, bundle.subject?.system_id ?? draft.systemId, {
+            packType: inferredPackType,
+            bundleFormat,
+            templateProfile: disclosureProfile
+          })
+        : null;
     const systemSummary = await fetchSystemSummary(
       draft.serviceUrl,
       draft.apiKey,
@@ -474,10 +488,23 @@ export function DemoProvider({ children }) {
     }
     await loadRecentRuns(bundle.subject?.system_id ?? draft.systemId);
 
-    const responsePayload = parsed["response.json"] ?? null;
-    const promptPayload = parsed["prompt.json"] ?? null;
-    const tracePayload = parsed["trace.json"] ?? null;
     const scenarioId = currentRun?.bundleId === bundleId ? currentRun.scenarioId : scenario?.id ?? null;
+
+    const bundleRuns =
+      currentRun?.bundleId === bundleId
+        ? currentRun.bundleRuns
+        : [
+            {
+              bundleId,
+              label: scenario?.label ?? "Loaded bundle",
+              bundleRole: "primary",
+              itemTypes,
+              summary: "Loaded from the vault.",
+              verifyResponse,
+              timestampVerification,
+              receiptVerification
+            }
+          ];
 
     const hydratedRun = {
       bundleId,
@@ -530,21 +557,7 @@ export function DemoProvider({ children }) {
       packManifest: currentRun?.bundleId === bundleId ? currentRun.packManifest : null,
       downloadInfo: currentRun?.bundleId === bundleId ? currentRun.downloadInfo : null,
       systemSummary,
-      bundleRuns:
-        currentRun?.bundleId === bundleId
-          ? currentRun.bundleRuns
-          : [
-              {
-                bundleId,
-                label: scenario?.label ?? "Loaded bundle",
-                bundleRole: "primary",
-                itemTypes: bundle.items.map((item) => item.type),
-                summary: "Loaded from the vault.",
-                verifyResponse,
-                timestampVerification,
-                receiptVerification
-              }
-            ],
+      bundleRuns,
       scriptSource:
         currentRun?.bundleId === bundleId
           ? currentRun.scriptSource
@@ -556,18 +569,23 @@ export function DemoProvider({ children }) {
           ? currentRun.review
           : scenario
             ? buildComplianceReview(scenario, {
-                bundleRuns: [
-                  {
-                    bundleId,
-                    label: scenario.label,
-                    itemTypes: bundle.items.map((item) => item.type)
-                  }
-                ],
+                bundleRuns,
                 packManifest: currentRun?.packManifest,
                 packSummary: currentRun?.packSummary,
                 downloadInfo: currentRun?.downloadInfo
               })
-            : null
+            : null,
+      recordExplainer:
+        currentRun?.bundleId === bundleId
+          ? currentRun.recordExplainer
+          : buildRecordExplainer(scenario, {
+              bundle,
+              bundleRuns,
+              packType: inferredPackType,
+              packManifest: currentRun?.packManifest,
+              packSummary: currentRun?.packSummary,
+              downloadInfo: currentRun?.downloadInfo
+            })
     };
     setCurrentRun(hydratedRun);
     return hydratedRun;
@@ -915,16 +933,26 @@ export function DemoProvider({ children }) {
 
       const primaryBundle =
         bundleRuns.find((bundleRun) => bundleRun.bundleRole === "primary") ?? bundleRuns[0];
-      const disclosurePreview = await previewFor(primaryBundle.bundleId, draft.systemId, {
-        packType: scenario.packType,
-        bundleFormat: scenario.bundleFormat,
-        templateProfile: scenario.disclosureProfile
-      });
-      const exportState = await exportFor(primaryBundle.bundleId, draft.systemId, {
-        packType: scenario.packType,
-        bundleFormat: scenario.bundleFormat,
-        templateProfile: scenario.disclosureProfile
-      });
+      const disclosurePreview =
+        scenario.packType !== null
+          ? await previewFor(primaryBundle.bundleId, draft.systemId, {
+              packType: scenario.packType,
+              bundleFormat: scenario.bundleFormat,
+              templateProfile: scenario.disclosureProfile
+            })
+          : null;
+      const exportState =
+        scenario.packType !== null
+          ? await exportFor(primaryBundle.bundleId, draft.systemId, {
+              packType: scenario.packType,
+              bundleFormat: scenario.bundleFormat,
+              templateProfile: scenario.disclosureProfile
+            })
+          : {
+              packSummary: null,
+              packManifest: null,
+              downloadInfo: null
+            };
       const systemSummary = await fetchSystemSummary(
         draft.serviceUrl,
         draft.apiKey,
@@ -935,6 +963,14 @@ export function DemoProvider({ children }) {
       const scriptSource = renderScenarioScript(scenario, draft);
       const review = buildComplianceReview(scenario, {
         bundleRuns,
+        packSummary: exportState.packSummary,
+        packManifest: exportState.packManifest,
+        downloadInfo: exportState.downloadInfo
+      });
+      const recordExplainer = buildRecordExplainer(scenario, {
+        bundle: primaryBundle.bundle,
+        bundleRuns,
+        packType: scenario.packType,
         packSummary: exportState.packSummary,
         packManifest: exportState.packManifest,
         downloadInfo: exportState.downloadInfo
@@ -977,7 +1013,8 @@ export function DemoProvider({ children }) {
         systemSummary,
         bundleRuns,
         scriptSource,
-        review
+        review,
+        recordExplainer
       };
       setCurrentRun(nextRun);
       return primaryBundle.bundleId;
@@ -992,7 +1029,7 @@ export function DemoProvider({ children }) {
   }
 
   async function previewCurrentRun() {
-    if (!currentRun?.bundleId) {
+    if (!currentRun?.bundleId || currentRun.packType === null) {
       return null;
     }
     setIsPreviewing(true);
@@ -1014,7 +1051,7 @@ export function DemoProvider({ children }) {
   }
 
   async function exportCurrentRun() {
-    if (!currentRun?.bundleId || !currentRun.bundle?.subject?.system_id) {
+    if (!currentRun?.bundleId || !currentRun.bundle?.subject?.system_id || currentRun.packType === null) {
       return null;
     }
     setIsExporting(true);

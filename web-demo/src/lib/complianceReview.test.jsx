@@ -1,10 +1,10 @@
 import { describe, expect, test } from "vitest";
-import { buildComplianceReview } from "./complianceReview";
+import { buildComplianceReview, buildRecordExplainer } from "./complianceReview";
 import { getPlaygroundScenario } from "./sdkPlaygroundScenarios";
 
 describe("buildComplianceReview", () => {
   test("maps bundle runs and pack state into plain-language review output", () => {
-    const review = buildComplianceReview(getPlaygroundScenario("py_incident_response"), {
+    const review = buildComplianceReview(getPlaygroundScenario("py_incident_escalation"), {
       bundleRuns: [
         {
           label: "Incident report",
@@ -21,10 +21,20 @@ describe("buildComplianceReview", () => {
       }
     });
 
-    expect(review.title).toBe("Incident response evidence map");
+    expect(review.title).toBe("Incident escalation evidence map");
     expect(review.capturedNow[0].bundleId).toBe("bundle-1");
     expect(review.supportsPack.packType).toBe("incident_response");
     expect(review.supportsPack.exportState).toContain("ready to download");
+    expect(review.lawExplainer.expectation).toContain("clear incident trail");
     expect(review.missingEvidence.length).toBeGreaterThan(0);
+  });
+
+  test("builds a record explainer for packless chatbot scenarios", () => {
+    const explainer = buildRecordExplainer(getPlaygroundScenario("ts_chatbot_support"), {
+      packType: null
+    });
+
+    expect(explainer.captured.title).toBe("What was stored");
+    expect(explainer.share.body).toContain("does not automatically build an export package");
   });
 });

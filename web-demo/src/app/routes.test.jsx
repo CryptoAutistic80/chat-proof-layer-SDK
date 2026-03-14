@@ -254,44 +254,28 @@ describe("AppRoutes", () => {
     expect(
       await screen.findByRole("heading", {
         level: 1,
-        name: "Prove what your AI system did, without relying on ordinary logs."
+        name: "Keep a clear record of what your AI system did and what controls were around it."
       })
     ).toBeTruthy();
   });
 
-  test("guided demo hides advanced settings until expanded", async () => {
-    const user = userEvent.setup();
+  test("legacy guided and docs routes redirect into the simplified app", async () => {
     renderApp(["/guided"]);
     expect(
       await screen.findByRole("heading", {
         level: 1,
-        name: "Start with the business story, not the technical settings"
+        name: "See how Proof Layer fits into common AI workflows"
       })
     ).toBeTruthy();
-    expect(screen.queryByLabelText("System ID")).toBeNull();
 
-    await user.click(screen.getByRole("button", { name: "Show advanced options" }));
-
-    await waitFor(() => {
-      expect(screen.getByLabelText("Actor role").value).toBe("provider");
-    });
-    expect(screen.getByLabelText("Disclosure profile").value).toBe("regulator_minimum");
-    expect(screen.getByLabelText("Bundle format").value).toBe("disclosure");
-  });
-
-  test("guided demo shows provider key guidance in live mode", async () => {
-    const user = userEvent.setup();
-    renderApp(["/guided"]);
+    cleanup();
+    renderApp(["/docs/what-is-proof-layer"]);
     expect(
       await screen.findByRole("heading", {
         level: 1,
-        name: "Start with the business story, not the technical settings"
+        name: "Keep a clear record of what your AI system did and what controls were around it."
       })
     ).toBeTruthy();
-
-    await user.selectOptions(screen.getByLabelText("Capture mode"), "live");
-
-    expect(screen.getByLabelText("Temporary provider API key")).toBeTruthy();
   });
 
   test("playground loads the sdk view and advanced route keeps raw controls", async () => {
@@ -299,10 +283,10 @@ describe("AppRoutes", () => {
     expect(
       await screen.findByRole("heading", {
         level: 1,
-        name: "Try the real SDK and CLI flows without leaving the demo"
+        name: "See how Proof Layer fits into common AI workflows"
       })
     ).toBeTruthy();
-    expect(screen.getByRole("link", { name: "Open advanced controls" })).toBeTruthy();
+    expect(screen.getByRole("link", { name: /advanced playground/i })).toBeTruthy();
 
     cleanup();
 
@@ -320,53 +304,62 @@ describe("AppRoutes", () => {
     renderApp(["/playground"]);
 
     expect(
-      await screen.findByRole("heading", { level: 3, name: "Provider governance" })
+      await screen.findByRole("heading", { level: 2, name: "Customer support chatbot" })
     ).toBeTruthy();
-    expect(screen.getByText(/captureInstructionsForUse/)).toBeTruthy();
+    expect(screen.getByText(/await proofLayer\.capture/)).toBeTruthy();
 
     await user.click(
       screen.getByRole("tab", {
-        name: /Python Show Python capture flows for deployer-side governance and incident response/
+        name: /Python Use the Python SDK for reviewed workflows and incident handling/
       })
     );
 
     expect(
-      await screen.findByRole("heading", { level: 3, name: "Fundamental rights" })
+      await screen.findByRole("heading", { level: 2, name: "Hiring review assistant" })
     ).toBeTruthy();
     expect(screen.getByText(/capture_fundamental_rights_assessment/)).toBeTruthy();
   });
 
-  test("running a playground scenario reveals inline result and compliance review", async () => {
+  test("running a packless playground scenario reveals record and compliance views", async () => {
     const user = userEvent.setup();
     renderApp(["/playground"]);
 
     await screen.findByRole("heading", {
       level: 1,
-      name: "Try the real SDK and CLI flows without leaving the demo"
+      name: "See how Proof Layer fits into common AI workflows"
     });
 
-    await user.click(screen.getByRole("button", { name: "Run prefab example" }));
+    await user.click(screen.getByRole("button", { name: "Run example" }));
 
     expect(
-      await screen.findByRole("heading", {
-        level: 2,
-        name: "Provider governance completed"
-      })
+      await screen.findByRole("heading", { level: 2, name: "What was recorded" })
     ).toBeTruthy();
     expect(screen.getByText("Bundle-by-bundle view")).toBeTruthy();
+    expect(mocks.createPack).not.toHaveBeenCalled();
 
-    await user.click(screen.getByRole("tab", { name: "Compliance Review" }));
-    expect(await screen.findByText("Provider governance evidence map")).toBeTruthy();
+    await user.click(screen.getByRole("tab", { name: "Why this helps with compliance" }));
+    expect(await screen.findByText("Customer support chatbot evidence map")).toBeTruthy();
 
-    await user.click(screen.getByRole("tab", { name: "Open deeper views" }));
-    expect(
-      await screen.findByText("Inspect the primary bundle and captured materials.")
-    ).toBeTruthy();
+    await user.click(screen.getByRole("tab", { name: "Open in record explorer" }));
+    expect(await screen.findByRole("link", { name: "Open record explorer" })).toBeTruthy();
   });
 
-  test("docs route renders integrated documentation content", async () => {
-    renderApp(["/docs/what-is-proof-layer"]);
-    expect(await screen.findByRole("heading", { level: 1, name: "What is Proof Layer?" })).toBeTruthy();
-    expect(screen.getByText("business · operator · engineer")).toBeTruthy();
+  test("records explorer loads a bundle and honors the selected view", async () => {
+    const user = userEvent.setup();
+    renderApp(["/playground"]);
+
+    await screen.findByRole("heading", {
+      level: 1,
+      name: "See how Proof Layer fits into common AI workflows"
+    });
+    await user.click(screen.getByRole("button", { name: "Run example" }));
+    await screen.findByRole("heading", { level: 2, name: "What was recorded" });
+
+    cleanup();
+
+    renderApp(["/records/bundle-1?view=proof"]);
+    expect(await screen.findByRole("heading", { level: 1, name: "Customer support chatbot completed" })).toBeTruthy();
+    expect(screen.getByRole("tab", { name: "Proof" }).getAttribute("aria-selected")).toBe("true");
+    expect(screen.getByText("Verification and disclosure payloads")).toBeTruthy();
   });
 });

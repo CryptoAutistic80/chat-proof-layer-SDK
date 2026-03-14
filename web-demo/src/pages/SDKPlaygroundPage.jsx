@@ -4,52 +4,41 @@ import { useDemo } from "../app/DemoContext";
 import { ActivityFeed } from "../components/ActivityFeed";
 import { BundleRunList } from "../components/BundleRunList";
 import { ComplianceReviewPanel } from "../components/ComplianceReviewPanel";
-import { DataPanel } from "../components/DataPanel";
-import { PrimaryResultSummary } from "../components/PrimaryResultSummary";
-import { RunSummaryCard } from "../components/RunSummaryCard";
+import { RecordEvidenceSection } from "../components/RecordEvidenceSection";
 import { ScenarioParameterForm } from "../components/ScenarioParameterForm";
 import { ScriptPanel } from "../components/ScriptPanel";
 import { SdkLaneTabs } from "../components/SdkLaneTabs";
 import { SdkScenarioCard } from "../components/SdkScenarioCard";
 import { buildRunNarrativeSummary } from "../lib/narrative";
-import {
-  PLAYGROUND_LANES,
-  listScenariosForLane
-} from "../lib/sdkPlaygroundScenarios";
+import { PLAYGROUND_LANES, listScenariosForLane } from "../lib/sdkPlaygroundScenarios";
 import { renderScenarioScript } from "../lib/sdkScriptTemplates";
+import { LEGAL_BOUNDARY } from "../lib/siteContent";
 import { isProviderLiveEnabled } from "../lib/presets";
 
 export function SDKPlaygroundPage() {
-  const [activeTab, setActiveTab] = useState("result");
+  const [activeTab, setActiveTab] = useState("recorded");
   const {
     draft,
     currentScenario,
     currentRun,
-    currentPreset,
     vaultConfig,
     activityLog,
     errors,
     isRunning,
     actions
   } = useDemo();
+
   const selectedLane = useMemo(
     () => PLAYGROUND_LANES.find((lane) => lane.id === draft.lane) ?? PLAYGROUND_LANES[0],
     [draft.lane]
   );
-  const scenarios = useMemo(
-    () => listScenariosForLane(draft.lane),
-    [draft.lane]
-  );
+  const scenarios = useMemo(() => listScenariosForLane(draft.lane), [draft.lane]);
   const laneCounts = useMemo(
     () =>
       Object.fromEntries(
         PLAYGROUND_LANES.map((lane) => [lane.id, listScenariosForLane(lane.id).length])
       ),
     []
-  );
-  const totalScenarioCount = useMemo(
-    () => PLAYGROUND_LANES.reduce((count, lane) => count + (laneCounts[lane.id] ?? 0), 0),
-    [laneCounts]
   );
   const liveAvailable = isProviderLiveEnabled(vaultConfig, draft.provider);
   const scriptSource = renderScenarioScript(currentScenario, draft);
@@ -63,84 +52,37 @@ export function SDKPlaygroundPage() {
 
   useEffect(() => {
     if (scenarioRun?.primaryBundleId) {
-      setActiveTab("result");
+      setActiveTab("recorded");
     }
   }, [scenarioRun?.primaryBundleId]);
 
   return (
     <section className="page-stack sdk-playground-page">
-      <section className="panel sdk-playground-hero">
-        <div className="sdk-playground-hero-grid">
-          <div className="sdk-playground-hero-copy">
-            <span className="section-label">SDK Playground</span>
-            <h1>Try the real SDK and CLI flows without leaving the demo</h1>
-            <p className="sdk-playground-lead">
-              Use the page like a controlled lab: choose a real TypeScript, Python, or CLI
-              workflow, tune a bounded set of inputs, inspect the emitted example source, then
-              review the resulting evidence as if you were preparing for compliance review.
-            </p>
-            <div className="sdk-hero-metrics">
-              <div className="sdk-hero-metric">
-                <strong>{PLAYGROUND_LANES.length}</strong>
-                <span>language lanes</span>
-              </div>
-              <div className="sdk-hero-metric">
-                <strong>{totalScenarioCount}</strong>
-                <span>prefab workflows</span>
-              </div>
-              <div className="sdk-hero-metric">
-                <strong>{currentScenario.steps.length}</strong>
-                <span>bundles in this flow</span>
-              </div>
-            </div>
-          </div>
-
-          <aside className="sdk-playground-hero-rail">
-            <article className="sdk-selected-card">
-              <div className="sdk-selected-head">
-                <span className="section-label">Selected prefab</span>
-                <span className="sdk-chip">{selectedLane.label}</span>
-              </div>
-              <h2>{currentScenario.label}</h2>
-              <p>{currentScenario.description}</p>
-              <div className="sdk-chip-row">
-                <span className="sdk-chip is-accent">{currentScenario.packType}</span>
-                <span className="sdk-chip">{currentScenario.actorRole}</span>
-                <span className="sdk-chip">{currentScenario.codeLanguage}</span>
-              </div>
-              <div className="sdk-evidence-stack">
-                <span className="sdk-evidence-label">This run creates</span>
-                <div className="sdk-evidence-list">
-                  {evidenceShape.map((itemType) => (
-                    <span key={itemType} className="sdk-evidence-pill">
-                      {itemType}
-                    </span>
-                  ))}
-                </div>
-              </div>
-            </article>
-
-            <div className="sdk-hero-actions">
-              <Link to="/docs/playground" className="secondary-cta">
-                Playground docs
-              </Link>
-              <Link to="/playground/advanced" className="ghost-btn">
-                Open advanced controls
-              </Link>
-            </div>
-          </aside>
+      <section className="panel studio-hero">
+        <div className="studio-hero-copy">
+          <span className="section-label">Developer playground</span>
+          <h1>See how Proof Layer fits into common AI workflows</h1>
+          <p className="studio-lead">
+            Pick a language, choose a common workflow, tweak a few inputs, and run the real
+            vault-backed flow. The page then shows what was recorded, why that helps with review,
+            and how to inspect the resulting record.
+          </p>
         </div>
+        <aside className="studio-hero-side">
+          <span className="section-label">Important boundary</span>
+          <p>{LEGAL_BOUNDARY}</p>
+          <Link to="/playground/advanced" className="text-link">
+            Need every raw control? Open the advanced playground.
+          </Link>
+        </aside>
       </section>
 
-      <section className="panel sdk-selector-panel">
+      <section className="panel selector-panel">
         <div className="panel-head compact">
           <div>
-            <span className="section-label">Scenario selector</span>
-            <h2>Pick the lane, then the exact workflow</h2>
+            <span className="section-label">Step 1</span>
+            <h2>Choose a language and workflow</h2>
           </div>
-          <p className="selector-note">
-            {selectedLane.description} Switch lanes without losing the connected vault settings.
-          </p>
         </div>
         <SdkLaneTabs
           lanes={PLAYGROUND_LANES}
@@ -148,7 +90,6 @@ export function SDKPlaygroundPage() {
           laneCounts={laneCounts}
           onSelect={actions.selectLane}
         />
-
         <div className="scenario-grid sdk-scenario-grid">
           {scenarios.map((scenario) => (
             <SdkScenarioCard
@@ -161,24 +102,37 @@ export function SDKPlaygroundPage() {
         </div>
       </section>
 
-      <div className="sdk-overview-grid">
-        <RunSummaryCard run={currentRun} preset={currentPreset} scenario={currentScenario} />
-        <ActivityFeed activityLog={activityLog} />
-      </div>
-
-      <section className="sdk-workbench-shell">
-        <div className="sdk-workbench-head">
+      <section className="panel selected-workflow-panel">
+        <div className="panel-head compact">
           <div>
-            <span className="section-label">Workbench</span>
-            <h2>Tune the prefab inputs and inspect the generated source</h2>
+            <span className="section-label">Selected workflow</span>
+            <h2>{currentScenario.label}</h2>
           </div>
-          <p className="section-intro">
-            The left side controls the bounded input surface. The right side shows the maintained
-            example template that corresponds to this workflow.
-          </p>
         </div>
+        <div className="selected-workflow-grid">
+          <div>
+            <strong>What kind of app this represents</strong>
+            <p>{currentScenario.audienceSummary}</p>
+          </div>
+          <div>
+            <strong>What gets recorded</strong>
+            <p>{evidenceShape.join(" + ")}</p>
+          </div>
+          <div>
+            <strong>Why it helps with review</strong>
+            <p>{currentScenario.lawExplainer.record}</p>
+          </div>
+        </div>
+      </section>
 
-        <div className="sdk-playground-grid">
+      <section className="studio-workbench">
+        <div className="studio-workbench-head">
+          <div>
+            <span className="section-label">Step 2</span>
+            <h2>Adjust the inputs and inspect the example code</h2>
+          </div>
+        </div>
+        <div className="studio-two-column">
           <ScenarioParameterForm
             scenario={currentScenario}
             draft={draft}
@@ -193,42 +147,66 @@ export function SDKPlaygroundPage() {
         </div>
       </section>
 
-      <section className="panel sdk-results-panel">
+      <section className="panel run-create-panel">
+        <div className="panel-head compact">
+          <div>
+            <span className="section-label">Step 3</span>
+            <h2>What this run will create</h2>
+          </div>
+        </div>
+        <div className="sdk-evidence-list">
+          {evidenceShape.map((itemType) => (
+            <span key={itemType} className="sdk-evidence-pill">
+              {itemType}
+            </span>
+          ))}
+          <span className="sdk-evidence-pill is-neutral">
+            {currentScenario.packType ?? "No export pack by default"}
+          </span>
+          <span className="sdk-evidence-pill is-neutral">{selectedLane.label}</span>
+        </div>
+      </section>
+
+      <div className="studio-support-grid">
+        <ActivityFeed activityLog={activityLog} />
+      </div>
+
+      <section className="panel results-panel">
         <div className="panel-head compact">
           <div>
             <span className="section-label">After run</span>
-            <h2>Inspect the outcome without leaving the playground</h2>
+            <h2>Review the result on this page</h2>
           </div>
         </div>
         <div className="playground-tab-row" role="tablist" aria-label="Playground result tabs">
           <button
             type="button"
             role="tab"
-            aria-selected={activeTab === "result"}
-            className={`toggle-pill ${activeTab === "result" ? "is-active" : ""}`}
-            onClick={() => setActiveTab("result")}
+            aria-selected={activeTab === "recorded"}
+            className={`toggle-pill ${activeTab === "recorded" ? "is-active" : ""}`}
+            onClick={() => setActiveTab("recorded")}
           >
-            Result
+            What was recorded
           </button>
           <button
             type="button"
             role="tab"
-            aria-selected={activeTab === "review"}
-            className={`toggle-pill ${activeTab === "review" ? "is-active" : ""}`}
-            onClick={() => setActiveTab("review")}
+            aria-selected={activeTab === "compliance"}
+            className={`toggle-pill ${activeTab === "compliance" ? "is-active" : ""}`}
+            onClick={() => setActiveTab("compliance")}
             disabled={!scenarioRun}
           >
-            Compliance Review
+            Why this helps with compliance
           </button>
           <button
             type="button"
             role="tab"
-            aria-selected={activeTab === "deeper"}
-            className={`toggle-pill ${activeTab === "deeper" ? "is-active" : ""}`}
-            onClick={() => setActiveTab("deeper")}
+            aria-selected={activeTab === "explore"}
+            className={`toggle-pill ${activeTab === "explore" ? "is-active" : ""}`}
+            onClick={() => setActiveTab("explore")}
             disabled={!scenarioRun}
           >
-            Open deeper views
+            Open in record explorer
           </button>
         </div>
       </section>
@@ -236,61 +214,56 @@ export function SDKPlaygroundPage() {
       {!scenarioRun ? (
         <section className="panel empty-state">
           <span className="section-label">Awaiting run</span>
-          <h2>No scenario results yet</h2>
-          <p>
-            Run the selected example to reveal bundle details, pack output, and the plain-English
-            evidence review for the chosen workflow.
-          </p>
+          <h2>No workflow result yet</h2>
+          <p>Run the selected example to create a record and see the outcome here.</p>
         </section>
       ) : null}
 
-      {scenarioRun && activeTab === "result" ? (
+      {scenarioRun && activeTab === "recorded" ? (
         <>
-          <PrimaryResultSummary summary={summary} run={scenarioRun} />
+          <RecordEvidenceSection
+            title="What was recorded"
+            intro={scenarioRun.recordExplainer?.captured?.body ?? currentScenario.recordExplorerIntro}
+            cards={[
+              {
+                title: "Workflow",
+                body: scenarioRun.scenarioLabel
+              },
+              {
+                title: "Primary record",
+                body: summary.summary
+              },
+              {
+                title: "Export path",
+                body: currentScenario.packType
+                  ? `This workflow also prepares ${currentScenario.packType} export material.`
+                  : "This workflow focuses on the main record first and does not create an export pack by default."
+              }
+            ]}
+          />
           <BundleRunList bundleRuns={scenarioRun.bundleRuns} />
-          <section className="snapshot-grid">
-            <DataPanel
-              title="Pack manifest"
-              subtitle={scenarioRun.packType}
-              value={scenarioRun.packManifest ?? null}
-              placeholder="Pack manifest appears here after export."
-            />
-            <DataPanel
-              title="System rollup"
-              subtitle={scenarioRun.systemSummary?.system_id ?? "System summary"}
-              value={scenarioRun.systemSummary ?? null}
-              placeholder="System summary appears here after the run."
-            />
-          </section>
         </>
       ) : null}
 
-      {scenarioRun && activeTab === "review" ? (
+      {scenarioRun && activeTab === "compliance" ? (
         <ComplianceReviewPanel review={scenarioRun.review} />
       ) : null}
 
-      {scenarioRun && activeTab === "deeper" ? (
+      {scenarioRun && activeTab === "explore" ? (
         <section className="panel">
           <div className="panel-head compact">
             <div>
-              <span className="section-label">Deeper views</span>
-              <h2>Open the detailed walkthrough pages</h2>
+              <span className="section-label">Record explorer</span>
+              <h2>Inspect the full record in one place</h2>
             </div>
           </div>
-          <div className="deeper-links-grid">
-            <Link className="deeper-link-card" to={`/what-happened/${scenarioRun.primaryBundleId}`}>
-              <strong>What Happened</strong>
-              <span>Inspect the primary bundle and captured materials.</span>
-            </Link>
-            <Link className="deeper-link-card" to={`/what-you-can-prove/${scenarioRun.primaryBundleId}`}>
-              <strong>What You Can Prove</strong>
-              <span>Check verification, disclosure preview, and trust status.</span>
-            </Link>
-            <Link className="deeper-link-card" to={`/what-you-can-share/${scenarioRun.primaryBundleId}`}>
-              <strong>What You Can Share</strong>
-              <span>Open the export and pack view for the same run.</span>
-            </Link>
-          </div>
+          <p className="section-intro">
+            Move to the record explorer to inspect captured content, proof details, and share
+            options without switching between separate walkthrough pages.
+          </p>
+          <Link className="primary-cta" to={`/records/${scenarioRun.primaryBundleId}?view=captured`}>
+            Open record explorer
+          </Link>
         </section>
       ) : null}
     </section>

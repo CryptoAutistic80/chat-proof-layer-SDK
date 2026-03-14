@@ -28,7 +28,7 @@ export function AdvancedPlaygroundPage() {
 
   async function handleRun() {
     const bundleId = await actions.runWorkflow();
-    navigate(`/what-happened/${bundleId}`);
+    navigate(`/records/${bundleId}?view=captured`);
   }
 
   return (
@@ -51,7 +51,7 @@ export function AdvancedPlaygroundPage() {
 
         <p className="section-intro">
           Use this view when you want the full set of controls for capture, proof, disclosure,
-          and export rather than the simplified guided experience.
+          and export rather than the simplified developer playground.
         </p>
 
         <div className="preset-grid">

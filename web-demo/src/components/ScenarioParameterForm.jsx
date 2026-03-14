@@ -68,12 +68,12 @@ const FIELD_GROUPS = [
   {
     key: "connection",
     title: "Connection",
-    description: "Choose which vault this prefab writes to and which API credentials it uses.",
+    description: "Choose where this example writes records and which credentials it uses.",
     matches: (fieldKey) => fieldKey === "serviceUrl" || fieldKey === "apiKey"
   },
   {
     key: "capture",
-    title: "Capture inputs",
+    title: "App inputs",
     description: "Control the provider path, model, run mode, and main prompt or incident input.",
     matches: (fieldKey) =>
       fieldKey === "provider" ||
@@ -84,15 +84,15 @@ const FIELD_GROUPS = [
   },
   {
     key: "profile",
-    title: "System profile",
-    description: "Reuse the core system context across every bundle created in this workflow.",
+    title: "Workflow context",
+    description: "Reuse the core system context across every record created in this workflow.",
     matches: (fieldKey) =>
       fieldKey === "systemId" || fieldKey === "intendedUse" || fieldKey === "owner"
   },
   {
     key: "evidence",
-    title: "Scenario evidence",
-    description: "Fill the workflow-specific governance or incident records that make the pack meaningful.",
+    title: "Extra records",
+    description: "Fill the workflow-specific governance or incident records that make this example realistic.",
     matches: () => true
   }
 ];
@@ -132,6 +132,9 @@ export function ScenarioParameterForm({
       </div>
 
       <p className="section-intro">{scenario.description}</p>
+      <p className="field-hint scenario-audience-note">
+        {scenario.audienceSummary}
+      </p>
 
       <div className="parameter-sections">
         {groupedFields.map((group) => (
@@ -149,12 +152,12 @@ export function ScenarioParameterForm({
 
       <p className="field-hint">
         {!hasInteraction
-          ? "This scenario is governance-only: the playground creates multiple evidence bundles without making a model call."
+          ? "This scenario is governance-only: the playground creates multiple evidence records without making a model call."
           : draft.mode === "live"
           ? liveAvailable || draft.providerApiKey?.trim()
             ? "Live provider access is available for this example."
             : "Add a temporary provider key if the connected vault does not already have live access."
-          : "Synthetic mode still runs through the real vault workflow for create, verify, preview, and export."}
+          : "Synthetic mode still runs through the real vault workflow for create, verify, and later inspection."}
       </p>
 
       <div className="scenario-form-footer">
@@ -177,7 +180,7 @@ export function ScenarioParameterForm({
 
         <div className="button-row">
           <button type="button" className="primary-cta" onClick={onRun} disabled={isRunning}>
-            {isRunning ? "Running workflow..." : "Run prefab example"}
+            {isRunning ? "Running example..." : "Run example"}
           </button>
         </div>
       </div>

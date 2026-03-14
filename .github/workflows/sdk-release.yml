@@ -72,7 +72,9 @@ jobs:
     name: Publish Python Wheels
     needs: build
     runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/') && secrets.PYPI_API_TOKEN != ''
+    if: startsWith(github.ref, 'refs/tags/')
+    env:
+      PYPI_API_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
     steps:
       - uses: actions/setup-python@v5
         with:
@@ -85,8 +87,12 @@ jobs:
           path: release-assets
       - name: Install Twine
         run: python -m pip install --upgrade twine
+      - name: Skip PyPI publish when token is not configured
+        if: env.PYPI_API_TOKEN == ''
+        run: echo "PYPI_API_TOKEN is not configured; skipping PyPI publish."
       - name: Publish wheels to PyPI
+        if: env.PYPI_API_TOKEN != ''
         env:
           TWINE_USERNAME: __token__
-          TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
+          TWINE_PASSWORD: ${{ env.PYPI_API_TOKEN }}
         run: python -m twine upload release-assets/*.whl

@@ -44,6 +44,24 @@
       "type": "string",
       "minLength": 1
     },
+    "completeness_profile": {
+      "type": "string",
+      "enum": [
+        "annex_iv_governance_v1"
+      ]
+    },
+    "completeness_pass_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "completeness_warn_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "completeness_fail_count": {
+      "type": "integer",
+      "minimum": 0
+    },
     "system_id": {
       "type": "string",
       "minLength": 1
@@ -169,6 +187,14 @@
               "type": "string",
               "minLength": 1
             }
+          },
+          "completeness_status": {
+            "type": "string",
+            "enum": [
+              "pass",
+              "warn",
+              "fail"
+            ]
           },
           "matched_rules": {
             "type": "array",

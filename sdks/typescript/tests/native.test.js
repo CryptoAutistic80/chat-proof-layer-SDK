@@ -5,6 +5,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   buildBundle,
+  evaluateCompleteness,
   hashSha256,
   redactBundle,
   signBundleRoot,
@@ -16,6 +17,7 @@ import {
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, "../../..");
 const goldenDir = path.join(repoRoot, "fixtures", "golden");
+const annexIvDir = path.join(goldenDir, "annex_iv_governance");
 
 test("native sign and verify round-trip uses Rust core logic", async () => {
   const signingKeyPem = await readFile(path.join(goldenDir, "signing_key.txt"), "utf8");
@@ -109,4 +111,60 @@ test("native redactBundle supports field-level redaction for v3 bundles", async 
   assert.deepEqual(redacted.disclosed_items[0].field_redacted_item?.redacted_paths, [
     "/output_commitment"
   ]);
+});
+
+test("native evaluateCompleteness uses Rust core logic", async () => {
+  const [
+    riskAssessment,
+    dataGovernance,
+    technicalDoc,
+    instructionsForUse,
+    humanOversight
+  ] = await Promise.all([
+    readFile(path.join(annexIvDir, "risk_assessment.json"), "utf8"),
+    readFile(path.join(annexIvDir, "data_governance.json"), "utf8"),
+    readFile(path.join(annexIvDir, "technical_doc.json"), "utf8"),
+    readFile(path.join(annexIvDir, "instructions_for_use.json"), "utf8"),
+    readFile(path.join(annexIvDir, "human_oversight.json"), "utf8")
+  ]);
+
+  const report = evaluateCompleteness({
+    profile: "annex_iv_governance_v1",
+    bundle: {
+      bundle_version: "1.0",
+      bundle_id: "B-annex-iv",
+      created_at: "2026-03-21T00:00:00Z",
+      actor: {
+        issuer: "proof-layer-test",
+        app_id: "native-tests",
+        env: "test",
+        signing_key_id: "kid-dev-01",
+        role: "provider"
+      },
+      subject: { system_id: "hiring-assistant" },
+      context: {},
+      items: [
+        { type: "technical_doc", data: JSON.parse(technicalDoc) },
+        { type: "risk_assessment", data: JSON.parse(riskAssessment) },
+        { type: "data_governance", data: JSON.parse(dataGovernance) },
+        { type: "instructions_for_use", data: JSON.parse(instructionsForUse) },
+        { type: "human_oversight", data: JSON.parse(humanOversight) }
+      ],
+      artefacts: [],
+      policy: { redactions: [], encryption: { enabled: false } },
+      integrity: {
+        canonicalization: "RFC8785-JCS",
+        hash: "SHA-256",
+        header_digest:
+          "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        bundle_root_algorithm: "pl-merkle-sha256-v4",
+        bundle_root:
+          "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        signature: { format: "JWS", alg: "EdDSA", kid: "kid-dev-01", value: "sig" }
+      }
+    }
+  });
+
+  assert.equal(report.status, "pass");
+  assert.equal(report.pass_count, 5);
 });

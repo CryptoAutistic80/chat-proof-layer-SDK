@@ -26,6 +26,39 @@ test("createBundle posts normalized payload", async () => {
   assert.ok(typeof body.artefacts[0].data_base64 === "string");
 });
 
+test("evaluateCompleteness posts bundle or bundleId to the vault", async () => {
+  let captured;
+  const fetchImpl = async (url, init) => {
+    captured = { url, init };
+    return new Response(
+      JSON.stringify({
+        profile: "annex_iv_governance_v1",
+        status: "pass",
+        bundle_id: "B1",
+        system_id: "hiring-assistant",
+        pass_count: 5,
+        warn_count: 0,
+        fail_count: 0,
+        rules: []
+      }),
+      { status: 200, headers: { "content-type": "application/json" } }
+    );
+  };
+
+  const client = new ProofLayerClient({ baseUrl: "http://127.0.0.1:8080", fetchImpl });
+  const result = await client.evaluateCompleteness({
+    bundleId: "B1",
+    profile: "annex_iv_governance_v1"
+  });
+
+  assert.equal(captured.url, "http://127.0.0.1:8080/v1/completeness/evaluate");
+  assert.deepEqual(JSON.parse(captured.init.body), {
+    bundle_id: "B1",
+    profile: "annex_iv_governance_v1"
+  });
+  assert.equal(result.status, "pass");
+});
+
 test("createPack posts vault pack filters including disclosure bundle_format", async () => {
   let captured;
   const fetchImpl = async (url, init) => {

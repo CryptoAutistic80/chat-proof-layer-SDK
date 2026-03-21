@@ -1,6 +1,7 @@
 import { Buffer } from "node:buffer";
 import type {
   BinaryLike,
+  CompletenessReport,
   CreatePackRequest,
   CreateBundleRequest,
   CreateBundleResponse,
@@ -10,6 +11,7 @@ import type {
   DisclosureTemplateCatalog,
   DisclosureTemplateInfo,
   DisclosureTemplateRenderRequest,
+  EvaluateCompletenessRequest,
   FetchLike,
   HttpClientOptions,
   InlineArtefactRequest,
@@ -91,6 +93,23 @@ export class ProofLayerClient {
       public_key_pem: publicKeyPem
     };
     return this.#post("/v1/verify", payload);
+  }
+
+  async evaluateCompleteness({
+    bundle,
+    bundleId,
+    profile
+  }: EvaluateCompletenessRequest): Promise<CompletenessReport> {
+    const selectionCount = Number(Boolean(bundle)) + Number(Boolean(bundleId));
+    if (selectionCount !== 1) {
+      throw new Error("provide exactly one of bundle or bundleId");
+    }
+    const payload = {
+      profile,
+      ...(bundle ? { bundle } : {}),
+      ...(bundleId ? { bundle_id: bundleId } : {})
+    };
+    return this.#post("/v1/completeness/evaluate", payload);
   }
 
   async createPack({

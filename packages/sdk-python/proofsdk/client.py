@@ -61,6 +61,28 @@ class ProofLayerClient:
         }
         return self._request_fn("POST", "/v1/verify", self._headers_json(), json.dumps(payload).encode("utf-8"))
 
+    def evaluate_completeness(
+        self,
+        *,
+        profile: str,
+        bundle: dict[str, Any] | None = None,
+        bundle_id: str | None = None,
+    ) -> dict[str, Any]:
+        selection_count = sum(1 for value in (bundle, bundle_id) if value is not None)
+        if selection_count != 1:
+            raise ValueError("provide exactly one of bundle or bundle_id")
+        payload: dict[str, Any] = {"profile": profile}
+        if bundle is not None:
+            payload["bundle"] = bundle
+        if bundle_id is not None:
+            payload["bundle_id"] = bundle_id
+        return self._request_fn(
+            "POST",
+            "/v1/completeness/evaluate",
+            self._headers_json(),
+            json.dumps(payload).encode("utf-8"),
+        )
+
     def create_pack(
         self,
         *,

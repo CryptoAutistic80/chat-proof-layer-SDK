@@ -2,7 +2,7 @@
 
 ## Implementation status note
 
-As of March 21, 2026, the repo now has a concrete Annex IV governance acceptance slice on top of the broader platform: checked governance fixtures, SDK builder guidance, vault `annex_iv` curation hardening, a narrower `annex_iv_redacted` disclosure default, and end-to-end TypeScript/Python examples for a provider-side employment-screening scenario. The main remaining work is still contract depth and release hardening rather than inventing another subsystem.
+As of March 21, 2026, the repo now has a concrete Annex IV governance acceptance slice on top of the broader platform: checked governance fixtures, SDK builder guidance, vault `annex_iv` curation hardening, a narrower `annex_iv_redacted` disclosure default, end-to-end TypeScript/Python examples for a provider-side employment-screening scenario, and an advisory `annex_iv_governance_v1` readiness/completeness contract across Rust core, CLI, vault, SDKs, and `web-demo`. The main remaining work is now broader profile coverage and release hardening rather than Annex IV minimum-field enforcement or inventing another subsystem.
 
 ## Scope and design principles
 
@@ -83,7 +83,7 @@ The consistent theme is traceability plus durable documentation. The product sho
 
 This gap discussion is grounded in the current AI Act legal anchors and Commission timeline: Regulation (EU) 2024/1689 as published on EUR-Lex, entry into force on August 1, 2024, AI literacy and prohibited-practice obligations from February 2, 2025, GPAI obligations from August 2, 2025, the main high-risk regime from August 2, 2026, and some Annex I pathways from August 2, 2027. The prioritisation below is a product inference from that legal baseline plus the current SDK/vault implementation shape, especially for GPAI compute-threshold evidence and completeness-validation expectations.
 
-The current implementation already has broad catalog coverage: the main governance, runtime, GPAI, incident, literacy, and conformity evidence families exist; retention classes and pack families are operational; and the cryptographic layer is production-grade. The remaining issue is not catalog breadth. It is schema depth. Most lifecycle evidence types intentionally use a thin pattern of stable identifiers, status fields, and commitment hashes that push detailed structure into artefact attachments.
+The current implementation already has broad catalog coverage: the main governance, runtime, GPAI, incident, literacy, and conformity evidence families exist; retention classes and pack families are operational; and the cryptographic layer is production-grade. The remaining issue is not catalog breadth. It is schema depth beyond the first shipped completeness profile. Most lifecycle evidence types intentionally use a thin pattern of stable identifiers, status fields, and commitment hashes that push detailed structure into artefact attachments.
 
 That design is strong for tamper evidence and backward compatibility, but it creates a real tension between commitment integrity and completeness validation. A verifier can prove that an attached artefact has not changed, but cannot tell from the schema alone whether a customer captured the minimum structured detail implied by Articles 9, 10, 13, 14, 15, 17, 27, 43, 47, 49, 53, and 55. The pragmatic design rule is therefore:
 

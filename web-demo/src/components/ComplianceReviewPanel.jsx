@@ -36,15 +36,36 @@ export function ComplianceReviewPanel({ review }) {
         </section>
 
         <section className="review-card">
+          <h4>Readiness check</h4>
+          <p>
+            <strong>{review.readiness.profile ?? "No readiness profile attached"}</strong>
+          </p>
+          <p>
+            {review.readiness.summary}
+          </p>
+          <p>
+            {review.readiness.passCount} pass · {review.readiness.warnCount} warn ·{" "}
+            {review.readiness.failCount} fail
+          </p>
+          {review.readiness.topMissingFields.length > 0 ? (
+            <>
+              <h4>Top missing fields</h4>
+              <ul className="review-list compact">
+                {review.readiness.topMissingFields.map((entry) => (
+                  <li key={entry}>{entry}</li>
+                ))}
+              </ul>
+            </>
+          ) : null}
           <h4>Share or export status</h4>
           <p>
             <strong>{review.supportsPack.packType}</strong>
           </p>
           <p>{review.supportsPack.bundleCount} record(s) are in the current run.</p>
           <p>{review.supportsPack.exportState}</p>
-          <h4>Still missing for a fuller review</h4>
+          <h4>Common next evidence</h4>
           <ul className="review-list compact">
-            {review.missingEvidence.map((entry) => (
+            {review.commonNextEvidence.map((entry) => (
               <li key={entry}>{entry}</li>
             ))}
           </ul>

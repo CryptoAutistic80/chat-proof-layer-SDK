@@ -225,6 +225,39 @@ export interface VerifyPackageRequest {
   publicKeyPem: string;
 }
 
+export type CompletenessProfile = "annex_iv_governance_v1";
+
+export type CompletenessStatus = "pass" | "warn" | "fail";
+
+export interface CompletenessRuleResult extends JsonObject {
+  rule_id: string;
+  item_type: string;
+  obligation_ref: string;
+  status: CompletenessStatus;
+  present_count: number;
+  complete_count: number;
+  evaluated_item_indices?: number[];
+  missing_fields?: string[];
+  summary: string;
+}
+
+export interface CompletenessReport extends JsonObject {
+  profile: CompletenessProfile;
+  status: CompletenessStatus;
+  bundle_id: string;
+  system_id?: string;
+  pass_count: number;
+  warn_count: number;
+  fail_count: number;
+  rules: CompletenessRuleResult[];
+}
+
+export interface EvaluateCompletenessRequest extends JsonObject {
+  profile: CompletenessProfile;
+  bundle?: string | ProofBundle;
+  bundleId?: string;
+}
+
 export type PackBundleFormat = "full" | "disclosure";
 
 export interface CreatePackRequest {
@@ -254,6 +287,7 @@ export interface PackBundleEntry extends JsonObject {
   disclosed_artefact_names?: string[];
   disclosed_artefact_bytes_included?: boolean;
   obligation_refs?: string[];
+  completeness_status?: CompletenessStatus;
   matched_rules: string[];
 }
 
@@ -266,6 +300,8 @@ export interface PackSummaryResponse extends JsonObject {
   to?: string;
   bundle_format: PackBundleFormat;
   disclosure_policy?: string;
+  completeness_profile?: CompletenessProfile;
+  completeness_status?: CompletenessStatus;
   bundle_count: number;
   bundle_ids: string[];
 }
@@ -280,6 +316,10 @@ export interface PackManifest extends JsonObject {
   to?: string;
   bundle_format: PackBundleFormat;
   disclosure_policy?: string;
+  completeness_profile?: CompletenessProfile;
+  completeness_pass_count?: number;
+  completeness_warn_count?: number;
+  completeness_fail_count?: number;
   bundle_ids: string[];
   bundles: PackBundleEntry[];
 }

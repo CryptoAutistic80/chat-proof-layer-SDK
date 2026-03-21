@@ -39,6 +39,7 @@ import type {
   AuthorityNotificationRequestOptions,
   AuthoritySubmissionRequestOptions,
   BundleCreateClient,
+  CompletenessReport,
   ComplianceProfileInput,
   ComputeMetricsRequestOptions,
   CreatePackRequest,
@@ -55,6 +56,7 @@ import type {
   DisclosureTemplateCatalog,
   DisclosureTemplateInfo,
   DisclosureTemplateRenderRequest,
+  EvaluateCompletenessRequest,
   DownstreamDocumentationRequestOptions,
   FundamentalRightsAssessmentRequestOptions,
   HumanOversightRequestOptions,
@@ -173,6 +175,20 @@ export class ProofLayer implements BundleCreateClient {
       return (this.client as LocalProofLayerClient | ProofLayerClient).verifyBundle(request);
     }
     throw new Error("underlying client does not support verifyBundle");
+  }
+
+  async evaluateCompleteness(
+    request: EvaluateCompletenessRequest
+  ): Promise<CompletenessReport> {
+    if (
+      "evaluateCompleteness" in this.client &&
+      typeof this.client.evaluateCompleteness === "function"
+    ) {
+      return (
+        this.client as LocalProofLayerClient | ProofLayerClient
+      ).evaluateCompleteness(request);
+    }
+    throw new Error("underlying client does not support evaluateCompleteness");
   }
 
   async disclose({

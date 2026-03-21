@@ -87,6 +87,11 @@ def verify_bundle(*, bundle: Any, artefacts: Any, public_key_pem: str) -> dict[s
     return json.loads(_native_impl.verify_bundle(bundle_json, artefacts_json, public_key_pem))
 
 
+def evaluate_completeness(*, bundle: Any, profile: str) -> dict[str, Any]:
+    bundle_json = bundle if isinstance(bundle, str) else json.dumps(bundle)
+    return json.loads(_native_impl.evaluate_completeness_json(bundle_json, profile))
+
+
 def redact_bundle(
     *,
     bundle: Any,

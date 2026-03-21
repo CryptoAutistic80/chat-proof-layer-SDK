@@ -183,6 +183,13 @@ export async function previewDisclosure(serviceUrl, apiKey, payload) {
   });
 }
 
+export async function evaluateCompleteness(serviceUrl, apiKey, payload) {
+  return requestJson(serviceUrl, apiKey, "/v1/completeness/evaluate", {
+    method: "POST",
+    body: JSON.stringify(payload)
+  });
+}
+
 export async function createPack(serviceUrl, apiKey, payload) {
   return requestJson(serviceUrl, apiKey, "/v1/packs", {
     method: "POST",

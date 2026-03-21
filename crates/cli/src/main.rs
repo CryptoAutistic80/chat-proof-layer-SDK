@@ -5,7 +5,8 @@ use clap::{Args, Parser, Subcommand, ValueEnum};
 use ed25519_dalek::SigningKey;
 use flate2::{Compression, read::GzDecoder, write::GzEncoder};
 use proof_layer_core::{
-    ActorRole, ArtefactInput, CaptureEvent, CaptureInput, DisclosureError, EvidenceItem,
+    ActorRole, ArtefactInput, CaptureEvent, CaptureInput, CompletenessProfile,
+    CompletenessReport, CompletenessStatus, DisclosureError, EvidenceItem,
     LEGACY_BUNDLE_ROOT_ALGORITHM, ProofBundle, ReceiptVerification, RedactedBundle,
     RekorTransparencyProvider, Rfc3161HttpTimestampProvider, SCITT_TRANSPARENCY_KIND,
     ScittTransparencyProvider, TimestampAssuranceProfile, TimestampProvider, TimestampToken,
@@ -13,9 +14,9 @@ use proof_layer_core::{
     anchor_bundle as anchor_bundle_receipt, build_bundle, build_inclusion_proof,
     capture_input_v01_to_event, decode_backup_encryption_key, decode_private_key_pem,
     decode_public_key_pem, decrypt_backup_archive, encode_private_key_pem, encode_public_key_pem,
-    redact_bundle, redact_bundle_with_field_redactions, sha256_prefixed, timestamp_digest,
-    validate_bundle_integrity_fields, validate_timestamp_trust_policy, verify_receipt,
-    verify_receipt_with_policy, verify_redacted_bundle, verify_timestamp,
+    evaluate_completeness, redact_bundle, redact_bundle_with_field_redactions, sha256_prefixed,
+    timestamp_digest, validate_bundle_integrity_fields, validate_timestamp_trust_policy,
+    verify_receipt, verify_receipt_with_policy, verify_redacted_bundle, verify_timestamp,
     verify_timestamp_with_policy,
 };
 use reqwest::{
@@ -57,6 +58,8 @@ enum Commands {
     Create(Box<CreateArgs>),
     /// Verify a proof bundle package offline.
     Verify(Box<VerifyArgs>),
+    /// Assess Annex IV governance completeness for a full bundle package.
+    Assess(Box<AssessArgs>),
     /// Produce a redacted disclosure package with Merkle proofs for selected items.
     Disclose(Box<DiscloseArgs>),
     /// Print key fields from a proof bundle package.
@@ -190,6 +193,16 @@ struct VerifyArgs {
     timestamp_assurance: Option<TimestampAssuranceArg>,
     #[arg(long = "transparency-public-key")]
     transparency_public_key: Option<PathBuf>,
+}
+
+#[derive(Args)]
+struct AssessArgs {
+    #[arg(long = "in")]
+    input: PathBuf,
+    #[arg(long)]
+    profile: CompletenessProfileArg,
+    #[arg(long, default_value = "human")]
+    format: OutputFormat,
 }
 
 #[derive(Args)]
@@ -359,6 +372,20 @@ struct ArtefactArg {
 enum OutputFormat {
     Human,
     Json,
+}
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq, ValueEnum)]
+enum CompletenessProfileArg {
+    #[value(name = "annex_iv_governance_v1")]
+    AnnexIvGovernanceV1,
+}
+
+impl CompletenessProfileArg {
+    fn as_core(self) -> CompletenessProfile {
+        match self {
+            Self::AnnexIvGovernanceV1 => CompletenessProfile::AnnexIvGovernanceV1,
+        }
+    }
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, ValueEnum)]
@@ -597,6 +624,12 @@ struct VerifyCommandInput<'a> {
     timestamp_policy_oids: &'a [String],
     timestamp_assurance: Option<TimestampAssuranceArg>,
     transparency_public_key_path: Option<&'a Path>,
+}
+
+struct AssessCommandInput<'a> {
+    input_path: &'a Path,
+    profile: CompletenessProfileArg,
+    format: OutputFormat,
 }
 
 struct VaultQueryCommandInput<'a> {
@@ -1598,6 +1631,11 @@ fn main() -> Result<()> {
             timestamp_assurance: args.timestamp_assurance,
             transparency_public_key_path: args.transparency_public_key.as_deref(),
         }),
+        Commands::Assess(args) => cmd_assess(AssessCommandInput {
+            input_path: &args.input,
+            profile: args.profile,
+            format: args.format,
+        }),
         Commands::Disclose(args) => cmd_disclose(
             &args.input,
             &args.items,
@@ -2023,6 +2061,40 @@ fn cmd_verify(args: VerifyCommandInput<'_>) -> Result<()> {
     } else {
         bail!("verification failed")
     }
+}
+
+fn cmd_assess(args: AssessCommandInput<'_>) -> Result<()> {
+    let max_payload_bytes = max_payload_bytes()?;
+    let package_size = fs::metadata(args.input_path)
+        .with_context(|| format!("failed to stat {}", args.input_path.display()))?
+        .len() as usize;
+    if package_size > max_payload_bytes {
+        bail!(
+            "package size {} bytes exceeds max {} bytes",
+            package_size,
+            max_payload_bytes
+        );
+    }
+
+    let package = read_package(args.input_path)?;
+    if package.format != BUNDLE_PACKAGE_FORMAT {
+        if package.format == DISCLOSURE_PACKAGE_FORMAT {
+            bail!(
+                "completeness assessment requires a full bundle package, not a disclosure package"
+            );
+        }
+        bail!(
+            "completeness assessment requires a full bundle package, got {}",
+            package.format
+        );
+    }
+
+    let bundle = parse_bundle_file(&package.files)?;
+    let report = evaluate_completeness(&bundle, args.profile.as_core());
+
+    print!("{}", render_completeness_report(&report, args.format)?);
+
+    Ok(())
 }
 
 fn verify_full_package(
@@ -4037,6 +4109,77 @@ fn print_human_verify_report(report: &VerifyReport) {
     println!("Verification result: {}", report.message);
 }
 
+fn render_completeness_report(report: &CompletenessReport, format: OutputFormat) -> Result<String> {
+    match format {
+        OutputFormat::Human => Ok(render_human_completeness_report(report)),
+        OutputFormat::Json => Ok(format!("{}\n", serde_json::to_string_pretty(report)?)),
+    }
+}
+
+fn render_human_completeness_report(report: &CompletenessReport) -> String {
+    use std::fmt::Write as _;
+
+    let mut output = String::new();
+    writeln!(&mut output, "Profile: {}", report.profile.as_str()).unwrap();
+    writeln!(
+        &mut output,
+        "Overall status: {}",
+        completeness_status_label(report.status)
+    )
+    .unwrap();
+    writeln!(&mut output, "Bundle ID: {}", report.bundle_id).unwrap();
+    if let Some(system_id) = report.system_id.as_deref() {
+        writeln!(&mut output, "System ID: {system_id}").unwrap();
+    }
+    writeln!(
+        &mut output,
+        "Rule counts: {} pass, {} warn, {} fail",
+        report.pass_count, report.warn_count, report.fail_count
+    )
+    .unwrap();
+    output.push('\n');
+    for rule in &report.rules {
+        let missing_fields = if rule.missing_fields.is_empty() {
+            "none".to_string()
+        } else {
+            rule.missing_fields.join(", ")
+        };
+        writeln!(
+            &mut output,
+            "[{}] {} — present {}, complete {}, missing fields: {}",
+            completeness_status_marker(rule.status),
+            rule.item_type,
+            rule.present_count,
+            rule.complete_count,
+            missing_fields
+        )
+        .unwrap();
+    }
+    output.push('\n');
+    writeln!(
+        &mut output,
+        "Readiness assessment is advisory only and separate from cryptographic verification."
+    )
+    .unwrap();
+    output
+}
+
+fn completeness_status_marker(status: CompletenessStatus) -> &'static str {
+    match status {
+        CompletenessStatus::Pass => "✓",
+        CompletenessStatus::Warn => "!",
+        CompletenessStatus::Fail => "✗",
+    }
+}
+
+fn completeness_status_label(status: CompletenessStatus) -> &'static str {
+    match status {
+        CompletenessStatus::Pass => "pass",
+        CompletenessStatus::Warn => "warn",
+        CompletenessStatus::Fail => "fail",
+    }
+}
+
 fn optional_check_marker(state: &OptionalCheckState) -> &'static str {
     match state {
         OptionalCheckState::Valid => "✓",
@@ -4541,6 +4684,199 @@ mod tests {
         .unwrap()
     }
 
+    fn sample_annex_iv_bundle() -> ProofBundle {
+        let signing_key = SigningKey::from_bytes(&[7_u8; 32]);
+        let mut event = sample_event();
+        event.subject.system_id = Some("hiring-assistant".to_string());
+        event.items = vec![
+            EvidenceItem::RiskAssessment(proof_layer_core::schema::RiskAssessmentEvidence {
+                risk_id: "risk-001".to_string(),
+                severity: "high".to_string(),
+                status: "mitigated".to_string(),
+                summary: Some("Bias and over-reliance risk reviewed.".to_string()),
+                risk_description: Some(
+                    "Potential unfair ranking of borderline candidates.".to_string(),
+                ),
+                likelihood: Some("medium".to_string()),
+                affected_groups: vec!["job_applicants".to_string()],
+                mitigation_measures: vec![
+                    "mandatory human review".to_string(),
+                    "monthly subgroup parity review".to_string(),
+                ],
+                residual_risk_level: Some("low".to_string()),
+                risk_owner: Some("quality-team".to_string()),
+                vulnerable_groups_considered: Some(true),
+                test_results_summary: Some(
+                    "No blocking disparity found in March review.".to_string(),
+                ),
+                metadata: json!({}),
+            }),
+            EvidenceItem::DataGovernance(proof_layer_core::schema::DataGovernanceEvidence {
+                decision: "approved".to_string(),
+                dataset_ref: Some("dataset://candidates/2026-03".to_string()),
+                dataset_name: None,
+                dataset_version: Some("2026.03".to_string()),
+                source_description: Some(
+                    "EU recruitment applicant and hiring outcome corpus.".to_string(),
+                ),
+                collection_period: Some(proof_layer_core::schema::DateRange {
+                    start: Some("2025-01-01".to_string()),
+                    end: Some("2025-12-31".to_string()),
+                }),
+                geographical_scope: vec!["EU".to_string()],
+                preprocessing_operations: vec![
+                    "deduplication".to_string(),
+                    "feature scaling".to_string(),
+                ],
+                bias_detection_methodology: Some(
+                    "Subgroup parity review across protected attributes.".to_string(),
+                ),
+                bias_metrics: vec![proof_layer_core::schema::MetricSummary {
+                    name: "selection_rate_ratio".to_string(),
+                    value: "0.96".to_string(),
+                    unit: Some("ratio".to_string()),
+                    methodology: Some("Measured on March validation set.".to_string()),
+                }],
+                mitigation_actions: vec!["rebalance training sample".to_string()],
+                data_gaps: vec!["low historical volume for niche roles".to_string()],
+                personal_data_categories: vec![
+                    "employment_history".to_string(),
+                    "education".to_string(),
+                ],
+                safeguards: vec!["role-based access".to_string(), "retention caps".to_string()],
+                metadata: json!({}),
+            }),
+            EvidenceItem::TechnicalDoc(proof_layer_core::schema::TechnicalDocEvidence {
+                document_ref: "annex-iv/system-card".to_string(),
+                section: Some("system_overview".to_string()),
+                commitment: Some(
+                    "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                        .to_string(),
+                ),
+                annex_iv_sections: vec!["section_2".to_string(), "section_3".to_string()],
+                system_description_summary: Some(
+                    "Ranks candidates for recruiter review.".to_string(),
+                ),
+                model_description_summary: Some("Fine-tuned ranking model.".to_string()),
+                capabilities_and_limitations: Some(
+                    "Advisory only for first-pass screening.".to_string(),
+                ),
+                design_choices_summary: Some(
+                    "Human review is required before employment decisions.".to_string(),
+                ),
+                evaluation_metrics_summary: Some(
+                    "Precision and subgroup parity are reviewed monthly.".to_string(),
+                ),
+                human_oversight_design_summary: Some(
+                    "Recruiters must review every adverse or borderline case.".to_string(),
+                ),
+                post_market_monitoring_plan_ref: Some(
+                    "pmm://hiring-assistant/2026.03".to_string(),
+                ),
+                simplified_tech_doc: None,
+            }),
+            EvidenceItem::InstructionsForUse(proof_layer_core::schema::InstructionsForUseEvidence {
+                document_ref: "ifu://hiring-assistant/2026.03".to_string(),
+                version: Some("2026.03".to_string()),
+                section: Some("operator_guidance".to_string()),
+                commitment: Some(
+                    "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+                        .to_string(),
+                ),
+                provider_identity: Some("Proof Layer Labs".to_string()),
+                intended_purpose: Some(
+                    "Assist recruiters with first-pass candidate screening.".to_string(),
+                ),
+                system_capabilities: vec![
+                    "candidate ranking".to_string(),
+                    "confidence banding".to_string(),
+                ],
+                accuracy_metrics: vec![proof_layer_core::schema::MetricSummary {
+                    name: "precision_at_10".to_string(),
+                    value: "0.87".to_string(),
+                    unit: Some("ratio".to_string()),
+                    methodology: Some("Measured on validation cohort.".to_string()),
+                }],
+                foreseeable_risks: vec!["automation bias".to_string()],
+                explainability_capabilities: vec!["reason codes".to_string()],
+                human_oversight_guidance: vec![
+                    "review all adverse recommendations".to_string(),
+                ],
+                compute_requirements: vec!["cpu-only inference".to_string()],
+                service_lifetime: Some("12 months".to_string()),
+                log_management_guidance: vec!["retain audit logs for 12 months".to_string()],
+                metadata: json!({}),
+            }),
+            EvidenceItem::HumanOversight(proof_layer_core::schema::HumanOversightEvidence {
+                action: "manual_review".to_string(),
+                reviewer: Some("reviewer-123".to_string()),
+                notes_commitment: Some(
+                    "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+                        .to_string(),
+                ),
+                actor_role: Some("recruiter".to_string()),
+                anomaly_detected: Some(false),
+                override_action: Some("none".to_string()),
+                interpretation_guidance_followed: Some(true),
+                automation_bias_detected: Some(false),
+                two_person_verification: Some(false),
+                stop_triggered: Some(false),
+                stop_reason: Some("No emergency stop was required for this review path.".to_string()),
+            }),
+        ];
+
+        build_bundle(
+            event,
+            &[ArtefactInput {
+                name: "annex_iv_overview.json".to_string(),
+                content_type: "application/json".to_string(),
+                bytes: br#"{"profile":"annex_iv_governance_v1"}"#.to_vec(),
+            }],
+            &signing_key,
+            "kid-dev-01",
+            "01JPGG4QFZZ0X0P3N2JDMQ6K3V",
+            parse_created_at(Some("2026-03-02T00:00:00Z")).unwrap(),
+        )
+        .unwrap()
+    }
+
+    fn bundle_package_files(
+        bundle: &ProofBundle,
+        artefact_name: &str,
+        artefact_bytes: &[u8],
+    ) -> BTreeMap<String, Vec<u8>> {
+        let mut package_files = BTreeMap::<String, Vec<u8>>::new();
+        package_files.insert(
+            "proof_bundle.json".to_string(),
+            serde_json::to_vec_pretty(bundle).unwrap(),
+        );
+        package_files.insert(
+            "proof_bundle.canonical.json".to_string(),
+            bundle.canonical_header_bytes().unwrap(),
+        );
+        package_files.insert(
+            "proof_bundle.sig".to_string(),
+            bundle.integrity.signature.value.as_bytes().to_vec(),
+        );
+        package_files.insert(format!("artefacts/{artefact_name}"), artefact_bytes.to_vec());
+
+        let manifest = Manifest {
+            files: package_files
+                .iter()
+                .map(|(name, bytes)| ManifestEntry {
+                    name: name.clone(),
+                    digest: sha256_prefixed(bytes),
+                    size: bytes.len() as u64,
+                })
+                .collect(),
+        };
+        package_files.insert(
+            "manifest.json".to_string(),
+            serde_json::to_vec_pretty(&manifest).unwrap(),
+        );
+        package_files
+    }
+
     struct StaticTimestampProvider {
         token: TimestampToken,
     }
@@ -4975,6 +5311,30 @@ mod tests {
             } => {
                 assert_eq!(bundle_format, PackBundleFormatArg::Disclosure);
                 assert_eq!(disclosure_policy.as_deref(), Some("annex_iv_redacted"));
+            }
+            _ => panic!("unexpected command parsed"),
+        }
+    }
+
+    #[test]
+    fn assess_command_accepts_annex_iv_profile_arg() {
+        let cli = Cli::try_parse_from([
+            "proofctl",
+            "assess",
+            "--in",
+            "./bundle.pkg",
+            "--profile",
+            "annex_iv_governance_v1",
+            "--format",
+            "json",
+        ])
+        .unwrap();
+
+        match cli.command {
+            Commands::Assess(args) => {
+                assert_eq!(args.input, PathBuf::from("./bundle.pkg"));
+                assert_eq!(args.profile, CompletenessProfileArg::AnnexIvGovernanceV1);
+                assert_eq!(args.format, OutputFormat::Json);
             }
             _ => panic!("unexpected command parsed"),
         }
@@ -5773,6 +6133,78 @@ mod tests {
         assert_eq!(report.message, "VALID");
 
         fs::remove_dir_all(&tmp_dir).unwrap();
+    }
+
+    #[test]
+    fn render_human_completeness_report_lists_rule_results() {
+        let bundle = sample_annex_iv_bundle();
+        let report = evaluate_completeness(&bundle, CompletenessProfile::AnnexIvGovernanceV1);
+        let rendered = render_human_completeness_report(&report);
+
+        assert!(rendered.contains("Profile: annex_iv_governance_v1"));
+        assert!(rendered.contains("Overall status: pass"));
+        assert!(rendered.contains("[✓] risk_assessment"));
+        assert!(rendered.contains("[✓] data_governance"));
+        assert!(rendered.contains("Readiness assessment is advisory only"));
+    }
+
+    #[test]
+    fn render_completeness_report_json_serializes_report() {
+        let bundle = sample_annex_iv_bundle();
+        let report = evaluate_completeness(&bundle, CompletenessProfile::AnnexIvGovernanceV1);
+        let rendered = render_completeness_report(&report, OutputFormat::Json).unwrap();
+        let decoded: CompletenessReport = serde_json::from_str(&rendered).unwrap();
+
+        assert_eq!(decoded.profile, CompletenessProfile::AnnexIvGovernanceV1);
+        assert_eq!(decoded.status, CompletenessStatus::Pass);
+    }
+
+    #[test]
+    fn assess_command_accepts_full_bundle_package() {
+        let bundle = sample_annex_iv_bundle();
+        let package_files =
+            bundle_package_files(&bundle, "annex_iv_overview.json", br#"{"profile":"annex_iv"}"#);
+        let tmp_dir = std::env::temp_dir().join(format!("proofctl-assess-test-{}", Ulid::new()));
+        fs::create_dir_all(&tmp_dir).unwrap();
+        let bundle_path = tmp_dir.join("bundle.pkg");
+
+        write_bundle_package(&bundle_path, &package_files).unwrap();
+
+        let result = cmd_assess(AssessCommandInput {
+            input_path: &bundle_path,
+            profile: CompletenessProfileArg::AnnexIvGovernanceV1,
+            format: OutputFormat::Json,
+        });
+
+        fs::remove_dir_all(&tmp_dir).unwrap();
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn assess_command_rejects_disclosure_package() {
+        let bundle = sample_bundle();
+        let artefact_bytes = br#"{"hello":"world"}"#.to_vec();
+        let package_files = bundle_package_files(&bundle, "prompt.json", &artefact_bytes);
+        let tmp_dir =
+            std::env::temp_dir().join(format!("proofctl-assess-disclosure-{}", Ulid::new()));
+        fs::create_dir_all(&tmp_dir).unwrap();
+        let bundle_path = tmp_dir.join("bundle.pkg");
+        let disclosure_path = tmp_dir.join("bundle.disclosure.pkg");
+
+        write_bundle_package(&bundle_path, &package_files).unwrap();
+        cmd_disclose(&bundle_path, "0", None, &[], &disclosure_path).unwrap();
+
+        let err = cmd_assess(AssessCommandInput {
+            input_path: &disclosure_path,
+            profile: CompletenessProfileArg::AnnexIvGovernanceV1,
+            format: OutputFormat::Json,
+        })
+        .unwrap_err();
+
+        fs::remove_dir_all(&tmp_dir).unwrap();
+        assert!(err
+            .to_string()
+            .contains("completeness assessment requires a full bundle package"));
     }
 
     #[test]

@@ -68,6 +68,42 @@ class TestProofLayerClient(unittest.TestCase):
             },
         )
 
+    def test_evaluate_completeness_posts_bundle_id_or_bundle(self):
+        captured = {}
+
+        def request_fn(method, path, headers, body):
+            captured["method"] = method
+            captured["path"] = path
+            captured["headers"] = headers
+            captured["body"] = body
+            return {
+                "profile": "annex_iv_governance_v1",
+                "status": "pass",
+                "bundle_id": "B1",
+                "system_id": "hiring-assistant",
+                "pass_count": 5,
+                "warn_count": 0,
+                "fail_count": 0,
+                "rules": [],
+            }
+
+        client = ProofLayerClient(base_url="http://127.0.0.1:8080", request_fn=request_fn)
+        out = client.evaluate_completeness(
+            bundle_id="B1",
+            profile="annex_iv_governance_v1",
+        )
+
+        self.assertEqual(captured["method"], "POST")
+        self.assertEqual(captured["path"], "/v1/completeness/evaluate")
+        self.assertEqual(
+            json.loads(captured["body"].decode("utf-8")),
+            {
+                "bundle_id": "B1",
+                "profile": "annex_iv_governance_v1",
+            },
+        )
+        self.assertEqual(out["status"], "pass")
+
     def test_create_pack_serializes_inline_disclosure_template(self):
         captured = {}
 

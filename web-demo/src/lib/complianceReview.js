@@ -47,14 +47,53 @@ function bundleRunsFromRun(run) {
   return Array.isArray(run?.bundleRuns) ? run.bundleRuns : [];
 }
 
+function buildReadinessSummary(run) {
+  const report = run?.completenessReport;
+  if (!report) {
+    return {
+      profile: null,
+      status: "muted",
+      passCount: 0,
+      warnCount: 0,
+      failCount: 0,
+      topMissingFields: [],
+      summary: "No readiness check is attached to this workflow."
+    };
+  }
+
+  const topMissingFields = [
+    ...new Set(
+      (report.rules ?? [])
+        .filter((rule) => rule.status === "warn" || rule.status === "fail")
+        .flatMap((rule) => rule.missing_fields ?? [])
+    )
+  ].slice(0, 6);
+
+  return {
+    profile: report.profile,
+    status: report.status,
+    passCount: report.pass_count ?? 0,
+    warnCount: report.warn_count ?? 0,
+    failCount: report.fail_count ?? 0,
+    topMissingFields,
+    summary:
+      report.status === "pass"
+        ? "The structured governance fields for this Annex IV workflow meet the current advisory minimum."
+        : report.status === "warn"
+          ? "The workflow has at least one minimally complete governance record for each required area, but some captured records are thinner than the current advisory minimum."
+          : "The workflow is missing at least one required governance area or does not yet include a minimally complete record for that area."
+  };
+}
+
 export function buildComplianceReview(inputScenario, run) {
   const scenario = normalizeScenario(inputScenario, run);
   const bundleRuns = bundleRunsFromRun(run);
+  const readiness = buildReadinessSummary(run);
 
   return {
     title: `${scenario.label} evidence map`,
     summary:
-      "This is a plain-English evidence map for the selected workflow. It is not legal advice or a complete EU AI Act determination.",
+      "This is a plain-English evidence map for the selected workflow. The readiness check is an advisory structural review, not legal advice and not a complete EU AI Act determination.",
     capturedNow: bundleRuns.map((bundleRun) => ({
       label: bundleRun.label,
       bundleId: bundleRun.bundleId,
@@ -71,8 +110,9 @@ export function buildComplianceReview(inputScenario, run) {
           itemTypes: entry.item_types
         })) ?? []
     },
+    readiness,
     lawExplainer: scenario.lawExplainer,
-    missingEvidence: scenario.missingEvidence
+    commonNextEvidence: scenario.missingEvidence
   };
 }
 
@@ -102,6 +142,6 @@ export function buildRecordExplainer(inputScenario, run) {
       audience: defaultShareAudience(scenario),
       lawExplainer: scenario.lawExplainer
     },
-    missingEvidence: scenario.missingEvidence
+    commonNextEvidence: scenario.missingEvidence
   };
 }

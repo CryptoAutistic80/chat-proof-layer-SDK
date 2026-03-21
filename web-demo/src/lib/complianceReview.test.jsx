@@ -18,6 +18,19 @@ describe("buildComplianceReview", () => {
       },
       downloadInfo: {
         fileName: "incident-response.pack"
+      },
+      completenessReport: {
+        profile: "annex_iv_governance_v1",
+        status: "warn",
+        pass_count: 4,
+        warn_count: 1,
+        fail_count: 0,
+        rules: [
+          {
+            status: "warn",
+            missing_fields: ["stop_reason"]
+          }
+        ]
       }
     });
 
@@ -26,7 +39,9 @@ describe("buildComplianceReview", () => {
     expect(review.supportsPack.packType).toBe("incident_response");
     expect(review.supportsPack.exportState).toContain("ready to download");
     expect(review.lawExplainer.expectation).toContain("clear incident trail");
-    expect(review.missingEvidence.length).toBeGreaterThan(0);
+    expect(review.readiness.profile).toBe("annex_iv_governance_v1");
+    expect(review.readiness.topMissingFields).toContain("stop_reason");
+    expect(review.commonNextEvidence.length).toBeGreaterThan(0);
   });
 
   test("builds a record explainer for packless chatbot scenarios", () => {

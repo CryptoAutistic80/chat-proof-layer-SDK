@@ -22,6 +22,7 @@ Current implemented surface:
 
 - Rust core for canonicalization, hashing, signing, verification, timestamping, transparency, disclosure, and backup-envelope crypto.
 - `proofctl` CLI for local keygen, create, verify, inspect, disclose, plus optional vault query/export/backup/restore flows.
+- Advisory readiness/completeness evaluation for full governance bundles via `proofctl assess`, the vault API, and the SDK facades.
 - `proof-service` optional self-hosted vault with SQLite storage, filesystem blobs, TLS, bearer auth, single-tenant enforcement, retention, legal holds, audit log, metrics, backup, restore layout export, and pack assembly.
 - TypeScript SDK in `sdks/typescript`, packaged as `@proof-layer/sdk`.
 - Python SDK in `packages/sdk-python`, packaged as `proof-layer-sdk-python`.
@@ -145,6 +146,11 @@ cargo run -p proofctl -- disclose \
 
 # Verify the redacted package
 cargo run -p proofctl -- verify --in ./bundle.disclosure.pkg --key ./keys/verify.pub
+
+# Assess Annex IV governance readiness for a full bundle
+cargo run -p proofctl -- assess \
+  --in ./annex-iv-bundle.pkg \
+  --profile annex_iv_governance_v1
 ```
 
 Notes:
@@ -228,6 +234,8 @@ That starts the vault on `http://127.0.0.1:8080` and the demo site on `http://12
 The compose stack mounts `./vault.toml`, `./keys`, and `./storage`, and sets `PROOF_SIGNING_KEY_PATH=/app/keys/signing.pem`, so the vault exposes the matching public verify key from `./keys/verify.pub` through `/v1/config`.
 
 The service auto-loads `./vault.toml` when present. Environment variables still override file settings.
+
+The vault also exposes `POST /v1/completeness/evaluate` for advisory readiness checks against stored or inline full bundles. The TypeScript and Python SDK facades mirror that as `evaluateCompleteness(...)` and `evaluate_completeness(...)`.
 
 ### 5. Query, Export, And Backup Through The CLI
 
@@ -604,6 +612,7 @@ The demo frontend can connect to a local `proof-service` instance. It is there t
 - integrated docs under `/docs/*`
 - a guided demo for scenario walkthroughs
 - an advanced playground for deeper workflow control
+- an Annex IV-oriented readiness check card backed by the completeness API
 
 When connected to a running vault, the interactive workflow can:
 

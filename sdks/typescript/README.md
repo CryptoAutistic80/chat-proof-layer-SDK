@@ -103,6 +103,11 @@ const locallySealed = await localClient.createBundle({
   artefacts: [{ name: "prompt.json", contentType: "application/json", data: Buffer.from("{}") }]
 });
 
+const readiness = await proofLayer.evaluateCompleteness({
+  bundle: locallySealed.bundle,
+  profile: "annex_iv_governance_v1"
+});
+
 const summary = verifyBundle({
   bundle: locallySealed.bundle,
   artefacts: [{ name: "prompt.json", data: Buffer.from("{}") }],
@@ -110,6 +115,7 @@ const summary = verifyBundle({
 });
 
 console.log(summary.artefact_count);
+console.log(readiness.status);
 console.log(proofClient.baseUrl);
 
 const redacted = await proofLayer.disclose({
@@ -174,6 +180,10 @@ const templatePreview = await proofClient.previewDisclosure({
   }
 });
 const archive = await proofClient.downloadPackExport(pack.pack_id);
+const vaultReadiness = await proofClient.evaluateCompleteness({
+  bundleId: "BUNDLE_ID",
+  profile: "annex_iv_governance_v1"
+});
 
 const generic = withGenericProofLayer(
   async (params) => ({ id: "generic-1", model: params.model, output_text: "ok" }),
@@ -201,6 +211,7 @@ console.log(redactedSummary.disclosed_item_count, archive.length);
 console.log(preview.disclosed_item_types);
 console.log(templatePack.pack_id, templatePreview.disclosedItemTypes);
 console.log(templateCatalog.templates[0].profile, renderedTemplate.policy.name);
+console.log(vaultReadiness.status);
 ```
 
 For the full provider-side Annex IV governance walkthrough, build the SDK and run:

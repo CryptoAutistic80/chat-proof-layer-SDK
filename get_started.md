@@ -21,6 +21,14 @@ cargo run -p proofctl -- create \
 cargo run -p proofctl -- verify --in ./bundle.pkg --key ./keys/verify.pub
 ```
 
+If you have a full high-risk governance bundle and want the advisory readiness view:
+
+```bash
+cargo run -p proofctl -- assess \
+  --in ./annex-iv-bundle.pkg \
+  --profile annex_iv_governance_v1
+```
+
 If you want the bundle to carry your actor role and system-classification context from day one, create it with the compliance flags instead of adding that data later:
 
 ```bash
@@ -138,7 +146,7 @@ http://127.0.0.1:5173/playground
 http://127.0.0.1:5173/docs
 ```
 
-`web-demo` is demo-only collateral for walkthroughs and API exercises; it is not the production compliance surface.
+`web-demo` is demo-only collateral for walkthroughs and API exercises; it is not the production compliance surface. When connected to a local vault it now also shows an Annex IV-oriented readiness check for supported workflows.
 
 If the site is already open, click `Refresh vault` after starting `proof-service` so the verifier and capability panels pick up the current vault state.
 

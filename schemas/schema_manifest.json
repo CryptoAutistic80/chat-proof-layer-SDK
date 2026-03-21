@@ -68,6 +68,7 @@
     "evidence_item": "schemas/evidence_item.schema.json",
     "evidence_bundle": "schemas/evidence_bundle.schema.json",
     "redacted_bundle": "schemas/redacted_bundle.schema.json",
-    "evidence_pack": "schemas/evidence_pack.schema.json"
+    "evidence_pack": "schemas/evidence_pack.schema.json",
+    "completeness_report": "schemas/completeness_report.schema.json"
   }
 }

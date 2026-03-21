@@ -5,6 +5,7 @@ import {
   createBundle,
   createPack,
   downloadPackExport,
+  evaluateCompleteness,
   fetchBundle,
   fetchBundleArtefact,
   fetchDemoProviderResponse,
@@ -44,6 +45,7 @@ import { renderScenarioScript } from "../lib/sdkScriptTemplates";
 import { buildScenarioWorkflow } from "../lib/sdkWorkflowBuilders";
 
 const DemoContext = createContext(null);
+const ANNEX_IV_COMPLETENESS_PROFILE = "annex_iv_governance_v1";
 
 function arrayValue(value) {
   return Array.isArray(value) ? value : [];
@@ -62,6 +64,10 @@ function hasTemporaryProviderKey(value) {
 
 function canUseLiveMode(vaultConfig, provider, providerApiKey) {
   return isProviderLiveEnabled(vaultConfig, provider) || hasTemporaryProviderKey(providerApiKey);
+}
+
+function readinessProfileForPackType(packType) {
+  return packType === "annex_iv" ? ANNEX_IV_COMPLETENESS_PROFILE : null;
 }
 
 function createInitialDraft() {
@@ -375,6 +381,37 @@ export function DemoProvider({ children }) {
     });
   }
 
+  async function evaluateReadinessFor(bundleId, packType, bundle = null) {
+    const profile = readinessProfileForPackType(packType);
+    if (!profile) {
+      return {
+        completenessProfile: null,
+        completenessReport: null
+      };
+    }
+    const payload = bundle
+      ? { bundle, profile }
+      : { bundle_id: bundleId, profile };
+    const completenessReport = await evaluateCompleteness(
+      draft.serviceUrl,
+      draft.apiKey,
+      payload
+    );
+    appendActivity(
+      "Readiness check updated",
+      `${completenessReport.status} · ${completenessReport.pass_count} pass / ${completenessReport.warn_count} warn / ${completenessReport.fail_count} fail`,
+      completenessReport.status === "fail"
+        ? "warn"
+        : completenessReport.status === "warn"
+          ? "accent"
+          : "good"
+    );
+    return {
+      completenessProfile: profile,
+      completenessReport
+    };
+  }
+
   async function previewFor(bundleId, systemId, options = {}) {
     const templateProfile = options.templateProfile ?? draft.templateProfile;
     const selectedGroups = options.selectedGroups ?? draft.selectedGroups;
@@ -479,6 +516,14 @@ export function DemoProvider({ children }) {
             templateProfile: disclosureProfile
           })
         : null;
+    const readinessState =
+      currentRun?.bundleId === bundleId &&
+      currentRun?.completenessProfile === readinessProfileForPackType(inferredPackType)
+        ? {
+            completenessProfile: currentRun.completenessProfile,
+            completenessReport: currentRun.completenessReport
+          }
+        : await evaluateReadinessFor(bundleId, inferredPackType, bundle);
     const systemSummary = await fetchSystemSummary(
       draft.serviceUrl,
       draft.apiKey,
@@ -576,6 +621,8 @@ export function DemoProvider({ children }) {
       packSummary: currentRun?.bundleId === bundleId ? currentRun.packSummary : null,
       packManifest: currentRun?.bundleId === bundleId ? currentRun.packManifest : null,
       downloadInfo: currentRun?.bundleId === bundleId ? currentRun.downloadInfo : null,
+      completenessProfile: readinessState.completenessProfile,
+      completenessReport: readinessState.completenessReport,
       systemSummary,
       bundleRuns,
       scriptSource:
@@ -592,7 +639,9 @@ export function DemoProvider({ children }) {
                 bundleRuns,
                 packManifest: currentRun?.packManifest,
                 packSummary: currentRun?.packSummary,
-                downloadInfo: currentRun?.downloadInfo
+                downloadInfo: currentRun?.downloadInfo,
+                completenessProfile: readinessState.completenessProfile,
+                completenessReport: readinessState.completenessReport
               })
             : null,
       recordExplainer:
@@ -849,6 +898,12 @@ export function DemoProvider({ children }) {
         );
       }
 
+      const readinessState = await evaluateReadinessFor(
+        createMeta.bundle_id,
+        preset.packType,
+        bundle
+      );
+
       const systemSummary = await fetchSystemSummary(
         draft.serviceUrl,
         draft.apiKey,
@@ -883,6 +938,8 @@ export function DemoProvider({ children }) {
         packSummary: exportState.packSummary,
         packManifest: exportState.packManifest,
         downloadInfo: exportState.downloadInfo,
+        completenessProfile: readinessState.completenessProfile,
+        completenessReport: readinessState.completenessReport,
         systemSummary,
         bundleRuns: [
           {
@@ -973,6 +1030,11 @@ export function DemoProvider({ children }) {
               packManifest: null,
               downloadInfo: null
             };
+      const readinessState = await evaluateReadinessFor(
+        primaryBundle.bundleId,
+        scenario.packType,
+        primaryBundle.bundle
+      );
       const systemSummary = await fetchSystemSummary(
         draft.serviceUrl,
         draft.apiKey,
@@ -985,7 +1047,9 @@ export function DemoProvider({ children }) {
         bundleRuns,
         packSummary: exportState.packSummary,
         packManifest: exportState.packManifest,
-        downloadInfo: exportState.downloadInfo
+        downloadInfo: exportState.downloadInfo,
+        completenessProfile: readinessState.completenessProfile,
+        completenessReport: readinessState.completenessReport
       });
       const recordExplainer = buildRecordExplainer(scenario, {
         bundle: primaryBundle.bundle,
@@ -1030,6 +1094,8 @@ export function DemoProvider({ children }) {
         packSummary: exportState.packSummary,
         packManifest: exportState.packManifest,
         downloadInfo: exportState.downloadInfo,
+        completenessProfile: readinessState.completenessProfile,
+        completenessReport: readinessState.completenessReport,
         systemSummary,
         bundleRuns,
         scriptSource,

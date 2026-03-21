@@ -104,6 +104,11 @@ locally_sealed = local_client.create_bundle(
     [{"name": "prompt.json", "content_type": "application/json", "data": b"{}"}],
 )
 
+readiness = proof_layer.evaluate_completeness(
+    bundle=locally_sealed["bundle"],
+    profile="annex_iv_governance_v1",
+)
+
 summary = verify_bundle(
     bundle=locally_sealed["bundle"],
     artefacts=[{"name": "prompt.json", "data": b"{}"}],
@@ -111,6 +116,7 @@ summary = verify_bundle(
 )
 
 print(summary["artefact_count"])
+print(readiness["status"])
 
 redacted = proof_layer.disclose(
     bundle=locally_sealed["bundle"],
@@ -175,6 +181,10 @@ template_preview = proof_client.preview_disclosure(
     },
 )
 archive = proof_client.download_pack_export(pack["pack_id"])
+vault_readiness = proof_client.evaluate_completeness(
+    bundle_id="BUNDLE_ID",
+    profile="annex_iv_governance_v1",
+)
 
 risk_bundle = proof_layer.capture_risk_assessment(
     risk_id="risk-42",
@@ -188,6 +198,7 @@ print(redacted_summary["disclosed_item_count"], len(archive))
 print(preview["disclosed_item_types"])
 print(template_pack["pack_id"], template_preview["disclosed_item_types"])
 print(template_catalog["templates"][0]["profile"], rendered_template["policy"]["name"])
+print(vault_readiness["status"])
 ```
 
 For the full provider-side Annex IV governance walkthrough, build the native module and run:

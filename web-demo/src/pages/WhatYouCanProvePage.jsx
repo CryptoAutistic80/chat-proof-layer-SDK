@@ -47,10 +47,11 @@ export function WhatYouCanProvePage() {
             {isPreviewing ? "Refreshing..." : "Refresh disclosure preview"}
           </button>
         </div>
-        <div className="status-stack three-up">
+        <div className="status-stack">
           <StatusExplainCard status={summary.integrityStatus} />
           <StatusExplainCard status={summary.timestampStatus} />
           <StatusExplainCard status={summary.transparencyStatus} />
+          <StatusExplainCard status={summary.completenessStatus} />
         </div>
       </section>
 
@@ -64,7 +65,7 @@ export function WhatYouCanProvePage() {
           </div>
           <p className="narrative-copy">
             {summary.integrityStatus.summary} {summary.timestampStatus.summary}{" "}
-            {summary.transparencyStatus.summary}
+            {summary.transparencyStatus.summary} {summary.completenessStatus.summary}
           </p>
         </section>
 

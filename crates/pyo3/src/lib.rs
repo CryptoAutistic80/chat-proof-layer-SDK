@@ -1,9 +1,10 @@
 use base64ct::{Base64, Encoding};
 use chrono::{DateTime, Utc};
 use proof_layer_core::{
-    ArtefactInput, BundleBuildInput, CaptureEvent, LegacyCaptureInput, ProofBundle, RedactedBundle,
-    build_bundle, canonicalize_json_strict, compute_commitment, decode_private_key_pem,
-    decode_public_key_pem, redact_bundle, redact_bundle_with_field_redactions, sha256_prefixed,
+    ArtefactInput, BundleBuildInput, CaptureEvent, CompletenessProfile, LegacyCaptureInput,
+    ProofBundle, RedactedBundle, build_bundle, canonicalize_json_strict, compute_commitment,
+    decode_private_key_pem, decode_public_key_pem, evaluate_completeness, redact_bundle,
+    redact_bundle_with_field_redactions, sha256_prefixed,
     sign_bundle_root as sign_bundle_root_core, validate_bundle_integrity_fields,
     verify_bundle_root as verify_bundle_root_core, verify_redacted_bundle,
 };
@@ -27,6 +28,10 @@ struct BuildArtefact {
 
 fn py_value_error(message: impl Into<String>) -> PyErr {
     PyValueError::new_err(message.into())
+}
+
+fn parse_profile(profile: &str) -> PyResult<CompletenessProfile> {
+    profile.parse().map_err(py_value_error)
 }
 
 #[pyfunction]
@@ -153,6 +158,14 @@ fn verify_redacted_bundle_json(
 }
 
 #[pyfunction]
+fn evaluate_completeness_json(bundle_json: &str, profile: &str) -> PyResult<String> {
+    let bundle: ProofBundle =
+        serde_json::from_str(bundle_json).map_err(|err| py_value_error(err.to_string()))?;
+    let report = evaluate_completeness(&bundle, parse_profile(profile)?);
+    serde_json::to_string(&report).map_err(|err| py_value_error(err.to_string()))
+}
+
+#[pyfunction]
 fn build_bundle_json(
     capture_json: &str,
     artefacts_json: &str,
@@ -216,5 +229,6 @@ fn _native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(verify_bundle, m)?)?;
     m.add_function(wrap_pyfunction!(redact_bundle_json, m)?)?;
     m.add_function(wrap_pyfunction!(verify_redacted_bundle_json, m)?)?;
+    m.add_function(wrap_pyfunction!(evaluate_completeness_json, m)?)?;
     Ok(())
 }

@@ -9,6 +9,67 @@ import { withProofLayer } from "../dist/providers/openai.js";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, "../../..");
 const goldenDir = path.join(repoRoot, "fixtures", "golden");
+const annexIvDir = path.join(goldenDir, "annex_iv_governance");
+
+async function annexIvBundle() {
+  const [
+    riskAssessment,
+    dataGovernance,
+    technicalDoc,
+    instructionsForUse,
+    humanOversight
+  ] = await Promise.all([
+    readFile(path.join(annexIvDir, "risk_assessment.json"), "utf8"),
+    readFile(path.join(annexIvDir, "data_governance.json"), "utf8"),
+    readFile(path.join(annexIvDir, "technical_doc.json"), "utf8"),
+    readFile(path.join(annexIvDir, "instructions_for_use.json"), "utf8"),
+    readFile(path.join(annexIvDir, "human_oversight.json"), "utf8")
+  ]);
+
+  return {
+    bundle_version: "1.0",
+    bundle_id: "B-annex-iv",
+    created_at: "2026-03-21T00:00:00Z",
+    actor: {
+      issuer: "proof-layer-test",
+      app_id: "typescript-sdk",
+      env: "test",
+      signing_key_id: "kid-dev-01",
+      role: "provider"
+    },
+    subject: {
+      system_id: "hiring-assistant"
+    },
+    context: {},
+    items: [
+      { type: "technical_doc", data: JSON.parse(technicalDoc) },
+      { type: "risk_assessment", data: JSON.parse(riskAssessment) },
+      { type: "data_governance", data: JSON.parse(dataGovernance) },
+      { type: "instructions_for_use", data: JSON.parse(instructionsForUse) },
+      { type: "human_oversight", data: JSON.parse(humanOversight) }
+    ],
+    artefacts: [],
+    policy: {
+      redactions: [],
+      encryption: { enabled: false }
+    },
+    integrity: {
+      canonicalization: "RFC8785-JCS",
+      hash: "SHA-256",
+      header_digest:
+        "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      bundle_root_algorithm: "pl-merkle-sha256-v4",
+      bundle_root:
+        "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      signature: {
+        format: "JWS",
+        alg: "EdDSA",
+        kid: "kid-dev-01",
+        value: "sig"
+      }
+    }
+  };
+}
 
 test("ProofLayer.capture seals a local llm_interaction bundle", async () => {
   const signingKeyPem = await readFile(path.join(goldenDir, "signing_key.txt"), "utf8");
@@ -110,6 +171,22 @@ test("ProofLayer.disclose forwards field-level redaction options", async () => {
   ]);
 });
 
+test("ProofLayer local mode can evaluate completeness", async () => {
+  const signingKeyPem = await readFile(path.join(goldenDir, "signing_key.txt"), "utf8");
+  const proofLayer = new ProofLayer({
+    signingKeyPem,
+    keyId: "kid-dev-01"
+  });
+
+  const report = await proofLayer.evaluateCompleteness({
+    bundle: await annexIvBundle(),
+    profile: "annex_iv_governance_v1"
+  });
+
+  assert.equal(report.status, "pass");
+  assert.equal(report.pass_count, 5);
+});
+
 test("ProofLayer vault mode can update disclosure config", async () => {
   let captured;
   const proofLayer = new ProofLayer({
@@ -138,6 +215,37 @@ test("ProofLayer vault mode can update disclosure config", async () => {
   assert.equal(captured.url, "http://127.0.0.1:8080/v1/config/disclosure");
   assert.equal(captured.init.method, "PUT");
   assert.equal(result.policies[0].name, "regulator_minimum");
+});
+
+test("ProofLayer vault mode can evaluate completeness", async () => {
+  let captured;
+  const proofLayer = new ProofLayer({
+    vaultUrl: "http://127.0.0.1:8080",
+    fetchImpl: async (url, init) => {
+      captured = { url, init };
+      return new Response(
+        JSON.stringify({
+          profile: "annex_iv_governance_v1",
+          status: "warn",
+          bundle_id: "B1",
+          system_id: "hiring-assistant",
+          pass_count: 4,
+          warn_count: 1,
+          fail_count: 0,
+          rules: []
+        }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      );
+    }
+  });
+
+  const result = await proofLayer.evaluateCompleteness({
+    bundleId: "B1",
+    profile: "annex_iv_governance_v1"
+  });
+
+  assert.equal(captured.url, "http://127.0.0.1:8080/v1/completeness/evaluate");
+  assert.equal(result.status, "warn");
 });
 
 test("ProofLayer vault mode can list disclosure templates", async () => {

@@ -33,6 +33,7 @@ SCHEMA_FILES = (
     "evidence_bundle.schema.json",
     "redacted_bundle.schema.json",
     "evidence_pack.schema.json",
+    "completeness_report.schema.json",
     "schema_manifest.json",
 )
 
@@ -716,6 +717,10 @@ def build_evidence_pack_schema(pack_types: list[str]) -> dict[str, object]:
         "generated_at": {"type": "string", "format": "date-time"},
         "bundle_format": {"type": "string", "enum": ["full", "disclosure"]},
         "disclosure_policy": {"type": "string", "minLength": 1},
+        "completeness_profile": {"type": "string", "enum": ["annex_iv_governance_v1"]},
+        "completeness_pass_count": {"type": "integer", "minimum": 0},
+        "completeness_warn_count": {"type": "integer", "minimum": 0},
+        "completeness_fail_count": {"type": "integer", "minimum": 0},
         "system_id": {"type": "string", "minLength": 1},
         "from": {"type": "string", "format": "date-time"},
         "to": {"type": "string", "format": "date-time"},
@@ -780,6 +785,10 @@ def build_evidence_pack_schema(pack_types: list[str]) -> dict[str, object]:
                         "type": "array",
                         "items": {"type": "string", "minLength": 1},
                     },
+                    "completeness_status": {
+                        "type": "string",
+                        "enum": ["pass", "warn", "fail"],
+                    },
                     "matched_rules": {
                         "type": "array",
                         "items": {"type": "string", "minLength": 1},
@@ -807,6 +816,69 @@ def build_evidence_pack_schema(pack_types: list[str]) -> dict[str, object]:
             "bundles",
         ],
         "properties": properties,
+    }
+
+
+def build_completeness_report_schema() -> dict[str, object]:
+    return {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "$id": "https://proof-layer.dev/schemas/completeness_report.schema.json",
+        "title": "Completeness Report",
+        "description": "Advisory structural readiness report for machine-assessed governance completeness profiles.",
+        "type": "object",
+        "additionalProperties": False,
+        "required": [
+            "profile",
+            "status",
+            "bundle_id",
+            "pass_count",
+            "warn_count",
+            "fail_count",
+            "rules",
+        ],
+        "properties": {
+            "profile": {"type": "string", "enum": ["annex_iv_governance_v1"]},
+            "status": {"type": "string", "enum": ["pass", "warn", "fail"]},
+            "bundle_id": {"type": "string", "minLength": 1},
+            "system_id": {"type": "string", "minLength": 1},
+            "pass_count": {"type": "integer", "minimum": 0},
+            "warn_count": {"type": "integer", "minimum": 0},
+            "fail_count": {"type": "integer", "minimum": 0},
+            "rules": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": [
+                        "rule_id",
+                        "item_type",
+                        "obligation_ref",
+                        "status",
+                        "present_count",
+                        "complete_count",
+                        "summary",
+                    ],
+                    "properties": {
+                        "rule_id": {"type": "string", "minLength": 1},
+                        "item_type": {"type": "string", "minLength": 1},
+                        "obligation_ref": {"type": "string", "minLength": 1},
+                        "status": {"type": "string", "enum": ["pass", "warn", "fail"]},
+                        "present_count": {"type": "integer", "minimum": 0},
+                        "complete_count": {"type": "integer", "minimum": 0},
+                        "evaluated_item_indices": {
+                            "type": "array",
+                            "items": {"type": "integer", "minimum": 0},
+                        },
+                        "missing_fields": {
+                            "type": "array",
+                            "items": {"type": "string", "minLength": 1},
+                        },
+                        "summary": {"type": "string", "minLength": 1},
+                    },
+                },
+            },
+        },
     }
 
 
@@ -846,6 +918,7 @@ def build_schema_manifest(
             "evidence_bundle": "schemas/evidence_bundle.schema.json",
             "redacted_bundle": "schemas/redacted_bundle.schema.json",
             "evidence_pack": "schemas/evidence_pack.schema.json",
+            "completeness_report": "schemas/completeness_report.schema.json",
         },
     }
 
@@ -910,6 +983,7 @@ def build_expected_schema_files(repo_root: Path) -> dict[Path, str]:
             signature_format=signature_format,
         ),
         schema_dir / "evidence_pack.schema.json": build_evidence_pack_schema(pack_types),
+        schema_dir / "completeness_report.schema.json": build_completeness_report_schema(),
         schema_dir / "schema_manifest.json": build_schema_manifest(
             release_version=release_version,
             bundle_version=bundle_version,

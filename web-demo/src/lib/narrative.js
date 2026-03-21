@@ -166,6 +166,43 @@ function exportStatus(run) {
   };
 }
 
+function completenessStatus(run) {
+  if (!run?.completenessProfile) {
+    return {
+      tone: "muted",
+      title: "Readiness check not attached",
+      summary: "This workflow does not currently run an Annex IV readiness check."
+    };
+  }
+  if (!run?.completenessReport) {
+    return {
+      tone: "muted",
+      title: "Readiness check pending",
+      summary: "The advisory readiness result has not been attached yet."
+    };
+  }
+  const report = run.completenessReport;
+  if (report.status === "pass") {
+    return {
+      tone: "good",
+      title: "Readiness check passed",
+      summary: `Advisory structured review passed for ${report.profile}.`
+    };
+  }
+  if (report.status === "warn") {
+    return {
+      tone: "accent",
+      title: "Readiness check has warnings",
+      summary: `${report.warn_count} rule(s) need attention even though each required governance area has at least one minimally complete record.`
+    };
+  }
+  return {
+    tone: "warn",
+    title: "Readiness check failed",
+    summary: `${report.fail_count} required governance area(s) are missing or do not yet have a minimally complete record.`
+  };
+}
+
 export function buildRunNarrativeSummary(run, vaultConfig) {
   const preset = getPreset(run?.presetKey);
   const mode = humanCaptureMode(run?.captureMode);
@@ -190,6 +227,7 @@ export function buildRunNarrativeSummary(run, vaultConfig) {
     integrityStatus: integrityStatus(run),
     timestampStatus: timestampStatus(run, vaultConfig),
     transparencyStatus: transparencyStatus(run, vaultConfig),
+    completenessStatus: completenessStatus(run),
     disclosureStatus: disclosureStatus(run),
     exportStatus: exportStatus(run)
   };

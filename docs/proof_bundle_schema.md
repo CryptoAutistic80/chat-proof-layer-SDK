@@ -216,6 +216,8 @@ Those disclosure policies can now also supply `redacted_fields_by_item_type`, us
 
 This section is normative for the checked-in Annex IV governance fixtures, examples, and pack-acceptance tests. It does not change the bundle contract; it defines the minimum structured detail we expect callers to provide for an audit-ready high-risk governance record.
 
+These minimums are now machine-assessed by the advisory `annex_iv_governance_v1` completeness profile exposed through Rust core, `proofctl assess`, `POST /v1/completeness/evaluate`, the TypeScript/Python SDKs, and the `web-demo` readiness check. Integrity and completeness remain separate concerns: verification answers whether the sealed record changed; completeness answers whether the structured governance record is minimally populated for Annex IV-style review.
+
 ### `risk_assessment`
 
 - Already schema-supported: `risk_id`, `severity`, `status`, `summary`, `risk_description`, `likelihood`, `affected_groups`, `mitigation_measures`, `residual_risk_level`, `risk_owner`, `vulnerable_groups_considered`, `test_results_summary`, `metadata`

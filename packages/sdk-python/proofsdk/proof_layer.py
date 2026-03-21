@@ -106,6 +106,21 @@ class ProofLayer:
     ) -> dict[str, Any]:
         return self.client.verify_bundle(bundle, artefacts, public_key_pem)
 
+    def evaluate_completeness(
+        self,
+        *,
+        profile: str,
+        bundle: dict[str, Any] | None = None,
+        bundle_id: str | None = None,
+    ) -> dict[str, Any]:
+        if hasattr(self.client, "evaluate_completeness"):
+            return self.client.evaluate_completeness(
+                profile=profile,
+                bundle=bundle,
+                bundle_id=bundle_id,
+            )
+        raise ValueError("underlying client does not support evaluate_completeness")
+
     def disclose(
         self,
         *,

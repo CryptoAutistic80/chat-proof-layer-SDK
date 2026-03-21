@@ -1,6 +1,7 @@
 pub mod backup;
 pub mod build;
 pub mod canon;
+pub mod completeness;
 pub mod disclosure;
 pub mod hash;
 pub mod merkle;
@@ -43,6 +44,10 @@ pub use bundle::{
     TransparencyReceipt, VerificationSummary, validate_bundle_integrity_fields,
 };
 pub use canon::{CanonError, canonicalize_json_strict, canonicalize_value, parse_json_strict};
+pub use completeness::{
+    CompletenessProfile, CompletenessReport, CompletenessRuleResult, CompletenessStatus,
+    evaluate_completeness,
+};
 pub use disclosure::{
     DisclosedArtefact, DisclosedItem, DisclosureError, FieldRedactedItem, RedactedBundle,
     RedactedVerificationSummary, redact_bundle, redact_bundle_with_field_redactions,

@@ -1,7 +1,15 @@
 import { randomUUID } from "node:crypto";
-import { buildBundle, redactBundle, verifyBundle, verifyRedactedBundle } from "./native.js";
+import {
+  buildBundle,
+  evaluateCompleteness as evaluateCompletenessNative,
+  redactBundle,
+  verifyBundle,
+  verifyRedactedBundle
+} from "./native.js";
 import type {
+  CompletenessReport,
   CreateBundleResponse,
+  EvaluateCompletenessRequest,
   LocalBuildOptions,
   LocalClientOptions,
   LocalCreateBundleRequest,
@@ -86,5 +94,11 @@ export class LocalProofLayerClient {
     publicKeyPem
   }: VerifyRedactedBundleRequest): Promise<VerifyRedactedBundleSummary> {
     return verifyRedactedBundle({ bundle, artefacts, publicKeyPem });
+  }
+
+  async evaluateCompleteness(
+    request: EvaluateCompletenessRequest
+  ): Promise<CompletenessReport> {
+    return evaluateCompletenessNative(request);
   }
 }

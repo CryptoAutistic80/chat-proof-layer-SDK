@@ -14,15 +14,16 @@ use chrono::Utc;
 use ed25519_dalek::SigningKey;
 use flate2::{Compression, read::GzDecoder, write::GzEncoder};
 use proof_layer_core::{
-    ArtefactInput, BuildBundleError, CaptureEvent, CaptureInput, EvidenceItem, ProofBundle,
-    ReceiptVerification, RedactedBundle, RekorTransparencyProvider, Rfc3161HttpTimestampProvider,
+    ArtefactInput, BuildBundleError, CaptureEvent, CaptureInput, CompletenessProfile,
+    CompletenessStatus, EvidenceItem, ProofBundle, ReceiptVerification,
+    RedactedBundle, RekorTransparencyProvider, Rfc3161HttpTimestampProvider,
     ScittTransparencyProvider, TimestampAssuranceProfile, TimestampToken, TimestampTrustPolicy,
     TimestampVerification, TransparencyReceipt, TransparencyTrustPolicy,
     VAULT_BACKUP_ENCRYPTION_ALGORITHM, anchor_bundle as anchor_bundle_receipt, build_bundle,
     canonicalize_value, decode_backup_encryption_key, decode_private_key_pem,
-    decode_public_key_pem, encode_public_key_pem, encrypt_backup_archive, redact_bundle,
-    redact_bundle_with_field_redactions, sha256_prefixed, timestamp_digest,
-    validate_bundle_integrity_fields, validate_timestamp_trust_policy,
+    decode_public_key_pem, encode_public_key_pem, encrypt_backup_archive,
+    evaluate_completeness, redact_bundle, redact_bundle_with_field_redactions, sha256_prefixed,
+    timestamp_digest, validate_bundle_integrity_fields, validate_timestamp_trust_policy,
     validate_transparency_trust_policy, verify_receipt, verify_receipt_with_policy,
     verify_redacted_bundle, verify_timestamp, verify_timestamp_with_policy,
 };
@@ -947,6 +948,15 @@ struct DisclosurePreviewRequest {
 }
 
 #[derive(Debug, Deserialize, Serialize)]
+struct EvaluateCompletenessRequest {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    bundle_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    bundle: Option<ProofBundle>,
+    profile: CompletenessProfile,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
 struct DisclosureTemplateRenderRequest {
     profile: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1017,6 +1027,10 @@ struct PackSummaryResponse {
     bundle_format: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     disclosure_policy: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    completeness_profile: Option<CompletenessProfile>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    completeness_status: Option<CompletenessStatus>,
     bundle_count: usize,
     bundle_ids: Vec<String>,
 }
@@ -1037,6 +1051,14 @@ struct PackManifest {
     bundle_format: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     disclosure_policy: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    completeness_profile: Option<CompletenessProfile>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    completeness_pass_count: Option<usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    completeness_warn_count: Option<usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    completeness_fail_count: Option<usize>,
     bundle_ids: Vec<String>,
     bundles: Vec<PackBundleEntry>,
 }
@@ -1070,6 +1092,8 @@ struct PackBundleEntry {
     disclosed_artefact_bytes_included: bool,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     obligation_refs: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    completeness_status: Option<CompletenessStatus>,
     matched_rules: Vec<String>,
 }
 
@@ -1317,6 +1341,7 @@ fn build_router(state: AppState, max_payload_bytes: usize) -> Router {
             post(render_disclosure_template),
         )
         .route("/v1/disclosure/preview", post(preview_disclosure))
+        .route("/v1/completeness/evaluate", post(evaluate_completeness_api))
         .route("/v1/systems", get(list_systems))
         .route("/v1/systems/{system_id}/summary", get(get_system_summary))
         .route("/v1/packs", post(create_pack))
@@ -3545,6 +3570,50 @@ async fn preview_disclosure(
     Ok((StatusCode::OK, Json(response)))
 }
 
+async fn evaluate_completeness_api(
+    State(state): State<AppState>,
+    actor: Option<Extension<AuthenticatedActor>>,
+    Json(request): Json<EvaluateCompletenessRequest>,
+) -> Result<impl IntoResponse, ApiError> {
+    let selection_count =
+        usize::from(request.bundle_id.is_some()) + usize::from(request.bundle.is_some());
+    if selection_count != 1 {
+        return Err(ApiError::bad_request(
+            "provide exactly one of bundle_id or bundle",
+        ));
+    }
+
+    let bundle = if let Some(bundle_id) = request.bundle_id.as_deref() {
+        load_active_bundle(&state.db, bundle_id)
+            .await
+            .map_err(ApiError::internal_anyhow)?
+            .ok_or_else(|| ApiError::not_found("bundle not found"))?
+    } else {
+        request.bundle.expect("selection_count ensures bundle is present")
+    };
+
+    let report = evaluate_completeness(&bundle, request.profile);
+
+    append_audit_log(
+        &state.db,
+        "evaluate_completeness",
+        Some(request_actor_label(&actor)),
+        Some(&bundle.bundle_id),
+        None,
+        serde_json::json!({
+            "profile": report.profile,
+            "status": report.status,
+            "pass_count": report.pass_count,
+            "warn_count": report.warn_count,
+            "fail_count": report.fail_count,
+        }),
+    )
+    .await
+    .map_err(ApiError::internal_anyhow)?;
+
+    Ok((StatusCode::OK, Json(report)))
+}
+
 async fn delete_bundle(
     State(state): State<AppState>,
     actor: Option<Extension<AuthenticatedActor>>,
@@ -3910,11 +3979,24 @@ async fn create_pack(
     let pack_id = generate_bundle_id();
     let created_at = Utc::now().to_rfc3339();
     let disclosure_policy_name = disclosure_policy.as_ref().map(|policy| policy.name.clone());
+    let completeness_profile = completeness_profile_for_pack(&request.pack_type);
+    let mut completeness_pass_count = 0usize;
+    let mut completeness_warn_count = 0usize;
+    let mut completeness_fail_count = 0usize;
     let mut bundle_ids = Vec::with_capacity(curated_rows.len());
     let mut bundle_entries = Vec::with_capacity(curated_rows.len());
     let mut files = Vec::with_capacity(curated_rows.len());
 
     for curated in curated_rows {
+        let completeness_status = completeness_profile.map(|profile| {
+            let report = evaluate_completeness(&curated.bundle, profile);
+            match report.status {
+                CompletenessStatus::Pass => completeness_pass_count += 1,
+                CompletenessStatus::Warn => completeness_warn_count += 1,
+                CompletenessStatus::Fail => completeness_fail_count += 1,
+            }
+            report.status
+        });
         let package_name = pack_bundle_file_name(&curated.row.bundle_id, &request.bundle_format);
         let package_bytes = match request.bundle_format.as_str() {
             PACK_BUNDLE_FORMAT_FULL => {
@@ -3976,6 +4058,7 @@ async fn create_pack(
             disclosed_artefact_names: curated.disclosed_artefact_names,
             disclosed_artefact_bytes_included: curated.disclosed_artefact_bytes_included,
             obligation_refs: curated.obligation_refs,
+            completeness_status,
             matched_rules: curated.matched_rules,
         });
         files.push(PackagedFile {
@@ -3994,6 +4077,10 @@ async fn create_pack(
         to: request.to.clone(),
         bundle_format: request.bundle_format.clone(),
         disclosure_policy: disclosure_policy_name.clone(),
+        completeness_profile,
+        completeness_pass_count: completeness_profile.map(|_| completeness_pass_count),
+        completeness_warn_count: completeness_profile.map(|_| completeness_warn_count),
+        completeness_fail_count: completeness_profile.map(|_| completeness_fail_count),
         bundle_ids,
         bundles: bundle_entries,
     };
@@ -4018,6 +4105,10 @@ async fn create_pack(
             "pack_type": manifest.pack_type.clone(),
             "bundle_format": manifest.bundle_format.clone(),
             "disclosure_policy": manifest.disclosure_policy.clone(),
+            "completeness_profile": manifest.completeness_profile,
+            "completeness_pass_count": manifest.completeness_pass_count,
+            "completeness_warn_count": manifest.completeness_warn_count,
+            "completeness_fail_count": manifest.completeness_fail_count,
             "bundle_count": manifest.bundle_ids.len(),
             "system_id": manifest.system_id.clone(),
         }),
@@ -4812,8 +4903,29 @@ fn pack_summary(manifest: &PackManifest) -> PackSummaryResponse {
         to: manifest.to.clone(),
         bundle_format: manifest.bundle_format.clone(),
         disclosure_policy: manifest.disclosure_policy.clone(),
+        completeness_profile: manifest.completeness_profile,
+        completeness_status: aggregate_manifest_completeness_status(manifest),
         bundle_count: manifest.bundle_ids.len(),
         bundle_ids: manifest.bundle_ids.clone(),
+    }
+}
+
+fn completeness_profile_for_pack(pack_type: &str) -> Option<CompletenessProfile> {
+    (pack_type == "annex_iv").then_some(CompletenessProfile::AnnexIvGovernanceV1)
+}
+
+fn aggregate_manifest_completeness_status(manifest: &PackManifest) -> Option<CompletenessStatus> {
+    if manifest.completeness_profile.is_none() {
+        return None;
+    }
+    if manifest.completeness_fail_count.unwrap_or_default() > 0 {
+        Some(CompletenessStatus::Fail)
+    } else if manifest.completeness_warn_count.unwrap_or_default() > 0 {
+        Some(CompletenessStatus::Warn)
+    } else if manifest.completeness_pass_count.unwrap_or_default() > 0 {
+        Some(CompletenessStatus::Pass)
+    } else {
+        None
     }
 }
 
@@ -9478,7 +9590,9 @@ mod tests {
                 automation_bias_detected: Some(false),
                 two_person_verification: Some(true),
                 stop_triggered: Some(false),
-                stop_reason: None,
+                stop_reason: Some(
+                    "No emergency stop was required for this review path.".to_string(),
+                ),
             }),
             "risk_mgmt",
             "req-annex-iv-oversight",
@@ -9632,6 +9746,186 @@ mod tests {
             runtime_logs,
             other_system_risk,
         }
+    }
+
+    fn fixture_annex_iv_bundle() -> ProofBundle {
+        let event = sample_event_with_profile(
+            "hiring-assistant",
+            proof_layer_core::ActorRole::Provider,
+            vec![
+                EvidenceItem::TechnicalDoc(proof_layer_core::schema::TechnicalDocEvidence {
+                    document_ref: "annex-iv/system-card".to_string(),
+                    section: Some("system_overview".to_string()),
+                    commitment: Some(
+                        "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                            .to_string(),
+                    ),
+                    annex_iv_sections: vec!["section_2".to_string(), "section_3".to_string()],
+                    system_description_summary: Some(
+                        "Ranks candidates for recruiter review.".to_string(),
+                    ),
+                    model_description_summary: Some("Fine-tuned ranking model.".to_string()),
+                    capabilities_and_limitations: Some(
+                        "Advisory only for first-pass screening.".to_string(),
+                    ),
+                    design_choices_summary: Some(
+                        "Human review is required before employment decisions.".to_string(),
+                    ),
+                    evaluation_metrics_summary: Some(
+                        "Precision and subgroup parity are reviewed monthly.".to_string(),
+                    ),
+                    human_oversight_design_summary: Some(
+                        "Recruiters must review every adverse or borderline case.".to_string(),
+                    ),
+                    post_market_monitoring_plan_ref: Some(
+                        "pmm://hiring-assistant/2026.03".to_string(),
+                    ),
+                    simplified_tech_doc: None,
+                }),
+                EvidenceItem::RiskAssessment(proof_layer_core::schema::RiskAssessmentEvidence {
+                    risk_id: "risk-001".to_string(),
+                    severity: "high".to_string(),
+                    status: "mitigated".to_string(),
+                    summary: Some("Bias and over-reliance risk reviewed.".to_string()),
+                    risk_description: Some(
+                        "Potential unfair ranking of borderline candidates.".to_string(),
+                    ),
+                    likelihood: Some("medium".to_string()),
+                    affected_groups: vec!["job_applicants".to_string()],
+                    mitigation_measures: vec![
+                        "mandatory human review".to_string(),
+                        "monthly subgroup parity review".to_string(),
+                    ],
+                    residual_risk_level: Some("low".to_string()),
+                    risk_owner: Some("quality-team".to_string()),
+                    vulnerable_groups_considered: Some(true),
+                    test_results_summary: Some(
+                        "No blocking disparity found in March review.".to_string(),
+                    ),
+                    metadata: serde_json::json!({
+                        "owner": "quality-team",
+                    }),
+                }),
+                EvidenceItem::DataGovernance(proof_layer_core::schema::DataGovernanceEvidence {
+                    decision: "approved".to_string(),
+                    dataset_ref: Some("dataset://candidates/2026-03".to_string()),
+                    dataset_name: None,
+                    dataset_version: Some("2026.03".to_string()),
+                    source_description: Some(
+                        "EU recruitment applicant and hiring outcome corpus.".to_string(),
+                    ),
+                    collection_period: Some(proof_layer_core::schema::DateRange {
+                        start: Some("2025-01-01".to_string()),
+                        end: Some("2025-12-31".to_string()),
+                    }),
+                    geographical_scope: vec!["EU".to_string()],
+                    preprocessing_operations: vec![
+                        "deduplication".to_string(),
+                        "feature scaling".to_string(),
+                    ],
+                    bias_detection_methodology: Some(
+                        "Subgroup parity review across protected attributes.".to_string(),
+                    ),
+                    bias_metrics: vec![proof_layer_core::schema::MetricSummary {
+                        name: "selection_rate_ratio".to_string(),
+                        value: "0.96".to_string(),
+                        unit: Some("ratio".to_string()),
+                        methodology: Some("Measured on March validation set.".to_string()),
+                    }],
+                    mitigation_actions: vec!["rebalance training sample".to_string()],
+                    data_gaps: vec!["low historical volume for niche roles".to_string()],
+                    personal_data_categories: vec![
+                        "employment_history".to_string(),
+                        "education".to_string(),
+                    ],
+                    safeguards: vec![
+                        "role-based access".to_string(),
+                        "retention caps".to_string(),
+                    ],
+                    metadata: serde_json::json!({
+                        "owner": "data-governance",
+                    }),
+                }),
+                EvidenceItem::InstructionsForUse(
+                    proof_layer_core::schema::InstructionsForUseEvidence {
+                        document_ref: "ifu://hiring-assistant/2026.03".to_string(),
+                        version: Some("2026.03".to_string()),
+                        section: Some("operator_guidance".to_string()),
+                        commitment: Some(
+                            "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+                                .to_string(),
+                        ),
+                        provider_identity: Some("Proof Layer Labs".to_string()),
+                        intended_purpose: Some(
+                            "Assist recruiters with first-pass candidate screening.".to_string(),
+                        ),
+                        system_capabilities: vec![
+                            "candidate ranking".to_string(),
+                            "confidence banding".to_string(),
+                        ],
+                        accuracy_metrics: vec![proof_layer_core::schema::MetricSummary {
+                            name: "precision_at_10".to_string(),
+                            value: "0.87".to_string(),
+                            unit: Some("ratio".to_string()),
+                            methodology: Some("Measured on validation cohort.".to_string()),
+                        }],
+                        foreseeable_risks: vec!["automation bias".to_string()],
+                        explainability_capabilities: vec!["reason codes".to_string()],
+                        human_oversight_guidance: vec![
+                            "review all adverse recommendations".to_string(),
+                        ],
+                        compute_requirements: vec!["cpu-only inference".to_string()],
+                        service_lifetime: Some("12 months".to_string()),
+                        log_management_guidance: vec![
+                            "retain audit logs for 12 months".to_string(),
+                        ],
+                        metadata: serde_json::json!({
+                            "distribution": "internal_only",
+                        }),
+                    },
+                ),
+                EvidenceItem::HumanOversight(proof_layer_core::schema::HumanOversightEvidence {
+                    action: "manual_review".to_string(),
+                    reviewer: Some("reviewer-123".to_string()),
+                    notes_commitment: Some(
+                        "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+                            .to_string(),
+                    ),
+                    actor_role: Some("recruiter".to_string()),
+                    anomaly_detected: Some(false),
+                    override_action: Some("none".to_string()),
+                    interpretation_guidance_followed: Some(true),
+                    automation_bias_detected: Some(false),
+                    two_person_verification: Some(false),
+                    stop_triggered: Some(false),
+                    stop_reason: Some(
+                        "No emergency stop was required for this review path.".to_string(),
+                    ),
+                }),
+            ],
+            Some("annex_iv"),
+        );
+        let mut event = event;
+        event.subject.request_id = Some("req-annex-iv-inline".to_string());
+        event.subject.model_id = Some("hiring-model-v3".to_string());
+        event.subject.version = Some("2026.03".to_string());
+        event.compliance_profile = Some(hiring_assistant_compliance_profile());
+
+        build_bundle(
+            event,
+            &[ArtefactInput {
+                name: "annex_iv_overview.json".to_string(),
+                content_type: "application/json".to_string(),
+                bytes: br#"{"profile":"annex_iv_governance_v1"}"#.to_vec(),
+            }],
+            &SigningKey::from_bytes(&[7_u8; 32]),
+            "kid-dev-01",
+            "01JPGG4QFZZ0X0P3N2JDMQ6K3V",
+            chrono::DateTime::parse_from_rfc3339("2026-03-02T00:00:00Z")
+                .unwrap()
+                .with_timezone(&Utc),
+        )
+        .unwrap()
     }
 
     async fn test_state(max_payload_bytes: usize) -> AppState {
@@ -14079,6 +14373,103 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
     }
 
     #[tokio::test]
+    async fn evaluate_completeness_api_supports_bundle_id_requests() {
+        let state = test_state(DEFAULT_MAX_PAYLOAD_BYTES).await;
+        let app = build_router(state, DEFAULT_MAX_PAYLOAD_BYTES);
+        let scenario = create_annex_iv_scenario(&app).await;
+
+        let request = Request::builder()
+            .method("POST")
+            .uri("/v1/completeness/evaluate")
+            .header("content-type", "application/json")
+            .body(Body::from(
+                serde_json::to_vec(&EvaluateCompletenessRequest {
+                    bundle_id: Some(scenario.technical_doc.bundle_id.clone()),
+                    bundle: None,
+                    profile: CompletenessProfile::AnnexIvGovernanceV1,
+                })
+                .unwrap(),
+            ))
+            .unwrap();
+        let response = app.oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let report: proof_layer_core::CompletenessReport = serde_json::from_slice(&body).unwrap();
+
+        assert_eq!(report.profile, CompletenessProfile::AnnexIvGovernanceV1);
+        assert_eq!(report.bundle_id, scenario.technical_doc.bundle_id);
+        assert_eq!(report.status, CompletenessStatus::Fail);
+        assert!(report.fail_count > 0);
+    }
+
+    #[tokio::test]
+    async fn evaluate_completeness_api_supports_inline_bundle_requests() {
+        let state = test_state(DEFAULT_MAX_PAYLOAD_BYTES).await;
+        let app = build_router(state, DEFAULT_MAX_PAYLOAD_BYTES);
+        let bundle = fixture_annex_iv_bundle();
+
+        let request = Request::builder()
+            .method("POST")
+            .uri("/v1/completeness/evaluate")
+            .header("content-type", "application/json")
+            .body(Body::from(
+                serde_json::to_vec(&EvaluateCompletenessRequest {
+                    bundle_id: None,
+                    bundle: Some(bundle),
+                    profile: CompletenessProfile::AnnexIvGovernanceV1,
+                })
+                .unwrap(),
+            ))
+            .unwrap();
+        let response = app.oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let report: proof_layer_core::CompletenessReport = serde_json::from_slice(&body).unwrap();
+
+        assert_eq!(report.profile, CompletenessProfile::AnnexIvGovernanceV1);
+        assert_eq!(report.status, CompletenessStatus::Pass);
+        assert_eq!(report.fail_count, 0);
+    }
+
+    #[tokio::test]
+    async fn evaluate_completeness_api_rejects_invalid_selection_combinations() {
+        let state = test_state(DEFAULT_MAX_PAYLOAD_BYTES).await;
+        let app = build_router(state, DEFAULT_MAX_PAYLOAD_BYTES);
+        let bundle = fixture_annex_iv_bundle();
+
+        for payload in [
+            EvaluateCompletenessRequest {
+                bundle_id: None,
+                bundle: None,
+                profile: CompletenessProfile::AnnexIvGovernanceV1,
+            },
+            EvaluateCompletenessRequest {
+                bundle_id: Some("bundle-123".to_string()),
+                bundle: Some(bundle.clone()),
+                profile: CompletenessProfile::AnnexIvGovernanceV1,
+            },
+        ] {
+            let request = Request::builder()
+                .method("POST")
+                .uri("/v1/completeness/evaluate")
+                .header("content-type", "application/json")
+                .body(Body::from(serde_json::to_vec(&payload).unwrap()))
+                .unwrap();
+            let response = app.clone().oneshot(request).await.unwrap();
+            assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+            let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+                .await
+                .unwrap();
+            let error: serde_json::Value = serde_json::from_slice(&body).unwrap();
+            assert_eq!(error["error"], "provide exactly one of bundle_id or bundle");
+        }
+    }
+
+    #[tokio::test]
     async fn annex_iv_pack_curates_expected_governance_bundle_set() {
         let state = test_state(DEFAULT_MAX_PAYLOAD_BYTES).await;
         let app = build_router(state, DEFAULT_MAX_PAYLOAD_BYTES);
@@ -14107,6 +14498,11 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
             .await
             .unwrap();
         let pack: PackSummaryResponse = serde_json::from_slice(&body).unwrap();
+        assert_eq!(
+            pack.completeness_profile,
+            Some(CompletenessProfile::AnnexIvGovernanceV1)
+        );
+        assert_eq!(pack.completeness_status, Some(CompletenessStatus::Fail));
 
         let expected_bundle_ids = BTreeSet::from([
             scenario.technical_doc.bundle_id.clone(),
@@ -14166,6 +14562,13 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
             .await
             .unwrap();
         let manifest: PackManifest = serde_json::from_slice(&body).unwrap();
+        assert_eq!(
+            manifest.completeness_profile,
+            Some(CompletenessProfile::AnnexIvGovernanceV1)
+        );
+        assert_eq!(manifest.completeness_pass_count, Some(0));
+        assert_eq!(manifest.completeness_warn_count, Some(0));
+        assert_eq!(manifest.completeness_fail_count, Some(8));
 
         let technical_entry = manifest
             .bundles
@@ -14196,6 +14599,7 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
                 .matched_rules
                 .contains(&"obligation_ref:art11_annex_iv".to_string())
         );
+        assert_eq!(technical_entry.completeness_status, Some(CompletenessStatus::Fail));
 
         let expected_refs = BTreeMap::from([
             (scenario.risk_assessment.bundle_id.clone(), "art9".to_string()),
@@ -14216,6 +14620,7 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
         for entry in &manifest.bundles {
             assert_eq!(entry.actor_role, "provider");
             assert_eq!(entry.system_id.as_deref(), Some("hiring-assistant"));
+            assert_eq!(entry.completeness_status, Some(CompletenessStatus::Fail));
             if let Some(expected_ref) = expected_refs.get(&entry.bundle_id) {
                 assert_eq!(entry.obligation_refs, vec![expected_ref.clone()]);
                 assert!(

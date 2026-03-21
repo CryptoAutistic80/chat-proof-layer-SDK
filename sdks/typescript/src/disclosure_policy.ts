@@ -54,8 +54,12 @@ const ALL_ITEM_TYPES = [
 ] as const;
 
 const ANNEX_IV_DEFAULT_REDACTIONS = {
-  data_governance: ["/bias_metrics", "/personal_data_categories", "/safeguards"],
-  instructions_for_use: ["/accuracy_metrics", "/compute_requirements", "/log_management_guidance"]
+  risk_assessment: ["/metadata"],
+  data_governance: ["/metadata", "/personal_data_categories", "/safeguards"],
+  instructions_for_use: ["/metadata"],
+  qms_record: ["/metadata"],
+  standards_alignment: ["/metadata"],
+  post_market_monitoring: ["/metadata"]
 } satisfies Record<string, string[]>;
 
 const INCIDENT_SUMMARY_DEFAULT_REDACTIONS = {
@@ -172,13 +176,17 @@ const TEMPLATE_BASES: Record<DisclosurePolicyTemplateName, DisclosurePolicyTempl
         "risk_assessment",
         "data_governance",
         "instructions_for_use",
-        "human_oversight"
+        "human_oversight",
+        "qms_record",
+        "standards_alignment",
+        "post_market_monitoring",
+        "corrective_action"
       ],
       excluded_item_types: [],
       allowed_obligation_refs: [],
       excluded_obligation_refs: [],
       include_artefact_metadata: true,
-      include_artefact_bytes: true,
+      include_artefact_bytes: false,
       artefact_names: [],
       redacted_fields_by_item_type: ANNEX_IV_DEFAULT_REDACTIONS
     },

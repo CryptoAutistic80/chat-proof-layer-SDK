@@ -189,3 +189,12 @@ print(preview["disclosed_item_types"])
 print(template_pack["pack_id"], template_preview["disclosed_item_types"])
 print(template_catalog["templates"][0]["profile"], rendered_template["policy"]["name"])
 ```
+
+For the full provider-side Annex IV governance walkthrough, build the native module and run:
+
+```bash
+python3 packages/sdk-python/scripts/build_native.py
+python3 examples/python-annex-iv/run.py
+```
+
+That example captures the checked governance set, previews `annex_iv_redacted`, and exports both full and disclosure-format `annex_iv` packs.

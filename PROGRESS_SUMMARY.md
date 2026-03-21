@@ -362,3 +362,22 @@ Still outstanding from `plan.md`:
 - RFC 3161 verification now supports signer-chain validation against configured PEM trust anchors, optional `TSTInfo.policy` OID enforcement, CRL-based revocation checking, optional live OCSP checks, qualified TSA signer allowlist matching, and operational `qualified` profile gating, but full eIDAS-qualified trust-list evaluation and archival OCSP evidence handling are still outstanding.
 - Rekor verification now supports SET signature validation and `logID` binding against a configured PEM log public key; live-log consistency checks beyond the stored inclusion proof remain future work.
 - The current SCITT path is intentionally bounded: it verifies a draft-aligned canonical JSON statement/receipt contract, not a full interoperable COSE/CCF profile.
+
+## March 21, 2026
+
+Completed:
+
+- Landed the audit-ready Annex IV governance slice:
+  `annex_iv` pack curation now excludes retention-only matches, carries stable bundle ordering for the governance set, and preserves match metadata suitable for manifest assertions.
+- Narrowed the built-in disclosure default for high-risk governance:
+  `annex_iv_redacted` now keeps the full governance inclusion set, includes artefact metadata but not raw artefact bytes by default, and redacts governance metadata plus the sensitive `data_governance` paths for personal-data categories and safeguards.
+- Hardened the SDK governance contract:
+  TypeScript request types now document the recommended minimum Annex IV fields,
+  Python default governance artefacts now mirror the full structured evidence payloads instead of partial subsets,
+  and both SDK test suites now lock those artefact shapes in place.
+- Added Annex IV vault acceptance coverage:
+  dedicated tests now prove the expected governance bundle set, manifest match metadata, deterministic pack ordering, and verifiable disclosure-package exports with preserved nested path redactions.
+- Added checked source fixtures and reproducible examples for the hiring-assistant scenario:
+  `fixtures/golden/annex_iv_governance/` now records the governance inputs plus expected pack/disclosure summaries,
+  `examples/typescript-compliance` now captures the full Annex IV governance workflow and exports both full and disclosure packs,
+  and `examples/python-annex-iv` provides the matching Python walkthrough while preserving the older FRIA example separately.

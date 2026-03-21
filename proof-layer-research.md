@@ -1,5 +1,9 @@
 # EU AI Act Readiness Notes for an SDK-first Tamper-Evident AI Compliance Evidence Platform
 
+## Implementation status note
+
+As of March 21, 2026, the repo now has a concrete Annex IV governance acceptance slice on top of the broader platform: checked governance fixtures, SDK builder guidance, vault `annex_iv` curation hardening, a narrower `annex_iv_redacted` disclosure default, and end-to-end TypeScript/Python examples for a provider-side employment-screening scenario. The main remaining work is still contract depth and release hardening rather than inventing another subsystem.
+
 ## Scope and design principles
 
 These notes assume you are building an evidence substrate that can sit underneath many AI applications and governance stacks. It captures compliance-relevant events and artefacts at runtime and across the lifecycle, seals them into portable and independently verifiable evidence bundles, and can optionally store them in a vault layer with retention, access controls, and export workflows suitable for audits, customers, and regulators. The design direction remains consistent with the original idea of an AI Output Proof Layer producing cryptographically verifiable proof bundles that can be selectively disclosed and verified outside the vendor platform.

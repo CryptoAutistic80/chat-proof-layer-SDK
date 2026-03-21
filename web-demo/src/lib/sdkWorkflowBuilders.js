@@ -97,6 +97,163 @@ async function buildInteractionStep(scenario, draft, providerResult) {
   });
 }
 
+function governedModelId(draft) {
+  return `${draft.systemId}-model-v3`;
+}
+
+function governedVersion() {
+  return "2026.03";
+}
+
+async function buildTechnicalDocStep(scenario, draft) {
+  const actor = baseActor(scenario);
+  const subject = baseSubject(draft, "technical-doc", {
+    modelId: governedModelId(draft),
+    version: governedVersion()
+  });
+  const complianceProfile = serializeComplianceProfile(buildPlaygroundComplianceProfile(draft));
+  const descriptor = {
+    owner: draft.owner,
+    document_class: "annex_iv_system_card",
+    system_id: draft.systemId,
+    release: governedVersion()
+  };
+  const descriptorArtefact = await buildDocumentArtefact(
+    "technical_doc_descriptor.json",
+    descriptor,
+    "application/json"
+  );
+  return buildSimpleEvidenceCapture({
+    actor,
+    subject,
+    complianceProfile,
+    item: {
+      type: "technical_doc",
+      data: {
+        document_ref: `docs://${draft.systemId}/annex-iv-system-card`,
+        section: "system_description",
+        commitment: descriptorArtefact.commitment,
+        annex_iv_sections: ["section_2", "section_3", "section_5", "section_7"],
+        system_description_summary:
+          "Provider-operated employment-screening assistant for first-pass candidate review in the EU market.",
+        model_description_summary:
+          `Structured reviewer support workflow using ${governedModelId(draft)} for candidate summaries and escalation prompts.`,
+        capabilities_and_limitations:
+          "Summarizes candidate materials and highlights gaps, but does not make autonomous employment decisions.",
+        design_choices_summary:
+          "The workflow prioritizes explanation, escalation, and review traceability over full automation.",
+        evaluation_metrics_summary:
+          "Quarterly fairness, reviewer-agreement, and false-negative checks are tracked in the provider file.",
+        human_oversight_design_summary:
+          "Borderline or adverse recommendations route to a human reviewer with documented override controls.",
+        post_market_monitoring_plan_ref: `pmm-${draft.systemId}-2026-03`
+      }
+    },
+    artefacts: [
+      jsonArtefact("technical_doc.json", {
+        document_ref: `docs://${draft.systemId}/annex-iv-system-card`,
+        section: "system_description",
+        annex_iv_sections: ["section_2", "section_3", "section_5", "section_7"],
+        system_description_summary:
+          "Provider-operated employment-screening assistant for first-pass candidate review in the EU market.",
+        model_description_summary:
+          `Structured reviewer support workflow using ${governedModelId(draft)} for candidate summaries and escalation prompts.`,
+        capabilities_and_limitations:
+          "Summarizes candidate materials and highlights gaps, but does not make autonomous employment decisions.",
+        design_choices_summary:
+          "The workflow prioritizes explanation, escalation, and review traceability over full automation.",
+        evaluation_metrics_summary:
+          "Quarterly fairness, reviewer-agreement, and false-negative checks are tracked in the provider file.",
+        human_oversight_design_summary:
+          "Borderline or adverse recommendations route to a human reviewer with documented override controls.",
+        post_market_monitoring_plan_ref: `pmm-${draft.systemId}-2026-03`
+      }),
+      descriptorArtefact.artefact
+    ],
+    retentionClass: "technical_doc",
+    label: "Technical documentation",
+    summary: "Annex IV technical documentation evidence captured for the provider file.",
+    localPayloads: { descriptor }
+  });
+}
+
+async function buildRiskAssessmentStep(scenario, draft) {
+  const actor = baseActor(scenario);
+  const subject = baseSubject(draft, "risk-assessment", {
+    modelId: governedModelId(draft),
+    version: governedVersion()
+  });
+  const complianceProfile = serializeComplianceProfile(buildPlaygroundComplianceProfile(draft));
+  const record = {
+    risk_owner: draft.owner,
+    review_cycle: "quarterly",
+    reviewer: draft.reviewer
+  };
+  return buildSimpleEvidenceCapture({
+    actor,
+    subject,
+    complianceProfile,
+    item: {
+      type: "risk_assessment",
+      data: {
+        risk_id: `risk-${draft.systemId}-001`,
+        severity: "high",
+        status: "mitigated",
+        summary: "High-risk employment workflow risk tracked for Annex IV readiness.",
+        risk_description:
+          "Candidate summaries could over-weight incomplete or proxy-sensitive profile signals without explicit human review.",
+        likelihood: "medium",
+        affected_groups: ["job_candidates", "recruiters"],
+        mitigation_measures: [
+          "Mandatory human review before shortlist or rejection actions.",
+          "Escalation for low-confidence or incomplete-profile cases.",
+          "Quarterly fairness and reviewer-agreement sampling."
+        ],
+        residual_risk_level: "medium",
+        risk_owner: draft.owner,
+        vulnerable_groups_considered: true,
+        test_results_summary:
+          "Offline validation and reviewer-agreement checks show acceptable performance only when human oversight remains enabled.",
+        metadata: {
+          owner: draft.owner,
+          review_board: draft.reviewer
+        }
+      }
+    },
+    artefacts: [
+      jsonArtefact("risk_assessment.json", {
+        risk_id: `risk-${draft.systemId}-001`,
+        severity: "high",
+        status: "mitigated",
+        summary: "High-risk employment workflow risk tracked for Annex IV readiness.",
+        risk_description:
+          "Candidate summaries could over-weight incomplete or proxy-sensitive profile signals without explicit human review.",
+        likelihood: "medium",
+        affected_groups: ["job_candidates", "recruiters"],
+        mitigation_measures: [
+          "Mandatory human review before shortlist or rejection actions.",
+          "Escalation for low-confidence or incomplete-profile cases.",
+          "Quarterly fairness and reviewer-agreement sampling."
+        ],
+        residual_risk_level: "medium",
+        risk_owner: draft.owner,
+        vulnerable_groups_considered: true,
+        test_results_summary:
+          "Offline validation and reviewer-agreement checks show acceptable performance only when human oversight remains enabled.",
+        metadata: {
+          owner: draft.owner,
+          review_board: draft.reviewer
+        },
+        record
+      })
+    ],
+    retentionClass: "risk_mgmt",
+    label: "Risk assessment",
+    summary: "Structured risk evidence added to the Annex IV governance set.",
+    localPayloads: { record }
+  });
+}
+
 async function buildInstructionsStep(scenario, draft) {
   const actor = baseActor(scenario);
   const subject = baseSubject(draft, "instructions");
@@ -111,17 +268,17 @@ async function buildInstructionsStep(scenario, draft) {
     )
   ]);
   const systemCapabilities = [
-    "issue_summary",
-    "safe_response_drafting",
-    "escalation_flagging"
+    "candidate_summary",
+    "qualification_gap_flagging",
+    "follow_up_question_suggestions"
   ];
   const foreseeableRisks = [
-    "overconfident refund guidance",
-    "missed escalation on account-access edge cases"
+    "overconfident qualification summaries",
+    "missed context for non-linear career paths"
   ];
   const explainabilityCapabilities = [
     "reason_summary",
-    "policy-grounded escalation note"
+    "criteria_trace"
   ];
   const computeRequirements = ["4 vCPU", "8GB RAM"];
   const logManagementGuidance = [
@@ -229,15 +386,15 @@ async function buildDataGovernanceStep(scenario, draft) {
           end: "2025-12-31"
         },
         geographical_scope: ["EU"],
-        preprocessing_operations: ["deduplication", "pii_minimization", "label_review"],
+        preprocessing_operations: ["deduplication", "pseudonymization", "label_review"],
         bias_detection_methodology: draft.biasMethodology ?? null,
         bias_metrics: biasMetrics,
         mitigation_actions: [
-          "Escalate sensitive support actions to human review.",
-          "Sample multilingual support outputs for quality assurance."
+          "Escalate sensitive employment actions to human review.",
+          "Sample multilingual candidate summaries for quality assurance."
         ],
-        data_gaps: ["Limited historic examples for rare safety escalations."],
-        personal_data_categories: ["customer_messages", "account_status"],
+        data_gaps: ["Limited historic examples for non-linear career paths."],
+        personal_data_categories: ["cv_data", "employment_history"],
         safeguards,
         metadata: {
           owner: draft.owner,
@@ -257,15 +414,15 @@ async function buildDataGovernanceStep(scenario, draft) {
           end: "2025-12-31"
         },
         geographical_scope: ["EU"],
-        preprocessing_operations: ["deduplication", "pii_minimization", "label_review"],
+        preprocessing_operations: ["deduplication", "pseudonymization", "label_review"],
         bias_detection_methodology: draft.biasMethodology ?? null,
         bias_metrics: biasMetrics,
         mitigation_actions: [
-          "Escalate sensitive support actions to human review.",
-          "Sample multilingual support outputs for quality assurance."
+          "Escalate sensitive employment actions to human review.",
+          "Sample multilingual candidate summaries for quality assurance."
         ],
-        data_gaps: ["Limited historic examples for rare safety escalations."],
-        personal_data_categories: ["customer_messages", "account_status"],
+        data_gaps: ["Limited historic examples for non-linear career paths."],
+        personal_data_categories: ["cv_data", "employment_history"],
         safeguards,
         metadata: {
           owner: draft.owner,
@@ -312,20 +469,20 @@ async function buildQmsRecordStep(scenario, draft) {
     item: {
       type: "qms_record",
       data: {
-        record_id: "qms-release-approval-42",
+        record_id: `qms-${draft.systemId}-release-42`,
         process: "release_approval",
         status: draft.qmsStatus ?? "approved",
         record_commitment: recordArtefact.commitment,
-        policy_name: "Support Assistant Release Governance",
+        policy_name: "Hiring Assistant Release Governance",
         revision: "3.1",
         effective_date: "2026-03-01",
         scope: "EU provider release control",
         approval_commitment: approvalArtefact.commitment,
         audit_results_summary:
-          "No blocking findings. Quarterly governance review requested for escalation quality.",
+          "No blocking findings. Quarterly oversight-quality review requested before broader rollout.",
         continuous_improvement_actions: [
-          "Extend multilingual QA review coverage.",
-          "Refresh escalation examples before the next release."
+          "Extend fairness review coverage for non-linear career histories.",
+          "Refresh recruiter guidance before the next release."
         ],
         metadata: {
           owner: draft.owner
@@ -334,19 +491,19 @@ async function buildQmsRecordStep(scenario, draft) {
     },
     artefacts: [
       jsonArtefact("qms_record.json", {
-        record_id: "qms-release-approval-42",
+        record_id: `qms-${draft.systemId}-release-42`,
         process: "release_approval",
         status: draft.qmsStatus ?? "approved",
-        policy_name: "Support Assistant Release Governance",
+        policy_name: "Hiring Assistant Release Governance",
         revision: "3.1",
         effective_date: "2026-03-01",
         scope: "EU provider release control",
         approval_commitment: approvalArtefact.commitment,
         audit_results_summary:
-          "No blocking findings. Quarterly governance review requested for escalation quality.",
+          "No blocking findings. Quarterly oversight-quality review requested before broader rollout.",
         continuous_improvement_actions: [
-          "Extend multilingual QA review coverage.",
-          "Refresh escalation examples before the next release."
+          "Extend fairness review coverage for non-linear career histories.",
+          "Refresh recruiter guidance before the next release."
         ],
         metadata: {
           owner: draft.owner
@@ -359,6 +516,60 @@ async function buildQmsRecordStep(scenario, draft) {
     label: "QMS record",
     summary: "Quality sign-off evidence added to the workflow.",
     localPayloads: { record, approval }
+  });
+}
+
+async function buildStandardsAlignmentStep(scenario, draft) {
+  const actor = baseActor(scenario);
+  const subject = baseSubject(draft, "standards-alignment", {
+    modelId: governedModelId(draft),
+    version: governedVersion()
+  });
+  const complianceProfile = serializeComplianceProfile(buildPlaygroundComplianceProfile(draft));
+  const mapping = {
+    owner: draft.owner,
+    mappings: [
+      { clause: "governance", evidence: "qms_record" },
+      { clause: "risk_management", evidence: "risk_assessment" },
+      { clause: "monitoring", evidence: "post_market_monitoring" }
+    ]
+  };
+  const mappingArtefact = await buildDocumentArtefact(
+    "standards_alignment_mapping.json",
+    mapping,
+    "application/json"
+  );
+  return buildSimpleEvidenceCapture({
+    actor,
+    subject,
+    complianceProfile,
+    item: {
+      type: "standards_alignment",
+      data: {
+        standard_ref: "EN ISO/IEC 42001:2023",
+        status: "aligned_with_internal_controls",
+        scope: `Provider governance process for ${draft.systemId}`,
+        mapping_commitment: mappingArtefact.commitment,
+        metadata: {
+          owner: draft.owner
+        }
+      }
+    },
+    artefacts: [
+      jsonArtefact("standards_alignment.json", {
+        standard_ref: "EN ISO/IEC 42001:2023",
+        status: "aligned_with_internal_controls",
+        scope: `Provider governance process for ${draft.systemId}`,
+        metadata: {
+          owner: draft.owner
+        }
+      }),
+      mappingArtefact.artefact
+    ],
+    retentionClass: "technical_doc",
+    label: "Standards alignment",
+    summary: "Standards-mapping evidence added to the governance pack.",
+    localPayloads: { mapping }
   });
 }
 
@@ -383,7 +594,7 @@ async function buildPostMarketMonitoringStep(scenario, draft) {
     item: {
       type: "post_market_monitoring",
       data: {
-        plan_id: "pmm-claims-2026-03",
+        plan_id: `pmm-${draft.systemId}-2026-03`,
         status: "active",
         summary: draft.monitoringSummary,
         report_commitment: reportArtefact.commitment,
@@ -394,7 +605,7 @@ async function buildPostMarketMonitoringStep(scenario, draft) {
     },
     artefacts: [
       jsonArtefact("post_market_monitoring.json", {
-        plan_id: "pmm-claims-2026-03",
+        plan_id: `pmm-${draft.systemId}-2026-03`,
         status: "active",
         summary: draft.monitoringSummary,
         metadata: {
@@ -905,9 +1116,12 @@ async function buildRegulatorCorrespondenceStep(scenario, draft) {
 }
 
 const STEP_BUILDERS = {
+  technical_doc: buildTechnicalDocStep,
+  risk_assessment: buildRiskAssessmentStep,
   data_governance: buildDataGovernanceStep,
   instructions_for_use: buildInstructionsStep,
   qms_record: buildQmsRecordStep,
+  standards_alignment: buildStandardsAlignmentStep,
   post_market_monitoring: buildPostMarketMonitoringStep,
   authority_submission: buildAuthoritySubmissionStep,
   fundamental_rights_assessment: buildFriaStep,

@@ -99,16 +99,22 @@ test("createDisclosurePolicyTemplate annex iv includes structured governance red
     "risk_assessment",
     "data_governance",
     "instructions_for_use",
-    "human_oversight"
+    "human_oversight",
+    "qms_record",
+    "standards_alignment",
+    "post_market_monitoring",
+    "corrective_action"
   ]);
+  assert.equal(policy.include_artefact_metadata, true);
+  assert.equal(policy.include_artefact_bytes, false);
+  assert.deepEqual(policy.redacted_fields_by_item_type?.risk_assessment, ["/metadata"]);
   assert.deepEqual(policy.redacted_fields_by_item_type?.data_governance, [
-    "/bias_metrics",
+    "/metadata",
     "/personal_data_categories",
     "/safeguards"
   ]);
-  assert.deepEqual(policy.redacted_fields_by_item_type?.instructions_for_use, [
-    "/accuracy_metrics",
-    "/compute_requirements",
-    "/log_management_guidance"
-  ]);
+  assert.deepEqual(policy.redacted_fields_by_item_type?.instructions_for_use, ["/metadata"]);
+  assert.deepEqual(policy.redacted_fields_by_item_type?.qms_record, ["/metadata"]);
+  assert.deepEqual(policy.redacted_fields_by_item_type?.standards_alignment, ["/metadata"]);
+  assert.deepEqual(policy.redacted_fields_by_item_type?.post_market_monitoring, ["/metadata"]);
 });

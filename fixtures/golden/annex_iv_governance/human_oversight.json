@@ -1,0 +1,12 @@
+{
+  "action": "manual_case_review_required",
+  "reviewer": "quality-panel",
+  "actor_role": "human_reviewer",
+  "anomaly_detected": true,
+  "override_action": "escalate_to_recruiter",
+  "interpretation_guidance_followed": true,
+  "automation_bias_detected": false,
+  "two_person_verification": true,
+  "stop_triggered": false,
+  "stop_reason": null
+}

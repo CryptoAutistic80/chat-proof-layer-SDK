@@ -28,6 +28,8 @@ function exportedState(run, scenario) {
 
 function defaultShareAudience(scenario) {
   switch (scenario.packType) {
+    case "annex_iv":
+      return "an Annex IV, regulator-facing, or conformity review";
     case "provider_governance":
       return "an internal quality or regulator-facing review";
     case "annex_xi":

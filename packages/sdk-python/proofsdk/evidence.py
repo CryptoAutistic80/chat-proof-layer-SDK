@@ -362,7 +362,23 @@ def create_human_oversight_request(
 ) -> dict[str, Any]:
     artefacts = list(artefacts or [])
     if not artefacts:
-        artefacts.append(_json_artefact("human_oversight.json", {"action": action, "reviewer": reviewer}))
+        artefacts.append(
+            _json_artefact(
+                "human_oversight.json",
+                {
+                    "action": action,
+                    "reviewer": reviewer,
+                    "actor_role": actor_role,
+                    "anomaly_detected": anomaly_detected,
+                    "override_action": override_action,
+                    "interpretation_guidance_followed": interpretation_guidance_followed,
+                    "automation_bias_detected": automation_bias_detected,
+                    "two_person_verification": two_person_verification,
+                    "stop_triggered": stop_triggered,
+                    "stop_reason": stop_reason,
+                },
+            )
+        )
         if notes is not None:
             artefacts.append(_named_data_artefact("oversight_notes", notes))
 
@@ -547,6 +563,14 @@ def create_risk_assessment_request(
                     "severity": severity,
                     "status": status,
                     "summary": summary,
+                    "risk_description": risk_description,
+                    "likelihood": likelihood,
+                    "affected_groups": _list_or_empty(affected_groups),
+                    "mitigation_measures": _list_or_empty(mitigation_measures),
+                    "residual_risk_level": residual_risk_level,
+                    "risk_owner": risk_owner,
+                    "vulnerable_groups_considered": vulnerable_groups_considered,
+                    "test_results_summary": test_results_summary,
                     "metadata": metadata,
                     "record": record,
                 },
@@ -635,6 +659,18 @@ def create_data_governance_request(
                 {
                     "decision": decision,
                     "dataset_ref": dataset_ref,
+                    "dataset_name": dataset_name,
+                    "dataset_version": dataset_version,
+                    "source_description": source_description,
+                    "collection_period": collection_period,
+                    "geographical_scope": _list_or_empty(geographical_scope),
+                    "preprocessing_operations": _list_or_empty(preprocessing_operations),
+                    "bias_detection_methodology": bias_detection_methodology,
+                    "bias_metrics": _list_or_empty(bias_metrics),
+                    "mitigation_actions": _list_or_empty(mitigation_actions),
+                    "data_gaps": _list_or_empty(data_gaps),
+                    "personal_data_categories": _list_or_empty(personal_data_categories),
+                    "safeguards": _list_or_empty(safeguards),
                     "metadata": metadata,
                     "record": record,
                 },
@@ -696,6 +732,15 @@ def create_technical_doc_request(
                         "document_ref": document_ref,
                         "section": section,
                         "descriptor": descriptor,
+                        "annex_iv_sections": _list_or_empty(annex_iv_sections),
+                        "system_description_summary": system_description_summary,
+                        "model_description_summary": model_description_summary,
+                        "capabilities_and_limitations": capabilities_and_limitations,
+                        "design_choices_summary": design_choices_summary,
+                        "evaluation_metrics_summary": evaluation_metrics_summary,
+                        "human_oversight_design_summary": human_oversight_design_summary,
+                        "post_market_monitoring_plan_ref": post_market_monitoring_plan_ref,
+                        "simplified_tech_doc": simplified_tech_doc,
                     },
                 )
             )
@@ -1517,6 +1562,16 @@ def create_instructions_for_use_request(
                     "document_ref": document_ref,
                     "version": version_tag,
                     "section": section,
+                    "provider_identity": provider_identity,
+                    "intended_purpose": intended_purpose,
+                    "system_capabilities": _list_or_empty(system_capabilities),
+                    "accuracy_metrics": _list_or_empty(accuracy_metrics),
+                    "foreseeable_risks": _list_or_empty(foreseeable_risks),
+                    "explainability_capabilities": _list_or_empty(explainability_capabilities),
+                    "human_oversight_guidance": _list_or_empty(human_oversight_guidance),
+                    "compute_requirements": _list_or_empty(compute_requirements),
+                    "service_lifetime": service_lifetime,
+                    "log_management_guidance": _list_or_empty(log_management_guidance),
                     "metadata": metadata,
                 },
             )

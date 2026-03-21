@@ -254,6 +254,13 @@ cargo run -p proofctl -- pack \
   --system-id system-123 \
   --out ./provider-governance.pack
 
+# Export an Annex IV high-risk governance pack
+cargo run -p proofctl -- pack \
+  --type annex-iv \
+  --vault-url http://127.0.0.1:8080 \
+  --system-id hiring-assistant \
+  --out ./annex-iv.pack
+
 # Export a deployer-side FRIA / fundamental rights pack
 cargo run -p proofctl -- pack \
   --type fundamental-rights \
@@ -296,6 +303,18 @@ cargo run -p proofctl -- vault restore \
   --in ./vault-backup.tar.gz \
   --out-dir ./restored-vault
 ```
+
+### 6. High-Risk Governance Workflow
+
+The repo now includes a checked Annex IV acceptance scenario under `fixtures/golden/annex_iv_governance/` plus end-to-end SDK examples for a provider-side employment screening system.
+
+The intended flow is:
+
+1. capture governance bundles for `technical_doc`, `risk_assessment`, `data_governance`, `instructions_for_use`, `human_oversight`, `qms_record`, `standards_alignment`, and `post_market_monitoring`
+2. create an `annex_iv` full pack
+3. preview the `annex_iv_redacted` disclosure policy
+4. create an `annex_iv` disclosure pack
+5. verify the exported package members
 
 ## Vault Service
 
@@ -563,12 +582,13 @@ Examples:
 - `npm --prefix sdks/typescript build && node examples/typescript-compliance/run.mjs`
 - `npm --prefix sdks/typescript build && node examples/typescript-monitoring/run.mjs`
 - `node examples/typescript/run.mjs`
+- `python3 packages/sdk-python/scripts/build_native.py && python3 examples/python-annex-iv/run.py`
 - `python3 packages/sdk-python/scripts/build_native.py && python3 examples/python-compliance/run.py`
 - `python3 packages/sdk-python/scripts/build_native.py && python3 examples/python-incident-response/run.py`
 - `python3 examples/python-basic/run.py`
 - `python3 examples/agent-simulated/run.py`
 
-The compliance examples assume `proof-service` is running locally or `PROOF_SERVICE_URL` points at a reachable vault.
+The Annex IV and other compliance examples assume `proof-service` is running locally or `PROOF_SERVICE_URL` points at a reachable vault.
 
 Optional demo frontend:
 

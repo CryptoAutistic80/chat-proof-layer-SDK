@@ -202,3 +202,12 @@ console.log(preview.disclosed_item_types);
 console.log(templatePack.pack_id, templatePreview.disclosedItemTypes);
 console.log(templateCatalog.templates[0].profile, renderedTemplate.policy.name);
 ```
+
+For the full provider-side Annex IV governance walkthrough, build the SDK and run:
+
+```bash
+npm --prefix sdks/typescript build
+node examples/typescript-compliance/run.mjs
+```
+
+That example captures the checked governance set, previews `annex_iv_redacted`, and exports both full and disclosure-format `annex_iv` packs.

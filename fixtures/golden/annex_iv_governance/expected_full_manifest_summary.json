@@ -1,0 +1,24 @@
+{
+  "pack_type": "annex_iv",
+  "system_id": "hiring-assistant",
+  "ordered_item_types": [
+    "technical_doc",
+    "risk_assessment",
+    "data_governance",
+    "instructions_for_use",
+    "human_oversight",
+    "qms_record",
+    "standards_alignment",
+    "post_market_monitoring"
+  ],
+  "obligation_refs_by_item_type": {
+    "technical_doc": ["art11_annex_iv"],
+    "risk_assessment": ["art9"],
+    "data_governance": ["art10"],
+    "instructions_for_use": ["art13"],
+    "human_oversight": ["art14"],
+    "qms_record": ["art17"],
+    "standards_alignment": ["art40_43"],
+    "post_market_monitoring": ["art72"]
+  }
+}

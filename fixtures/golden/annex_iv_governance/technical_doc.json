@@ -1,0 +1,12 @@
+{
+  "document_ref": "annex-iv/system-card",
+  "section": "system_overview",
+  "annex_iv_sections": ["section_2", "section_3"],
+  "system_description_summary": "Ranks candidates for recruiter review.",
+  "model_description_summary": "Fine-tuned ranking model.",
+  "capabilities_and_limitations": "Advisory only for first-pass screening.",
+  "design_choices_summary": "Human review is required before employment decisions.",
+  "evaluation_metrics_summary": "Precision and subgroup parity are reviewed monthly.",
+  "human_oversight_design_summary": "Recruiters must review every adverse or borderline case.",
+  "post_market_monitoring_plan_ref": "pmm://hiring-assistant/2026.03"
+}

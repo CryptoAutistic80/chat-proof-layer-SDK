@@ -498,6 +498,12 @@ export interface LlmInteractionRequestOptions {
   artefacts?: ProofArtefactInput[];
 }
 
+/**
+ * Recommended Annex IV minimum: `riskId`, `severity`, `status`,
+ * `riskDescription`, `likelihood`, `affectedGroups`, `mitigationMeasures`,
+ * `residualRiskLevel`, `riskOwner`, and `testResultsSummary`.
+ * Treat `metadata` as disclosure-sensitive.
+ */
 export interface RiskAssessmentRequestOptions extends LifecycleCaptureOptions {
   riskId: string;
   severity: string;
@@ -515,6 +521,14 @@ export interface RiskAssessmentRequestOptions extends LifecycleCaptureOptions {
   record?: JsonValue | JsonObject;
 }
 
+/**
+ * Recommended Annex IV minimum: `decision`, `datasetRef` or `datasetName`,
+ * `sourceDescription`, `collectionPeriod`, `preprocessingOperations`,
+ * `biasDetectionMethodology`, `biasMetrics`, `mitigationActions`, `dataGaps`,
+ * `personalDataCategories`, and `safeguards`.
+ * Treat `metadata`, `personalDataCategories`, and `safeguards` as
+ * disclosure-sensitive.
+ */
 export interface DataGovernanceRequestOptions extends LifecycleCaptureOptions {
   decision: string;
   datasetRef?: string;
@@ -534,6 +548,13 @@ export interface DataGovernanceRequestOptions extends LifecycleCaptureOptions {
   record?: JsonValue | JsonObject;
 }
 
+/**
+ * Recommended Annex IV minimum: `documentRef`, `annexIvSections`,
+ * `systemDescriptionSummary`, `modelDescriptionSummary`,
+ * `capabilitiesAndLimitations`, `designChoicesSummary`,
+ * `evaluationMetricsSummary`, `humanOversightDesignSummary`, and
+ * `postMarketMonitoringPlanRef`.
+ */
 export interface TechnicalDocRequestOptions extends LifecycleCaptureOptions {
   documentRef: string;
   section?: string;
@@ -553,6 +574,13 @@ export interface TechnicalDocRequestOptions extends LifecycleCaptureOptions {
   descriptor?: JsonValue | JsonObject;
 }
 
+/**
+ * Recommended Annex IV minimum: `documentRef`, `versionTag`,
+ * `providerIdentity`, `intendedPurpose`, `systemCapabilities`,
+ * `accuracyMetrics`, `foreseeableRisks`, `humanOversightGuidance`, and
+ * `logManagementGuidance`.
+ * Treat `metadata` as disclosure-sensitive.
+ */
 export interface InstructionsForUseRequestOptions extends LifecycleCaptureOptions {
   documentRef: string;
   versionTag?: string;
@@ -687,6 +715,11 @@ export interface RetrievalRequestOptions extends LifecycleCaptureOptions {
   executionEnd?: string;
 }
 
+/**
+ * Recommended Annex IV minimum: `action`, `reviewer`, `actorRole`,
+ * `anomalyDetected`, `overrideAction`, `automationBiasDetected`,
+ * `stopTriggered`, and `stopReason`. Supporting notes remain an artefact.
+ */
 export interface HumanOversightRequestOptions extends LifecycleCaptureOptions {
   action: string;
   reviewer?: string;

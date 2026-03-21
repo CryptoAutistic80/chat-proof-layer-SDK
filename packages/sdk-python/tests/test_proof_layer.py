@@ -350,6 +350,42 @@ class TestProofLayer(unittest.TestCase):
         self.assertEqual(result["bundle"]["subject"]["system_id"], "system-governance-42")
         self.assertTrue(result["bundle"]["items"][0]["data"]["commitment"].startswith("sha256:"))
 
+    def test_proof_layer_reuses_shared_compliance_profile_for_annex_iv_governance(self):
+        signing_key_pem = (GOLDEN_DIR / "signing_key.txt").read_text(encoding="utf-8")
+        proof_layer = ProofLayer(
+            signing_key_pem=signing_key_pem,
+            key_id="kid-dev-01",
+            system_id="hiring-assistant",
+            role="provider",
+            compliance_profile={
+                "intended_use": "Recruiter support for first-pass candidate review",
+                "prohibited_practice_screening": "screened_no_prohibited_use",
+                "risk_tier": "high_risk",
+                "high_risk_domain": "employment",
+                "deployment_context": "eu_market_placement",
+            },
+        )
+
+        risk = proof_layer.capture_risk_assessment(
+            risk_id="risk-42",
+            severity="high",
+            status="mitigated",
+            risk_description="Potential unfair ranking of borderline candidates.",
+        )
+        data_governance = proof_layer.capture_data_governance(
+            decision="approved_with_restrictions",
+            dataset_ref="dataset://hiring-assistant/training-v3",
+            dataset_name="hiring-assistant-training",
+        )
+
+        self.assertEqual(risk["bundle"]["compliance_profile"]["high_risk_domain"], "employment")
+        self.assertEqual(
+            data_governance["bundle"]["compliance_profile"]["prohibited_practice_screening"],
+            "screened_no_prohibited_use",
+        )
+        self.assertEqual(risk["bundle"]["subject"]["system_id"], "hiring-assistant")
+        self.assertEqual(data_governance["bundle"]["subject"]["system_id"], "hiring-assistant")
+
     def test_capture_retrieval_seals_retrieval_evidence(self):
         signing_key_pem = (GOLDEN_DIR / "signing_key.txt").read_text(encoding="utf-8")
         proof_layer = ProofLayer(

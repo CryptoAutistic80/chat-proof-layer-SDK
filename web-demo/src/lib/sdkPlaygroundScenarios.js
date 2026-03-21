@@ -153,62 +153,65 @@ export const PLAYGROUND_SCENARIOS = [
   {
     id: "ts_support_rules",
     lane: "typescript",
-    label: "Support assistant with governance file",
-    category: "Support workflow",
+    label: "Annex IV governance pack",
+    category: "High-risk governance",
     description:
-      "Capture the AI run plus structured data-governance, operator instructions, and sign-off evidence, then export a provider governance pack.",
+      "Capture a provider-side high-risk governance record and export full plus redacted Annex IV packs.",
     audienceSummary:
-      "A support or triage assistant that needs usable provider-governance evidence around the model run.",
+      "A provider preparing a regulator-facing or conformity-review package for a high-risk employment system.",
     lawExplainer: explainer(
-      "The law usually expects more than a raw model output when a workflow needs operating controls, data governance, and internal review evidence.",
-      "This example records the model run plus structured data-governance detail, instructions for operators, and a quality-management sign-off record.",
-      "Your team still needs to maintain the real process, validate completeness against your own obligations, and add monitoring once the workflow is live."
+      "Annex IV style readiness needs more than one technical note. Reviewers usually expect technical documentation, risk controls, data governance, oversight, quality management, standards mapping, and monitoring evidence to line up around the same system.",
+      "This example records the core governance bundle set for a provider-side high-risk employment workflow and then exports the same inclusion set as both full and redacted Annex IV packs.",
+      "Your team still needs the real legal assessment, conformity process, and production operating procedures outside the demo."
     ),
     sourceRef: "examples/typescript-compliance/run.mjs",
     codeLanguage: "javascript",
-    packType: "provider_governance",
-    reviewKind: "provider_governance",
+    packType: "annex_iv",
+    reviewKind: "annex_iv",
     actorRole: "provider",
     bundleFormat: "full",
     disclosureProfile: "annex_iv_redacted",
     templateId: "ts_support_rules",
-    primaryStepId: "interaction",
+    primaryStepId: "technical_doc",
     recordExplorerIntro:
-      "This record set shows the model run plus the operating material around it, so a reviewer sees both behavior and controls.",
+      "This record set shows the provider-side governance file around a high-risk employment system, rather than just one model interaction.",
     defaults: {
       serviceUrl: DEFAULT_SERVICE_URL,
       provider: "openai",
       model: defaultModelFor("openai"),
       mode: "synthetic",
-      systemId: "support-assistant",
+      systemId: "hiring-assistant",
       systemPrompt:
-        "You are a support operations assistant. Summarize the issue, stay factual, and escalate edge cases for human review.",
-      intendedUse: "Support-assistant workflow with human review for sensitive or unusual cases",
+        "You are a provider governance assistant preparing Annex IV-ready employment-system records. Stay precise, factual, and implementation-oriented.",
+      intendedUse: "Recruiter support for first-pass candidate review",
       prohibitedPracticeScreening: "screened_no_prohibited_use",
-      riskTier: "limited_risk",
-      highRiskDomain: "",
+      riskTier: "high_risk",
+      highRiskDomain: "employment",
       deploymentContext: "eu_market_placement",
       owner: "quality-team",
       market: "eu",
-      userPrompt: "Summarize a customer complaint and suggest the next safe support step.",
-      datasetName: "support-assistant-ops-corpus",
+      userPrompt:
+        "Summarize this employment-screening AI system's intended purpose, known limitations, oversight model, and the evidence a provider would need for Annex IV review.",
+      datasetName: "hiring-assistant-training-v3",
       datasetVersion: "2026.03",
       sourceDescription:
-        "Curated support tickets and QA-reviewed agent notes for EU customer support operations.",
+        "Curated recruiting assessments, interviewer notes, and QA-reviewed candidate summaries for EU employment workflows.",
       biasMethodology:
-        "Monthly parity review across language, accessibility, and vulnerable-customer cohorts.",
+        "Quarterly parity review across gender, age-proxy, disability-accommodation, and language cohorts.",
       safeguards: "pseudonymization, role-based access, retention minimization",
       instructionsSummary:
-        "Agents must review high-risk refund, safety, and account-lock decisions before anything is sent.",
-      instructionsSection: "agent-review-required",
+        "Recruiters must review all borderline or adverse recommendations before anything leaves the workflow.",
+      instructionsSection: "employment_review_controls",
       humanOversightGuidance:
-        "Escalate refund, safety, and account-access decisions to a human reviewer before release.",
+        "Escalate adverse or borderline recommendations to a human reviewer before any employment decision.",
       qmsStatus: "approved",
-      qmsApprover: "quality-lead"
+      qmsApprover: "quality-lead",
+      monitoringSummary:
+        "Weekly review of override rates, appeal signals, and fairness sampling for the employment workflow.",
+      reviewer: "quality-panel"
     },
     fields: [
       ...COMMON_CONNECTION_FIELDS,
-      ...INTERACTION_FIELDS,
       ...COMMON_PROFILE_FIELDS,
       {
         key: "datasetName",
@@ -243,10 +246,22 @@ export const PLAYGROUND_SCENARIOS = [
         key: "qmsApprover",
         label: "Quality approver",
         type: "text"
+      },
+      {
+        key: "reviewer",
+        label: "Human reviewer",
+        type: "text"
+      },
+      {
+        key: "monitoringSummary",
+        label: "Monitoring summary",
+        type: "textarea",
+        rows: 3
       }
     ],
     steps: [
-      { id: "interaction", kind: "interaction", itemType: "llm_interaction", bundleRole: "primary" },
+      { id: "technical_doc", kind: "evidence", itemType: "technical_doc", bundleRole: "primary" },
+      { id: "risk_assessment", kind: "evidence", itemType: "risk_assessment", bundleRole: "support" },
       { id: "data_governance", kind: "evidence", itemType: "data_governance", bundleRole: "support" },
       {
         id: "instructions_for_use",
@@ -254,12 +269,25 @@ export const PLAYGROUND_SCENARIOS = [
         itemType: "instructions_for_use",
         bundleRole: "support"
       },
-      { id: "qms_record", kind: "evidence", itemType: "qms_record", bundleRole: "support" }
+      { id: "human_oversight", kind: "evidence", itemType: "human_oversight", bundleRole: "support" },
+      { id: "qms_record", kind: "evidence", itemType: "qms_record", bundleRole: "support" },
+      {
+        id: "standards_alignment",
+        kind: "evidence",
+        itemType: "standards_alignment",
+        bundleRole: "support"
+      },
+      {
+        id: "post_market_monitoring",
+        kind: "evidence",
+        itemType: "post_market_monitoring",
+        bundleRole: "support"
+      }
     ],
     missingEvidence: [
-      "Add monitoring records once the workflow is live and you need to show how it is watched over time.",
-      "Add risk-assessment and testing records if this needs to represent a fuller provider file.",
-      "Add incident or corrective-action records when the workflow has real operational issues to review."
+      "Add conformity-assessment outputs and notified-body material if the reviewer needs the full market-placement file.",
+      "Add corrective-action or incident records when the workflow has real operational issues to investigate.",
+      "Add the legal sign-off and deployment approval process that sits outside the capture tool."
     ]
   },
   {
@@ -690,6 +718,13 @@ export function inferPackTypeFromItems(items = []) {
   }
   if (types.includes("training_provenance") || types.includes("compute_metrics")) {
     return "annex_xi";
+  }
+  if (
+    types.includes("technical_doc") ||
+    types.includes("risk_assessment") ||
+    types.includes("standards_alignment")
+  ) {
+    return "annex_iv";
   }
   if (types.includes("fundamental_rights_assessment") || types.includes("human_oversight")) {
     return "fundamental_rights";

@@ -9,6 +9,7 @@ import {
   createDeclarationRequest,
   createHumanOversightRequest,
   createIncidentReportRequest,
+  createInstructionsForUseRequest,
   createLiteracyAttestationRequest,
   createLlmInteractionRequest,
   createModelEvaluationRequest,
@@ -20,6 +21,10 @@ import {
   createTrainingProvenanceRequest,
   createToolCallRequest
 } from "../dist/index.js";
+
+function decodeJsonArtefact(artefact) {
+  return JSON.parse(Buffer.from(artefact.data).toString("utf8"));
+}
 
 test("createLlmInteractionRequest emits v1 llm_interaction capture shape", () => {
   const request = createLlmInteractionRequest({
@@ -71,6 +76,22 @@ test("createRiskAssessmentRequest emits lifecycle evidence with default artefact
   assert.equal(request.capture.items[0].data.vulnerable_groups_considered, true);
   assert.equal(request.capture.policy.retention_class, "provider_documentation_days");
   assert.equal(request.artefacts[0].name, "risk_assessment.json");
+  assert.deepEqual(decodeJsonArtefact(request.artefacts[0]), {
+    risk_id: "risk-123",
+    severity: "high",
+    status: "open",
+    summary: "hallucination path under review",
+    risk_description: null,
+    likelihood: "medium",
+    affected_groups: [],
+    mitigation_measures: [],
+    residual_risk_level: "low",
+    risk_owner: null,
+    vulnerable_groups_considered: true,
+    test_results_summary: null,
+    metadata: { owner: "risk-team" },
+    record: { controls: ["approval", "monitoring"] }
+  });
 });
 
 test("createDataGovernanceRequest emits governance evidence with dataset ref", () => {
@@ -89,6 +110,24 @@ test("createDataGovernanceRequest emits governance evidence with dataset ref", (
   assert.equal(request.capture.items[0].data.dataset_name, "curated-training");
   assert.deepEqual(request.capture.items[0].data.personal_data_categories, ["support_tickets"]);
   assert.equal(request.artefacts[0].name, "data_governance.json");
+  assert.deepEqual(decodeJsonArtefact(request.artefacts[0]), {
+    decision: "approved_with_restrictions",
+    dataset_ref: "dataset://curated/training-v2",
+    dataset_name: "curated-training",
+    dataset_version: null,
+    source_description: null,
+    collection_period: null,
+    geographical_scope: [],
+    preprocessing_operations: [],
+    bias_detection_methodology: null,
+    bias_metrics: [],
+    mitigation_actions: [],
+    data_gaps: [],
+    personal_data_categories: ["support_tickets"],
+    safeguards: [],
+    metadata: { reviewer: "privacy" },
+    record: null
+  });
 });
 
 test("createTechnicalDocRequest hashes inline documents when commitment is omitted", () => {
@@ -104,6 +143,75 @@ test("createTechnicalDocRequest hashes inline documents when commitment is omitt
   assert.equal(request.capture.items[0].type, "technical_doc");
   assert.ok(request.capture.items[0].data.commitment.startsWith("sha256:"));
   assert.equal(request.artefacts[0].name, "system-card.txt");
+});
+
+test("createTechnicalDocRequest emits descriptive JSON artefact when no binary document is supplied", () => {
+  const request = createTechnicalDocRequest({
+    keyId: "kid-dev-01",
+    systemId: "system-doc-2",
+    documentRef: "annex-iv/system-card",
+    annexIvSections: ["section_2", "section_3"],
+    systemDescriptionSummary: "Ranks candidates for recruiter review.",
+    modelDescriptionSummary: "Fine-tuned ranking model.",
+    capabilitiesAndLimitations: "Advisory only for first-pass screening.",
+    designChoicesSummary: "Human review is required before employment decisions.",
+    evaluationMetricsSummary: "Precision and subgroup parity are reviewed monthly.",
+    humanOversightDesignSummary: "Recruiters must review every adverse or borderline case.",
+    postMarketMonitoringPlanRef: "pmm://hiring-assistant/2026.03"
+  });
+
+  assert.equal(request.artefacts[0].name, "technical_doc.json");
+  assert.deepEqual(decodeJsonArtefact(request.artefacts[0]), {
+    document_ref: "annex-iv/system-card",
+    section: null,
+    descriptor: null,
+    annex_iv_sections: ["section_2", "section_3"],
+    system_description_summary: "Ranks candidates for recruiter review.",
+    model_description_summary: "Fine-tuned ranking model.",
+    capabilities_and_limitations: "Advisory only for first-pass screening.",
+    design_choices_summary: "Human review is required before employment decisions.",
+    evaluation_metrics_summary: "Precision and subgroup parity are reviewed monthly.",
+    human_oversight_design_summary:
+      "Recruiters must review every adverse or borderline case.",
+    post_market_monitoring_plan_ref: "pmm://hiring-assistant/2026.03",
+    simplified_tech_doc: null
+  });
+});
+
+test("createInstructionsForUseRequest emits the recommended governance artefact shape", () => {
+  const request = createInstructionsForUseRequest({
+    keyId: "kid-dev-01",
+    systemId: "system-ifu-1",
+    documentRef: "docs://ifu/hiring-assistant",
+    versionTag: "2026.03",
+    providerIdentity: "Proof Layer Hiring Systems Ltd.",
+    intendedPurpose: "Recruiter support for first-pass candidate review",
+    systemCapabilities: ["candidate_summary", "borderline_case_flagging"],
+    accuracyMetrics: [{ name: "review_precision", value: "0.91", unit: "ratio" }],
+    foreseeableRisks: ["automation bias"],
+    humanOversightGuidance: ["Review all adverse outputs before decisions."],
+    logManagementGuidance: ["Retain logs for post-market monitoring."],
+    metadata: { owner: "product-compliance" }
+  });
+
+  assert.equal(request.capture.items[0].type, "instructions_for_use");
+  assert.equal(request.artefacts[0].name, "instructions_for_use.json");
+  assert.deepEqual(decodeJsonArtefact(request.artefacts[0]), {
+    document_ref: "docs://ifu/hiring-assistant",
+    version: "2026.03",
+    section: null,
+    provider_identity: "Proof Layer Hiring Systems Ltd.",
+    intended_purpose: "Recruiter support for first-pass candidate review",
+    system_capabilities: ["candidate_summary", "borderline_case_flagging"],
+    accuracy_metrics: [{ name: "review_precision", value: "0.91", unit: "ratio" }],
+    foreseeable_risks: ["automation bias"],
+    explainability_capabilities: [],
+    human_oversight_guidance: ["Review all adverse outputs before decisions."],
+    compute_requirements: [],
+    service_lifetime: null,
+    log_management_guidance: ["Retain logs for post-market monitoring."],
+    metadata: { owner: "product-compliance" }
+  });
 });
 
 test("createToolCallRequest hashes input/output and emits default artefacts", () => {
@@ -167,6 +275,18 @@ test("createHumanOversightRequest hashes notes when provided", () => {
   assert.equal(request.capture.items[0].data.stop_triggered, true);
   assert.equal(request.capture.items[0].data.stop_reason, "manual kill switch");
   assert.ok(request.capture.items[0].data.notes_commitment.startsWith("sha256:"));
+  assert.deepEqual(decodeJsonArtefact(request.artefacts[0]), {
+    action: "approved_after_review",
+    reviewer: "ops-lead",
+    actor_role: "human_reviewer",
+    anomaly_detected: null,
+    override_action: null,
+    interpretation_guidance_followed: null,
+    automation_bias_detected: null,
+    two_person_verification: null,
+    stop_triggered: true,
+    stop_reason: "manual kill switch"
+  });
   assert.equal(request.artefacts[1].name, "oversight_notes.txt");
 });
 

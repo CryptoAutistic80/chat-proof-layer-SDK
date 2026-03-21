@@ -81,6 +81,13 @@ cargo run -p proofctl -- pack \
   --system-id system-123 \
   --out ./provider-governance.pack
 
+# Annex IV high-risk governance pack
+cargo run -p proofctl -- pack \
+  --type annex-iv \
+  --vault-url http://127.0.0.1:8080 \
+  --system-id hiring-assistant \
+  --out ./annex-iv.pack
+
 # Deployer-side FRIA / fundamental rights pack
 cargo run -p proofctl -- pack \
   --type fundamental-rights \
@@ -104,6 +111,7 @@ node examples/typescript-compliance/run.mjs
 node examples/typescript-monitoring/run.mjs
 
 python3 packages/sdk-python/scripts/build_native.py
+python3 examples/python-annex-iv/run.py
 python3 examples/python-compliance/run.py
 python3 examples/python-incident-response/run.py
 ```

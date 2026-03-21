@@ -413,6 +413,43 @@ test("ProofLayer.captureInstructionsForUse seals governance evidence locally", a
   assert.ok(result.bundle?.items[0].data.commitment.startsWith("sha256:"));
 });
 
+test("ProofLayer reuses a shared compliance profile across annex iv governance captures", async () => {
+  const signingKeyPem = await readFile(path.join(goldenDir, "signing_key.txt"), "utf8");
+  const proofLayer = new ProofLayer({
+    signingKeyPem,
+    keyId: "kid-dev-01",
+    systemId: "hiring-assistant",
+    role: "provider",
+    complianceProfile: {
+      intendedUse: "Recruiter support for first-pass candidate review",
+      prohibitedPracticeScreening: "screened_no_prohibited_use",
+      riskTier: "high_risk",
+      highRiskDomain: "employment",
+      deploymentContext: "eu_market_placement"
+    }
+  });
+
+  const risk = await proofLayer.captureRiskAssessment({
+    riskId: "risk-42",
+    severity: "high",
+    status: "mitigated",
+    riskDescription: "Potential unfair ranking of borderline candidates."
+  });
+  const dataGovernance = await proofLayer.captureDataGovernance({
+    decision: "approved_with_restrictions",
+    datasetRef: "dataset://hiring-assistant/training-v3",
+    datasetName: "hiring-assistant-training"
+  });
+
+  assert.equal(risk.bundle?.compliance_profile?.high_risk_domain, "employment");
+  assert.equal(
+    dataGovernance.bundle?.compliance_profile?.prohibited_practice_screening,
+    "screened_no_prohibited_use"
+  );
+  assert.equal(risk.bundle?.subject.system_id, "hiring-assistant");
+  assert.equal(dataGovernance.bundle?.subject.system_id, "hiring-assistant");
+});
+
 test("ProofLayer.captureRetrieval seals retrieval evidence locally", async () => {
   const signingKeyPem = await readFile(path.join(goldenDir, "signing_key.txt"), "utf8");
   const proofLayer = new ProofLayer({

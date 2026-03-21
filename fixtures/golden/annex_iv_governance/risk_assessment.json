@@ -1,0 +1,20 @@
+{
+  "risk_id": "risk-001",
+  "severity": "high",
+  "status": "mitigated",
+  "summary": "Bias and over-reliance risk reviewed.",
+  "risk_description": "Potential unfair ranking of borderline candidates.",
+  "likelihood": "medium",
+  "affected_groups": ["job_applicants"],
+  "mitigation_measures": [
+    "mandatory human review",
+    "monthly subgroup parity review"
+  ],
+  "residual_risk_level": "low",
+  "risk_owner": "quality-team",
+  "vulnerable_groups_considered": true,
+  "test_results_summary": "No blocking disparity found in March review.",
+  "metadata": {
+    "internal_notes": "Escalate if parity delta exceeds 5%"
+  }
+}

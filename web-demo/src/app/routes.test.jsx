@@ -199,7 +199,7 @@ const mocks = vi.hoisted(() => {
     fetchSystemSummary: vi.fn(async (_serviceUrl, _apiKey, systemId) => ({
       system_id: systemId,
       bundle_count: state.bundles.size,
-      pack_types: ["provider_governance"]
+      pack_types: ["annex_iv"]
     })),
     listBundles: vi.fn(async () => ({
       items: Array.from(state.bundles.keys()).map((bundleId) => ({

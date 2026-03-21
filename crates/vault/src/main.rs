@@ -1168,6 +1168,18 @@ struct CuratedPackBundle {
     matched_rules: Vec<String>,
 }
 
+const ANNEX_IV_ITEM_PRIORITY: &[&str] = &[
+    "technical_doc",
+    "risk_assessment",
+    "data_governance",
+    "instructions_for_use",
+    "human_oversight",
+    "qms_record",
+    "standards_alignment",
+    "post_market_monitoring",
+    "corrective_action",
+];
+
 #[tokio::main]
 async fn main() -> Result<()> {
     tracing_subscriber::fmt()
@@ -5152,8 +5164,11 @@ fn curate_pack_bundles(
             .retention_classes
             .contains(&retention_class.as_str());
 
-        if matched_item_types.is_empty() && matched_obligation_refs.is_empty() && !matched_retention
-        {
+        let matched_governance_content =
+            !matched_item_types.is_empty() || !matched_obligation_refs.is_empty();
+        let allow_retention_only_match = profile.pack_type != "annex_iv";
+
+        if !matched_governance_content && (!matched_retention || !allow_retention_only_match) {
             continue;
         }
 
@@ -5195,9 +5210,7 @@ fn curate_pack_bundles(
 
         let mut matched_rules = Vec::new();
         matched_rules.push(format!("pack_type:{}", profile.pack_type));
-        if !profile.allowed_roles.is_empty() {
-            matched_rules.push(format!("actor_role:{bundle_role}"));
-        }
+        matched_rules.push(format!("actor_role:{bundle_role}"));
         if let Some(required_fria) = profile.requires_fria {
             matched_rules.push(format!("compliance_profile.fria_required:{required_fria}"));
         }
@@ -5229,7 +5242,23 @@ fn curate_pack_bundles(
         });
     }
 
+    if profile.pack_type == "annex_iv" {
+        curated.sort_by(|left, right| {
+            annex_iv_bundle_priority(&left.item_types)
+                .cmp(&annex_iv_bundle_priority(&right.item_types))
+                .then_with(|| left.row.created_at.cmp(&right.row.created_at))
+                .then_with(|| left.row.bundle_id.cmp(&right.row.bundle_id))
+        });
+    }
+
     Ok(curated)
+}
+
+fn annex_iv_bundle_priority(item_types: &[String]) -> usize {
+    ANNEX_IV_ITEM_PRIORITY
+        .iter()
+        .position(|expected| item_types.iter().any(|actual| actual == expected))
+        .unwrap_or(ANNEX_IV_ITEM_PRIORITY.len())
 }
 
 fn apply_disclosure_policy_to_items(
@@ -7493,20 +7522,32 @@ const ALL_DISCLOSURE_ITEM_TYPES: &[&str] = &[
 fn annex_iv_default_redactions() -> BTreeMap<String, Vec<String>> {
     BTreeMap::from([
         (
+            "risk_assessment".to_string(),
+            vec!["/metadata".to_string()],
+        ),
+        (
             "data_governance".to_string(),
             vec![
-                "/bias_metrics".to_string(),
+                "/metadata".to_string(),
                 "/personal_data_categories".to_string(),
                 "/safeguards".to_string(),
             ],
         ),
         (
             "instructions_for_use".to_string(),
-            vec![
-                "/accuracy_metrics".to_string(),
-                "/compute_requirements".to_string(),
-                "/log_management_guidance".to_string(),
-            ],
+            vec!["/metadata".to_string()],
+        ),
+        (
+            "qms_record".to_string(),
+            vec!["/metadata".to_string()],
+        ),
+        (
+            "standards_alignment".to_string(),
+            vec!["/metadata".to_string()],
+        ),
+        (
+            "post_market_monitoring".to_string(),
+            vec!["/metadata".to_string()],
         ),
     ])
 }
@@ -7616,12 +7657,16 @@ fn disclosure_policy_template(
                 "data_governance".to_string(),
                 "instructions_for_use".to_string(),
                 "human_oversight".to_string(),
+                "qms_record".to_string(),
+                "standards_alignment".to_string(),
+                "post_market_monitoring".to_string(),
+                "corrective_action".to_string(),
             ],
             excluded_item_types: Vec::new(),
             allowed_obligation_refs: Vec::new(),
             excluded_obligation_refs: Vec::new(),
             include_artefact_metadata: true,
-            include_artefact_bytes: true,
+            include_artefact_bytes: false,
             artefact_names: Vec::new(),
             redacted_fields_by_item_type: annex_iv_default_redactions(),
         },
@@ -7900,12 +7945,16 @@ fn default_disclosure_config() -> DisclosureConfig {
                     "data_governance".to_string(),
                     "instructions_for_use".to_string(),
                     "human_oversight".to_string(),
+                    "qms_record".to_string(),
+                    "standards_alignment".to_string(),
+                    "post_market_monitoring".to_string(),
+                    "corrective_action".to_string(),
                 ],
                 excluded_item_types: Vec::new(),
                 allowed_obligation_refs: Vec::new(),
                 excluded_obligation_refs: Vec::new(),
                 include_artefact_metadata: true,
-                include_artefact_bytes: true,
+                include_artefact_bytes: false,
                 artefact_names: Vec::new(),
                 redacted_fields_by_item_type: annex_iv_default_redactions(),
             },
@@ -9167,6 +9216,422 @@ mod tests {
         event.items = items;
         event.policy.retention_class = retention_class.map(str::to_string);
         event
+    }
+
+    fn hiring_assistant_compliance_profile() -> proof_layer_core::ComplianceProfile {
+        proof_layer_core::ComplianceProfile {
+            intended_use: Some("Recruiter support for first-pass candidate review".to_string()),
+            prohibited_practice_screening: Some("screened_no_prohibited_use".to_string()),
+            risk_tier: Some("high_risk".to_string()),
+            high_risk_domain: Some("employment".to_string()),
+            gpai_status: None,
+            systemic_risk: None,
+            fria_required: None,
+            deployment_context: Some("eu_market_placement".to_string()),
+            metadata: serde_json::json!({
+                "owner": "quality-team",
+                "market": "eu",
+            }),
+        }
+    }
+
+    fn annex_iv_governance_event(
+        item: EvidenceItem,
+        retention_class: &str,
+        request_id: &str,
+    ) -> CaptureEvent {
+        let mut event = sample_event_with_profile(
+            "hiring-assistant",
+            proof_layer_core::ActorRole::Provider,
+            vec![item],
+            Some(retention_class),
+        );
+        event.subject.request_id = Some(request_id.to_string());
+        event.subject.model_id = Some("hiring-model-v3".to_string());
+        event.subject.version = Some("2026.03".to_string());
+        event.compliance_profile = Some(hiring_assistant_compliance_profile());
+        event
+    }
+
+    async fn create_annex_iv_governance_bundle(
+        app: &Router,
+        item: EvidenceItem,
+        retention_class: &str,
+        request_id: &str,
+        artefact_name: &str,
+        artefact_bytes: &[u8],
+    ) -> CreateBundleResponse {
+        create_bundle_response(
+            app,
+            &CreateBundleRequest {
+                capture: SealableCaptureInput::V10(annex_iv_governance_event(
+                    item,
+                    retention_class,
+                    request_id,
+                )),
+                artefacts: vec![InlineArtefact {
+                    name: artefact_name.to_string(),
+                    content_type: "application/json".to_string(),
+                    data_base64: Base64::encode_string(artefact_bytes),
+                }],
+            },
+        )
+        .await
+    }
+
+    struct AnnexIvScenarioBundles {
+        technical_doc: CreateBundleResponse,
+        risk_assessment: CreateBundleResponse,
+        data_governance: CreateBundleResponse,
+        instructions_for_use: CreateBundleResponse,
+        human_oversight: CreateBundleResponse,
+        qms_record: CreateBundleResponse,
+        standards_alignment: CreateBundleResponse,
+        post_market_monitoring: CreateBundleResponse,
+        runtime_logs: CreateBundleResponse,
+        other_system_risk: CreateBundleResponse,
+    }
+
+    async fn create_annex_iv_scenario(app: &Router) -> AnnexIvScenarioBundles {
+        let technical_doc = create_annex_iv_governance_bundle(
+            app,
+            EvidenceItem::TechnicalDoc(proof_layer_core::schema::TechnicalDocEvidence {
+                document_ref: "annex-iv/system-card".to_string(),
+                section: Some("system_overview".to_string()),
+                commitment: Some(
+                    "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                        .to_string(),
+                ),
+                annex_iv_sections: vec!["section_2".to_string(), "section_3".to_string()],
+                system_description_summary: Some(
+                    "Ranks candidates for recruiter review.".to_string(),
+                ),
+                model_description_summary: Some("Fine-tuned ranking model.".to_string()),
+                capabilities_and_limitations: Some(
+                    "Advisory only for first-pass screening.".to_string(),
+                ),
+                design_choices_summary: Some(
+                    "Human review is required before employment decisions.".to_string(),
+                ),
+                evaluation_metrics_summary: Some(
+                    "Precision and subgroup parity are reviewed monthly.".to_string(),
+                ),
+                human_oversight_design_summary: Some(
+                    "Recruiters must review every adverse or borderline case.".to_string(),
+                ),
+                post_market_monitoring_plan_ref: Some(
+                    "pmm://hiring-assistant/2026.03".to_string(),
+                ),
+                simplified_tech_doc: None,
+            }),
+            "technical_doc",
+            "req-annex-iv-tech-doc",
+            "technical_doc.json",
+            br#"{"document_ref":"annex-iv/system-card"}"#,
+        )
+        .await;
+
+        let risk_assessment = create_annex_iv_governance_bundle(
+            app,
+            EvidenceItem::RiskAssessment(proof_layer_core::schema::RiskAssessmentEvidence {
+                risk_id: "risk-001".to_string(),
+                severity: "high".to_string(),
+                status: "mitigated".to_string(),
+                summary: Some("Bias and over-reliance risk reviewed.".to_string()),
+                risk_description: Some(
+                    "Potential unfair ranking of borderline candidates.".to_string(),
+                ),
+                likelihood: Some("medium".to_string()),
+                affected_groups: vec!["job_applicants".to_string()],
+                mitigation_measures: vec![
+                    "mandatory human review".to_string(),
+                    "monthly subgroup parity review".to_string(),
+                ],
+                residual_risk_level: Some("low".to_string()),
+                risk_owner: Some("quality-team".to_string()),
+                vulnerable_groups_considered: Some(true),
+                test_results_summary: Some("No blocking disparity found in March review.".to_string()),
+                metadata: serde_json::json!({
+                    "internal_notes": "Escalate if parity delta exceeds 5%",
+                }),
+            }),
+            "risk_mgmt",
+            "req-annex-iv-risk",
+            "risk_assessment.json",
+            br#"{"risk_id":"risk-001"}"#,
+        )
+        .await;
+
+        let data_governance = create_annex_iv_governance_bundle(
+            app,
+            EvidenceItem::DataGovernance(proof_layer_core::schema::DataGovernanceEvidence {
+                decision: "approved_with_restrictions".to_string(),
+                dataset_ref: Some("dataset://hiring-assistant/training-v3".to_string()),
+                dataset_name: Some("hiring-assistant-training".to_string()),
+                dataset_version: Some("2026.03".to_string()),
+                source_description: Some(
+                    "Curated applicant and recruiter-feedback corpus.".to_string(),
+                ),
+                collection_period: Some(proof_layer_core::schema::DateRange {
+                    start: Some("2024-01-01".to_string()),
+                    end: Some("2025-12-31".to_string()),
+                }),
+                geographical_scope: vec!["EU".to_string()],
+                preprocessing_operations: vec![
+                    "deduplication".to_string(),
+                    "pii_minimization".to_string(),
+                    "label_review".to_string(),
+                ],
+                bias_detection_methodology: Some(
+                    "Quarterly protected-group parity review.".to_string(),
+                ),
+                bias_metrics: vec![proof_layer_core::schema::MetricSummary {
+                    name: "selection_rate_gap".to_string(),
+                    value: "0.04".to_string(),
+                    unit: Some("ratio".to_string()),
+                    methodology: None,
+                }],
+                mitigation_actions: vec![
+                    "oversample underrepresented profiles".to_string(),
+                    "human review on borderline scores".to_string(),
+                ],
+                data_gaps: vec!["limited historic data for niche technical roles".to_string()],
+                personal_data_categories: vec![
+                    "employment_history".to_string(),
+                    "education_history".to_string(),
+                ],
+                safeguards: vec![
+                    "pseudonymization".to_string(),
+                    "role-based dataset access".to_string(),
+                ],
+                metadata: serde_json::json!({
+                    "owner": "data-governance-board",
+                }),
+            }),
+            "technical_doc",
+            "req-annex-iv-data",
+            "data_governance.json",
+            br#"{"dataset_ref":"dataset://hiring-assistant/training-v3"}"#,
+        )
+        .await;
+
+        let instructions_for_use = create_annex_iv_governance_bundle(
+            app,
+            EvidenceItem::InstructionsForUse(
+                proof_layer_core::schema::InstructionsForUseEvidence {
+                    document_ref: "docs://hiring-assistant/operator-handbook".to_string(),
+                    version: Some("2026.03".to_string()),
+                    section: Some("human-review-required".to_string()),
+                    commitment: Some(
+                        "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+                            .to_string(),
+                    ),
+                    provider_identity: Some("Proof Layer Hiring Systems Ltd.".to_string()),
+                    intended_purpose: Some(
+                        "Recruiter support for first-pass candidate review".to_string(),
+                    ),
+                    system_capabilities: vec![
+                        "candidate_summary".to_string(),
+                        "borderline_case_flagging".to_string(),
+                    ],
+                    accuracy_metrics: vec![proof_layer_core::schema::MetricSummary {
+                        name: "review_precision".to_string(),
+                        value: "0.91".to_string(),
+                        unit: Some("ratio".to_string()),
+                        methodology: None,
+                    }],
+                    foreseeable_risks: vec!["automation bias".to_string()],
+                    explainability_capabilities: Vec::new(),
+                    human_oversight_guidance: vec![
+                        "Review every negative or borderline recommendation.".to_string(),
+                    ],
+                    compute_requirements: vec!["4 vCPU".to_string(), "8GB RAM".to_string()],
+                    service_lifetime: Some("12 months".to_string()),
+                    log_management_guidance: vec![
+                        "Retain runtime logs for post-market monitoring.".to_string(),
+                    ],
+                    metadata: serde_json::json!({
+                        "distribution": "internal_only",
+                    }),
+                },
+            ),
+            "technical_doc",
+            "req-annex-iv-ifu",
+            "instructions_for_use.json",
+            br#"{"document_ref":"docs://hiring-assistant/operator-handbook"}"#,
+        )
+        .await;
+
+        let human_oversight = create_annex_iv_governance_bundle(
+            app,
+            EvidenceItem::HumanOversight(proof_layer_core::schema::HumanOversightEvidence {
+                action: "manual_case_review_required".to_string(),
+                reviewer: Some("quality-panel".to_string()),
+                notes_commitment: Some(
+                    "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+                        .to_string(),
+                ),
+                actor_role: Some("human_reviewer".to_string()),
+                anomaly_detected: Some(true),
+                override_action: Some("escalate_to_recruiter".to_string()),
+                interpretation_guidance_followed: Some(true),
+                automation_bias_detected: Some(false),
+                two_person_verification: Some(true),
+                stop_triggered: Some(false),
+                stop_reason: None,
+            }),
+            "risk_mgmt",
+            "req-annex-iv-oversight",
+            "human_oversight.json",
+            br#"{"action":"manual_case_review_required"}"#,
+        )
+        .await;
+
+        let qms_record = create_annex_iv_governance_bundle(
+            app,
+            EvidenceItem::QmsRecord(proof_layer_core::schema::QmsRecordEvidence {
+                record_id: "qms-release-approval-42".to_string(),
+                process: "release_approval".to_string(),
+                status: "approved".to_string(),
+                record_commitment: Some(
+                    "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+                        .to_string(),
+                ),
+                policy_name: Some("Hiring Assistant Release Governance".to_string()),
+                revision: Some("3.1".to_string()),
+                effective_date: Some("2026-03-01".to_string()),
+                expiry_date: None,
+                scope: Some("EU provider release control".to_string()),
+                approval_commitment: None,
+                audit_results_summary: Some(
+                    "Release gate approved after compliance review.".to_string(),
+                ),
+                continuous_improvement_actions: vec![
+                    "monitor subgroup parity monthly".to_string(),
+                ],
+                metadata: serde_json::json!({
+                    "owner": "quality-lead",
+                }),
+            }),
+            "technical_doc",
+            "req-annex-iv-qms",
+            "qms_record.json",
+            br#"{"record_id":"qms-release-approval-42"}"#,
+        )
+        .await;
+
+        let standards_alignment = create_annex_iv_governance_bundle(
+            app,
+            EvidenceItem::StandardsAlignment(
+                proof_layer_core::schema::StandardsAlignmentEvidence {
+                    standard_ref: "harmonized://eu-ai-act/annex-iv".to_string(),
+                    status: "aligned".to_string(),
+                    scope: Some("high-risk technical documentation".to_string()),
+                    mapping_commitment: Some(
+                        "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+                            .to_string(),
+                    ),
+                    metadata: serde_json::json!({
+                        "owner": "compliance-mapping-team",
+                    }),
+                },
+            ),
+            "technical_doc",
+            "req-annex-iv-standards",
+            "standards_alignment.json",
+            br#"{"standard_ref":"harmonized://eu-ai-act/annex-iv"}"#,
+        )
+        .await;
+
+        let post_market_monitoring = create_annex_iv_governance_bundle(
+            app,
+            EvidenceItem::PostMarketMonitoring(
+                proof_layer_core::schema::PostMarketMonitoringEvidence {
+                    plan_id: "pmm-42".to_string(),
+                    status: "active".to_string(),
+                    summary: Some(
+                        "Weekly drift review with escalation thresholds.".to_string(),
+                    ),
+                    report_commitment: Some(
+                        "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+                            .to_string(),
+                    ),
+                    metadata: serde_json::json!({
+                        "owner": "safety-ops",
+                    }),
+                },
+            ),
+            "risk_mgmt",
+            "req-annex-iv-pmm",
+            "post_market_monitoring.json",
+            br#"{"plan_id":"pmm-42"}"#,
+        )
+        .await;
+
+        let runtime_logs = create_bundle_response(
+            app,
+            &CreateBundleRequest {
+                capture: SealableCaptureInput::V10(sample_event_with_profile(
+                    "hiring-assistant",
+                    proof_layer_core::ActorRole::Provider,
+                    sample_event_with_system("hiring-assistant").items,
+                    Some("runtime_logs"),
+                )),
+                artefacts: vec![InlineArtefact {
+                    name: "prompt.json".to_string(),
+                    content_type: "application/json".to_string(),
+                    data_base64: Base64::encode_string(br#"{"prompt":"hello"}"#),
+                }],
+            },
+        )
+        .await;
+
+        let other_system_risk = create_bundle_response(
+            app,
+            &CreateBundleRequest {
+                capture: SealableCaptureInput::V10(sample_event_with_profile(
+                    "other-hiring-system",
+                    proof_layer_core::ActorRole::Provider,
+                    vec![EvidenceItem::RiskAssessment(
+                        proof_layer_core::schema::RiskAssessmentEvidence {
+                            risk_id: "risk-other".to_string(),
+                            severity: "high".to_string(),
+                            status: "open".to_string(),
+                            summary: Some("unrelated system".to_string()),
+                            risk_description: None,
+                            likelihood: None,
+                            affected_groups: Vec::new(),
+                            mitigation_measures: Vec::new(),
+                            residual_risk_level: None,
+                            risk_owner: None,
+                            vulnerable_groups_considered: None,
+                            test_results_summary: None,
+                            metadata: serde_json::Value::Null,
+                        },
+                    )],
+                    Some("risk_mgmt"),
+                )),
+                artefacts: vec![InlineArtefact {
+                    name: "risk_assessment.json".to_string(),
+                    content_type: "application/json".to_string(),
+                    data_base64: Base64::encode_string(br#"{"risk_id":"risk-other"}"#),
+                }],
+            },
+        )
+        .await;
+
+        AnnexIvScenarioBundles {
+            technical_doc,
+            risk_assessment,
+            data_governance,
+            instructions_for_use,
+            human_oversight,
+            qms_record,
+            standards_alignment,
+            post_market_monitoring,
+            runtime_logs,
+            other_system_risk,
+        }
     }
 
     async fn test_state(max_payload_bytes: usize) -> AppState {
@@ -13467,7 +13932,7 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
     }
 
     #[tokio::test]
-    async fn create_pack_applies_named_disclosure_policy_with_artefact_metadata() {
+    async fn create_pack_applies_named_disclosure_policy_with_artefact_metadata_only_by_default() {
         let state = test_state(DEFAULT_MAX_PAYLOAD_BYTES).await;
         let public_key_pem = encode_public_key_pem(&state.signing_key.verifying_key());
         let app = build_router(state, DEFAULT_MAX_PAYLOAD_BYTES);
@@ -13565,7 +14030,7 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
             manifest.bundles[0].disclosed_artefact_names,
             vec!["doc.json".to_string(), "diagram.txt".to_string()]
         );
-        assert!(manifest.bundles[0].disclosed_artefact_bytes_included);
+        assert!(!manifest.bundles[0].disclosed_artefact_bytes_included);
 
         let export_req = Request::builder()
             .method("GET")
@@ -13588,17 +14053,8 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
         assert_eq!(redacted.disclosed_artefacts.len(), 2);
         assert_eq!(redacted.disclosed_artefacts[0].meta.name, "doc.json");
         assert_eq!(redacted.disclosed_artefacts[1].meta.name, "diagram.txt");
-        assert_eq!(
-            decoded.files.get("artefacts/doc.json").map(Vec::as_slice),
-            Some(br#"{"doc":"system-card"}"#.as_slice())
-        );
-        assert_eq!(
-            decoded
-                .files
-                .get("artefacts/diagram.txt")
-                .map(Vec::as_slice),
-            Some(b"annex-iv-diagram".as_slice())
-        );
+        assert!(!decoded.files.contains_key("artefacts/doc.json"));
+        assert!(!decoded.files.contains_key("artefacts/diagram.txt"));
 
         let verify_req = Request::builder()
             .method("POST")
@@ -13619,7 +14075,391 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
             .unwrap();
         let verify_response: VerifyResponse = serde_json::from_slice(&body).unwrap();
         assert!(verify_response.valid);
-        assert_eq!(verify_response.artefacts_verified, 2);
+        assert_eq!(verify_response.artefacts_verified, 0);
+    }
+
+    #[tokio::test]
+    async fn annex_iv_pack_curates_expected_governance_bundle_set() {
+        let state = test_state(DEFAULT_MAX_PAYLOAD_BYTES).await;
+        let app = build_router(state, DEFAULT_MAX_PAYLOAD_BYTES);
+        let scenario = create_annex_iv_scenario(&app).await;
+
+        let pack_req = Request::builder()
+            .method("POST")
+            .uri("/v1/packs")
+            .header("content-type", "application/json")
+            .body(Body::from(
+                serde_json::to_vec(&CreatePackRequest {
+                    pack_type: "annex_iv".to_string(),
+                    system_id: Some("hiring-assistant".to_string()),
+                    from: None,
+                    to: None,
+                    bundle_format: PACK_BUNDLE_FORMAT_FULL.to_string(),
+                    disclosure_policy: None,
+                    disclosure_template: None,
+                })
+                .unwrap(),
+            ))
+            .unwrap();
+        let pack_res = app.clone().oneshot(pack_req).await.unwrap();
+        assert_eq!(pack_res.status(), StatusCode::CREATED);
+        let body = axum::body::to_bytes(pack_res.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let pack: PackSummaryResponse = serde_json::from_slice(&body).unwrap();
+
+        let expected_bundle_ids = BTreeSet::from([
+            scenario.technical_doc.bundle_id.clone(),
+            scenario.risk_assessment.bundle_id.clone(),
+            scenario.data_governance.bundle_id.clone(),
+            scenario.instructions_for_use.bundle_id.clone(),
+            scenario.human_oversight.bundle_id.clone(),
+            scenario.qms_record.bundle_id.clone(),
+            scenario.standards_alignment.bundle_id.clone(),
+            scenario.post_market_monitoring.bundle_id.clone(),
+        ]);
+        let actual_bundle_ids = pack.bundle_ids.iter().cloned().collect::<BTreeSet<_>>();
+
+        assert_eq!(actual_bundle_ids, expected_bundle_ids);
+        assert!(!pack.bundle_ids.contains(&scenario.runtime_logs.bundle_id));
+        assert!(!pack.bundle_ids.contains(&scenario.other_system_risk.bundle_id));
+    }
+
+    #[tokio::test]
+    async fn annex_iv_pack_manifest_records_expected_match_metadata() {
+        let state = test_state(DEFAULT_MAX_PAYLOAD_BYTES).await;
+        let app = build_router(state, DEFAULT_MAX_PAYLOAD_BYTES);
+        let scenario = create_annex_iv_scenario(&app).await;
+
+        let pack_req = Request::builder()
+            .method("POST")
+            .uri("/v1/packs")
+            .header("content-type", "application/json")
+            .body(Body::from(
+                serde_json::to_vec(&CreatePackRequest {
+                    pack_type: "annex_iv".to_string(),
+                    system_id: Some("hiring-assistant".to_string()),
+                    from: None,
+                    to: None,
+                    bundle_format: PACK_BUNDLE_FORMAT_FULL.to_string(),
+                    disclosure_policy: None,
+                    disclosure_template: None,
+                })
+                .unwrap(),
+            ))
+            .unwrap();
+        let pack_res = app.clone().oneshot(pack_req).await.unwrap();
+        assert_eq!(pack_res.status(), StatusCode::CREATED);
+        let body = axum::body::to_bytes(pack_res.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let pack: PackSummaryResponse = serde_json::from_slice(&body).unwrap();
+
+        let manifest_req = Request::builder()
+            .method("GET")
+            .uri(format!("/v1/packs/{}/manifest", pack.pack_id))
+            .body(Body::empty())
+            .unwrap();
+        let manifest_res = app.clone().oneshot(manifest_req).await.unwrap();
+        assert_eq!(manifest_res.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(manifest_res.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let manifest: PackManifest = serde_json::from_slice(&body).unwrap();
+
+        let technical_entry = manifest
+            .bundles
+            .iter()
+            .find(|entry| entry.bundle_id == scenario.technical_doc.bundle_id)
+            .unwrap();
+        assert_eq!(technical_entry.actor_role, "provider");
+        assert_eq!(technical_entry.system_id.as_deref(), Some("hiring-assistant"));
+        assert_eq!(technical_entry.item_types, vec!["technical_doc"]);
+        assert_eq!(technical_entry.obligation_refs, vec!["art11_annex_iv"]);
+        assert!(
+            technical_entry
+                .matched_rules
+                .contains(&"pack_type:annex_iv".to_string())
+        );
+        assert!(
+            technical_entry
+                .matched_rules
+                .contains(&"actor_role:provider".to_string())
+        );
+        assert!(
+            technical_entry
+                .matched_rules
+                .contains(&"item_type:technical_doc".to_string())
+        );
+        assert!(
+            technical_entry
+                .matched_rules
+                .contains(&"obligation_ref:art11_annex_iv".to_string())
+        );
+
+        let expected_refs = BTreeMap::from([
+            (scenario.risk_assessment.bundle_id.clone(), "art9".to_string()),
+            (scenario.data_governance.bundle_id.clone(), "art10".to_string()),
+            (scenario.instructions_for_use.bundle_id.clone(), "art13".to_string()),
+            (scenario.human_oversight.bundle_id.clone(), "art14".to_string()),
+            (scenario.qms_record.bundle_id.clone(), "art17".to_string()),
+            (
+                scenario.standards_alignment.bundle_id.clone(),
+                "art40_43".to_string(),
+            ),
+            (
+                scenario.post_market_monitoring.bundle_id.clone(),
+                "art72".to_string(),
+            ),
+        ]);
+
+        for entry in &manifest.bundles {
+            assert_eq!(entry.actor_role, "provider");
+            assert_eq!(entry.system_id.as_deref(), Some("hiring-assistant"));
+            if let Some(expected_ref) = expected_refs.get(&entry.bundle_id) {
+                assert_eq!(entry.obligation_refs, vec![expected_ref.clone()]);
+                assert!(
+                    entry.matched_rules
+                        .contains(&format!("obligation_ref:{expected_ref}"))
+                );
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn annex_iv_disclosure_pack_verifies_and_preserves_redactions() {
+        let state = test_state(DEFAULT_MAX_PAYLOAD_BYTES).await;
+        let public_key_pem = encode_public_key_pem(&state.signing_key.verifying_key());
+        let app = build_router(state, DEFAULT_MAX_PAYLOAD_BYTES);
+        let scenario = create_annex_iv_scenario(&app).await;
+
+        let pack_req = Request::builder()
+            .method("POST")
+            .uri("/v1/packs")
+            .header("content-type", "application/json")
+            .body(Body::from(
+                serde_json::to_vec(&CreatePackRequest {
+                    pack_type: "annex_iv".to_string(),
+                    system_id: Some("hiring-assistant".to_string()),
+                    from: None,
+                    to: None,
+                    bundle_format: PACK_BUNDLE_FORMAT_DISCLOSURE.to_string(),
+                    disclosure_policy: Some(
+                        DEFAULT_DISCLOSURE_POLICY_ANNEX_IV_REDACTED.to_string(),
+                    ),
+                    disclosure_template: None,
+                })
+                .unwrap(),
+            ))
+            .unwrap();
+        let pack_res = app.clone().oneshot(pack_req).await.unwrap();
+        assert_eq!(pack_res.status(), StatusCode::CREATED);
+        let body = axum::body::to_bytes(pack_res.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let pack: PackSummaryResponse = serde_json::from_slice(&body).unwrap();
+        assert_eq!(pack.bundle_ids.len(), 8);
+
+        let manifest_req = Request::builder()
+            .method("GET")
+            .uri(format!("/v1/packs/{}/manifest", pack.pack_id))
+            .body(Body::empty())
+            .unwrap();
+        let manifest_res = app.clone().oneshot(manifest_req).await.unwrap();
+        assert_eq!(manifest_res.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(manifest_res.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let manifest: PackManifest = serde_json::from_slice(&body).unwrap();
+
+        let risk_entry = manifest
+            .bundles
+            .iter()
+            .find(|entry| entry.bundle_id == scenario.risk_assessment.bundle_id)
+            .unwrap();
+        assert_eq!(
+            risk_entry.disclosed_item_field_redactions,
+            BTreeMap::from([(0usize, vec!["/metadata".to_string()])])
+        );
+
+        let data_entry = manifest
+            .bundles
+            .iter()
+            .find(|entry| entry.bundle_id == scenario.data_governance.bundle_id)
+            .unwrap();
+        assert_eq!(
+            data_entry.disclosed_item_field_redactions,
+            BTreeMap::from([(
+                0usize,
+                vec![
+                    "/metadata".to_string(),
+                    "/personal_data_categories".to_string(),
+                    "/safeguards".to_string(),
+                ],
+            )])
+        );
+
+        let ifu_entry = manifest
+            .bundles
+            .iter()
+            .find(|entry| entry.bundle_id == scenario.instructions_for_use.bundle_id)
+            .unwrap();
+        assert_eq!(
+            ifu_entry.disclosed_item_field_redactions,
+            BTreeMap::from([(0usize, vec!["/metadata".to_string()])])
+        );
+
+        for entry in &manifest.bundles {
+            assert!(!entry.disclosed_artefact_bytes_included);
+        }
+
+        let export_req = Request::builder()
+            .method("GET")
+            .uri(format!("/v1/packs/{}/export", pack.pack_id))
+            .body(Body::empty())
+            .unwrap();
+        let export_res = app.clone().oneshot(export_req).await.unwrap();
+        assert_eq!(export_res.status(), StatusCode::OK);
+        let export_bytes = axum::body::to_bytes(export_res.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let archive = decode_pack_archive(&export_bytes);
+        assert_eq!(archive.files.len(), 8);
+
+        let mut seen_bundle_ids = BTreeSet::new();
+        for packaged in &archive.files {
+            let verify_req = Request::builder()
+                .method("POST")
+                .uri("/v1/verify")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::to_vec(&VerifyRequest::Package(Box::new(PackageVerifyRequest {
+                        bundle_pkg_base64: packaged.data_base64.clone(),
+                        public_key_pem: public_key_pem.clone(),
+                    })))
+                    .unwrap(),
+                ))
+                .unwrap();
+            let verify_res = app.clone().oneshot(verify_req).await.unwrap();
+            assert_eq!(verify_res.status(), StatusCode::OK);
+            let body = axum::body::to_bytes(verify_res.into_body(), usize::MAX)
+                .await
+                .unwrap();
+            let verify_response: VerifyResponse = serde_json::from_slice(&body).unwrap();
+            assert!(verify_response.valid);
+            assert_eq!(verify_response.artefacts_verified, 0);
+
+            let disclosure_package = Base64::decode_vec(&packaged.data_base64).unwrap();
+            let decoded =
+                read_package_from_bytes(&disclosure_package, DEFAULT_MAX_PAYLOAD_BYTES).unwrap();
+            let redacted = parse_redacted_bundle_file(&decoded.files).unwrap();
+            seen_bundle_ids.insert(redacted.bundle_id.clone());
+            assert!(!decoded.files.keys().any(|name| name.starts_with("artefacts/")));
+
+            if redacted.bundle_id == scenario.risk_assessment.bundle_id {
+                assert_eq!(
+                    redacted.disclosed_items[0]
+                        .field_redacted_item
+                        .as_ref()
+                        .unwrap()
+                        .redacted_paths,
+                    vec!["/metadata/internal_notes".to_string()]
+                );
+            }
+            if redacted.bundle_id == scenario.data_governance.bundle_id {
+                assert_eq!(
+                    redacted.disclosed_items[0]
+                        .field_redacted_item
+                        .as_ref()
+                        .unwrap()
+                        .redacted_paths,
+                    vec![
+                        "/metadata/owner".to_string(),
+                        "/personal_data_categories/0".to_string(),
+                        "/personal_data_categories/1".to_string(),
+                        "/safeguards/0".to_string(),
+                        "/safeguards/1".to_string(),
+                    ]
+                );
+            }
+            if redacted.bundle_id == scenario.instructions_for_use.bundle_id {
+                assert_eq!(
+                    redacted.disclosed_items[0]
+                        .field_redacted_item
+                        .as_ref()
+                        .unwrap()
+                        .redacted_paths,
+                    vec!["/metadata/distribution".to_string()]
+                );
+            }
+        }
+
+        assert_eq!(
+            seen_bundle_ids,
+            pack.bundle_ids.into_iter().collect::<BTreeSet<_>>()
+        );
+    }
+
+    #[tokio::test]
+    async fn annex_iv_pack_order_is_stable() {
+        let state = test_state(DEFAULT_MAX_PAYLOAD_BYTES).await;
+        let app = build_router(state, DEFAULT_MAX_PAYLOAD_BYTES);
+        create_annex_iv_scenario(&app).await;
+
+        let pack_req = Request::builder()
+            .method("POST")
+            .uri("/v1/packs")
+            .header("content-type", "application/json")
+            .body(Body::from(
+                serde_json::to_vec(&CreatePackRequest {
+                    pack_type: "annex_iv".to_string(),
+                    system_id: Some("hiring-assistant".to_string()),
+                    from: None,
+                    to: None,
+                    bundle_format: PACK_BUNDLE_FORMAT_FULL.to_string(),
+                    disclosure_policy: None,
+                    disclosure_template: None,
+                })
+                .unwrap(),
+            ))
+            .unwrap();
+        let pack_res = app.clone().oneshot(pack_req).await.unwrap();
+        assert_eq!(pack_res.status(), StatusCode::CREATED);
+        let body = axum::body::to_bytes(pack_res.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let pack: PackSummaryResponse = serde_json::from_slice(&body).unwrap();
+
+        let manifest_req = Request::builder()
+            .method("GET")
+            .uri(format!("/v1/packs/{}/manifest", pack.pack_id))
+            .body(Body::empty())
+            .unwrap();
+        let manifest_res = app.clone().oneshot(manifest_req).await.unwrap();
+        assert_eq!(manifest_res.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(manifest_res.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let manifest: PackManifest = serde_json::from_slice(&body).unwrap();
+
+        let ordered_item_types = manifest
+            .bundles
+            .iter()
+            .map(|entry| entry.item_types[0].clone())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            ordered_item_types,
+            vec![
+                "technical_doc".to_string(),
+                "risk_assessment".to_string(),
+                "data_governance".to_string(),
+                "instructions_for_use".to_string(),
+                "human_oversight".to_string(),
+                "qms_record".to_string(),
+                "standards_alignment".to_string(),
+                "post_market_monitoring".to_string(),
+            ]
+        );
     }
 
     #[tokio::test]

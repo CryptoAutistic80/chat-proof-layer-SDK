@@ -53,13 +53,19 @@ const draft = {
 };
 
 describe("renderScenarioScript", () => {
-  test("renders a TypeScript support workflow script with draft values", () => {
+  test("renders a TypeScript annex iv workflow script with draft values", () => {
     const script = renderScenarioScript(getPlaygroundScenario("ts_support_rules"), draft);
     expect(script).toContain('new ProofLayer');
     expect(script).toContain('"benefits-review"');
+    expect(script).toContain('captureTechnicalDoc');
+    expect(script).toContain('captureRiskAssessment');
     expect(script).toContain('captureDataGovernance');
     expect(script).toContain('captureInstructionsForUse');
+    expect(script).toContain('captureHumanOversight');
     expect(script).toContain('captureQmsRecord');
+    expect(script).toContain('captureStandardsAlignment');
+    expect(script).toContain('capturePostMarketMonitoring');
+    expect(script).toContain('packType: "annex_iv"');
   });
 
   test("renders a GPAI threshold script with training provenance and compute metrics", () => {

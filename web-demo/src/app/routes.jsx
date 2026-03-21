@@ -6,12 +6,14 @@ import { HomePage } from "../pages/HomePage";
 import { SDKPlaygroundPage } from "../pages/SDKPlaygroundPage";
 import { AdvancedPlaygroundPage } from "../pages/AdvancedPlaygroundPage";
 import { RecordsExplorerPage } from "../pages/RecordsExplorerPage";
+import { VerifyPage } from "../pages/VerifyPage";
 
 export function AppRoutes() {
   return (
     <Routes>
       <Route element={<SiteShell />}>
         <Route path="/" element={<HomePage />} />
+        <Route path="/verify" element={<VerifyPage />} />
 
         <Route element={<DemoShell />}>
           <Route path="/playground" element={<SDKPlaygroundPage />} />

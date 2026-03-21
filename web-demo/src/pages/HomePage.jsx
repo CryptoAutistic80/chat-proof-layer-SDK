@@ -1,5 +1,6 @@
 import React from "react";
 import { Link } from "react-router-dom";
+import { HeroDemo } from "../components/HeroDemo";
 import {
   AI_ACT_EXPECTATIONS,
   COMMON_WORKFLOWS,
@@ -25,12 +26,20 @@ export function HomePage() {
             <Link className="secondary-cta" to={LEARN_HERO.secondaryCta.to}>
               {LEARN_HERO.secondaryCta.label}
             </Link>
+            <Link className="secondary-cta" to="/verify">
+              Try the tamper playground
+            </Link>
           </div>
         </div>
         <aside className="learn-hero-side">
           <span className="section-label">Boundary</span>
           <p>{LEGAL_BOUNDARY}</p>
         </aside>
+      </section>
+
+      {/* Interactive hero demo — runs entirely in the browser */}
+      <section className="panel section-panel hero-demo-section">
+        <HeroDemo />
       </section>
 
       <section className="panel section-panel">

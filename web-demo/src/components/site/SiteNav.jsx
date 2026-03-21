@@ -33,6 +33,9 @@ export function SiteNav() {
         <NavLink to="/records" className={linkClass(pathname.startsWith("/records"))}>
           Explore records
         </NavLink>
+        <NavLink to="/verify" className={linkClass(pathname === "/verify")}>
+          Verify
+        </NavLink>
       </nav>
 
       <div className="site-nav-status">

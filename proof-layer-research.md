@@ -75,6 +75,41 @@ To make this operational, the SDK should emit typed evidence events and artefact
 
 The consistent theme is traceability plus durable documentation. The product should make those artefacts first-class and verifiable while keeping the baseline adoption path usable as local SDK and CLI tooling.
 
+## Current schema gaps vs. AI Act completeness
+
+This gap discussion is grounded in the current AI Act legal anchors and Commission timeline: Regulation (EU) 2024/1689 as published on EUR-Lex, entry into force on August 1, 2024, AI literacy and prohibited-practice obligations from February 2, 2025, GPAI obligations from August 2, 2025, the main high-risk regime from August 2, 2026, and some Annex I pathways from August 2, 2027. The prioritisation below is a product inference from that legal baseline plus the current SDK/vault implementation shape, especially for GPAI compute-threshold evidence and completeness-validation expectations.
+
+The current implementation already has broad catalog coverage: the main governance, runtime, GPAI, incident, literacy, and conformity evidence families exist; retention classes and pack families are operational; and the cryptographic layer is production-grade. The remaining issue is not catalog breadth. It is schema depth. Most lifecycle evidence types intentionally use a thin pattern of stable identifiers, status fields, and commitment hashes that push detailed structure into artefact attachments.
+
+That design is strong for tamper evidence and backward compatibility, but it creates a real tension between commitment integrity and completeness validation. A verifier can prove that an attached artefact has not changed, but cannot tell from the schema alone whether a customer captured the minimum structured detail implied by Articles 9, 10, 13, 14, 15, 17, 27, 43, 47, 49, 53, and 55. The pragmatic design rule is therefore:
+
+- keep the thin required spine,
+- add optional typed enrichment fields to existing evidence items,
+- keep rich artefacts for full narrative detail and large attachments,
+- avoid any bundle-format or bundle-version reset.
+
+### Priority ranking
+
+| Priority | Area | Gap | Direction |
+|---|---|---|---|
+| `P0` | Data governance (Art. 10) | Large | Add optional structured dataset, preprocessing, bias, safeguard, and data-gap fields to `data_governance`. |
+| `P0` | GPAI compute thresholds (Arts. 51, 53, 55) | Large | Add first-class `compute_metrics` evidence plus linkage from `training_provenance`. |
+| `P1` | Instructions for use (Art. 13) | Medium-large | Keep document-centric capture but add optional structured capability, risk, oversight, compute, and logging guidance fields. |
+| `P1` | Risk detail (Art. 9) | Medium | Keep one item per risk, but add optional likelihood, affected-group, mitigation, residual-risk, owner, and test-summary structure. |
+| `P1` | Human oversight (Art. 14) | Medium | Enrich `human_oversight` with actor role, anomaly/override/bias/stop-event structure instead of creating a separate stop-event type. |
+| `P2` | Technical documentation (Art. 11 / Annex IV) | Medium | Keep `technical_doc` document-centric, but add Annex IV section coverage and summary/linkage fields. |
+| `P2` | Evaluation and adversarial detail (Art. 15 / Art. 55) | Medium | Add structured metric summaries, group performance, threat models, and test-methodology fields while leaving full reports in artefacts. |
+| `P2` | QMS record depth (Art. 17) | Medium | Add optional policy, revision, dates, scope, approval, audit-summary, and improvement-action fields. |
+| `P3` | Incident, FRIA, literacy, conformity polish | Small to medium | Add a small number of structured enrichment fields without changing the current item model. |
+| `P3` | Runtime timestamp polish | Small | Add explicit `execution_start` / `execution_end` and retrieval database-reference fields. |
+
+### Design implications
+
+- `compute_metrics` is the only proposed new first-class evidence type in the near-term plan because systemic-risk threshold tracking cannot be inferred cleanly from existing items.
+- `serious incident notification` and `stop event` remain structured enrichments on `authority_notification` and `human_oversight` rather than becoming new top-level item types.
+- Selective disclosure remains compatible with richer nested evidence because `pl-merkle-sha256-v4` already supports JSON-pointer path redaction at `item.data` subtree level.
+- The package format stays at `bundle_version: "1.0"` and the current Merkle family stays in place because all planned schema changes are additive and optional.
+
 ## Tamper-evident cryptographic design for evidence bundles
 
 The strongest technical direction remains the same: portable evidence bundles assembled from normalised events and artefacts, sealed cryptographically, timestamped, and optionally anchored in a transparency system. The design should explicitly separate integrity guarantees from availability and retention guarantees. The SDK and core library provide the former; the optional vault primarily strengthens the latter.

@@ -36,6 +36,35 @@ function baseSubject(draft, suffix, extra = {}) {
   });
 }
 
+function splitList(value) {
+  return String(value ?? "")
+    .split(/[\n,]/)
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+}
+
+function optionalText(value) {
+  const text = String(value ?? "").trim();
+  return text || null;
+}
+
+function buildMetricSummary(name, value, unit, methodology = null) {
+  const normalizedValue = optionalText(value);
+  if (!normalizedValue) {
+    return null;
+  }
+  return {
+    name,
+    value: normalizedValue,
+    ...(unit ? { unit } : {}),
+    ...(methodology ? { methodology } : {})
+  };
+}
+
+function compactList(values) {
+  return values.filter(Boolean);
+}
+
 export function buildPlaygroundComplianceProfile(draft) {
   return {
     intendedUse: draft.intendedUse,
@@ -72,9 +101,37 @@ async function buildInstructionsStep(scenario, draft) {
   const actor = baseActor(scenario);
   const subject = baseSubject(draft, "instructions");
   const complianceProfile = serializeComplianceProfile(buildPlaygroundComplianceProfile(draft));
+  const humanOversightGuidance = splitList(draft.humanOversightGuidance);
+  const accuracyMetrics = compactList([
+    buildMetricSummary(
+      "review_precision",
+      "0.91",
+      "ratio",
+      "Quarterly reviewer agreement sample."
+    )
+  ]);
+  const systemCapabilities = [
+    "issue_summary",
+    "safe_response_drafting",
+    "escalation_flagging"
+  ];
+  const foreseeableRisks = [
+    "overconfident refund guidance",
+    "missed escalation on account-access edge cases"
+  ];
+  const explainabilityCapabilities = [
+    "reason_summary",
+    "policy-grounded escalation note"
+  ];
+  const computeRequirements = ["4 vCPU", "8GB RAM"];
+  const logManagementGuidance = [
+    "Retain runtime logs for post-market monitoring reviews.",
+    "Escalate incident-linked logs to safety operations."
+  ];
   const document = {
     summary: draft.instructionsSummary,
-    owner: draft.owner
+    owner: draft.owner,
+    human_oversight_guidance: humanOversightGuidance
   };
   const documentArtefact = await buildDocumentArtefact(
     "instructions_for_use_document.json",
@@ -92,6 +149,16 @@ async function buildInstructionsStep(scenario, draft) {
         version: "2026.03",
         section: draft.instructionsSection ?? null,
         commitment: documentArtefact.commitment,
+        provider_identity: `${draft.owner} provider team`,
+        intended_purpose: draft.intendedUse,
+        system_capabilities: systemCapabilities,
+        accuracy_metrics: accuracyMetrics,
+        foreseeable_risks: foreseeableRisks,
+        explainability_capabilities: explainabilityCapabilities,
+        human_oversight_guidance: humanOversightGuidance,
+        compute_requirements: computeRequirements,
+        service_lifetime: "Review quarterly or whenever operator rules change.",
+        log_management_guidance: logManagementGuidance,
         metadata: {
           owner: draft.owner,
           market: draft.market
@@ -104,6 +171,16 @@ async function buildInstructionsStep(scenario, draft) {
         document_ref: `docs://${draft.systemId}/operator-handbook`,
         version: "2026.03",
         section: draft.instructionsSection ?? null,
+        provider_identity: `${draft.owner} provider team`,
+        intended_purpose: draft.intendedUse,
+        system_capabilities: systemCapabilities,
+        accuracy_metrics: accuracyMetrics,
+        foreseeable_risks: foreseeableRisks,
+        explainability_capabilities: explainabilityCapabilities,
+        human_oversight_guidance: humanOversightGuidance,
+        compute_requirements: computeRequirements,
+        service_lifetime: "Review quarterly or whenever operator rules change.",
+        log_management_guidance: logManagementGuidance,
         metadata: {
           owner: draft.owner,
           market: draft.market
@@ -117,6 +194,93 @@ async function buildInstructionsStep(scenario, draft) {
   });
 }
 
+async function buildDataGovernanceStep(scenario, draft) {
+  const actor = baseActor(scenario);
+  const subject = baseSubject(draft, "data-governance");
+  const complianceProfile = serializeComplianceProfile(buildPlaygroundComplianceProfile(draft));
+  const safeguards = splitList(draft.safeguards);
+  const biasMetrics = compactList([
+    buildMetricSummary(
+      "selection_rate_gap",
+      "0.04",
+      "ratio",
+      optionalText(draft.biasMethodology)
+    )
+  ]);
+  const record = {
+    review_owner: draft.owner,
+    safeguards,
+    source_description: draft.sourceDescription
+  };
+  return buildSimpleEvidenceCapture({
+    actor,
+    subject,
+    complianceProfile,
+    item: {
+      type: "data_governance",
+      data: {
+        decision: "approved_with_restrictions",
+        dataset_ref: `dataset://${draft.systemId}/training`,
+        dataset_name: draft.datasetName ?? null,
+        dataset_version: draft.datasetVersion ?? "2026.03",
+        source_description: draft.sourceDescription ?? null,
+        collection_period: {
+          start: "2024-01-01",
+          end: "2025-12-31"
+        },
+        geographical_scope: ["EU"],
+        preprocessing_operations: ["deduplication", "pii_minimization", "label_review"],
+        bias_detection_methodology: draft.biasMethodology ?? null,
+        bias_metrics: biasMetrics,
+        mitigation_actions: [
+          "Escalate sensitive support actions to human review.",
+          "Sample multilingual support outputs for quality assurance."
+        ],
+        data_gaps: ["Limited historic examples for rare safety escalations."],
+        personal_data_categories: ["customer_messages", "account_status"],
+        safeguards,
+        metadata: {
+          owner: draft.owner,
+          market: draft.market
+        }
+      }
+    },
+    artefacts: [
+      jsonArtefact("data_governance.json", {
+        decision: "approved_with_restrictions",
+        dataset_ref: `dataset://${draft.systemId}/training`,
+        dataset_name: draft.datasetName ?? null,
+        dataset_version: draft.datasetVersion ?? "2026.03",
+        source_description: draft.sourceDescription ?? null,
+        collection_period: {
+          start: "2024-01-01",
+          end: "2025-12-31"
+        },
+        geographical_scope: ["EU"],
+        preprocessing_operations: ["deduplication", "pii_minimization", "label_review"],
+        bias_detection_methodology: draft.biasMethodology ?? null,
+        bias_metrics: biasMetrics,
+        mitigation_actions: [
+          "Escalate sensitive support actions to human review.",
+          "Sample multilingual support outputs for quality assurance."
+        ],
+        data_gaps: ["Limited historic examples for rare safety escalations."],
+        personal_data_categories: ["customer_messages", "account_status"],
+        safeguards,
+        metadata: {
+          owner: draft.owner,
+          market: draft.market
+        },
+        record
+      })
+    ],
+    retentionClass: "technical_doc",
+    label: "Data governance",
+    summary: "Structured dataset and bias-governance evidence added to the provider file.",
+    localPayloads: { record }
+  });
+}
+
 async function buildQmsRecordStep(scenario, draft) {
   const actor = baseActor(scenario);
   const subject = baseSubject(draft, "qms");
@@ -126,9 +290,19 @@ async function buildQmsRecordStep(scenario, draft) {
     gate: "release",
     release: "2026.03"
   };
+  const approval = {
+    approver: draft.qmsApprover,
+    approved_at: "2026-03-01T09:00:00Z",
+    release: "2026.03"
+  };
   const recordArtefact = await buildDocumentArtefact(
     "qms_record_record.json",
     record,
+    "application/json"
+  );
+  const approvalArtefact = await buildDocumentArtefact(
+    "qms_record_approval.json",
+    approval,
     "application/json"
   );
   return buildSimpleEvidenceCapture({
@@ -142,6 +316,17 @@ async function buildQmsRecordStep(scenario, draft) {
         process: "release_approval",
         status: draft.qmsStatus ?? "approved",
         record_commitment: recordArtefact.commitment,
+        policy_name: "Support Assistant Release Governance",
+        revision: "3.1",
+        effective_date: "2026-03-01",
+        scope: "EU provider release control",
+        approval_commitment: approvalArtefact.commitment,
+        audit_results_summary:
+          "No blocking findings. Quarterly governance review requested for escalation quality.",
+        continuous_improvement_actions: [
+          "Extend multilingual QA review coverage.",
+          "Refresh escalation examples before the next release."
+        ],
         metadata: {
           owner: draft.owner
         }
@@ -152,16 +337,28 @@ async function buildQmsRecordStep(scenario, draft) {
         record_id: "qms-release-approval-42",
         process: "release_approval",
         status: draft.qmsStatus ?? "approved",
+        policy_name: "Support Assistant Release Governance",
+        revision: "3.1",
+        effective_date: "2026-03-01",
+        scope: "EU provider release control",
+        approval_commitment: approvalArtefact.commitment,
+        audit_results_summary:
+          "No blocking findings. Quarterly governance review requested for escalation quality.",
+        continuous_improvement_actions: [
+          "Extend multilingual QA review coverage.",
+          "Refresh escalation examples before the next release."
+        ],
         metadata: {
           owner: draft.owner
         }
       }),
-      recordArtefact.artefact
+      recordArtefact.artefact,
+      approvalArtefact.artefact
     ],
     retentionClass: "technical_doc",
     label: "QMS record",
     summary: "Quality sign-off evidence added to the workflow.",
-    localPayloads: { record }
+    localPayloads: { record, approval }
   });
 }
 
@@ -268,9 +465,12 @@ async function buildFriaStep(scenario, draft) {
   const actor = baseActor(scenario);
   const subject = baseSubject(draft, "fria");
   const complianceProfile = serializeComplianceProfile(buildPlaygroundComplianceProfile(draft));
+  const affectedRights = splitList(draft.affectedRights);
   const report = {
     owner: draft.owner,
-    finding: draft.friaSummary
+    finding: draft.friaSummary,
+    assessor: draft.assessor,
+    affected_rights: affectedRights
   };
   const reportArtefact = await buildDocumentArtefact(
     "fundamental_rights_assessment_report.json",
@@ -288,6 +488,13 @@ async function buildFriaStep(scenario, draft) {
         status: "completed",
         scope: draft.intendedUse,
         report_commitment: reportArtefact.commitment,
+        legal_basis: "GDPR Art. 22 and EU employment-law review safeguards",
+        affected_rights: affectedRights,
+        stakeholder_consultation_summary:
+          "People operations, legal, and worker-representation stakeholders reviewed the workflow.",
+        mitigation_plan_summary:
+          "Borderline or negative recommendations require human review and documented justification.",
+        assessor: draft.assessor ?? null,
         metadata: {
           owner: draft.owner
         }
@@ -298,6 +505,13 @@ async function buildFriaStep(scenario, draft) {
         assessment_id: "fria-2026-03",
         status: "completed",
         scope: draft.intendedUse,
+        legal_basis: "GDPR Art. 22 and EU employment-law review safeguards",
+        affected_rights: affectedRights,
+        stakeholder_consultation_summary:
+          "People operations, legal, and worker-representation stakeholders reviewed the workflow.",
+        mitigation_plan_summary:
+          "Borderline or negative recommendations require human review and documented justification.",
+        assessor: draft.assessor ?? null,
         metadata: {
           owner: draft.owner
         }
@@ -318,6 +532,7 @@ async function buildHumanOversightStep(scenario, draft) {
   const notes = {
     reason: draft.friaSummary,
     reviewer: draft.reviewer,
+    override_action: draft.overrideAction,
     sla_hours: 24
   };
   const notesArtefact = await buildDocumentArtefact(
@@ -334,13 +549,29 @@ async function buildHumanOversightStep(scenario, draft) {
       data: {
         action: "manual_case_review_required",
         reviewer: draft.reviewer,
-        notes_commitment: notesArtefact.commitment
+        notes_commitment: notesArtefact.commitment,
+        actor_role: "human_reviewer",
+        anomaly_detected: false,
+        override_action: draft.overrideAction ?? null,
+        interpretation_guidance_followed: true,
+        automation_bias_detected: false,
+        two_person_verification: true,
+        stop_triggered: false,
+        stop_reason: null
       }
     },
     artefacts: [
       jsonArtefact("human_oversight.json", {
         action: "manual_case_review_required",
-        reviewer: draft.reviewer
+        reviewer: draft.reviewer,
+        actor_role: "human_reviewer",
+        anomaly_detected: false,
+        override_action: draft.overrideAction ?? null,
+        interpretation_guidance_followed: true,
+        automation_bias_detected: false,
+        two_person_verification: true,
+        stop_triggered: false,
+        stop_reason: null
       }),
       notesArtefact.artefact
     ],
@@ -357,7 +588,9 @@ async function buildIncidentReportStep(scenario, draft) {
   const complianceProfile = serializeComplianceProfile(buildPlaygroundComplianceProfile(draft));
   const report = {
     owner: draft.owner,
-    summary: draft.incidentSummary
+    summary: draft.incidentSummary,
+    root_cause_summary: draft.rootCauseSummary,
+    corrective_action_ref: draft.correctiveActionRef
   };
   const reportArtefact = await buildDocumentArtefact(
     "incident_report_record.json",
@@ -377,6 +610,11 @@ async function buildIncidentReportStep(scenario, draft) {
         occurred_at: "2026-03-07T18:30:00Z",
         summary: draft.incidentSummary,
         report_commitment: reportArtefact.commitment,
+        detection_method: "post_market_monitoring",
+        root_cause_summary: draft.rootCauseSummary ?? null,
+        corrective_action_ref: draft.correctiveActionRef ?? null,
+        authority_notification_required: true,
+        authority_notification_status: "drafted",
         metadata: {
           owner: draft.owner
         }
@@ -389,6 +627,11 @@ async function buildIncidentReportStep(scenario, draft) {
         status: "open",
         occurred_at: "2026-03-07T18:30:00Z",
         summary: draft.incidentSummary,
+        detection_method: "post_market_monitoring",
+        root_cause_summary: draft.rootCauseSummary ?? null,
+        corrective_action_ref: draft.correctiveActionRef ?? null,
+        authority_notification_required: true,
+        authority_notification_status: "drafted",
         metadata: {
           owner: draft.owner
         }
@@ -408,7 +651,7 @@ async function buildAuthorityNotificationStep(scenario, draft) {
   const complianceProfile = serializeComplianceProfile(buildPlaygroundComplianceProfile(draft));
   const report = {
     article: "73",
-    summary: "Initial authority notification draft"
+    summary: draft.notificationSummary ?? "Initial authority notification draft"
   };
   const reportArtefact = await buildDocumentArtefact(
     "authority_notification_report.json",
@@ -450,6 +693,122 @@ async function buildAuthorityNotificationStep(scenario, draft) {
     label: "Authority notification",
     summary: "Notification draft captured for the incident response pack.",
     localPayloads: { report }
+  });
+}
+
+async function buildTrainingProvenanceStep(scenario, draft) {
+  const actor = baseActor(scenario);
+  const subject = baseSubject(draft, "training-provenance");
+  const complianceProfile = serializeComplianceProfile(buildPlaygroundComplianceProfile(draft));
+  const record = {
+    manifests: 28,
+    review_owner: draft.owner
+  };
+  const recordArtefact = await buildDocumentArtefact(
+    "training_provenance_record.json",
+    record,
+    "application/json"
+  );
+  const computeId = `compute-${draft.systemId}-v1`;
+  return buildSimpleEvidenceCapture({
+    actor,
+    subject,
+    complianceProfile,
+    item: {
+      type: "training_provenance",
+      data: {
+        dataset_ref: draft.datasetRef,
+        stage: "pretraining",
+        lineage_ref: `lineage://${draft.systemId}/2026-03-10`,
+        record_commitment: recordArtefact.commitment,
+        compute_metrics_ref: computeId,
+        training_dataset_summary: draft.trainingDatasetSummary ?? null,
+        consortium_context: draft.consortiumContext ?? null,
+        metadata: {
+          owner: draft.owner,
+          market: draft.market
+        }
+      }
+    },
+    artefacts: [
+      jsonArtefact("training_provenance.json", {
+        dataset_ref: draft.datasetRef,
+        stage: "pretraining",
+        lineage_ref: `lineage://${draft.systemId}/2026-03-10`,
+        compute_metrics_ref: computeId,
+        training_dataset_summary: draft.trainingDatasetSummary ?? null,
+        consortium_context: draft.consortiumContext ?? null,
+        metadata: {
+          owner: draft.owner,
+          market: draft.market
+        }
+      }),
+      recordArtefact.artefact
+    ],
+    retentionClass: "gpai_documentation",
+    label: "Training provenance",
+    summary: "Training-lineage evidence added to the GPAI provider workflow.",
+    localPayloads: { record }
+  });
+}
+
+async function buildComputeMetricsStep(scenario, draft) {
+  const actor = baseActor(scenario);
+  const subject = baseSubject(draft, "compute-metrics");
+  const complianceProfile = serializeComplianceProfile(buildPlaygroundComplianceProfile(draft));
+  const computeId = `compute-${draft.systemId}-v1`;
+  const computeResourcesSummary = compactList([
+    buildMetricSummary("gpu_hours", draft.gpuHours, "hours"),
+    buildMetricSummary("accelerator_count", draft.acceleratorCount, "gpus")
+  ]);
+  const record = {
+    source: "web-demo-sample",
+    rollup_owner: draft.owner
+  };
+  return buildSimpleEvidenceCapture({
+    actor,
+    subject,
+    complianceProfile,
+    item: {
+      type: "compute_metrics",
+      data: {
+        compute_id: computeId,
+        training_flops_estimate: draft.trainingFlopsEstimate,
+        threshold_basis_ref: "art51_systemic_risk_threshold",
+        threshold_value: draft.thresholdValue,
+        threshold_status: draft.thresholdStatus,
+        estimation_methodology: "Cluster scheduler logs and accelerator utilization rollup.",
+        measured_at: "2026-03-10T12:00:00Z",
+        compute_resources_summary: computeResourcesSummary,
+        consortium_context: draft.consortiumContext ?? null,
+        metadata: {
+          owner: draft.owner,
+          market: draft.market
+        }
+      }
+    },
+    artefacts: [
+      jsonArtefact("compute_metrics.json", {
+        compute_id: computeId,
+        training_flops_estimate: draft.trainingFlopsEstimate,
+        threshold_basis_ref: "art51_systemic_risk_threshold",
+        threshold_value: draft.thresholdValue,
+        threshold_status: draft.thresholdStatus,
+        estimation_methodology: "Cluster scheduler logs and accelerator utilization rollup.",
+        measured_at: "2026-03-10T12:00:00Z",
+        compute_resources_summary: computeResourcesSummary,
+        consortium_context: draft.consortiumContext ?? null,
+        metadata: {
+          owner: draft.owner,
+          market: draft.market
+        },
+        record
+      })
+    ],
+    retentionClass: "gpai_documentation",
+    label: "Compute metrics",
+    summary: "Compute-threshold evidence added to the GPAI provider workflow.",
+    localPayloads: { record }
   });
 }
 
@@ -546,6 +905,7 @@ async function buildRegulatorCorrespondenceStep(scenario, draft) {
 }
 
 const STEP_BUILDERS = {
+  data_governance: buildDataGovernanceStep,
   instructions_for_use: buildInstructionsStep,
   qms_record: buildQmsRecordStep,
   post_market_monitoring: buildPostMarketMonitoringStep,
@@ -554,6 +914,8 @@ const STEP_BUILDERS = {
   human_oversight: buildHumanOversightStep,
   incident_report: buildIncidentReportStep,
   authority_notification: buildAuthorityNotificationStep,
+  training_provenance: buildTrainingProvenanceStep,
+  compute_metrics: buildComputeMetricsStep,
   reporting_deadline: buildReportingDeadlineStep,
   regulator_correspondence: buildRegulatorCorrespondenceStep
 };

@@ -393,6 +393,7 @@ enum EvidenceTypeArg {
     Registration,
     LiteracyAttestation,
     IncidentReport,
+    ComputeMetrics,
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, ValueEnum)]
@@ -814,7 +815,45 @@ const ALL_DISCLOSURE_ITEM_TYPES: &[&str] = &[
     "registration",
     "literacy_attestation",
     "incident_report",
+    "compute_metrics",
 ];
+
+fn annex_iv_default_redactions() -> BTreeMap<String, Vec<String>> {
+    BTreeMap::from([
+        (
+            "data_governance".to_string(),
+            vec![
+                "/bias_metrics".to_string(),
+                "/personal_data_categories".to_string(),
+                "/safeguards".to_string(),
+            ],
+        ),
+        (
+            "instructions_for_use".to_string(),
+            vec![
+                "/accuracy_metrics".to_string(),
+                "/compute_requirements".to_string(),
+                "/log_management_guidance".to_string(),
+            ],
+        ),
+    ])
+}
+
+fn incident_summary_default_redactions() -> BTreeMap<String, Vec<String>> {
+    BTreeMap::from([
+        (
+            "incident_report".to_string(),
+            vec!["/root_cause_summary".to_string()],
+        ),
+        (
+            "adversarial_test".to_string(),
+            vec![
+                "/threat_model".to_string(),
+                "/affected_components".to_string(),
+            ],
+        ),
+    ])
+}
 
 fn disclosure_policy_template_name(profile: DisclosurePolicyTemplateArg) -> &'static str {
     match profile {
@@ -873,6 +912,7 @@ fn disclosure_policy_template(
                 "technical_doc".to_string(),
                 "risk_assessment".to_string(),
                 "data_governance".to_string(),
+                "instructions_for_use".to_string(),
                 "human_oversight".to_string(),
             ],
             excluded_item_types: Vec::new(),
@@ -881,7 +921,7 @@ fn disclosure_policy_template(
             include_artefact_metadata: true,
             include_artefact_bytes: true,
             artefact_names: Vec::new(),
-            redacted_fields_by_item_type: BTreeMap::new(),
+            redacted_fields_by_item_type: annex_iv_default_redactions(),
         },
         DisclosurePolicyTemplateArg::IncidentSummary => DisclosurePolicyConfig {
             name: disclosure_policy_template_name(profile).to_string(),
@@ -894,6 +934,7 @@ fn disclosure_policy_template(
                 "risk_assessment".to_string(),
                 "policy_decision".to_string(),
                 "human_oversight".to_string(),
+                "adversarial_test".to_string(),
             ],
             excluded_item_types: vec![
                 "llm_interaction".to_string(),
@@ -905,7 +946,7 @@ fn disclosure_policy_template(
             include_artefact_metadata: false,
             include_artefact_bytes: false,
             artefact_names: Vec::new(),
-            redacted_fields_by_item_type: BTreeMap::new(),
+            redacted_fields_by_item_type: incident_summary_default_redactions(),
         },
         DisclosurePolicyTemplateArg::RuntimeMinimum => DisclosurePolicyConfig {
             name: disclosure_policy_template_name(profile).to_string(),
@@ -1034,6 +1075,7 @@ fn disclosure_redaction_group_selectors(
             "registration" => &["receipt_commitment"],
             "literacy_attestation" => &["attestation_commitment"],
             "incident_report" => &["report_commitment"],
+            "compute_metrics" => &[],
             _ => &[],
         },
         DisclosureRedactionGroupArg::Metadata => match item_type {
@@ -1061,7 +1103,8 @@ fn disclosure_redaction_group_selectors(
             | "conformity_assessment"
             | "declaration"
             | "literacy_attestation"
-            | "incident_report" => &["/metadata"],
+            | "incident_report"
+            | "compute_metrics" => &["/metadata"],
             _ => &[],
         },
         DisclosureRedactionGroupArg::Parameters => match item_type {
@@ -1349,19 +1392,37 @@ impl EvidenceTypeArg {
                 | (Self::RiskAssessment, EvidenceItem::RiskAssessment(_))
                 | (Self::DataGovernance, EvidenceItem::DataGovernance(_))
                 | (Self::TechnicalDoc, EvidenceItem::TechnicalDoc(_))
-                | (Self::InstructionsForUse, EvidenceItem::InstructionsForUse(_))
+                | (
+                    Self::InstructionsForUse,
+                    EvidenceItem::InstructionsForUse(_)
+                )
                 | (Self::QmsRecord, EvidenceItem::QmsRecord(_))
                 | (
                     Self::FundamentalRightsAssessment,
                     EvidenceItem::FundamentalRightsAssessment(_)
                 )
-                | (Self::StandardsAlignment, EvidenceItem::StandardsAlignment(_))
-                | (Self::PostMarketMonitoring, EvidenceItem::PostMarketMonitoring(_))
+                | (
+                    Self::StandardsAlignment,
+                    EvidenceItem::StandardsAlignment(_)
+                )
+                | (
+                    Self::PostMarketMonitoring,
+                    EvidenceItem::PostMarketMonitoring(_)
+                )
                 | (Self::CorrectiveAction, EvidenceItem::CorrectiveAction(_))
-                | (Self::AuthorityNotification, EvidenceItem::AuthorityNotification(_))
-                | (Self::AuthoritySubmission, EvidenceItem::AuthoritySubmission(_))
+                | (
+                    Self::AuthorityNotification,
+                    EvidenceItem::AuthorityNotification(_)
+                )
+                | (
+                    Self::AuthoritySubmission,
+                    EvidenceItem::AuthoritySubmission(_)
+                )
                 | (Self::ReportingDeadline, EvidenceItem::ReportingDeadline(_))
-                | (Self::RegulatorCorrespondence, EvidenceItem::RegulatorCorrespondence(_))
+                | (
+                    Self::RegulatorCorrespondence,
+                    EvidenceItem::RegulatorCorrespondence(_)
+                )
                 | (Self::ModelEvaluation, EvidenceItem::ModelEvaluation(_))
                 | (Self::AdversarialTest, EvidenceItem::AdversarialTest(_))
                 | (
@@ -1385,6 +1446,7 @@ impl EvidenceTypeArg {
                     EvidenceItem::LiteracyAttestation(_)
                 )
                 | (Self::IncidentReport, EvidenceItem::IncidentReport(_))
+                | (Self::ComputeMetrics, EvidenceItem::ComputeMetrics(_))
         )
     }
 
@@ -1419,6 +1481,7 @@ impl EvidenceTypeArg {
             Self::Registration => "registration",
             Self::LiteracyAttestation => "literacy_attestation",
             Self::IncidentReport => "incident_report",
+            Self::ComputeMetrics => "compute_metrics",
         }
     }
 }
@@ -3445,6 +3508,10 @@ fn describe_evidence_item(item: &EvidenceItem) -> String {
             "incident_report incident_id={} severity={} status={}",
             data.incident_id, data.severity, data.status
         ),
+        EvidenceItem::ComputeMetrics(data) => format!(
+            "compute_metrics compute_id={} threshold_status={}",
+            data.compute_id, data.threshold_status
+        ),
     }
 }
 
@@ -4338,10 +4405,9 @@ mod tests {
     use flate2::{Compression, write::GzEncoder};
     use proof_layer_core::{
         Actor, ActorRole, ComplianceProfile, EncryptionPolicy, EvidenceContext,
-        LlmInteractionEvidence, Policy,
-        REKOR_RFC3161_API_VERSION, REKOR_RFC3161_ENTRY_KIND, REKOR_TRANSPARENCY_KIND,
-        RFC3161_TIMESTAMP_KIND, SCITT_STATEMENT_PROFILE, SCITT_TRANSPARENCY_KIND, Subject,
-        TimestampError, TimestampToken, TransparencyReceipt,
+        LlmInteractionEvidence, Policy, REKOR_RFC3161_API_VERSION, REKOR_RFC3161_ENTRY_KIND,
+        REKOR_TRANSPARENCY_KIND, RFC3161_TIMESTAMP_KIND, SCITT_STATEMENT_PROFILE,
+        SCITT_TRANSPARENCY_KIND, Subject, TimestampError, TimestampToken, TransparencyReceipt,
     };
     use serde_json::json;
     use sha2::{Digest, Sha256};
@@ -4447,6 +4513,8 @@ mod tests {
                         .to_string(),
                 ),
                 trace_semconv_version: Some("1.0.0".to_string()),
+                execution_start: None,
+                execution_end: None,
             })],
             policy: Policy {
                 redactions: vec![],
@@ -5421,23 +5489,29 @@ mod tests {
         assert_eq!(event.actor.role, ActorRole::Deployer);
         assert_eq!(event.subject.system_id.as_deref(), Some("system-123"));
         assert_eq!(
-            event.compliance_profile.as_ref().and_then(|profile| profile.intended_use.as_deref()),
+            event
+                .compliance_profile
+                .as_ref()
+                .and_then(|profile| profile.intended_use.as_deref()),
             Some("Internal reviewer assistance")
         );
         assert_eq!(
-            event.compliance_profile
+            event
+                .compliance_profile
                 .as_ref()
                 .and_then(|profile| profile.gpai_status.as_deref()),
             Some("downstream_integrator")
         );
         assert_eq!(
-            event.compliance_profile
+            event
+                .compliance_profile
                 .as_ref()
                 .and_then(|profile| profile.systemic_risk),
             Some(false)
         );
         assert_eq!(
-            event.compliance_profile
+            event
+                .compliance_profile
                 .as_ref()
                 .and_then(|profile| profile.fria_required),
             Some(false)
@@ -5473,19 +5547,22 @@ mod tests {
 
         assert_eq!(event.actor.role, ActorRole::AuthorizedRepresentative);
         assert_eq!(
-            event.compliance_profile
+            event
+                .compliance_profile
                 .as_ref()
                 .and_then(|profile| profile.intended_use.as_deref()),
             Some("Public sector eligibility screening")
         );
         assert_eq!(
-            event.compliance_profile
+            event
+                .compliance_profile
                 .as_ref()
                 .and_then(|profile| profile.risk_tier.as_deref()),
             Some("high_risk")
         );
         assert_eq!(
-            event.compliance_profile
+            event
+                .compliance_profile
                 .as_ref()
                 .and_then(|profile| profile.fria_required),
             Some(true)
@@ -5500,6 +5577,15 @@ mod tests {
                 document_ref: "doc-1".to_string(),
                 section: None,
                 commitment: None,
+                annex_iv_sections: Vec::new(),
+                system_description_summary: None,
+                model_description_summary: None,
+                capabilities_and_limitations: None,
+                design_choices_summary: None,
+                evaluation_metrics_summary: None,
+                human_oversight_design_summary: None,
+                post_market_monitoring_plan_ref: None,
+                simplified_tech_doc: None,
             },
         )];
 

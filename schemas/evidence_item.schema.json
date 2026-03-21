@@ -46,6 +46,14 @@
             },
             "trace_semconv_version": {
               "type": "string"
+            },
+            "execution_start": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "execution_end": {
+              "type": "string",
+              "format": "date-time"
             }
           },
           "required": [
@@ -81,7 +89,15 @@
             "output_commitment": {
               "$ref": "#/$defs/sha256Digest"
             },
-            "metadata": true
+            "metadata": true,
+            "execution_start": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "execution_end": {
+              "type": "string",
+              "format": "date-time"
+            }
           },
           "required": [
             "tool_name"
@@ -113,7 +129,18 @@
             "query_commitment": {
               "$ref": "#/$defs/sha256Digest"
             },
-            "metadata": true
+            "metadata": true,
+            "database_reference": {
+              "type": "string"
+            },
+            "execution_start": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "execution_end": {
+              "type": "string",
+              "format": "date-time"
+            }
           },
           "required": [
             "corpus",
@@ -145,6 +172,30 @@
             },
             "notes_commitment": {
               "$ref": "#/$defs/sha256Digest"
+            },
+            "actor_role": {
+              "type": "string"
+            },
+            "anomaly_detected": {
+              "type": "boolean"
+            },
+            "override_action": {
+              "type": "string"
+            },
+            "interpretation_guidance_followed": {
+              "type": "boolean"
+            },
+            "automation_bias_detected": {
+              "type": "boolean"
+            },
+            "two_person_verification": {
+              "type": "boolean"
+            },
+            "stop_triggered": {
+              "type": "boolean"
+            },
+            "stop_reason": {
+              "type": "string"
             }
           },
           "required": [
@@ -213,12 +264,44 @@
             "summary": {
               "type": "string"
             },
+            "risk_description": {
+              "type": "string"
+            },
+            "likelihood": {
+              "type": "string"
+            },
+            "affected_groups": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "mitigation_measures": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "residual_risk_level": {
+              "type": "string"
+            },
+            "risk_owner": {
+              "type": "string"
+            },
+            "vulnerable_groups_considered": {
+              "type": "boolean"
+            },
+            "test_results_summary": {
+              "type": "string"
+            },
             "metadata": true
           },
           "required": [
             "risk_id",
             "severity",
-            "status"
+            "status",
+            "affected_groups",
+            "mitigation_measures"
           ]
         }
       },
@@ -244,10 +327,74 @@
             "dataset_ref": {
               "type": "string"
             },
+            "dataset_name": {
+              "type": "string"
+            },
+            "dataset_version": {
+              "type": "string"
+            },
+            "source_description": {
+              "type": "string"
+            },
+            "collection_period": {
+              "$ref": "#/$defs/dateRange"
+            },
+            "geographical_scope": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "preprocessing_operations": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "bias_detection_methodology": {
+              "type": "string"
+            },
+            "bias_metrics": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/metricSummary"
+              }
+            },
+            "mitigation_actions": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "data_gaps": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "personal_data_categories": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "safeguards": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
             "metadata": true
           },
           "required": [
-            "decision"
+            "decision",
+            "geographical_scope",
+            "preprocessing_operations",
+            "bias_metrics",
+            "mitigation_actions",
+            "data_gaps",
+            "personal_data_categories",
+            "safeguards"
           ]
         }
       },
@@ -275,10 +422,41 @@
             },
             "commitment": {
               "$ref": "#/$defs/sha256Digest"
+            },
+            "annex_iv_sections": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "system_description_summary": {
+              "type": "string"
+            },
+            "model_description_summary": {
+              "type": "string"
+            },
+            "capabilities_and_limitations": {
+              "type": "string"
+            },
+            "design_choices_summary": {
+              "type": "string"
+            },
+            "evaluation_metrics_summary": {
+              "type": "string"
+            },
+            "human_oversight_design_summary": {
+              "type": "string"
+            },
+            "post_market_monitoring_plan_ref": {
+              "type": "string"
+            },
+            "simplified_tech_doc": {
+              "type": "boolean"
             }
           },
           "required": [
-            "document_ref"
+            "document_ref",
+            "annex_iv_sections"
           ]
         }
       },
@@ -313,12 +491,29 @@
             "report_commitment": {
               "$ref": "#/$defs/sha256Digest"
             },
+            "metrics_summary": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/metricSummary"
+              }
+            },
+            "group_performance": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/groupMetricSummary"
+              }
+            },
+            "evaluation_methodology": {
+              "type": "string"
+            },
             "metadata": true
           },
           "required": [
             "evaluation_id",
             "benchmark",
-            "status"
+            "status",
+            "metrics_summary",
+            "group_performance"
           ]
         }
       },
@@ -353,12 +548,32 @@
             "report_commitment": {
               "$ref": "#/$defs/sha256Digest"
             },
+            "threat_model": {
+              "type": "string"
+            },
+            "test_methodology": {
+              "type": "string"
+            },
+            "attack_classes": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "affected_components": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
             "metadata": true
           },
           "required": [
             "test_id",
             "focus",
-            "status"
+            "status",
+            "attack_classes",
+            "affected_components"
           ]
         }
       },
@@ -390,11 +605,79 @@
             "record_commitment": {
               "$ref": "#/$defs/sha256Digest"
             },
+            "compute_metrics_ref": {
+              "type": "string"
+            },
+            "training_dataset_summary": {
+              "type": "string"
+            },
+            "consortium_context": {
+              "type": "string"
+            },
             "metadata": true
           },
           "required": [
             "dataset_ref",
             "stage"
+          ]
+        }
+      },
+      "required": [
+        "type",
+        "data"
+      ]
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "compute_metrics"
+        },
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "compute_id": {
+              "type": "string"
+            },
+            "training_flops_estimate": {
+              "type": "string"
+            },
+            "threshold_basis_ref": {
+              "type": "string"
+            },
+            "threshold_value": {
+              "type": "string"
+            },
+            "threshold_status": {
+              "type": "string"
+            },
+            "estimation_methodology": {
+              "type": "string"
+            },
+            "measured_at": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "compute_resources_summary": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/metricSummary"
+              }
+            },
+            "consortium_context": {
+              "type": "string"
+            },
+            "metadata": true
+          },
+          "required": [
+            "compute_id",
+            "training_flops_estimate",
+            "threshold_basis_ref",
+            "threshold_value",
+            "threshold_status",
+            "compute_resources_summary"
           ]
         }
       },
@@ -425,6 +708,12 @@
             },
             "report_commitment": {
               "$ref": "#/$defs/sha256Digest"
+            },
+            "assessment_body": {
+              "type": "string"
+            },
+            "certificate_ref": {
+              "type": "string"
             },
             "metadata": true
           },
@@ -463,6 +752,12 @@
             "document_commitment": {
               "$ref": "#/$defs/sha256Digest"
             },
+            "signatory": {
+              "type": "string"
+            },
+            "document_version": {
+              "type": "string"
+            },
             "metadata": true
           },
           "required": [
@@ -499,6 +794,13 @@
             },
             "receipt_commitment": {
               "$ref": "#/$defs/sha256Digest"
+            },
+            "registration_number": {
+              "type": "string"
+            },
+            "submitted_at": {
+              "type": "string",
+              "format": "date-time"
             },
             "metadata": true
           },
@@ -537,6 +839,15 @@
             "attestation_commitment": {
               "$ref": "#/$defs/sha256Digest"
             },
+            "completion_date": {
+              "type": "string"
+            },
+            "training_provider": {
+              "type": "string"
+            },
+            "certificate_digest": {
+              "type": "string"
+            },
             "metadata": true
           },
           "required": [
@@ -573,10 +884,68 @@
             "commitment": {
               "$ref": "#/$defs/sha256Digest"
             },
+            "provider_identity": {
+              "type": "string"
+            },
+            "intended_purpose": {
+              "type": "string"
+            },
+            "system_capabilities": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "accuracy_metrics": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/metricSummary"
+              }
+            },
+            "foreseeable_risks": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "explainability_capabilities": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "human_oversight_guidance": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "compute_requirements": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "service_lifetime": {
+              "type": "string"
+            },
+            "log_management_guidance": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
             "metadata": true
           },
           "required": [
-            "document_ref"
+            "document_ref",
+            "system_capabilities",
+            "accuracy_metrics",
+            "foreseeable_risks",
+            "explainability_capabilities",
+            "human_oversight_guidance",
+            "compute_requirements",
+            "log_management_guidance"
           ]
         }
       },
@@ -608,12 +977,40 @@
             "record_commitment": {
               "$ref": "#/$defs/sha256Digest"
             },
+            "policy_name": {
+              "type": "string"
+            },
+            "revision": {
+              "type": "string"
+            },
+            "effective_date": {
+              "type": "string"
+            },
+            "expiry_date": {
+              "type": "string"
+            },
+            "scope": {
+              "type": "string"
+            },
+            "approval_commitment": {
+              "$ref": "#/$defs/sha256Digest"
+            },
+            "audit_results_summary": {
+              "type": "string"
+            },
+            "continuous_improvement_actions": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
             "metadata": true
           },
           "required": [
             "record_id",
             "process",
-            "status"
+            "status",
+            "continuous_improvement_actions"
           ]
         }
       },
@@ -645,11 +1042,30 @@
             "report_commitment": {
               "$ref": "#/$defs/sha256Digest"
             },
+            "legal_basis": {
+              "type": "string"
+            },
+            "affected_rights": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "stakeholder_consultation_summary": {
+              "type": "string"
+            },
+            "mitigation_plan_summary": {
+              "type": "string"
+            },
+            "assessor": {
+              "type": "string"
+            },
             "metadata": true
           },
           "required": [
             "assessment_id",
-            "status"
+            "status",
+            "affected_rights"
           ]
         }
       },
@@ -1088,6 +1504,21 @@
             "report_commitment": {
               "$ref": "#/$defs/sha256Digest"
             },
+            "detection_method": {
+              "type": "string"
+            },
+            "root_cause_summary": {
+              "type": "string"
+            },
+            "corrective_action_ref": {
+              "type": "string"
+            },
+            "authority_notification_required": {
+              "type": "boolean"
+            },
+            "authority_notification_status": {
+              "type": "string"
+            },
             "metadata": true
           },
           "required": [
@@ -1123,6 +1554,58 @@
         "total_tokens": {
           "type": "integer",
           "minimum": 0
+        }
+      }
+    },
+    "dateRange": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "start": {
+          "type": "string"
+        },
+        "end": {
+          "type": "string"
+        }
+      }
+    },
+    "metricSummary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "value"
+      ],
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "value": {
+          "type": "string"
+        },
+        "unit": {
+          "type": "string"
+        },
+        "methodology": {
+          "type": "string"
+        }
+      }
+    },
+    "groupMetricSummary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "group"
+      ],
+      "properties": {
+        "group": {
+          "type": "string"
+        },
+        "metrics": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/metricSummary"
+          }
         }
       }
     }

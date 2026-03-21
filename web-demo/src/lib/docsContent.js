@@ -40,7 +40,7 @@ export const DOC_PAGES = {
         body: [
           "SDKs and the CLI capture prompts, responses, traces, and governance artefacts for one AI run or decision point.",
           "They seal that material into a signed proof record that can be verified locally.",
-          "The optional vault adds retention, disclosure policy handling, and export packs for workflows such as provider governance, post-market monitoring, incident response, and deployer-side FRIA reviews."
+          "The optional vault adds retention, disclosure policy handling, and export packs for workflows such as provider governance, Annex XI or GPAI threshold tracking, post-market monitoring, incident response, and deployer-side FRIA reviews."
         ]
       },
       {
@@ -80,7 +80,7 @@ export const DOC_PAGES = {
       {
         heading: "Share",
         body: [
-          "The vault can export either a full package or a redacted package, including curated packs such as provider governance, post-market monitoring, incident response, or deployer-side fundamental rights evidence."
+          "The vault can export either a full package or a redacted package, including curated packs such as provider governance, Annex XI, post-market monitoring, incident response, or deployer-side fundamental rights evidence."
         ]
       }
     ]
@@ -183,7 +183,7 @@ export const DOC_PAGES = {
         body: [
           "Signing key, service URL, optional auth, and optional assurance providers.",
           "Storage, retention, and backup behavior depending on your environment.",
-          "Pack/export workflows such as provider governance, runtime logs, post-market monitoring, incident response, and deployer-side fundamental rights evidence."
+          "Pack/export workflows such as provider governance, runtime logs, Annex XI, post-market monitoring, incident response, and deployer-side fundamental rights evidence."
         ]
       }
     ]

@@ -157,6 +157,31 @@ pub struct TokenUsage {
     pub total_tokens: Option<u64>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub struct DateRange {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub start: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub end: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct MetricSummary {
+    pub name: String,
+    pub value: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unit: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub methodology: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub struct GroupMetricSummary {
+    pub group: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub metrics: Vec<MetricSummary>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct LlmInteractionEvidence {
     pub provider: String,
@@ -177,6 +202,10 @@ pub struct LlmInteractionEvidence {
     pub trace_commitment: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub trace_semconv_version: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub execution_start: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub execution_end: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -188,6 +217,10 @@ pub struct ToolCallEvidence {
     pub output_commitment: Option<String>,
     #[serde(default = "null_json", skip_serializing_if = "Value::is_null")]
     pub metadata: Value,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub execution_start: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub execution_end: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -198,6 +231,12 @@ pub struct RetrievalEvidence {
     pub query_commitment: Option<String>,
     #[serde(default = "null_json", skip_serializing_if = "Value::is_null")]
     pub metadata: Value,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub database_reference: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub execution_start: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub execution_end: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -207,6 +246,22 @@ pub struct HumanOversightEvidence {
     pub reviewer: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub notes_commitment: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub actor_role: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub anomaly_detected: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub override_action: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub interpretation_guidance_followed: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub automation_bias_detected: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub two_person_verification: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stop_triggered: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stop_reason: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -226,6 +281,22 @@ pub struct RiskAssessmentEvidence {
     pub status: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub summary: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub risk_description: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub likelihood: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub affected_groups: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub mitigation_measures: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub residual_risk_level: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub risk_owner: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub vulnerable_groups_considered: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub test_results_summary: Option<String>,
     #[serde(default = "null_json", skip_serializing_if = "Value::is_null")]
     pub metadata: Value,
 }
@@ -235,6 +306,30 @@ pub struct DataGovernanceEvidence {
     pub decision: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dataset_ref: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dataset_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dataset_version: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_description: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub collection_period: Option<DateRange>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub geographical_scope: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub preprocessing_operations: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bias_detection_methodology: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub bias_metrics: Vec<MetricSummary>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub mitigation_actions: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub data_gaps: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub personal_data_categories: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub safeguards: Vec<String>,
     #[serde(default = "null_json", skip_serializing_if = "Value::is_null")]
     pub metadata: Value,
 }
@@ -246,6 +341,24 @@ pub struct TechnicalDocEvidence {
     pub section: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub commitment: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub annex_iv_sections: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub system_description_summary: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model_description_summary: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub capabilities_and_limitations: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub design_choices_summary: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub evaluation_metrics_summary: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub human_oversight_design_summary: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub post_market_monitoring_plan_ref: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub simplified_tech_doc: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -257,6 +370,12 @@ pub struct ModelEvaluationEvidence {
     pub summary: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub report_commitment: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub metrics_summary: Vec<MetricSummary>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub group_performance: Vec<GroupMetricSummary>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub evaluation_methodology: Option<String>,
     #[serde(default = "null_json", skip_serializing_if = "Value::is_null")]
     pub metadata: Value,
 }
@@ -270,6 +389,14 @@ pub struct AdversarialTestEvidence {
     pub finding_severity: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub report_commitment: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub threat_model: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub test_methodology: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub attack_classes: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub affected_components: Vec<String>,
     #[serde(default = "null_json", skip_serializing_if = "Value::is_null")]
     pub metadata: Value,
 }
@@ -282,6 +409,31 @@ pub struct TrainingProvenanceEvidence {
     pub lineage_ref: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub record_commitment: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub compute_metrics_ref: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub training_dataset_summary: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub consortium_context: Option<String>,
+    #[serde(default = "null_json", skip_serializing_if = "Value::is_null")]
+    pub metadata: Value,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ComputeMetricsEvidence {
+    pub compute_id: String,
+    pub training_flops_estimate: String,
+    pub threshold_basis_ref: String,
+    pub threshold_value: String,
+    pub threshold_status: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub estimation_methodology: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub measured_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub compute_resources_summary: Vec<MetricSummary>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub consortium_context: Option<String>,
     #[serde(default = "null_json", skip_serializing_if = "Value::is_null")]
     pub metadata: Value,
 }
@@ -293,6 +445,10 @@ pub struct ConformityAssessmentEvidence {
     pub status: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub report_commitment: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub assessment_body: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub certificate_ref: Option<String>,
     #[serde(default = "null_json", skip_serializing_if = "Value::is_null")]
     pub metadata: Value,
 }
@@ -304,6 +460,10 @@ pub struct DeclarationEvidence {
     pub status: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub document_commitment: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub signatory: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub document_version: Option<String>,
     #[serde(default = "null_json", skip_serializing_if = "Value::is_null")]
     pub metadata: Value,
 }
@@ -315,6 +475,10 @@ pub struct RegistrationEvidence {
     pub status: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub receipt_commitment: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub registration_number: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub submitted_at: Option<String>,
     #[serde(default = "null_json", skip_serializing_if = "Value::is_null")]
     pub metadata: Value,
 }
@@ -327,6 +491,12 @@ pub struct LiteracyAttestationEvidence {
     pub training_ref: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub attestation_commitment: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub completion_date: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub training_provider: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub certificate_digest: Option<String>,
     #[serde(default = "null_json", skip_serializing_if = "Value::is_null")]
     pub metadata: Value,
 }
@@ -340,6 +510,26 @@ pub struct InstructionsForUseEvidence {
     pub section: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub commitment: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider_identity: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub intended_purpose: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub system_capabilities: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub accuracy_metrics: Vec<MetricSummary>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub foreseeable_risks: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub explainability_capabilities: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub human_oversight_guidance: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub compute_requirements: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub service_lifetime: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub log_management_guidance: Vec<String>,
     #[serde(default = "null_json", skip_serializing_if = "Value::is_null")]
     pub metadata: Value,
 }
@@ -351,6 +541,22 @@ pub struct QmsRecordEvidence {
     pub status: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub record_commitment: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub policy_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub revision: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effective_date: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expiry_date: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scope: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub approval_commitment: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub audit_results_summary: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub continuous_improvement_actions: Vec<String>,
     #[serde(default = "null_json", skip_serializing_if = "Value::is_null")]
     pub metadata: Value,
 }
@@ -363,6 +569,16 @@ pub struct FundamentalRightsAssessmentEvidence {
     pub scope: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub report_commitment: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub legal_basis: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub affected_rights: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stakeholder_consultation_summary: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mitigation_plan_summary: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub assessor: Option<String>,
     #[serde(default = "null_json", skip_serializing_if = "Value::is_null")]
     pub metadata: Value,
 }
@@ -508,6 +724,16 @@ pub struct IncidentReportEvidence {
     pub summary: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub report_commitment: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detection_method: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub root_cause_summary: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub corrective_action_ref: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub authority_notification_required: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub authority_notification_status: Option<String>,
     #[serde(default = "null_json", skip_serializing_if = "Value::is_null")]
     pub metadata: Value,
 }
@@ -526,6 +752,7 @@ pub enum EvidenceItem {
     ModelEvaluation(ModelEvaluationEvidence),
     AdversarialTest(AdversarialTestEvidence),
     TrainingProvenance(TrainingProvenanceEvidence),
+    ComputeMetrics(ComputeMetricsEvidence),
     ConformityAssessment(ConformityAssessmentEvidence),
     Declaration(DeclarationEvidence),
     Registration(RegistrationEvidence),
@@ -1145,7 +1372,9 @@ fn validate_item_digests(index: usize, item: &EvidenceItem) -> Result<(), Bundle
                 validate_named_digest(index, "report_commitment", value)?;
             }
         }
-        EvidenceItem::RiskAssessment(_) | EvidenceItem::DataGovernance(_) => {}
+        EvidenceItem::RiskAssessment(_)
+        | EvidenceItem::DataGovernance(_)
+        | EvidenceItem::ComputeMetrics(_) => {}
     }
 
     Ok(())
@@ -1398,6 +1627,8 @@ mod tests {
                         .to_string(),
                 ),
                 trace_semconv_version: Some("1.0.0".to_string()),
+                execution_start: Some("2026-03-01T23:59:58Z".to_string()),
+                execution_end: Some("2026-03-02T00:00:00Z".to_string()),
             })],
             policy: Policy {
                 redactions: vec![],
@@ -1506,6 +1737,11 @@ mod tests {
             occurred_at: Some("2026-03-05T12:30:00Z".to_string()),
             summary: Some("model produced unsafe escalation advice".to_string()),
             report_commitment: Some("sha256:not-a-digest".to_string()),
+            detection_method: None,
+            root_cause_summary: None,
+            corrective_action_ref: None,
+            authority_notification_required: None,
+            authority_notification_status: None,
             metadata: json!({"source": "runtime_monitor"}),
         })];
 
@@ -1561,6 +1797,9 @@ mod tests {
                 stage: "pretraining".to_string(),
                 lineage_ref: Some("lineage://snapshot/2026-03-01".to_string()),
                 record_commitment: Some("sha256:not-a-digest".to_string()),
+                compute_metrics_ref: None,
+                training_dataset_summary: None,
+                consortium_context: None,
                 metadata: json!({"provider": "internal-data-registry"}),
             },
         )];
@@ -1616,6 +1855,8 @@ mod tests {
             jurisdiction: "eu".to_string(),
             status: "issued".to_string(),
             document_commitment: Some("sha256:not-a-digest".to_string()),
+            signatory: None,
+            document_version: None,
             metadata: json!({"annex": "v"}),
         })];
 

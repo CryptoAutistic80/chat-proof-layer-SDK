@@ -251,6 +251,8 @@ mod tests {
                         .to_string(),
                 ),
                 trace_semconv_version: Some("1.0.0".to_string()),
+                execution_start: None,
+                execution_end: None,
             })],
             policy: Policy {
                 redactions: vec![],

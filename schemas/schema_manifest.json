@@ -40,6 +40,7 @@
     "model_evaluation",
     "adversarial_test",
     "training_provenance",
+    "compute_metrics",
     "conformity_assessment",
     "declaration",
     "registration",

@@ -56,7 +56,8 @@ export const RECORDED_ITEMS = [
   "Prompts and model outputs",
   "System, model, and actor-role context",
   "Human review or oversight actions",
-  "Operating rules and governance records",
+  "Data-governance, operating-rule, and quality-management records",
+  "Training provenance and compute-threshold evidence for GPAI workflows",
   "Incident and authority-reporting material when needed"
 ];
 
@@ -75,9 +76,15 @@ export const COMMON_WORKFLOWS = [
   },
   {
     slug: "support-rules",
-    title: "Support assistant with operating rules",
+    title: "Support assistant with governance file",
     body:
-      "Capture the AI run plus the operating instructions and quality sign-off around that workflow."
+      "Capture the AI run plus structured data governance, operator instructions, and quality sign-off around that workflow."
+  },
+  {
+    slug: "foundation-model-thresholds",
+    title: "Foundation model threshold tracking",
+    body:
+      "Capture training provenance and compute-threshold evidence for GPAI or Annex XI style review."
   },
   {
     slug: "hiring-review",

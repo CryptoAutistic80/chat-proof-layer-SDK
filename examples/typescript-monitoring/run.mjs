@@ -54,6 +54,36 @@ async function main() {
     retentionClass: "risk_mgmt"
   });
 
+  const incident = await proofLayer.captureIncidentReport({
+    incidentId: "inc-claims-42",
+    severity: "serious",
+    status: "open",
+    occurredAt: "2026-03-08T07:15:00Z",
+    summary: "Potentially adverse recommendation surfaced in a sensitive claims case.",
+    detectionMethod: "post_market_monitoring",
+    rootCauseSummary: "Missing-document threshold was too permissive for a narrow claims segment.",
+    authorityNotificationRequired: true,
+    authorityNotificationStatus: "drafted",
+    report: {
+      owner: "incident-ops",
+      corrective_action_ref: "ca-claims-42"
+    },
+    retentionClass: "risk_mgmt"
+  });
+
+  const notification = await proofLayer.captureAuthorityNotification({
+    notificationId: "notif-claims-42",
+    authority: "eu_ai_office",
+    status: "drafted",
+    incidentId: "inc-claims-42",
+    dueAt: "2026-03-10T12:00:00Z",
+    report: {
+      article: "73",
+      summary: "Initial authority notification for claims incident review."
+    },
+    retentionClass: "risk_mgmt"
+  });
+
   const submission = await proofLayer.captureAuthoritySubmission({
     submissionId: "sub-claims-42",
     authority: "eu_ai_office",
@@ -82,7 +112,13 @@ async function main() {
   console.log("vault_url:", vaultUrl);
   console.log(
     "captured_bundle_ids:",
-    [interaction.bundleId, monitoring.bundleId, submission.bundleId].join(", ")
+    [
+      interaction.bundleId,
+      monitoring.bundleId,
+      incident.bundleId,
+      notification.bundleId,
+      submission.bundleId
+    ].join(", ")
   );
   console.log("pack_id:", pack.pack_id);
   console.log("pack_type:", manifest.pack_type);

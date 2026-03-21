@@ -2,7 +2,8 @@ import { describe, expect, test } from "vitest";
 import {
   applyScenarioToDraft,
   firstScenarioForLane,
-  getPlaygroundScenario
+  getPlaygroundScenario,
+  inferPackTypeFromItems
 } from "./sdkPlaygroundScenarios";
 
 describe("sdkPlaygroundScenarios", () => {
@@ -31,5 +32,14 @@ describe("sdkPlaygroundScenarios", () => {
     expect(nextDraft.systemId).toBe("support-assistant");
     expect(nextDraft.templateProfile).toBe("annex_iv_redacted");
     expect(nextDraft.playgroundHydrated).toBe(true);
+  });
+
+  test("infers Annex XI pack selection from GPAI evidence items", () => {
+    const packType = inferPackTypeFromItems([
+      { type: "training_provenance" },
+      { type: "compute_metrics" }
+    ]);
+
+    expect(packType).toBe("annex_xi");
   });
 });

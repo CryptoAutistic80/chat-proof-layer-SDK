@@ -18,10 +18,9 @@ pub mod bundle {
         BUNDLE_ROOT_ALGORITHM_V2, BUNDLE_ROOT_ALGORITHM_V3, BUNDLE_ROOT_ALGORITHM_V4,
         BUNDLE_VERSION, BundleValidationError, BundleVerificationError, CANONICALIZATION_ALGORITHM,
         CaptureEvent, ComplianceProfile, EncryptionPolicy, EvidenceBundle as ProofBundle,
-        EvidenceContext, EvidenceItem, HASH_ALGORITHM, Integrity,
-        LEGACY_BUNDLE_ROOT_ALGORITHM, LlmInteractionEvidence, Policy, SIGNATURE_ALGORITHM,
-        SIGNATURE_FORMAT, SignatureInfo, Subject, TimestampToken, TransparencyReceipt,
-        VerificationSummary,
+        EvidenceContext, EvidenceItem, HASH_ALGORITHM, Integrity, LEGACY_BUNDLE_ROOT_ALGORITHM,
+        LlmInteractionEvidence, Policy, SIGNATURE_ALGORITHM, SIGNATURE_FORMAT, SignatureInfo,
+        Subject, TimestampToken, TransparencyReceipt, VerificationSummary,
         validate_bundle_integrity_fields,
     };
 }

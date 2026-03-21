@@ -81,6 +81,34 @@ test("createDisclosurePolicyTemplate incident summary includes authority-reporti
     "regulator_correspondence",
     "risk_assessment",
     "policy_decision",
+    "human_oversight",
+    "adversarial_test"
+  ]);
+  assert.deepEqual(policy.redacted_fields_by_item_type?.incident_report, ["/root_cause_summary"]);
+  assert.deepEqual(policy.redacted_fields_by_item_type?.adversarial_test, [
+    "/threat_model",
+    "/affected_components"
+  ]);
+});
+
+test("createDisclosurePolicyTemplate annex iv includes structured governance redactions", () => {
+  const policy = createDisclosurePolicyTemplate("annex_iv_redacted");
+
+  assert.deepEqual(policy.allowed_item_types, [
+    "technical_doc",
+    "risk_assessment",
+    "data_governance",
+    "instructions_for_use",
     "human_oversight"
+  ]);
+  assert.deepEqual(policy.redacted_fields_by_item_type?.data_governance, [
+    "/bias_metrics",
+    "/personal_data_categories",
+    "/safeguards"
+  ]);
+  assert.deepEqual(policy.redacted_fields_by_item_type?.instructions_for_use, [
+    "/accuracy_metrics",
+    "/compute_requirements",
+    "/log_management_guidance"
   ]);
 });

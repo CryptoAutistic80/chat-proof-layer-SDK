@@ -19,6 +19,9 @@ DATETIME_FIELDS = {
     "occurred_at",
     "submitted_at",
     "due_at",
+    "measured_at",
+    "execution_start",
+    "execution_end",
     "generated_at",
     "from",
     "to",
@@ -177,6 +180,12 @@ def field_schema(field_name: str, rust_type: str, defs_prefix: str = "#/$defs/")
         return True, False
     if inner_type == "TokenUsage":
         return {"$ref": f"{defs_prefix}tokenUsage"}, False
+    if inner_type == "DateRange":
+        return {"$ref": f"{defs_prefix}dateRange"}, False
+    if inner_type == "MetricSummary":
+        return {"$ref": f"{defs_prefix}metricSummary"}, False
+    if inner_type == "GroupMetricSummary":
+        return {"$ref": f"{defs_prefix}groupMetricSummary"}, False
     if inner_type == "String":
         if "commitment" in field_name or field_name == "digest":
             return {"$ref": f"{defs_prefix}sha256Digest"}, required
@@ -190,7 +199,63 @@ def field_schema(field_name: str, rust_type: str, defs_prefix: str = "#/$defs/")
         return {"type": "boolean"}, required
     if inner_type == "Vec<String>":
         return {"type": "array", "items": {"type": "string"}}, required
+    if inner_type == "Vec<MetricSummary>":
+        return {"type": "array", "items": {"$ref": f"{defs_prefix}metricSummary"}}, required
+    if inner_type == "Vec<GroupMetricSummary>":
+        return {
+            "type": "array",
+            "items": {"$ref": f"{defs_prefix}groupMetricSummary"},
+        }, required
     raise RuntimeError(f"unsupported field type {rust_type!r} for {field_name}")
+
+
+def build_shared_defs() -> dict[str, object]:
+    return {
+        "sha256Digest": {
+            "type": "string",
+            "pattern": SHA256_PATTERN,
+        },
+        "tokenUsage": {
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {
+                "input_tokens": {"type": "integer", "minimum": 0},
+                "output_tokens": {"type": "integer", "minimum": 0},
+                "total_tokens": {"type": "integer", "minimum": 0},
+            },
+        },
+        "dateRange": {
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {
+                "start": {"type": "string"},
+                "end": {"type": "string"},
+            },
+        },
+        "metricSummary": {
+            "type": "object",
+            "additionalProperties": False,
+            "required": ["name", "value"],
+            "properties": {
+                "name": {"type": "string"},
+                "value": {"type": "string"},
+                "unit": {"type": "string"},
+                "methodology": {"type": "string"},
+            },
+        },
+        "groupMetricSummary": {
+            "type": "object",
+            "additionalProperties": False,
+            "required": ["group"],
+            "properties": {
+                "group": {"type": "string"},
+                "metrics": {
+                    "type": "array",
+                    "items": {"$ref": "#/$defs/metricSummary"},
+                },
+            },
+        },
+    }
 
 
 def build_item_variant_schema(
@@ -327,21 +392,7 @@ def build_evidence_item_schema(
             build_item_variant_schema(item_type, struct_name, structs)
             for item_type, struct_name in variants
         ],
-        "$defs": {
-            "sha256Digest": {
-                "type": "string",
-                "pattern": SHA256_PATTERN,
-            },
-            "tokenUsage": {
-                "type": "object",
-                "additionalProperties": False,
-                "properties": {
-                    "input_tokens": {"type": "integer", "minimum": 0},
-                    "output_tokens": {"type": "integer", "minimum": 0},
-                    "total_tokens": {"type": "integer", "minimum": 0},
-                },
-            },
-        },
+        "$defs": build_shared_defs(),
     }
 
 

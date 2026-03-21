@@ -41,6 +41,27 @@ test("ProofLayer.capture seals a local llm_interaction bundle", async () => {
   assert.equal(typeof result.bundleRoot, "string");
 });
 
+test("ProofLayer.captureComputeMetrics seals local GPAI threshold evidence", async () => {
+  const signingKeyPem = await readFile(path.join(goldenDir, "signing_key.txt"), "utf8");
+  const proofLayer = new ProofLayer({
+    signingKeyPem,
+    keyId: "kid-dev-01",
+    systemId: "system-gpai-threshold"
+  });
+
+  const result = await proofLayer.captureComputeMetrics({
+    computeId: "compute-2026-q1",
+    trainingFlopsEstimate: "1.2e25",
+    thresholdBasisRef: "art51",
+    thresholdValue: "1e25",
+    thresholdStatus: "above_threshold"
+  });
+
+  assert.equal(result.bundle?.items[0].type, "compute_metrics");
+  assert.equal(result.bundle?.items[0].data.threshold_status, "above_threshold");
+  assert.equal(result.bundle?.policy.retention_class, "gpai_documentation");
+});
+
 test("ProofLayer.disclose returns a locally verifiable redacted bundle", async () => {
   const signingKeyPem = await readFile(path.join(goldenDir, "signing_key.txt"), "utf8");
   const publicKeyPem = await readFile(path.join(goldenDir, "verify_key.txt"), "utf8");

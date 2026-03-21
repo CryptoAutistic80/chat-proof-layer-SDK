@@ -153,15 +153,16 @@ export const PLAYGROUND_SCENARIOS = [
   {
     id: "ts_support_rules",
     lane: "typescript",
-    label: "Support assistant with operating rules",
+    label: "Support assistant with governance file",
     category: "Support workflow",
     description:
-      "Capture the AI run plus the instructions and sign-off around it, then export a provider governance pack.",
-    audienceSummary: "A support or triage assistant that must operate under clear human rules.",
+      "Capture the AI run plus structured data-governance, operator instructions, and sign-off evidence, then export a provider governance pack.",
+    audienceSummary:
+      "A support or triage assistant that needs usable provider-governance evidence around the model run.",
     lawExplainer: explainer(
-      "The law usually expects more than a raw model output when a workflow needs operating controls and internal review evidence.",
-      "This example records the model run plus instructions for operators and a quality-management sign-off record.",
-      "Your team still needs to maintain the real operating process, decide which standards apply, and add monitoring once the workflow is live."
+      "The law usually expects more than a raw model output when a workflow needs operating controls, data governance, and internal review evidence.",
+      "This example records the model run plus structured data-governance detail, instructions for operators, and a quality-management sign-off record.",
+      "Your team still needs to maintain the real process, validate completeness against your own obligations, and add monitoring once the workflow is live."
     ),
     sourceRef: "examples/typescript-compliance/run.mjs",
     codeLanguage: "javascript",
@@ -190,9 +191,18 @@ export const PLAYGROUND_SCENARIOS = [
       owner: "quality-team",
       market: "eu",
       userPrompt: "Summarize a customer complaint and suggest the next safe support step.",
+      datasetName: "support-assistant-ops-corpus",
+      datasetVersion: "2026.03",
+      sourceDescription:
+        "Curated support tickets and QA-reviewed agent notes for EU customer support operations.",
+      biasMethodology:
+        "Monthly parity review across language, accessibility, and vulnerable-customer cohorts.",
+      safeguards: "pseudonymization, role-based access, retention minimization",
       instructionsSummary:
         "Agents must review high-risk refund, safety, and account-lock decisions before anything is sent.",
       instructionsSection: "agent-review-required",
+      humanOversightGuidance:
+        "Escalate refund, safety, and account-access decisions to a human reviewer before release.",
       qmsStatus: "approved",
       qmsApprover: "quality-lead"
     },
@@ -201,8 +211,31 @@ export const PLAYGROUND_SCENARIOS = [
       ...INTERACTION_FIELDS,
       ...COMMON_PROFILE_FIELDS,
       {
+        key: "datasetName",
+        label: "Dataset name",
+        type: "text"
+      },
+      {
+        key: "sourceDescription",
+        label: "Dataset source summary",
+        type: "textarea",
+        rows: 3
+      },
+      {
+        key: "biasMethodology",
+        label: "Bias review method",
+        type: "textarea",
+        rows: 3
+      },
+      {
         key: "instructionsSummary",
         label: "Operating rules summary",
+        type: "textarea",
+        rows: 3
+      },
+      {
+        key: "humanOversightGuidance",
+        label: "Human oversight guidance",
         type: "textarea",
         rows: 3
       },
@@ -214,6 +247,7 @@ export const PLAYGROUND_SCENARIOS = [
     ],
     steps: [
       { id: "interaction", kind: "interaction", itemType: "llm_interaction", bundleRole: "primary" },
+      { id: "data_governance", kind: "evidence", itemType: "data_governance", bundleRole: "support" },
       {
         id: "instructions_for_use",
         kind: "evidence",
@@ -224,8 +258,123 @@ export const PLAYGROUND_SCENARIOS = [
     ],
     missingEvidence: [
       "Add monitoring records once the workflow is live and you need to show how it is watched over time.",
-      "Add standards-alignment or release records if this needs to represent a fuller provider file.",
+      "Add risk-assessment and testing records if this needs to represent a fuller provider file.",
       "Add incident or corrective-action records when the workflow has real operational issues to review."
+    ]
+  },
+  {
+    id: "ts_gpai_thresholds",
+    lane: "typescript",
+    label: "Foundation model threshold tracking",
+    category: "GPAI workflow",
+    description:
+      "Capture training provenance plus compute-threshold evidence for a GPAI provider workflow and export an Annex XI pack.",
+    audienceSummary:
+      "A GPAI or foundation-model provider that needs to track provenance and systemic-risk compute thresholds.",
+    lawExplainer: explainer(
+      "For GPAI workflows, teams may need to show how training provenance and compute-threshold evidence line up with provider obligations.",
+      "This example records training provenance plus first-class compute metrics so a reviewer can trace dataset lineage and threshold status together.",
+      "Your team still needs the broader GPAI file such as downstream documentation, copyright policy, and evaluation evidence."
+    ),
+    sourceRef: "examples/typescript-gpai/run.mjs",
+    codeLanguage: "javascript",
+    packType: "annex_xi",
+    reviewKind: "annex_xi",
+    actorRole: "provider",
+    bundleFormat: "full",
+    disclosureProfile: "annex_iv_redacted",
+    templateId: "ts_gpai_thresholds",
+    primaryStepId: "training_provenance",
+    recordExplorerIntro:
+      "This record set shows a GPAI provider workflow where provenance and compute-threshold evidence are captured as separate but linked records.",
+    defaults: {
+      serviceUrl: DEFAULT_SERVICE_URL,
+      systemId: "foundation-model-alpha",
+      intendedUse: "General-purpose text and workflow assistance",
+      prohibitedPracticeScreening: "screened_no_prohibited_use",
+      riskTier: "",
+      highRiskDomain: "",
+      gpaiStatus: "provider",
+      systemicRisk: true,
+      deploymentContext: "eu_market_placement",
+      owner: "foundation-ops",
+      market: "eu",
+      datasetRef: "dataset://foundation-model-alpha/pretrain-v5",
+      trainingDatasetSummary: "Multilingual curated web, code, and licensed reference corpora.",
+      consortiumContext: "Single-provider training program",
+      trainingFlopsEstimate: "1.2e25",
+      thresholdStatus: "above_threshold",
+      thresholdValue: "1e25",
+      gpuHours: "42000",
+      acceleratorCount: "2048"
+    },
+    fields: [
+      ...COMMON_CONNECTION_FIELDS,
+      ...COMMON_PROFILE_FIELDS,
+      {
+        key: "datasetRef",
+        label: "Dataset reference",
+        type: "text"
+      },
+      {
+        key: "trainingDatasetSummary",
+        label: "Training dataset summary",
+        type: "textarea",
+        rows: 3
+      },
+      {
+        key: "consortiumContext",
+        label: "Consortium context",
+        type: "text"
+      },
+      {
+        key: "trainingFlopsEstimate",
+        label: "Training FLOPs estimate",
+        type: "text"
+      },
+      {
+        key: "thresholdStatus",
+        label: "Threshold status",
+        type: "select",
+        options: [
+          { label: "Above threshold", value: "above_threshold" },
+          { label: "Below threshold", value: "below_threshold" }
+        ]
+      },
+      {
+        key: "thresholdValue",
+        label: "Threshold value",
+        type: "text"
+      },
+      {
+        key: "gpuHours",
+        label: "GPU hours",
+        type: "text"
+      },
+      {
+        key: "acceleratorCount",
+        label: "Accelerator count",
+        type: "text"
+      }
+    ],
+    steps: [
+      {
+        id: "training_provenance",
+        kind: "evidence",
+        itemType: "training_provenance",
+        bundleRole: "primary"
+      },
+      {
+        id: "compute_metrics",
+        kind: "evidence",
+        itemType: "compute_metrics",
+        bundleRole: "support"
+      }
+    ],
+    missingEvidence: [
+      "Add downstream documentation and copyright-policy records when this needs to represent a fuller GPAI provider file.",
+      "Add evaluation or adversarial-testing evidence when reviewers need performance and robustness material with the provenance trail.",
+      "Add obligation-filtered export rules if you need to share only a narrow systemic-risk subset."
     ]
   },
   {
@@ -270,7 +419,10 @@ export const PLAYGROUND_SCENARIOS = [
       market: "eu",
       userPrompt: "Summarize the candidate profile for a hiring manager and flag open questions.",
       friaSummary: "Borderline or negative recommendations require manual review and documented justification.",
-      reviewer: "hiring-panel"
+      affectedRights: "equal treatment, access to employment, explanation",
+      assessor: "fundamental-rights-lead",
+      reviewer: "hiring-panel",
+      overrideAction: "Candidate routed to manual review queue before any hiring decision."
     },
     fields: [
       ...COMMON_CONNECTION_FIELDS,
@@ -283,9 +435,26 @@ export const PLAYGROUND_SCENARIOS = [
         rows: 3
       },
       {
+        key: "affectedRights",
+        label: "Affected rights",
+        type: "textarea",
+        rows: 3
+      },
+      {
+        key: "assessor",
+        label: "FRIA assessor",
+        type: "text"
+      },
+      {
         key: "reviewer",
         label: "Human reviewer",
         type: "text"
+      },
+      {
+        key: "overrideAction",
+        label: "Oversight outcome",
+        type: "textarea",
+        rows: 3
       }
     ],
     steps: [
@@ -346,6 +515,11 @@ export const PLAYGROUND_SCENARIOS = [
       market: "eu",
       authority: "eu_ai_office",
       incidentSummary: "Potentially adverse recommendation surfaced in a public-service case.",
+      rootCauseSummary:
+        "Missing-document threshold was too permissive for a narrow public-service case segment.",
+      correctiveActionRef: "ca-benefits-42",
+      notificationSummary:
+        "Initial authority notification for a potentially adverse recommendation incident.",
       dueAt: "2026-03-09T12:00:00Z",
       correspondenceSubject: "Initial authority follow-up"
     },
@@ -364,9 +538,26 @@ export const PLAYGROUND_SCENARIOS = [
         rows: 3
       },
       {
+        key: "rootCauseSummary",
+        label: "Root cause summary",
+        type: "textarea",
+        rows: 3
+      },
+      {
+        key: "correctiveActionRef",
+        label: "Corrective action ref",
+        type: "text"
+      },
+      {
         key: "dueAt",
         label: "Reporting deadline",
         type: "text"
+      },
+      {
+        key: "notificationSummary",
+        label: "Notification summary",
+        type: "textarea",
+        rows: 3
       },
       {
         key: "correspondenceSubject",
@@ -497,13 +688,20 @@ export function inferPackTypeFromItems(items = []) {
   if (types.includes("incident_report") || types.includes("authority_notification")) {
     return "incident_response";
   }
+  if (types.includes("training_provenance") || types.includes("compute_metrics")) {
+    return "annex_xi";
+  }
   if (types.includes("fundamental_rights_assessment") || types.includes("human_oversight")) {
     return "fundamental_rights";
   }
   if (types.includes("post_market_monitoring") || types.includes("authority_submission")) {
     return "post_market_monitoring";
   }
-  if (types.includes("instructions_for_use") || types.includes("qms_record")) {
+  if (
+    types.includes("data_governance") ||
+    types.includes("instructions_for_use") ||
+    types.includes("qms_record")
+  ) {
     return "provider_governance";
   }
   return null;

@@ -92,7 +92,38 @@ class TestDisclosurePolicyBuilders(unittest.TestCase):
                 "risk_assessment",
                 "policy_decision",
                 "human_oversight",
+                "adversarial_test",
             ],
+        )
+        self.assertEqual(
+            policy["redacted_fields_by_item_type"]["incident_report"],
+            ["/root_cause_summary"],
+        )
+        self.assertEqual(
+            policy["redacted_fields_by_item_type"]["adversarial_test"],
+            ["/threat_model", "/affected_components"],
+        )
+
+    def test_annex_iv_template_includes_structured_governance_redactions(self):
+        policy = create_disclosure_policy_template("annex_iv_redacted")
+
+        self.assertEqual(
+            policy["allowed_item_types"],
+            [
+                "technical_doc",
+                "risk_assessment",
+                "data_governance",
+                "instructions_for_use",
+                "human_oversight",
+            ],
+        )
+        self.assertEqual(
+            policy["redacted_fields_by_item_type"]["data_governance"],
+            ["/bias_metrics", "/personal_data_categories", "/safeguards"],
+        )
+        self.assertEqual(
+            policy["redacted_fields_by_item_type"]["instructions_for_use"],
+            ["/accuracy_metrics", "/compute_requirements", "/log_management_guidance"],
         )
 
 

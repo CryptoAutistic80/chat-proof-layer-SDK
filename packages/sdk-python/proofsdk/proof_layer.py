@@ -9,6 +9,7 @@ from proofsdk.evidence import (
     create_authority_notification_request,
     create_authority_submission_request,
     create_conformity_assessment_request,
+    create_compute_metrics_request,
     create_corrective_action_request,
     create_copyright_policy_request,
     create_data_governance_request,
@@ -482,6 +483,22 @@ class ProofLayer:
         params, bundle_id, created_at = self._split_local_options(kwargs)
         return self._submit_capture(
             create_training_provenance_request(
+                key_id=self.key_id,
+                role=self.role,
+                issuer=self.issuer,
+                app_id=self.app_id,
+                env=self.env,
+                system_id=params.pop("system_id", None) or self.system_id,
+                **params,
+            ),
+            bundle_id=bundle_id,
+            created_at=created_at,
+        )
+
+    def capture_compute_metrics(self, **kwargs: Any) -> dict[str, Any]:
+        params, bundle_id, created_at = self._split_local_options(kwargs)
+        return self._submit_capture(
+            create_compute_metrics_request(
                 key_id=self.key_id,
                 role=self.role,
                 issuer=self.issuer,

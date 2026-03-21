@@ -29,6 +29,14 @@ cargo run -p proofctl -- assess \
   --profile annex_iv_governance_v1
 ```
 
+If you have a full GPAI provider bundle and want the matching advisory readiness view:
+
+```bash
+cargo run -p proofctl -- assess \
+  --in ./gpai-provider-bundle.pkg \
+  --profile gpai_provider_v1
+```
+
 If you want the bundle to carry your actor role and system-classification context from day one, create it with the compliance flags instead of adding that data later:
 
 ```bash

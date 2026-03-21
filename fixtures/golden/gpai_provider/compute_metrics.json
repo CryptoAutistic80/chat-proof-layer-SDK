@@ -1,0 +1,27 @@
+{
+  "compute_id": "compute-foundation-alpha-v5",
+  "training_flops_estimate": "1.2e25",
+  "threshold_basis_ref": "art51_systemic_risk_threshold",
+  "threshold_value": "1e25",
+  "threshold_status": "above_threshold",
+  "estimation_methodology": "Cluster scheduler logs and accelerator utilization rollup.",
+  "measured_at": "2026-03-10T12:00:00Z",
+  "compute_resources_summary": [
+    {
+      "name": "gpu_hours",
+      "value": "42000",
+      "unit": "hours",
+      "methodology": "Provider training cluster accounting."
+    },
+    {
+      "name": "accelerator_count",
+      "value": "2048",
+      "unit": "gpus",
+      "methodology": "Peak provisioned accelerator count."
+    }
+  ],
+  "consortium_context": "Single-provider training program",
+  "metadata": {
+    "owner": "foundation-ops"
+  }
+}

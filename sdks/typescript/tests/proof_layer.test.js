@@ -10,6 +10,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, "../../..");
 const goldenDir = path.join(repoRoot, "fixtures", "golden");
 const annexIvDir = path.join(goldenDir, "annex_iv_governance");
+const gpaiDir = path.join(goldenDir, "gpai_provider");
 
 async function annexIvBundle() {
   const [
@@ -17,13 +18,13 @@ async function annexIvBundle() {
     dataGovernance,
     technicalDoc,
     instructionsForUse,
-    humanOversight
+    humanOversight,
   ] = await Promise.all([
     readFile(path.join(annexIvDir, "risk_assessment.json"), "utf8"),
     readFile(path.join(annexIvDir, "data_governance.json"), "utf8"),
     readFile(path.join(annexIvDir, "technical_doc.json"), "utf8"),
     readFile(path.join(annexIvDir, "instructions_for_use.json"), "utf8"),
-    readFile(path.join(annexIvDir, "human_oversight.json"), "utf8")
+    readFile(path.join(annexIvDir, "human_oversight.json"), "utf8"),
   ]);
 
   return {
@@ -35,10 +36,10 @@ async function annexIvBundle() {
       app_id: "typescript-sdk",
       env: "test",
       signing_key_id: "kid-dev-01",
-      role: "provider"
+      role: "provider",
     },
     subject: {
-      system_id: "hiring-assistant"
+      system_id: "hiring-assistant",
     },
     context: {},
     items: [
@@ -46,12 +47,12 @@ async function annexIvBundle() {
       { type: "risk_assessment", data: JSON.parse(riskAssessment) },
       { type: "data_governance", data: JSON.parse(dataGovernance) },
       { type: "instructions_for_use", data: JSON.parse(instructionsForUse) },
-      { type: "human_oversight", data: JSON.parse(humanOversight) }
+      { type: "human_oversight", data: JSON.parse(humanOversight) },
     ],
     artefacts: [],
     policy: {
       redactions: [],
-      encryption: { enabled: false }
+      encryption: { enabled: false },
     },
     integrity: {
       canonicalization: "RFC8785-JCS",
@@ -65,14 +66,80 @@ async function annexIvBundle() {
         format: "JWS",
         alg: "EdDSA",
         kid: "kid-dev-01",
-        value: "sig"
-      }
-    }
+        value: "sig",
+      },
+    },
+  };
+}
+
+async function gpaiProviderBundle() {
+  const [
+    technicalDoc,
+    modelEvaluation,
+    trainingProvenance,
+    computeMetrics,
+    copyrightPolicy,
+    trainingSummary,
+  ] = await Promise.all([
+    readFile(path.join(gpaiDir, "technical_doc.json"), "utf8"),
+    readFile(path.join(gpaiDir, "model_evaluation.json"), "utf8"),
+    readFile(path.join(gpaiDir, "training_provenance.json"), "utf8"),
+    readFile(path.join(gpaiDir, "compute_metrics.json"), "utf8"),
+    readFile(path.join(gpaiDir, "copyright_policy.json"), "utf8"),
+    readFile(path.join(gpaiDir, "training_summary.json"), "utf8"),
+  ]);
+
+  return {
+    bundle_version: "1.0",
+    bundle_id: "B-gpai-provider",
+    created_at: "2026-03-21T00:00:00Z",
+    actor: {
+      issuer: "proof-layer-test",
+      app_id: "typescript-sdk",
+      env: "test",
+      signing_key_id: "kid-dev-01",
+      role: "provider",
+    },
+    subject: {
+      system_id: "foundation-model-alpha",
+    },
+    context: {},
+    items: [
+      { type: "technical_doc", data: JSON.parse(technicalDoc) },
+      { type: "model_evaluation", data: JSON.parse(modelEvaluation) },
+      { type: "training_provenance", data: JSON.parse(trainingProvenance) },
+      { type: "compute_metrics", data: JSON.parse(computeMetrics) },
+      { type: "copyright_policy", data: JSON.parse(copyrightPolicy) },
+      { type: "training_summary", data: JSON.parse(trainingSummary) },
+    ],
+    artefacts: [],
+    policy: {
+      redactions: [],
+      encryption: { enabled: false },
+    },
+    integrity: {
+      canonicalization: "RFC8785-JCS",
+      hash: "SHA-256",
+      header_digest:
+        "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      bundle_root_algorithm: "pl-merkle-sha256-v4",
+      bundle_root:
+        "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      signature: {
+        format: "JWS",
+        alg: "EdDSA",
+        kid: "kid-dev-01",
+        value: "sig",
+      },
+    },
   };
 }
 
 test("ProofLayer.capture seals a local llm_interaction bundle", async () => {
-  const signingKeyPem = await readFile(path.join(goldenDir, "signing_key.txt"), "utf8");
+  const signingKeyPem = await readFile(
+    path.join(goldenDir, "signing_key.txt"),
+    "utf8",
+  );
   const proofLayer = new ProofLayer({
     signingKeyPem,
     keyId: "kid-dev-01",
@@ -80,11 +147,11 @@ test("ProofLayer.capture seals a local llm_interaction bundle", async () => {
     complianceProfile: {
       intendedUse: "Internal reviewer assistance",
       riskTier: "high_risk_candidate",
-      gpaiStatus: "downstream_integrator"
+      gpaiStatus: "downstream_integrator",
     },
     issuer: "proof-layer-ts",
     appId: "typescript-sdk",
-    env: "test"
+    env: "test",
   });
 
   const result = await proofLayer.capture({
@@ -92,22 +159,28 @@ test("ProofLayer.capture seals a local llm_interaction bundle", async () => {
     model: "gpt-4o-mini",
     input: [{ role: "user", content: "hello" }],
     output: { role: "assistant", content: "hi" },
-    requestId: "req-proof-layer-1"
+    requestId: "req-proof-layer-1",
   });
 
   assert.equal(result.bundle?.bundle_version, "1.0");
   assert.equal(result.bundle?.subject?.system_id, "system-123");
-  assert.equal(result.bundle?.compliance_profile?.intended_use, "Internal reviewer assistance");
+  assert.equal(
+    result.bundle?.compliance_profile?.intended_use,
+    "Internal reviewer assistance",
+  );
   assert.equal(result.bundle?.integrity.signature.kid, "kid-dev-01");
   assert.equal(typeof result.bundleRoot, "string");
 });
 
 test("ProofLayer.captureComputeMetrics seals local GPAI threshold evidence", async () => {
-  const signingKeyPem = await readFile(path.join(goldenDir, "signing_key.txt"), "utf8");
+  const signingKeyPem = await readFile(
+    path.join(goldenDir, "signing_key.txt"),
+    "utf8",
+  );
   const proofLayer = new ProofLayer({
     signingKeyPem,
     keyId: "kid-dev-01",
-    systemId: "system-gpai-threshold"
+    systemId: "system-gpai-threshold",
   });
 
   const result = await proofLayer.captureComputeMetrics({
@@ -115,76 +188,119 @@ test("ProofLayer.captureComputeMetrics seals local GPAI threshold evidence", asy
     trainingFlopsEstimate: "1.2e25",
     thresholdBasisRef: "art51",
     thresholdValue: "1e25",
-    thresholdStatus: "above_threshold"
+    thresholdStatus: "above_threshold",
   });
 
   assert.equal(result.bundle?.items[0].type, "compute_metrics");
-  assert.equal(result.bundle?.items[0].data.threshold_status, "above_threshold");
+  assert.equal(
+    result.bundle?.items[0].data.threshold_status,
+    "above_threshold",
+  );
   assert.equal(result.bundle?.policy.retention_class, "gpai_documentation");
 });
 
 test("ProofLayer.disclose returns a locally verifiable redacted bundle", async () => {
-  const signingKeyPem = await readFile(path.join(goldenDir, "signing_key.txt"), "utf8");
-  const publicKeyPem = await readFile(path.join(goldenDir, "verify_key.txt"), "utf8");
-  const bundle = JSON.parse(await readFile(path.join(goldenDir, "fixed_bundle", "proof_bundle.json"), "utf8"));
-  const proofLayer = new ProofLayer({
-    signingKeyPem,
-    keyId: "kid-dev-01"
-  });
-
-  const redacted = await proofLayer.disclose({
-    bundle,
-    itemIndices: [0]
-  });
-  const summary = await proofLayer.verifyRedactedBundle({
-    bundle: redacted,
-    artefacts: [],
-    publicKeyPem
-  });
-
-  assert.equal(redacted.disclosed_items.length, 1);
-  assert.deepEqual(summary, {
-    disclosed_item_count: 1,
-    disclosed_artefact_count: 0
-  });
-});
-
-test("ProofLayer.disclose forwards field-level redaction options", async () => {
-  const signingKeyPem = await readFile(path.join(goldenDir, "signing_key.txt"), "utf8");
+  const signingKeyPem = await readFile(
+    path.join(goldenDir, "signing_key.txt"),
+    "utf8",
+  );
+  const publicKeyPem = await readFile(
+    path.join(goldenDir, "verify_key.txt"),
+    "utf8",
+  );
   const bundle = JSON.parse(
-    await readFile(path.join(goldenDir, "fixed_bundle", "proof_bundle.json"), "utf8")
+    await readFile(
+      path.join(goldenDir, "fixed_bundle", "proof_bundle.json"),
+      "utf8",
+    ),
   );
   const proofLayer = new ProofLayer({
     signingKeyPem,
-    keyId: "kid-dev-01"
+    keyId: "kid-dev-01",
   });
 
   const redacted = await proofLayer.disclose({
     bundle,
     itemIndices: [0],
-    fieldRedactions: { "0": ["output_commitment"] }
+  });
+  const summary = await proofLayer.verifyRedactedBundle({
+    bundle: redacted,
+    artefacts: [],
+    publicKeyPem,
+  });
+
+  assert.equal(redacted.disclosed_items.length, 1);
+  assert.deepEqual(summary, {
+    disclosed_item_count: 1,
+    disclosed_artefact_count: 0,
+  });
+});
+
+test("ProofLayer.disclose forwards field-level redaction options", async () => {
+  const signingKeyPem = await readFile(
+    path.join(goldenDir, "signing_key.txt"),
+    "utf8",
+  );
+  const bundle = JSON.parse(
+    await readFile(
+      path.join(goldenDir, "fixed_bundle", "proof_bundle.json"),
+      "utf8",
+    ),
+  );
+  const proofLayer = new ProofLayer({
+    signingKeyPem,
+    keyId: "kid-dev-01",
+  });
+
+  const redacted = await proofLayer.disclose({
+    bundle,
+    itemIndices: [0],
+    fieldRedactions: { 0: ["output_commitment"] },
   });
 
   assert.equal(redacted.disclosed_items[0].item, undefined);
-  assert.deepEqual(redacted.disclosed_items[0].field_redacted_item?.redacted_paths, [
-    "/output_commitment"
-  ]);
+  assert.deepEqual(
+    redacted.disclosed_items[0].field_redacted_item?.redacted_paths,
+    ["/output_commitment"],
+  );
 });
 
 test("ProofLayer local mode can evaluate completeness", async () => {
-  const signingKeyPem = await readFile(path.join(goldenDir, "signing_key.txt"), "utf8");
+  const signingKeyPem = await readFile(
+    path.join(goldenDir, "signing_key.txt"),
+    "utf8",
+  );
   const proofLayer = new ProofLayer({
     signingKeyPem,
-    keyId: "kid-dev-01"
+    keyId: "kid-dev-01",
   });
 
   const report = await proofLayer.evaluateCompleteness({
     bundle: await annexIvBundle(),
-    profile: "annex_iv_governance_v1"
+    profile: "annex_iv_governance_v1",
   });
 
   assert.equal(report.status, "pass");
   assert.equal(report.pass_count, 5);
+});
+
+test("ProofLayer local mode can evaluate gpai provider completeness", async () => {
+  const signingKeyPem = await readFile(
+    path.join(goldenDir, "signing_key.txt"),
+    "utf8",
+  );
+  const proofLayer = new ProofLayer({
+    signingKeyPem,
+    keyId: "kid-dev-01",
+  });
+
+  const report = await proofLayer.evaluateCompleteness({
+    bundle: await gpaiProviderBundle(),
+    profile: "gpai_provider_v1",
+  });
+
+  assert.equal(report.status, "pass");
+  assert.equal(report.pass_count, 6);
 });
 
 test("ProofLayer vault mode can update disclosure config", async () => {
@@ -195,9 +311,9 @@ test("ProofLayer vault mode can update disclosure config", async () => {
       captured = { url, init };
       return new Response(init.body, {
         status: 200,
-        headers: { "content-type": "application/json" }
+        headers: { "content-type": "application/json" },
       });
-    }
+    },
   });
 
   const result = await proofLayer.updateDisclosureConfig({
@@ -207,9 +323,9 @@ test("ProofLayer vault mode can update disclosure config", async () => {
         excluded_item_types: ["tool_call"],
         include_artefact_metadata: false,
         include_artefact_bytes: false,
-        artefact_names: []
-      }
-    ]
+        artefact_names: [],
+      },
+    ],
   });
 
   assert.equal(captured.url, "http://127.0.0.1:8080/v1/config/disclosure");
@@ -225,23 +341,23 @@ test("ProofLayer vault mode can evaluate completeness", async () => {
       captured = { url, init };
       return new Response(
         JSON.stringify({
-          profile: "annex_iv_governance_v1",
+          profile: "gpai_provider_v1",
           status: "warn",
           bundle_id: "B1",
-          system_id: "hiring-assistant",
-          pass_count: 4,
+          system_id: "foundation-model-alpha",
+          pass_count: 5,
           warn_count: 1,
           fail_count: 0,
-          rules: []
+          rules: [],
         }),
-        { status: 200, headers: { "content-type": "application/json" } }
+        { status: 200, headers: { "content-type": "application/json" } },
       );
-    }
+    },
   });
 
   const result = await proofLayer.evaluateCompleteness({
     bundleId: "B1",
-    profile: "annex_iv_governance_v1"
+    profile: "gpai_provider_v1",
   });
 
   assert.equal(captured.url, "http://127.0.0.1:8080/v1/completeness/evaluate");
@@ -262,20 +378,20 @@ test("ProofLayer vault mode can list disclosure templates", async () => {
               description: "Runtime disclosure template",
               default_redaction_groups: ["commitments"],
               policy: {
-                name: "runtime_minimum"
-              }
-            }
+                name: "runtime_minimum",
+              },
+            },
           ],
           redaction_groups: [
             {
               name: "commitments",
-              description: "Hide digest fields."
-            }
-          ]
+              description: "Hide digest fields.",
+            },
+          ],
         }),
-        { status: 200, headers: { "content-type": "application/json" } }
+        { status: 200, headers: { "content-type": "application/json" } },
       );
-    }
+    },
   });
 
   const result = await proofLayer.getDisclosureTemplates();
@@ -298,13 +414,13 @@ test("ProofLayer vault mode can render disclosure templates", async () => {
           policy: {
             name: "privacy_review_custom",
             redacted_fields_by_item_type: {
-              risk_assessment: ["/metadata/internal_notes"]
-            }
-          }
+              risk_assessment: ["/metadata/internal_notes"],
+            },
+          },
         }),
-        { status: 200, headers: { "content-type": "application/json" } }
+        { status: 200, headers: { "content-type": "application/json" } },
       );
-    }
+    },
   });
 
   const result = await proofLayer.renderDisclosureTemplate({
@@ -312,11 +428,14 @@ test("ProofLayer vault mode can render disclosure templates", async () => {
     name: "privacy_review_custom",
     redactionGroups: ["metadata"],
     redactedFieldsByItemType: {
-      risk_assessment: ["/metadata/internal_notes"]
-    }
+      risk_assessment: ["/metadata/internal_notes"],
+    },
   });
 
-  assert.equal(captured.url, "http://127.0.0.1:8080/v1/disclosure/templates/render");
+  assert.equal(
+    captured.url,
+    "http://127.0.0.1:8080/v1/disclosure/templates/render",
+  );
   assert.equal(result.policy.name, "privacy_review_custom");
 });
 
@@ -334,11 +453,11 @@ test("ProofLayer vault mode can create packs with inline disclosure templates", 
           bundle_format: "disclosure",
           disclosure_policy: "runtime_template_pack",
           bundle_count: 1,
-          bundle_ids: ["B-inline"]
+          bundle_ids: ["B-inline"],
         }),
-        { status: 201, headers: { "content-type": "application/json" } }
+        { status: 201, headers: { "content-type": "application/json" } },
       );
-    }
+    },
   });
 
   const result = await proofLayer.createPack({
@@ -347,8 +466,8 @@ test("ProofLayer vault mode can create packs with inline disclosure templates", 
     disclosureTemplate: {
       profile: "runtime_minimum",
       name: "runtime_template_pack",
-      redactionGroups: ["metadata"]
-    }
+      redactionGroups: ["metadata"],
+    },
   });
 
   assert.equal(captured.url, "http://127.0.0.1:8080/v1/packs");
@@ -370,19 +489,19 @@ test("ProofLayer vault mode can preview disclosure selection", async () => {
           disclosed_item_obligation_refs: ["art9"],
           disclosed_artefact_indices: [],
           disclosed_artefact_names: [],
-          disclosed_artefact_bytes_included: false
+          disclosed_artefact_bytes_included: false,
         }),
-        { status: 200, headers: { "content-type": "application/json" } }
+        { status: 200, headers: { "content-type": "application/json" } },
       );
-    }
+    },
   });
 
   const result = await proofLayer.previewDisclosure({
     bundleId: "B1",
     policy: {
       name: "risk_only",
-      allowed_obligation_refs: ["art9"]
-    }
+      allowed_obligation_refs: ["art9"],
+    },
   });
 
   assert.equal(captured.url, "http://127.0.0.1:8080/v1/disclosure/preview");
@@ -403,14 +522,14 @@ test("ProofLayer vault mode can preview disclosure using a template request", as
           disclosed_item_indices: [0],
           disclosed_item_types: ["llm_interaction"],
           disclosed_item_obligation_refs: ["art12_19_26"],
-          disclosed_item_field_redactions: { "0": ["/parameters"] },
+          disclosed_item_field_redactions: { 0: ["/parameters"] },
           disclosed_artefact_indices: [],
           disclosed_artefact_names: [],
-          disclosed_artefact_bytes_included: false
+          disclosed_artefact_bytes_included: false,
         }),
-        { status: 200, headers: { "content-type": "application/json" } }
+        { status: 200, headers: { "content-type": "application/json" } },
       );
-    }
+    },
   });
 
   const result = await proofLayer.previewDisclosure({
@@ -419,8 +538,8 @@ test("ProofLayer vault mode can preview disclosure using a template request", as
     disclosureTemplate: {
       profile: "privacy_review",
       name: "privacy_review_internal",
-      redactionGroups: ["metadata"]
-    }
+      redactionGroups: ["metadata"],
+    },
   });
 
   assert.equal(captured.url, "http://127.0.0.1:8080/v1/disclosure/preview");
@@ -428,10 +547,13 @@ test("ProofLayer vault mode can preview disclosure using a template request", as
 });
 
 test("withProofLayer attaches proof metadata to OpenAI-like responses", async () => {
-  const signingKeyPem = await readFile(path.join(goldenDir, "signing_key.txt"), "utf8");
+  const signingKeyPem = await readFile(
+    path.join(goldenDir, "signing_key.txt"),
+    "utf8",
+  );
   const proofLayer = new ProofLayer({
     signingKeyPem,
-    keyId: "kid-dev-01"
+    keyId: "kid-dev-01",
   });
 
   const wrapped = withProofLayer(
@@ -442,18 +564,18 @@ test("withProofLayer attaches proof metadata to OpenAI-like responses", async ()
             id: "cmpl-typed-1",
             model: params.model,
             choices: [{ message: { role: "assistant", content: "ok" } }],
-            usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 }
-          })
-        }
-      }
+            usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+          }),
+        },
+      },
     },
     proofLayer,
-    { requestId: "req-proof-layer-wrapper" }
+    { requestId: "req-proof-layer-wrapper" },
   );
 
   const completion = await wrapped.chat.completions.create({
     model: "gpt-4o-mini",
-    messages: [{ role: "user", content: "hello" }]
+    messages: [{ role: "user", content: "hello" }],
   });
 
   assert.equal(completion.id, "cmpl-typed-1");
@@ -462,18 +584,21 @@ test("withProofLayer attaches proof metadata to OpenAI-like responses", async ()
 });
 
 test("ProofLayer.captureRiskAssessment seals lifecycle evidence locally", async () => {
-  const signingKeyPem = await readFile(path.join(goldenDir, "signing_key.txt"), "utf8");
+  const signingKeyPem = await readFile(
+    path.join(goldenDir, "signing_key.txt"),
+    "utf8",
+  );
   const proofLayer = new ProofLayer({
     signingKeyPem,
     keyId: "kid-dev-01",
-    systemId: "system-risk-42"
+    systemId: "system-risk-42",
   });
 
   const result = await proofLayer.captureRiskAssessment({
     riskId: "risk-42",
     severity: "medium",
     status: "mitigated",
-    summary: "manual review added"
+    summary: "manual review added",
   });
 
   assert.equal(result.bundle?.items[0].type, "risk_assessment");
@@ -481,18 +606,21 @@ test("ProofLayer.captureRiskAssessment seals lifecycle evidence locally", async 
 });
 
 test("ProofLayer.captureTechnicalDoc seals inline document evidence locally", async () => {
-  const signingKeyPem = await readFile(path.join(goldenDir, "signing_key.txt"), "utf8");
+  const signingKeyPem = await readFile(
+    path.join(goldenDir, "signing_key.txt"),
+    "utf8",
+  );
   const proofLayer = new ProofLayer({
     signingKeyPem,
     keyId: "kid-dev-01",
-    systemId: "system-doc-42"
+    systemId: "system-doc-42",
   });
 
   const result = await proofLayer.captureTechnicalDoc({
     documentRef: "annex-iv/system-card",
     section: "safety_controls",
     document: Buffer.from("annex-iv-body", "utf8"),
-    documentName: "system-card.txt"
+    documentName: "system-card.txt",
   });
 
   assert.equal(result.bundle?.items[0].type, "technical_doc");
@@ -501,11 +629,14 @@ test("ProofLayer.captureTechnicalDoc seals inline document evidence locally", as
 });
 
 test("ProofLayer.captureInstructionsForUse seals governance evidence locally", async () => {
-  const signingKeyPem = await readFile(path.join(goldenDir, "signing_key.txt"), "utf8");
+  const signingKeyPem = await readFile(
+    path.join(goldenDir, "signing_key.txt"),
+    "utf8",
+  );
   const proofLayer = new ProofLayer({
     signingKeyPem,
     keyId: "kid-dev-01",
-    systemId: "system-ifu-42"
+    systemId: "system-ifu-42",
   });
 
   const result = await proofLayer.captureInstructionsForUse({
@@ -513,7 +644,7 @@ test("ProofLayer.captureInstructionsForUse seals governance evidence locally", a
     versionTag: "v1.2",
     section: "operator_controls",
     document: Buffer.from("review before override", "utf8"),
-    documentName: "instructions.txt"
+    documentName: "instructions.txt",
   });
 
   assert.equal(result.bundle?.items[0].type, "instructions_for_use");
@@ -522,7 +653,10 @@ test("ProofLayer.captureInstructionsForUse seals governance evidence locally", a
 });
 
 test("ProofLayer reuses a shared compliance profile across annex iv governance captures", async () => {
-  const signingKeyPem = await readFile(path.join(goldenDir, "signing_key.txt"), "utf8");
+  const signingKeyPem = await readFile(
+    path.join(goldenDir, "signing_key.txt"),
+    "utf8",
+  );
   const proofLayer = new ProofLayer({
     signingKeyPem,
     keyId: "kid-dev-01",
@@ -533,75 +667,88 @@ test("ProofLayer reuses a shared compliance profile across annex iv governance c
       prohibitedPracticeScreening: "screened_no_prohibited_use",
       riskTier: "high_risk",
       highRiskDomain: "employment",
-      deploymentContext: "eu_market_placement"
-    }
+      deploymentContext: "eu_market_placement",
+    },
   });
 
   const risk = await proofLayer.captureRiskAssessment({
     riskId: "risk-42",
     severity: "high",
     status: "mitigated",
-    riskDescription: "Potential unfair ranking of borderline candidates."
+    riskDescription: "Potential unfair ranking of borderline candidates.",
   });
   const dataGovernance = await proofLayer.captureDataGovernance({
     decision: "approved_with_restrictions",
     datasetRef: "dataset://hiring-assistant/training-v3",
-    datasetName: "hiring-assistant-training"
+    datasetName: "hiring-assistant-training",
   });
 
   assert.equal(risk.bundle?.compliance_profile?.high_risk_domain, "employment");
   assert.equal(
     dataGovernance.bundle?.compliance_profile?.prohibited_practice_screening,
-    "screened_no_prohibited_use"
+    "screened_no_prohibited_use",
   );
   assert.equal(risk.bundle?.subject.system_id, "hiring-assistant");
   assert.equal(dataGovernance.bundle?.subject.system_id, "hiring-assistant");
 });
 
 test("ProofLayer.captureRetrieval seals retrieval evidence locally", async () => {
-  const signingKeyPem = await readFile(path.join(goldenDir, "signing_key.txt"), "utf8");
+  const signingKeyPem = await readFile(
+    path.join(goldenDir, "signing_key.txt"),
+    "utf8",
+  );
   const proofLayer = new ProofLayer({
     signingKeyPem,
     keyId: "kid-dev-01",
-    systemId: "system-rag-42"
+    systemId: "system-rag-42",
   });
 
   const result = await proofLayer.captureRetrieval({
     corpus: "policy-kb",
     query: "refund policy",
-    result: { docs: [{ id: "doc-1", score: 0.99 }] }
+    result: { docs: [{ id: "doc-1", score: 0.99 }] },
   });
 
   assert.equal(result.bundle?.items[0].type, "retrieval");
   assert.equal(result.bundle?.subject.system_id, "system-rag-42");
-  assert.ok(result.bundle?.items[0].data.result_commitment.startsWith("sha256:"));
+  assert.ok(
+    result.bundle?.items[0].data.result_commitment.startsWith("sha256:"),
+  );
 });
 
 test("ProofLayer.capturePolicyDecision seals policy decision evidence locally", async () => {
-  const signingKeyPem = await readFile(path.join(goldenDir, "signing_key.txt"), "utf8");
+  const signingKeyPem = await readFile(
+    path.join(goldenDir, "signing_key.txt"),
+    "utf8",
+  );
   const proofLayer = new ProofLayer({
     signingKeyPem,
     keyId: "kid-dev-01",
-    systemId: "system-policy-42"
+    systemId: "system-policy-42",
   });
 
   const result = await proofLayer.capturePolicyDecision({
     policyName: "harm-filter",
     decision: "blocked",
-    rationale: { classifier_score: 0.98 }
+    rationale: { classifier_score: 0.98 },
   });
 
   assert.equal(result.bundle?.items[0].type, "policy_decision");
   assert.equal(result.bundle?.subject.system_id, "system-policy-42");
-  assert.ok(result.bundle?.items[0].data.rationale_commitment.startsWith("sha256:"));
+  assert.ok(
+    result.bundle?.items[0].data.rationale_commitment.startsWith("sha256:"),
+  );
 });
 
 test("ProofLayer.captureLiteracyAttestation seals literacy evidence locally", async () => {
-  const signingKeyPem = await readFile(path.join(goldenDir, "signing_key.txt"), "utf8");
+  const signingKeyPem = await readFile(
+    path.join(goldenDir, "signing_key.txt"),
+    "utf8",
+  );
   const proofLayer = new ProofLayer({
     signingKeyPem,
     keyId: "kid-dev-01",
-    systemId: "system-literacy-42"
+    systemId: "system-literacy-42",
   });
 
   const result = await proofLayer.captureLiteracyAttestation({
@@ -609,20 +756,25 @@ test("ProofLayer.captureLiteracyAttestation seals literacy evidence locally", as
     status: "completed",
     trainingRef: "course://ai-literacy/v1",
     attestation: { completion_id: "att-42" },
-    retentionClass: "ai_literacy"
+    retentionClass: "ai_literacy",
   });
 
   assert.equal(result.bundle?.items[0].type, "literacy_attestation");
   assert.equal(result.bundle?.subject.system_id, "system-literacy-42");
-  assert.ok(result.bundle?.items[0].data.attestation_commitment.startsWith("sha256:"));
+  assert.ok(
+    result.bundle?.items[0].data.attestation_commitment.startsWith("sha256:"),
+  );
 });
 
 test("ProofLayer.captureIncidentReport seals incident evidence locally", async () => {
-  const signingKeyPem = await readFile(path.join(goldenDir, "signing_key.txt"), "utf8");
+  const signingKeyPem = await readFile(
+    path.join(goldenDir, "signing_key.txt"),
+    "utf8",
+  );
   const proofLayer = new ProofLayer({
     signingKeyPem,
     keyId: "kid-dev-01",
-    systemId: "system-incident-42"
+    systemId: "system-incident-42",
   });
 
   const result = await proofLayer.captureIncidentReport({
@@ -632,20 +784,25 @@ test("ProofLayer.captureIncidentReport seals incident evidence locally", async (
     occurredAt: "2026-03-06T10:15:00Z",
     summary: "unsafe medical guidance surfaced",
     report: "timeline and corrective actions",
-    retentionClass: "risk_mgmt"
+    retentionClass: "risk_mgmt",
   });
 
   assert.equal(result.bundle?.items[0].type, "incident_report");
   assert.equal(result.bundle?.subject.system_id, "system-incident-42");
-  assert.ok(result.bundle?.items[0].data.report_commitment.startsWith("sha256:"));
+  assert.ok(
+    result.bundle?.items[0].data.report_commitment.startsWith("sha256:"),
+  );
 });
 
 test("ProofLayer.capturePostMarketMonitoring seals monitoring evidence locally", async () => {
-  const signingKeyPem = await readFile(path.join(goldenDir, "signing_key.txt"), "utf8");
+  const signingKeyPem = await readFile(
+    path.join(goldenDir, "signing_key.txt"),
+    "utf8",
+  );
   const proofLayer = new ProofLayer({
     signingKeyPem,
     keyId: "kid-dev-01",
-    systemId: "system-monitoring-42"
+    systemId: "system-monitoring-42",
   });
 
   const result = await proofLayer.capturePostMarketMonitoring({
@@ -653,20 +810,25 @@ test("ProofLayer.capturePostMarketMonitoring seals monitoring evidence locally",
     status: "active",
     summary: "weekly drift review with escalation thresholds",
     report: { owner: "safety-ops", cadence: "weekly" },
-    retentionClass: "risk_mgmt"
+    retentionClass: "risk_mgmt",
   });
 
   assert.equal(result.bundle?.items[0].type, "post_market_monitoring");
   assert.equal(result.bundle?.subject.system_id, "system-monitoring-42");
-  assert.ok(result.bundle?.items[0].data.report_commitment.startsWith("sha256:"));
+  assert.ok(
+    result.bundle?.items[0].data.report_commitment.startsWith("sha256:"),
+  );
 });
 
 test("ProofLayer.captureAuthorityNotification seals authority-reporting evidence locally", async () => {
-  const signingKeyPem = await readFile(path.join(goldenDir, "signing_key.txt"), "utf8");
+  const signingKeyPem = await readFile(
+    path.join(goldenDir, "signing_key.txt"),
+    "utf8",
+  );
   const proofLayer = new ProofLayer({
     signingKeyPem,
     keyId: "kid-dev-01",
-    systemId: "system-incident-43"
+    systemId: "system-incident-43",
   });
 
   const result = await proofLayer.captureAuthorityNotification({
@@ -676,20 +838,25 @@ test("ProofLayer.captureAuthorityNotification seals authority-reporting evidence
     incidentId: "inc-42",
     dueAt: "2026-03-08T12:00:00Z",
     report: { incident: "inc-42", severity: "serious" },
-    retentionClass: "risk_mgmt"
+    retentionClass: "risk_mgmt",
   });
 
   assert.equal(result.bundle?.items[0].type, "authority_notification");
   assert.equal(result.bundle?.subject.system_id, "system-incident-43");
-  assert.ok(result.bundle?.items[0].data.report_commitment.startsWith("sha256:"));
+  assert.ok(
+    result.bundle?.items[0].data.report_commitment.startsWith("sha256:"),
+  );
 });
 
 test("ProofLayer.captureModelEvaluation seals evaluation evidence locally", async () => {
-  const signingKeyPem = await readFile(path.join(goldenDir, "signing_key.txt"), "utf8");
+  const signingKeyPem = await readFile(
+    path.join(goldenDir, "signing_key.txt"),
+    "utf8",
+  );
   const proofLayer = new ProofLayer({
     signingKeyPem,
     keyId: "kid-dev-01",
-    systemId: "system-gpai-42"
+    systemId: "system-gpai-42",
   });
 
   const result = await proofLayer.captureModelEvaluation({
@@ -697,20 +864,25 @@ test("ProofLayer.captureModelEvaluation seals evaluation evidence locally", asyn
     benchmark: "mmlu-pro",
     status: "completed",
     summary: "baseline complete",
-    report: { score: "0.84" }
+    report: { score: "0.84" },
   });
 
   assert.equal(result.bundle?.items[0].type, "model_evaluation");
   assert.equal(result.bundle?.subject.system_id, "system-gpai-42");
-  assert.ok(result.bundle?.items[0].data.report_commitment.startsWith("sha256:"));
+  assert.ok(
+    result.bundle?.items[0].data.report_commitment.startsWith("sha256:"),
+  );
 });
 
 test("ProofLayer.captureAdversarialTest seals adversarial evidence locally", async () => {
-  const signingKeyPem = await readFile(path.join(goldenDir, "signing_key.txt"), "utf8");
+  const signingKeyPem = await readFile(
+    path.join(goldenDir, "signing_key.txt"),
+    "utf8",
+  );
   const proofLayer = new ProofLayer({
     signingKeyPem,
     keyId: "kid-dev-01",
-    systemId: "system-gpai-43"
+    systemId: "system-gpai-43",
   });
 
   const result = await proofLayer.captureAdversarialTest({
@@ -718,40 +890,50 @@ test("ProofLayer.captureAdversarialTest seals adversarial evidence locally", asy
     focus: "prompt-injection",
     status: "open",
     findingSeverity: "high",
-    report: "exploit transcript"
+    report: "exploit transcript",
   });
 
   assert.equal(result.bundle?.items[0].type, "adversarial_test");
   assert.equal(result.bundle?.subject.system_id, "system-gpai-43");
-  assert.ok(result.bundle?.items[0].data.report_commitment.startsWith("sha256:"));
+  assert.ok(
+    result.bundle?.items[0].data.report_commitment.startsWith("sha256:"),
+  );
 });
 
 test("ProofLayer.captureTrainingProvenance seals provenance evidence locally", async () => {
-  const signingKeyPem = await readFile(path.join(goldenDir, "signing_key.txt"), "utf8");
+  const signingKeyPem = await readFile(
+    path.join(goldenDir, "signing_key.txt"),
+    "utf8",
+  );
   const proofLayer = new ProofLayer({
     signingKeyPem,
     keyId: "kid-dev-01",
-    systemId: "system-gpai-44"
+    systemId: "system-gpai-44",
   });
 
   const result = await proofLayer.captureTrainingProvenance({
     datasetRef: "dataset://foundation/pretrain-v3",
     stage: "pretraining",
     lineageRef: "lineage://snapshot/2026-03-01",
-    record: { manifests: 12 }
+    record: { manifests: 12 },
   });
 
   assert.equal(result.bundle?.items[0].type, "training_provenance");
   assert.equal(result.bundle?.subject.system_id, "system-gpai-44");
-  assert.ok(result.bundle?.items[0].data.record_commitment.startsWith("sha256:"));
+  assert.ok(
+    result.bundle?.items[0].data.record_commitment.startsWith("sha256:"),
+  );
 });
 
 test("ProofLayer.captureConformityAssessment seals conformity evidence locally", async () => {
-  const signingKeyPem = await readFile(path.join(goldenDir, "signing_key.txt"), "utf8");
+  const signingKeyPem = await readFile(
+    path.join(goldenDir, "signing_key.txt"),
+    "utf8",
+  );
   const proofLayer = new ProofLayer({
     signingKeyPem,
     keyId: "kid-dev-01",
-    systemId: "system-conf-42"
+    systemId: "system-conf-42",
   });
 
   const result = await proofLayer.captureConformityAssessment({
@@ -759,20 +941,25 @@ test("ProofLayer.captureConformityAssessment seals conformity evidence locally",
     procedure: "annex_vii",
     status: "completed",
     report: { outcome: "pass" },
-    retentionClass: "technical_doc"
+    retentionClass: "technical_doc",
   });
 
   assert.equal(result.bundle?.items[0].type, "conformity_assessment");
   assert.equal(result.bundle?.subject.system_id, "system-conf-42");
-  assert.ok(result.bundle?.items[0].data.report_commitment.startsWith("sha256:"));
+  assert.ok(
+    result.bundle?.items[0].data.report_commitment.startsWith("sha256:"),
+  );
 });
 
 test("ProofLayer.captureDeclaration seals declaration evidence locally", async () => {
-  const signingKeyPem = await readFile(path.join(goldenDir, "signing_key.txt"), "utf8");
+  const signingKeyPem = await readFile(
+    path.join(goldenDir, "signing_key.txt"),
+    "utf8",
+  );
   const proofLayer = new ProofLayer({
     signingKeyPem,
     keyId: "kid-dev-01",
-    systemId: "system-conf-43"
+    systemId: "system-conf-43",
   });
 
   const result = await proofLayer.captureDeclaration({
@@ -780,20 +967,25 @@ test("ProofLayer.captureDeclaration seals declaration evidence locally", async (
     jurisdiction: "eu",
     status: "issued",
     document: "eu declaration body",
-    retentionClass: "technical_doc"
+    retentionClass: "technical_doc",
   });
 
   assert.equal(result.bundle?.items[0].type, "declaration");
   assert.equal(result.bundle?.subject.system_id, "system-conf-43");
-  assert.ok(result.bundle?.items[0].data.document_commitment.startsWith("sha256:"));
+  assert.ok(
+    result.bundle?.items[0].data.document_commitment.startsWith("sha256:"),
+  );
 });
 
 test("ProofLayer.captureRegistration seals registration evidence locally", async () => {
-  const signingKeyPem = await readFile(path.join(goldenDir, "signing_key.txt"), "utf8");
+  const signingKeyPem = await readFile(
+    path.join(goldenDir, "signing_key.txt"),
+    "utf8",
+  );
   const proofLayer = new ProofLayer({
     signingKeyPem,
     keyId: "kid-dev-01",
-    systemId: "system-conf-44"
+    systemId: "system-conf-44",
   });
 
   const result = await proofLayer.captureRegistration({
@@ -801,10 +993,12 @@ test("ProofLayer.captureRegistration seals registration evidence locally", async
     authority: "eu_database",
     status: "accepted",
     receipt: { receipt_id: "rcpt-42" },
-    retentionClass: "technical_doc"
+    retentionClass: "technical_doc",
   });
 
   assert.equal(result.bundle?.items[0].type, "registration");
   assert.equal(result.bundle?.subject.system_id, "system-conf-44");
-  assert.ok(result.bundle?.items[0].data.receipt_commitment.startsWith("sha256:"));
+  assert.ok(
+    result.bundle?.items[0].data.receipt_commitment.startsWith("sha256:"),
+  );
 });

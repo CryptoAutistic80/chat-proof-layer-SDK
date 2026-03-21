@@ -77,11 +77,11 @@ class TestProofLayerClient(unittest.TestCase):
             captured["headers"] = headers
             captured["body"] = body
             return {
-                "profile": "annex_iv_governance_v1",
+                "profile": "gpai_provider_v1",
                 "status": "pass",
                 "bundle_id": "B1",
-                "system_id": "hiring-assistant",
-                "pass_count": 5,
+                "system_id": "foundation-model-alpha",
+                "pass_count": 6,
                 "warn_count": 0,
                 "fail_count": 0,
                 "rules": [],
@@ -90,7 +90,7 @@ class TestProofLayerClient(unittest.TestCase):
         client = ProofLayerClient(base_url="http://127.0.0.1:8080", request_fn=request_fn)
         out = client.evaluate_completeness(
             bundle_id="B1",
-            profile="annex_iv_governance_v1",
+            profile="gpai_provider_v1",
         )
 
         self.assertEqual(captured["method"], "POST")
@@ -99,7 +99,7 @@ class TestProofLayerClient(unittest.TestCase):
             json.loads(captured["body"].decode("utf-8")),
             {
                 "bundle_id": "B1",
-                "profile": "annex_iv_governance_v1",
+                "profile": "gpai_provider_v1",
             },
         )
         self.assertEqual(out["status"], "pass")

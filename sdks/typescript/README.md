@@ -3,8 +3,8 @@
 TypeScript SDK for creating Proof Layer evidence bundles around model calls.
 Integrity-sensitive helpers are backed by the local Rust NAPI module in `crates/napi`, while the package surface stays TypeScript-first.
 
-The SDK now has typed builders and `ProofLayer` convenience methods for every evidence item currently implemented in Rust core: `llm_interaction`, `tool_call`, `retrieval`, `human_oversight`, `policy_decision`, `risk_assessment`, `data_governance`, `technical_doc`, `instructions_for_use`, `qms_record`, `fundamental_rights_assessment`, `standards_alignment`, `post_market_monitoring`, `corrective_action`, `authority_notification`, `authority_submission`, `reporting_deadline`, `regulator_correspondence`, `model_evaluation`, `adversarial_test`, `training_provenance`, `downstream_documentation`, `copyright_policy`, `training_summary`, `literacy_attestation`, `incident_report`, `conformity_assessment`, `declaration`, and `registration`.
-The GPAI helpers default `model_evaluation`, `adversarial_test`, and `training_provenance` captures to the vault's `gpai_documentation` retention class.
+The SDK now has typed builders and `ProofLayer` convenience methods for every evidence item currently implemented in Rust core: `llm_interaction`, `tool_call`, `retrieval`, `human_oversight`, `policy_decision`, `risk_assessment`, `data_governance`, `technical_doc`, `instructions_for_use`, `qms_record`, `fundamental_rights_assessment`, `standards_alignment`, `post_market_monitoring`, `corrective_action`, `authority_notification`, `authority_submission`, `reporting_deadline`, `regulator_correspondence`, `model_evaluation`, `adversarial_test`, `training_provenance`, `compute_metrics`, `downstream_documentation`, `copyright_policy`, `training_summary`, `literacy_attestation`, `incident_report`, `conformity_assessment`, `declaration`, and `registration`.
+The GPAI helpers default `model_evaluation`, `adversarial_test`, `training_provenance`, and `compute_metrics` captures to the vault's `gpai_documentation` retention class.
 
 ## Install
 
@@ -108,6 +108,12 @@ const readiness = await proofLayer.evaluateCompleteness({
   profile: "annex_iv_governance_v1"
 });
 
+const gpaiReadiness = await proofLayer.evaluateCompleteness({
+  // fullGpaiProviderBundle should contain the full structured GPAI provider evidence set.
+  bundle: fullGpaiProviderBundle,
+  profile: "gpai_provider_v1"
+});
+
 const summary = verifyBundle({
   bundle: locallySealed.bundle,
   artefacts: [{ name: "prompt.json", data: Buffer.from("{}") }],
@@ -116,6 +122,7 @@ const summary = verifyBundle({
 
 console.log(summary.artefact_count);
 console.log(readiness.status);
+console.log(gpaiReadiness.status);
 console.log(proofClient.baseUrl);
 
 const redacted = await proofLayer.disclose({

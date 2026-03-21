@@ -1,5 +1,8 @@
 export type JsonPrimitive = string | number | boolean | null;
-export type JsonValue = JsonPrimitive | JsonValue[] | { [key: string]: JsonValue };
+export type JsonValue =
+  | JsonPrimitive
+  | JsonValue[]
+  | { [key: string]: JsonValue };
 export type JsonObject = Record<string, unknown>;
 export type BinaryLike = Uint8Array | string | JsonValue | JsonObject;
 export type ActorRole =
@@ -48,9 +51,7 @@ export interface EvidenceActorOptions {
 }
 
 export interface LifecycleCaptureOptions
-  extends EvidenceActorOptions,
-    EvidenceSubjectOptions,
-    EvidencePolicyOptions {
+  extends EvidenceActorOptions, EvidenceSubjectOptions, EvidencePolicyOptions {
   complianceProfile?: ComplianceProfileInput;
   artefacts?: ProofArtefactInput[];
   bundleId?: string;
@@ -225,7 +226,7 @@ export interface VerifyPackageRequest {
   publicKeyPem: string;
 }
 
-export type CompletenessProfile = "annex_iv_governance_v1";
+export type CompletenessProfile = "annex_iv_governance_v1" | "gpai_provider_v1";
 
 export type CompletenessStatus = "pass" | "warn" | "fail";
 
@@ -506,7 +507,9 @@ export interface LocalCreateBundleRequest extends CreateBundleRequest {
 }
 
 export interface BundleCreateClient {
-  createBundle(request: CreateBundleRequest | LocalCreateBundleRequest): Promise<CreateBundleResponse>;
+  createBundle(
+    request: CreateBundleRequest | LocalCreateBundleRequest,
+  ): Promise<CreateBundleResponse>;
 }
 
 export interface LlmInteractionRequestOptions {
@@ -957,11 +960,14 @@ export interface ProofLayerCaptureOptions {
 
 export interface GenericProofLayerOptions<
   TParams extends JsonObject = JsonObject,
-  TResult extends JsonObject = JsonObject
+  TResult extends JsonObject = JsonObject,
 > extends ProviderCaptureOptions {
   provider: string;
   model?: string | ((params: TParams, result: TResult) => string);
-  buildTrace?: (params: TParams, result: TResult) => JsonValue | JsonObject | undefined;
+  buildTrace?: (
+    params: TParams,
+    result: TResult,
+  ) => JsonValue | JsonObject | undefined;
 }
 
 export interface ProofLayerResult {

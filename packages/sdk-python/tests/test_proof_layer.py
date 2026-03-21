@@ -7,6 +7,7 @@ from proofsdk import ProofLayer
 REPO_ROOT = Path(__file__).resolve().parents[3]
 GOLDEN_DIR = REPO_ROOT / "fixtures" / "golden"
 ANNEX_IV_DIR = GOLDEN_DIR / "annex_iv_governance"
+GPAI_DIR = GOLDEN_DIR / "gpai_provider"
 
 
 def annex_iv_bundle() -> dict[str, object]:
@@ -43,6 +44,64 @@ def annex_iv_bundle() -> dict[str, object]:
             {
                 "type": "human_oversight",
                 "data": json.loads((ANNEX_IV_DIR / "human_oversight.json").read_text(encoding="utf-8")),
+            },
+        ],
+        "artefacts": [],
+        "policy": {"redactions": [], "encryption": {"enabled": False}},
+        "integrity": {
+            "canonicalization": "RFC8785-JCS",
+            "hash": "SHA-256",
+            "header_digest": "sha256:" + "a" * 64,
+            "bundle_root_algorithm": "pl-merkle-sha256-v4",
+            "bundle_root": "sha256:" + "b" * 64,
+            "signature": {
+                "format": "JWS",
+                "alg": "EdDSA",
+                "kid": "kid-dev-01",
+                "value": "sig",
+            },
+        },
+    }
+
+
+def gpai_provider_bundle() -> dict[str, object]:
+    return {
+        "bundle_version": "1.0",
+        "bundle_id": "B-gpai-provider",
+        "created_at": "2026-03-21T00:00:00Z",
+        "actor": {
+            "issuer": "proof-layer-test",
+            "app_id": "python-sdk",
+            "env": "test",
+            "signing_key_id": "kid-dev-01",
+            "role": "provider",
+        },
+        "subject": {"system_id": "foundation-model-alpha"},
+        "context": {},
+        "items": [
+            {
+                "type": "technical_doc",
+                "data": json.loads((GPAI_DIR / "technical_doc.json").read_text(encoding="utf-8")),
+            },
+            {
+                "type": "model_evaluation",
+                "data": json.loads((GPAI_DIR / "model_evaluation.json").read_text(encoding="utf-8")),
+            },
+            {
+                "type": "training_provenance",
+                "data": json.loads((GPAI_DIR / "training_provenance.json").read_text(encoding="utf-8")),
+            },
+            {
+                "type": "compute_metrics",
+                "data": json.loads((GPAI_DIR / "compute_metrics.json").read_text(encoding="utf-8")),
+            },
+            {
+                "type": "copyright_policy",
+                "data": json.loads((GPAI_DIR / "copyright_policy.json").read_text(encoding="utf-8")),
+            },
+            {
+                "type": "training_summary",
+                "data": json.loads((GPAI_DIR / "training_summary.json").read_text(encoding="utf-8")),
             },
         ],
         "artefacts": [],
@@ -175,6 +234,21 @@ class TestProofLayer(unittest.TestCase):
         self.assertEqual(report["status"], "pass")
         self.assertEqual(report["pass_count"], 5)
 
+    def test_local_mode_can_evaluate_gpai_provider_completeness(self):
+        signing_key_pem = (GOLDEN_DIR / "signing_key.txt").read_text(encoding="utf-8")
+        proof_layer = ProofLayer(
+            signing_key_pem=signing_key_pem,
+            key_id="kid-dev-01",
+        )
+
+        report = proof_layer.evaluate_completeness(
+            bundle=gpai_provider_bundle(),
+            profile="gpai_provider_v1",
+        )
+
+        self.assertEqual(report["status"], "pass")
+        self.assertEqual(report["pass_count"], 6)
+
     def test_vault_mode_can_update_disclosure_config(self):
         captured = {}
 
@@ -217,11 +291,11 @@ class TestProofLayer(unittest.TestCase):
             captured["headers"] = headers
             captured["body"] = body
             return {
-                "profile": "annex_iv_governance_v1",
+                "profile": "gpai_provider_v1",
                 "status": "warn",
                 "bundle_id": "B1",
-                "system_id": "hiring-assistant",
-                "pass_count": 4,
+                "system_id": "foundation-model-alpha",
+                "pass_count": 5,
                 "warn_count": 1,
                 "fail_count": 0,
                 "rules": [],
@@ -234,7 +308,7 @@ class TestProofLayer(unittest.TestCase):
 
         result = proof_layer.evaluate_completeness(
             bundle_id="B1",
-            profile="annex_iv_governance_v1",
+            profile="gpai_provider_v1",
         )
 
         self.assertEqual(captured["method"], "POST")

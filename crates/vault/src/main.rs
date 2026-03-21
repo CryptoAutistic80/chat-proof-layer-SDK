@@ -15,15 +15,15 @@ use ed25519_dalek::SigningKey;
 use flate2::{Compression, read::GzDecoder, write::GzEncoder};
 use proof_layer_core::{
     ArtefactInput, BuildBundleError, CaptureEvent, CaptureInput, CompletenessProfile,
-    CompletenessStatus, EvidenceItem, ProofBundle, ReceiptVerification,
-    RedactedBundle, RekorTransparencyProvider, Rfc3161HttpTimestampProvider,
-    ScittTransparencyProvider, TimestampAssuranceProfile, TimestampToken, TimestampTrustPolicy,
-    TimestampVerification, TransparencyReceipt, TransparencyTrustPolicy,
-    VAULT_BACKUP_ENCRYPTION_ALGORITHM, anchor_bundle as anchor_bundle_receipt, build_bundle,
-    canonicalize_value, decode_backup_encryption_key, decode_private_key_pem,
-    decode_public_key_pem, encode_public_key_pem, encrypt_backup_archive,
-    evaluate_completeness, redact_bundle, redact_bundle_with_field_redactions, sha256_prefixed,
-    timestamp_digest, validate_bundle_integrity_fields, validate_timestamp_trust_policy,
+    CompletenessStatus, EvidenceItem, ProofBundle, ReceiptVerification, RedactedBundle,
+    RekorTransparencyProvider, Rfc3161HttpTimestampProvider, ScittTransparencyProvider,
+    TimestampAssuranceProfile, TimestampToken, TimestampTrustPolicy, TimestampVerification,
+    TransparencyReceipt, TransparencyTrustPolicy, VAULT_BACKUP_ENCRYPTION_ALGORITHM,
+    anchor_bundle as anchor_bundle_receipt, build_bundle, canonicalize_value,
+    decode_backup_encryption_key, decode_private_key_pem, decode_public_key_pem,
+    encode_public_key_pem, encrypt_backup_archive, evaluate_completeness, redact_bundle,
+    redact_bundle_with_field_redactions, sha256_prefixed, timestamp_digest,
+    validate_bundle_integrity_fields, validate_timestamp_trust_policy,
     validate_transparency_trust_policy, verify_receipt, verify_receipt_with_policy,
     verify_redacted_bundle, verify_timestamp, verify_timestamp_with_policy,
 };
@@ -3589,7 +3589,9 @@ async fn evaluate_completeness_api(
             .map_err(ApiError::internal_anyhow)?
             .ok_or_else(|| ApiError::not_found("bundle not found"))?
     } else {
-        request.bundle.expect("selection_count ensures bundle is present")
+        request
+            .bundle
+            .expect("selection_count ensures bundle is present")
     };
 
     let report = evaluate_completeness(&bundle, request.profile);
@@ -4911,7 +4913,11 @@ fn pack_summary(manifest: &PackManifest) -> PackSummaryResponse {
 }
 
 fn completeness_profile_for_pack(pack_type: &str) -> Option<CompletenessProfile> {
-    (pack_type == "annex_iv").then_some(CompletenessProfile::AnnexIvGovernanceV1)
+    match pack_type {
+        "annex_iv" => Some(CompletenessProfile::AnnexIvGovernanceV1),
+        "annex_xi" => Some(CompletenessProfile::GpaiProviderV1),
+        _ => None,
+    }
 }
 
 fn aggregate_manifest_completeness_status(manifest: &PackManifest) -> Option<CompletenessStatus> {
@@ -7633,10 +7639,7 @@ const ALL_DISCLOSURE_ITEM_TYPES: &[&str] = &[
 
 fn annex_iv_default_redactions() -> BTreeMap<String, Vec<String>> {
     BTreeMap::from([
-        (
-            "risk_assessment".to_string(),
-            vec!["/metadata".to_string()],
-        ),
+        ("risk_assessment".to_string(), vec!["/metadata".to_string()]),
         (
             "data_governance".to_string(),
             vec![
@@ -7649,10 +7652,7 @@ fn annex_iv_default_redactions() -> BTreeMap<String, Vec<String>> {
             "instructions_for_use".to_string(),
             vec!["/metadata".to_string()],
         ),
-        (
-            "qms_record".to_string(),
-            vec!["/metadata".to_string()],
-        ),
+        ("qms_record".to_string(), vec!["/metadata".to_string()]),
         (
             "standards_alignment".to_string(),
             vec!["/metadata".to_string()],
@@ -9347,6 +9347,23 @@ mod tests {
         }
     }
 
+    fn gpai_provider_compliance_profile() -> proof_layer_core::ComplianceProfile {
+        proof_layer_core::ComplianceProfile {
+            intended_use: Some("General-purpose text and workflow assistance".to_string()),
+            prohibited_practice_screening: Some("screened_no_prohibited_use".to_string()),
+            risk_tier: Some("gpai".to_string()),
+            high_risk_domain: None,
+            gpai_status: Some("provider".to_string()),
+            systemic_risk: Some(true),
+            fria_required: None,
+            deployment_context: Some("eu_market_placement".to_string()),
+            metadata: serde_json::json!({
+                "owner": "foundation-governance",
+                "market": "eu",
+            }),
+        }
+    }
+
     fn annex_iv_governance_event(
         item: EvidenceItem,
         retention_class: &str,
@@ -9362,6 +9379,24 @@ mod tests {
         event.subject.model_id = Some("hiring-model-v3".to_string());
         event.subject.version = Some("2026.03".to_string());
         event.compliance_profile = Some(hiring_assistant_compliance_profile());
+        event
+    }
+
+    fn gpai_provider_event(
+        item: EvidenceItem,
+        retention_class: &str,
+        request_id: &str,
+    ) -> CaptureEvent {
+        let mut event = sample_event_with_profile(
+            "foundation-model-alpha",
+            proof_layer_core::ActorRole::Provider,
+            vec![item],
+            Some(retention_class),
+        );
+        event.subject.request_id = Some(request_id.to_string());
+        event.subject.model_id = Some("foundation-model-alpha-v5".to_string());
+        event.subject.version = Some("2026.03".to_string());
+        event.compliance_profile = Some(gpai_provider_compliance_profile());
         event
     }
 
@@ -9391,6 +9426,32 @@ mod tests {
         .await
     }
 
+    async fn create_gpai_provider_bundle(
+        app: &Router,
+        item: EvidenceItem,
+        retention_class: &str,
+        request_id: &str,
+        artefact_name: &str,
+        artefact_bytes: &[u8],
+    ) -> CreateBundleResponse {
+        create_bundle_response(
+            app,
+            &CreateBundleRequest {
+                capture: SealableCaptureInput::V10(gpai_provider_event(
+                    item,
+                    retention_class,
+                    request_id,
+                )),
+                artefacts: vec![InlineArtefact {
+                    name: artefact_name.to_string(),
+                    content_type: "application/json".to_string(),
+                    data_base64: Base64::encode_string(artefact_bytes),
+                }],
+            },
+        )
+        .await
+    }
+
     struct AnnexIvScenarioBundles {
         technical_doc: CreateBundleResponse,
         risk_assessment: CreateBundleResponse,
@@ -9402,6 +9463,16 @@ mod tests {
         post_market_monitoring: CreateBundleResponse,
         runtime_logs: CreateBundleResponse,
         other_system_risk: CreateBundleResponse,
+    }
+
+    struct GpaiProviderScenarioBundles {
+        technical_doc: CreateBundleResponse,
+        model_evaluation: CreateBundleResponse,
+        training_provenance: CreateBundleResponse,
+        compute_metrics: CreateBundleResponse,
+        copyright_policy: CreateBundleResponse,
+        training_summary: CreateBundleResponse,
+        other_system_bundle: CreateBundleResponse,
     }
 
     async fn create_annex_iv_scenario(app: &Router) -> AnnexIvScenarioBundles {
@@ -9431,9 +9502,7 @@ mod tests {
                 human_oversight_design_summary: Some(
                     "Recruiters must review every adverse or borderline case.".to_string(),
                 ),
-                post_market_monitoring_plan_ref: Some(
-                    "pmm://hiring-assistant/2026.03".to_string(),
-                ),
+                post_market_monitoring_plan_ref: Some("pmm://hiring-assistant/2026.03".to_string()),
                 simplified_tech_doc: None,
             }),
             "technical_doc",
@@ -9462,7 +9531,9 @@ mod tests {
                 residual_risk_level: Some("low".to_string()),
                 risk_owner: Some("quality-team".to_string()),
                 vulnerable_groups_considered: Some(true),
-                test_results_summary: Some("No blocking disparity found in March review.".to_string()),
+                test_results_summary: Some(
+                    "No blocking disparity found in March review.".to_string(),
+                ),
                 metadata: serde_json::json!({
                     "internal_notes": "Escalate if parity delta exceeds 5%",
                 }),
@@ -9620,9 +9691,7 @@ mod tests {
                 audit_results_summary: Some(
                     "Release gate approved after compliance review.".to_string(),
                 ),
-                continuous_improvement_actions: vec![
-                    "monitor subgroup parity monthly".to_string(),
-                ],
+                continuous_improvement_actions: vec!["monitor subgroup parity monthly".to_string()],
                 metadata: serde_json::json!({
                     "owner": "quality-lead",
                 }),
@@ -9663,9 +9732,7 @@ mod tests {
                 proof_layer_core::schema::PostMarketMonitoringEvidence {
                     plan_id: "pmm-42".to_string(),
                     status: "active".to_string(),
-                    summary: Some(
-                        "Weekly drift review with escalation thresholds.".to_string(),
-                    ),
+                    summary: Some("Weekly drift review with escalation thresholds.".to_string()),
                     report_commitment: Some(
                         "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
                             .to_string(),
@@ -9745,6 +9812,223 @@ mod tests {
             post_market_monitoring,
             runtime_logs,
             other_system_risk,
+        }
+    }
+
+    async fn create_gpai_provider_scenario(app: &Router) -> GpaiProviderScenarioBundles {
+        let technical_doc = create_gpai_provider_bundle(
+            app,
+            EvidenceItem::TechnicalDoc(proof_layer_core::schema::TechnicalDocEvidence {
+                document_ref: "annex-xi/foundation-model-alpha/system-card".to_string(),
+                section: Some("model_overview".to_string()),
+                commitment: Some(
+                    "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+                        .to_string(),
+                ),
+                annex_iv_sections: Vec::new(),
+                system_description_summary: Some(
+                    "General-purpose provider-controlled model service.".to_string(),
+                ),
+                model_description_summary: None,
+                capabilities_and_limitations: Some(
+                    "Supports drafting and summarization with known hallucination limits."
+                        .to_string(),
+                ),
+                design_choices_summary: Some(
+                    "Provider policy filters and release gates apply before deployment."
+                        .to_string(),
+                ),
+                evaluation_metrics_summary: Some(
+                    "Provider benchmarks cover multilingual quality, safety, and subgroup performance."
+                        .to_string(),
+                ),
+                human_oversight_design_summary: None,
+                post_market_monitoring_plan_ref: None,
+                simplified_tech_doc: Some(false),
+            }),
+            "technical_doc",
+            "req-gpai-tech-doc",
+            "technical_doc.json",
+            br#"{"document_ref":"annex-xi/foundation-model-alpha/system-card"}"#,
+        )
+        .await;
+
+        let model_evaluation = create_gpai_provider_bundle(
+            app,
+            EvidenceItem::ModelEvaluation(proof_layer_core::schema::ModelEvaluationEvidence {
+                evaluation_id: "eval-foundation-alpha-v5".to_string(),
+                benchmark: "provider-release-suite-2026q1".to_string(),
+                status: "passed".to_string(),
+                summary: Some("Release benchmark suite met provider thresholds.".to_string()),
+                report_commitment: Some(
+                    "sha256:2222222222222222222222222222222222222222222222222222222222222222"
+                        .to_string(),
+                ),
+                metrics_summary: vec![proof_layer_core::schema::MetricSummary {
+                    name: "instruction_following".to_string(),
+                    value: "0.93".to_string(),
+                    unit: Some("ratio".to_string()),
+                    methodology: Some("Provider release suite average.".to_string()),
+                }],
+                group_performance: vec![proof_layer_core::schema::GroupMetricSummary {
+                    group: "eu_languages".to_string(),
+                    metrics: vec![proof_layer_core::schema::MetricSummary {
+                        name: "quality_score".to_string(),
+                        value: "0.91".to_string(),
+                        unit: Some("ratio".to_string()),
+                        methodology: Some("Held-out multilingual review set.".to_string()),
+                    }],
+                }],
+                evaluation_methodology: Some(
+                    "Held-out multilingual and safety benchmark suites.".to_string(),
+                ),
+                metadata: serde_json::json!({"owner": "provider-evals"}),
+            }),
+            "gpai_documentation",
+            "req-gpai-eval",
+            "model_evaluation.json",
+            br#"{"evaluation_id":"eval-foundation-alpha-v5"}"#,
+        )
+        .await;
+
+        let training_provenance = create_gpai_provider_bundle(
+            app,
+            EvidenceItem::TrainingProvenance(
+                proof_layer_core::schema::TrainingProvenanceEvidence {
+                    dataset_ref: "dataset://foundation-model-alpha/pretrain-v5".to_string(),
+                    stage: "pretraining".to_string(),
+                    lineage_ref: None,
+                    record_commitment: Some(
+                        "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+                            .to_string(),
+                    ),
+                    compute_metrics_ref: Some("compute-foundation-alpha-v5".to_string()),
+                    training_dataset_summary: Some(
+                        "Curated multilingual web, code, and licensed reference corpora."
+                            .to_string(),
+                    ),
+                    consortium_context: Some("Single-provider training program".to_string()),
+                    metadata: serde_json::json!({"source": "provider-registry"}),
+                },
+            ),
+            "gpai_documentation",
+            "req-gpai-training",
+            "training_provenance.json",
+            br#"{"dataset_ref":"dataset://foundation-model-alpha/pretrain-v5"}"#,
+        )
+        .await;
+
+        let compute_metrics = create_gpai_provider_bundle(
+            app,
+            EvidenceItem::ComputeMetrics(proof_layer_core::schema::ComputeMetricsEvidence {
+                compute_id: "compute-foundation-alpha-v5".to_string(),
+                training_flops_estimate: "1.2e25".to_string(),
+                threshold_basis_ref: "art51_systemic_risk_threshold".to_string(),
+                threshold_value: "1e25".to_string(),
+                threshold_status: "above_threshold".to_string(),
+                estimation_methodology: Some(
+                    "Cluster scheduler logs and accelerator utilization rollup.".to_string(),
+                ),
+                measured_at: Some("2026-03-10T12:00:00Z".to_string()),
+                compute_resources_summary: vec![
+                    proof_layer_core::schema::MetricSummary {
+                        name: "gpu_hours".to_string(),
+                        value: "42000".to_string(),
+                        unit: Some("hours".to_string()),
+                        methodology: Some("Provider training cluster accounting.".to_string()),
+                    },
+                    proof_layer_core::schema::MetricSummary {
+                        name: "accelerator_count".to_string(),
+                        value: "2048".to_string(),
+                        unit: Some("gpus".to_string()),
+                        methodology: Some("Peak provisioned accelerator count.".to_string()),
+                    },
+                ],
+                consortium_context: Some("Single-provider training program".to_string()),
+                metadata: serde_json::json!({"owner": "foundation-ops"}),
+            }),
+            "gpai_documentation",
+            "req-gpai-compute",
+            "compute_metrics.json",
+            br#"{"compute_id":"compute-foundation-alpha-v5"}"#,
+        )
+        .await;
+
+        let copyright_policy = create_gpai_provider_bundle(
+            app,
+            EvidenceItem::CopyrightPolicy(proof_layer_core::schema::CopyrightPolicyEvidence {
+                policy_ref: "copyright://foundation-model-alpha/policy-v2".to_string(),
+                status: "published".to_string(),
+                jurisdiction: Some("eu".to_string()),
+                commitment: Some(
+                    "sha256:4444444444444444444444444444444444444444444444444444444444444444"
+                        .to_string(),
+                ),
+                metadata: serde_json::json!({"scope": "training data intake"}),
+            }),
+            "gpai_documentation",
+            "req-gpai-copyright",
+            "copyright_policy.json",
+            br#"{"policy_ref":"copyright://foundation-model-alpha/policy-v2"}"#,
+        )
+        .await;
+
+        let training_summary = create_gpai_provider_bundle(
+            app,
+            EvidenceItem::TrainingSummary(proof_layer_core::schema::TrainingSummaryEvidence {
+                summary_ref: "summary://foundation-model-alpha/training-v5".to_string(),
+                status: "published".to_string(),
+                audience: Some("public".to_string()),
+                commitment: Some(
+                    "sha256:5555555555555555555555555555555555555555555555555555555555555555"
+                        .to_string(),
+                ),
+                metadata: serde_json::json!({"owner": "provider-disclosures"}),
+            }),
+            "gpai_documentation",
+            "req-gpai-summary",
+            "training_summary.json",
+            br#"{"summary_ref":"summary://foundation-model-alpha/training-v5"}"#,
+        )
+        .await;
+
+        let other_system_bundle = create_bundle_response(
+            app,
+            &CreateBundleRequest {
+                capture: SealableCaptureInput::V10(sample_event_with_profile(
+                    "other-foundation-model",
+                    proof_layer_core::ActorRole::Provider,
+                    vec![EvidenceItem::TrainingProvenance(
+                        proof_layer_core::schema::TrainingProvenanceEvidence {
+                            dataset_ref: "dataset://other/pretrain-v1".to_string(),
+                            stage: "pretraining".to_string(),
+                            lineage_ref: Some("lineage://other/provider".to_string()),
+                            record_commitment: None,
+                            compute_metrics_ref: Some("compute-other-v1".to_string()),
+                            training_dataset_summary: Some("Other provider dataset.".to_string()),
+                            consortium_context: None,
+                            metadata: serde_json::json!({"source": "other-registry"}),
+                        },
+                    )],
+                    Some("gpai_documentation"),
+                )),
+                artefacts: vec![InlineArtefact {
+                    name: "other-training-provenance.json".to_string(),
+                    content_type: "application/json".to_string(),
+                    data_base64: Base64::encode_string(br#"{"dataset":"other"}"#),
+                }],
+            },
+        )
+        .await;
+
+        GpaiProviderScenarioBundles {
+            technical_doc,
+            model_evaluation,
+            training_provenance,
+            compute_metrics,
+            copyright_policy,
+            training_summary,
+            other_system_bundle,
         }
     }
 
@@ -9922,6 +10206,163 @@ mod tests {
             "kid-dev-01",
             "01JPGG4QFZZ0X0P3N2JDMQ6K3V",
             chrono::DateTime::parse_from_rfc3339("2026-03-02T00:00:00Z")
+                .unwrap()
+                .with_timezone(&Utc),
+        )
+        .unwrap()
+    }
+
+    fn fixture_gpai_provider_bundle() -> ProofBundle {
+        let event = sample_event_with_profile(
+            "foundation-model-alpha",
+            proof_layer_core::ActorRole::Provider,
+            vec![
+                EvidenceItem::TechnicalDoc(proof_layer_core::schema::TechnicalDocEvidence {
+                    document_ref: "annex-xi/foundation-model-alpha/system-card".to_string(),
+                    section: Some("model_overview".to_string()),
+                    commitment: Some(
+                        "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+                            .to_string(),
+                    ),
+                    annex_iv_sections: Vec::new(),
+                    system_description_summary: Some(
+                        "General-purpose provider-controlled model service.".to_string(),
+                    ),
+                    model_description_summary: None,
+                    capabilities_and_limitations: Some(
+                        "Supports drafting and summarization with known hallucination limits."
+                            .to_string(),
+                    ),
+                    design_choices_summary: Some(
+                        "Provider policy filters and release gates apply before deployment."
+                            .to_string(),
+                    ),
+                    evaluation_metrics_summary: Some(
+                        "Provider benchmarks cover multilingual quality, safety, and subgroup performance."
+                            .to_string(),
+                    ),
+                    human_oversight_design_summary: None,
+                    post_market_monitoring_plan_ref: None,
+                    simplified_tech_doc: Some(false),
+                }),
+                EvidenceItem::ModelEvaluation(proof_layer_core::schema::ModelEvaluationEvidence {
+                    evaluation_id: "eval-foundation-alpha-v5".to_string(),
+                    benchmark: "provider-release-suite-2026q1".to_string(),
+                    status: "passed".to_string(),
+                    summary: Some(
+                        "Release benchmark suite met provider thresholds.".to_string(),
+                    ),
+                    report_commitment: Some(
+                        "sha256:2222222222222222222222222222222222222222222222222222222222222222"
+                            .to_string(),
+                    ),
+                    metrics_summary: vec![proof_layer_core::schema::MetricSummary {
+                        name: "instruction_following".to_string(),
+                        value: "0.93".to_string(),
+                        unit: Some("ratio".to_string()),
+                        methodology: Some("Provider release suite average.".to_string()),
+                    }],
+                    group_performance: vec![proof_layer_core::schema::GroupMetricSummary {
+                        group: "eu_languages".to_string(),
+                        metrics: vec![proof_layer_core::schema::MetricSummary {
+                            name: "quality_score".to_string(),
+                            value: "0.91".to_string(),
+                            unit: Some("ratio".to_string()),
+                            methodology: Some("Held-out multilingual review set.".to_string()),
+                        }],
+                    }],
+                    evaluation_methodology: Some(
+                        "Held-out multilingual and safety benchmark suites.".to_string(),
+                    ),
+                    metadata: serde_json::json!({"owner": "provider-evals"}),
+                }),
+                EvidenceItem::TrainingProvenance(
+                    proof_layer_core::schema::TrainingProvenanceEvidence {
+                        dataset_ref: "dataset://foundation-model-alpha/pretrain-v5".to_string(),
+                        stage: "pretraining".to_string(),
+                        lineage_ref: None,
+                        record_commitment: Some(
+                            "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+                                .to_string(),
+                        ),
+                        compute_metrics_ref: Some("compute-foundation-alpha-v5".to_string()),
+                        training_dataset_summary: Some(
+                            "Curated multilingual web, code, and licensed reference corpora."
+                                .to_string(),
+                        ),
+                        consortium_context: Some("Single-provider training program".to_string()),
+                        metadata: serde_json::json!({"source": "provider-registry"}),
+                    },
+                ),
+                EvidenceItem::ComputeMetrics(proof_layer_core::schema::ComputeMetricsEvidence {
+                    compute_id: "compute-foundation-alpha-v5".to_string(),
+                    training_flops_estimate: "1.2e25".to_string(),
+                    threshold_basis_ref: "art51_systemic_risk_threshold".to_string(),
+                    threshold_value: "1e25".to_string(),
+                    threshold_status: "above_threshold".to_string(),
+                    estimation_methodology: Some(
+                        "Cluster scheduler logs and accelerator utilization rollup.".to_string(),
+                    ),
+                    measured_at: Some("2026-03-10T12:00:00Z".to_string()),
+                    compute_resources_summary: vec![
+                        proof_layer_core::schema::MetricSummary {
+                            name: "gpu_hours".to_string(),
+                            value: "42000".to_string(),
+                            unit: Some("hours".to_string()),
+                            methodology: Some("Provider training cluster accounting.".to_string()),
+                        },
+                        proof_layer_core::schema::MetricSummary {
+                            name: "accelerator_count".to_string(),
+                            value: "2048".to_string(),
+                            unit: Some("gpus".to_string()),
+                            methodology: Some("Peak provisioned accelerator count.".to_string()),
+                        },
+                    ],
+                    consortium_context: Some("Single-provider training program".to_string()),
+                    metadata: serde_json::json!({"owner": "foundation-ops"}),
+                }),
+                EvidenceItem::CopyrightPolicy(
+                    proof_layer_core::schema::CopyrightPolicyEvidence {
+                        policy_ref: "copyright://foundation-model-alpha/policy-v2".to_string(),
+                        status: "published".to_string(),
+                        jurisdiction: Some("eu".to_string()),
+                        commitment: Some(
+                            "sha256:4444444444444444444444444444444444444444444444444444444444444444"
+                                .to_string(),
+                        ),
+                        metadata: serde_json::json!({"scope": "training data intake"}),
+                    },
+                ),
+                EvidenceItem::TrainingSummary(proof_layer_core::schema::TrainingSummaryEvidence {
+                    summary_ref: "summary://foundation-model-alpha/training-v5".to_string(),
+                    status: "published".to_string(),
+                    audience: Some("public".to_string()),
+                    commitment: Some(
+                        "sha256:5555555555555555555555555555555555555555555555555555555555555555"
+                            .to_string(),
+                    ),
+                    metadata: serde_json::json!({"owner": "provider-disclosures"}),
+                }),
+            ],
+            Some("gpai_documentation"),
+        );
+        let mut event = event;
+        event.subject.request_id = Some("req-gpai-inline".to_string());
+        event.subject.model_id = Some("foundation-model-alpha-v5".to_string());
+        event.subject.version = Some("2026.03".to_string());
+        event.compliance_profile = Some(gpai_provider_compliance_profile());
+
+        build_bundle(
+            event,
+            &[ArtefactInput {
+                name: "gpai_provider_overview.json".to_string(),
+                content_type: "application/json".to_string(),
+                bytes: br#"{"profile":"gpai_provider_v1"}"#.to_vec(),
+            }],
+            &SigningKey::from_bytes(&[7_u8; 32]),
+            "kid-dev-01",
+            "01JQ0JP7DPC7GRQYTF6MAVVXQJ",
+            chrono::DateTime::parse_from_rfc3339("2026-03-21T00:00:00Z")
                 .unwrap()
                 .with_timezone(&Utc),
         )
@@ -14436,6 +14877,69 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
     }
 
     #[tokio::test]
+    async fn evaluate_completeness_api_supports_gpai_provider_bundle_id_requests() {
+        let state = test_state(DEFAULT_MAX_PAYLOAD_BYTES).await;
+        let app = build_router(state, DEFAULT_MAX_PAYLOAD_BYTES);
+        let scenario = create_gpai_provider_scenario(&app).await;
+
+        let request = Request::builder()
+            .method("POST")
+            .uri("/v1/completeness/evaluate")
+            .header("content-type", "application/json")
+            .body(Body::from(
+                serde_json::to_vec(&EvaluateCompletenessRequest {
+                    bundle_id: Some(scenario.compute_metrics.bundle_id.clone()),
+                    bundle: None,
+                    profile: CompletenessProfile::GpaiProviderV1,
+                })
+                .unwrap(),
+            ))
+            .unwrap();
+        let response = app.oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let report: proof_layer_core::CompletenessReport = serde_json::from_slice(&body).unwrap();
+
+        assert_eq!(report.profile, CompletenessProfile::GpaiProviderV1);
+        assert_eq!(report.bundle_id, scenario.compute_metrics.bundle_id);
+        assert_eq!(report.status, CompletenessStatus::Fail);
+        assert!(report.fail_count > 0);
+    }
+
+    #[tokio::test]
+    async fn evaluate_completeness_api_supports_gpai_provider_inline_bundle_requests() {
+        let state = test_state(DEFAULT_MAX_PAYLOAD_BYTES).await;
+        let app = build_router(state, DEFAULT_MAX_PAYLOAD_BYTES);
+        let bundle = fixture_gpai_provider_bundle();
+
+        let request = Request::builder()
+            .method("POST")
+            .uri("/v1/completeness/evaluate")
+            .header("content-type", "application/json")
+            .body(Body::from(
+                serde_json::to_vec(&EvaluateCompletenessRequest {
+                    bundle_id: None,
+                    bundle: Some(bundle),
+                    profile: CompletenessProfile::GpaiProviderV1,
+                })
+                .unwrap(),
+            ))
+            .unwrap();
+        let response = app.oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let report: proof_layer_core::CompletenessReport = serde_json::from_slice(&body).unwrap();
+
+        assert_eq!(report.profile, CompletenessProfile::GpaiProviderV1);
+        assert_eq!(report.status, CompletenessStatus::Pass);
+        assert_eq!(report.fail_count, 0);
+    }
+
+    #[tokio::test]
     async fn evaluate_completeness_api_rejects_invalid_selection_combinations() {
         let state = test_state(DEFAULT_MAX_PAYLOAD_BYTES).await;
         let app = build_router(state, DEFAULT_MAX_PAYLOAD_BYTES);
@@ -14518,7 +15022,11 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
 
         assert_eq!(actual_bundle_ids, expected_bundle_ids);
         assert!(!pack.bundle_ids.contains(&scenario.runtime_logs.bundle_id));
-        assert!(!pack.bundle_ids.contains(&scenario.other_system_risk.bundle_id));
+        assert!(
+            !pack
+                .bundle_ids
+                .contains(&scenario.other_system_risk.bundle_id)
+        );
     }
 
     #[tokio::test]
@@ -14576,7 +15084,10 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
             .find(|entry| entry.bundle_id == scenario.technical_doc.bundle_id)
             .unwrap();
         assert_eq!(technical_entry.actor_role, "provider");
-        assert_eq!(technical_entry.system_id.as_deref(), Some("hiring-assistant"));
+        assert_eq!(
+            technical_entry.system_id.as_deref(),
+            Some("hiring-assistant")
+        );
         assert_eq!(technical_entry.item_types, vec!["technical_doc"]);
         assert_eq!(technical_entry.obligation_refs, vec!["art11_annex_iv"]);
         assert!(
@@ -14599,13 +15110,28 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
                 .matched_rules
                 .contains(&"obligation_ref:art11_annex_iv".to_string())
         );
-        assert_eq!(technical_entry.completeness_status, Some(CompletenessStatus::Fail));
+        assert_eq!(
+            technical_entry.completeness_status,
+            Some(CompletenessStatus::Fail)
+        );
 
         let expected_refs = BTreeMap::from([
-            (scenario.risk_assessment.bundle_id.clone(), "art9".to_string()),
-            (scenario.data_governance.bundle_id.clone(), "art10".to_string()),
-            (scenario.instructions_for_use.bundle_id.clone(), "art13".to_string()),
-            (scenario.human_oversight.bundle_id.clone(), "art14".to_string()),
+            (
+                scenario.risk_assessment.bundle_id.clone(),
+                "art9".to_string(),
+            ),
+            (
+                scenario.data_governance.bundle_id.clone(),
+                "art10".to_string(),
+            ),
+            (
+                scenario.instructions_for_use.bundle_id.clone(),
+                "art13".to_string(),
+            ),
+            (
+                scenario.human_oversight.bundle_id.clone(),
+                "art14".to_string(),
+            ),
             (scenario.qms_record.bundle_id.clone(), "art17".to_string()),
             (
                 scenario.standards_alignment.bundle_id.clone(),
@@ -14624,7 +15150,8 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
             if let Some(expected_ref) = expected_refs.get(&entry.bundle_id) {
                 assert_eq!(entry.obligation_refs, vec![expected_ref.clone()]);
                 assert!(
-                    entry.matched_rules
+                    entry
+                        .matched_rules
                         .contains(&format!("obligation_ref:{expected_ref}"))
                 );
             }
@@ -14759,7 +15286,12 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
                 read_package_from_bytes(&disclosure_package, DEFAULT_MAX_PAYLOAD_BYTES).unwrap();
             let redacted = parse_redacted_bundle_file(&decoded.files).unwrap();
             seen_bundle_ids.insert(redacted.bundle_id.clone());
-            assert!(!decoded.files.keys().any(|name| name.starts_with("artefacts/")));
+            assert!(
+                !decoded
+                    .files
+                    .keys()
+                    .any(|name| name.starts_with("artefacts/"))
+            );
 
             if redacted.bundle_id == scenario.risk_assessment.bundle_id {
                 assert_eq!(
@@ -15740,6 +16272,114 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
             copyright_entry
                 .matched_rules
                 .contains(&"obligation_ref:art53_copyright".to_string())
+        );
+    }
+
+    #[tokio::test]
+    async fn annex_xi_pack_attaches_gpai_provider_completeness_profile_and_excludes_other_systems()
+    {
+        let state = test_state(DEFAULT_MAX_PAYLOAD_BYTES).await;
+        let app = build_router(state, DEFAULT_MAX_PAYLOAD_BYTES);
+        let scenario = create_gpai_provider_scenario(&app).await;
+
+        let pack_req = Request::builder()
+            .method("POST")
+            .uri("/v1/packs")
+            .header("content-type", "application/json")
+            .body(Body::from(
+                serde_json::to_vec(&CreatePackRequest {
+                    pack_type: "annex_xi".to_string(),
+                    system_id: Some("foundation-model-alpha".to_string()),
+                    from: None,
+                    to: None,
+                    bundle_format: default_pack_bundle_format(),
+                    disclosure_policy: None,
+                    disclosure_template: None,
+                })
+                .unwrap(),
+            ))
+            .unwrap();
+        let pack_res = app.clone().oneshot(pack_req).await.unwrap();
+        assert_eq!(pack_res.status(), StatusCode::CREATED);
+        let body = axum::body::to_bytes(pack_res.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let pack: PackSummaryResponse = serde_json::from_slice(&body).unwrap();
+
+        assert_eq!(
+            pack.completeness_profile,
+            Some(CompletenessProfile::GpaiProviderV1)
+        );
+        assert_eq!(pack.completeness_status, Some(CompletenessStatus::Fail));
+        assert_eq!(pack.bundle_count, 6);
+        assert_eq!(
+            pack.bundle_ids,
+            vec![
+                scenario.technical_doc.bundle_id.clone(),
+                scenario.model_evaluation.bundle_id.clone(),
+                scenario.training_provenance.bundle_id.clone(),
+                scenario.compute_metrics.bundle_id.clone(),
+                scenario.copyright_policy.bundle_id.clone(),
+                scenario.training_summary.bundle_id.clone(),
+            ]
+        );
+        assert!(
+            !pack
+                .bundle_ids
+                .contains(&scenario.other_system_bundle.bundle_id)
+        );
+
+        let manifest_req = Request::builder()
+            .method("GET")
+            .uri(format!("/v1/packs/{}/manifest", pack.pack_id))
+            .body(Body::empty())
+            .unwrap();
+        let manifest_res = app.oneshot(manifest_req).await.unwrap();
+        assert_eq!(manifest_res.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(manifest_res.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let manifest: PackManifest = serde_json::from_slice(&body).unwrap();
+
+        assert_eq!(
+            manifest.completeness_profile,
+            Some(CompletenessProfile::GpaiProviderV1)
+        );
+        assert_eq!(manifest.completeness_pass_count, Some(0));
+        assert_eq!(manifest.completeness_warn_count, Some(0));
+        assert_eq!(manifest.completeness_fail_count, Some(6));
+        assert_eq!(manifest.bundles.len(), 6);
+        assert!(
+            manifest
+                .bundles
+                .iter()
+                .all(|entry| entry.completeness_status == Some(CompletenessStatus::Fail))
+        );
+
+        let compute_entry = manifest
+            .bundles
+            .iter()
+            .find(|entry| entry.bundle_id == scenario.compute_metrics.bundle_id)
+            .unwrap();
+        assert_eq!(compute_entry.item_types, vec!["compute_metrics"]);
+        assert_eq!(
+            compute_entry.obligation_refs,
+            vec!["art51_compute_threshold"]
+        );
+        assert!(
+            compute_entry
+                .matched_rules
+                .contains(&"pack_type:annex_xi".to_string())
+        );
+        assert!(
+            compute_entry
+                .matched_rules
+                .contains(&"item_type:compute_metrics".to_string())
+        );
+        assert!(
+            compute_entry
+                .matched_rules
+                .contains(&"obligation_ref:art51_compute_threshold".to_string())
         );
     }
 

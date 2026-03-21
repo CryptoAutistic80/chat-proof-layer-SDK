@@ -1,4 +1,7 @@
-import { findScenarioByPackType, getPlaygroundScenario } from "./sdkPlaygroundScenarios";
+import {
+  findScenarioByPackType,
+  getPlaygroundScenario,
+} from "./sdkPlaygroundScenarios";
 
 function normalizeScenario(inputScenario, run) {
   if (typeof inputScenario === "string") {
@@ -10,7 +13,10 @@ function normalizeScenario(inputScenario, run) {
   if (run?.scenarioId) {
     return getPlaygroundScenario(run.scenarioId);
   }
-  return findScenarioByPackType(run?.packType ?? null, run?.bundle?.items ?? []) ?? getPlaygroundScenario("ts_chatbot_support");
+  return (
+    findScenarioByPackType(run?.packType ?? null, run?.bundle?.items ?? []) ??
+    getPlaygroundScenario("ts_chatbot_support")
+  );
 }
 
 function exportedState(run, scenario) {
@@ -47,6 +53,34 @@ function bundleRunsFromRun(run) {
   return Array.isArray(run?.bundleRuns) ? run.bundleRuns : [];
 }
 
+function readinessCopy(profile, status) {
+  if (profile === "annex_iv_governance_v1") {
+    if (status === "pass") {
+      return "The structured governance fields for this Annex IV workflow meet the current advisory minimum.";
+    }
+    if (status === "warn") {
+      return "The workflow has at least one minimally complete governance record for each required area, but some captured records are thinner than the current advisory minimum.";
+    }
+    return "The workflow is missing at least one required governance area or does not yet include a minimally complete record for that area.";
+  }
+  if (profile === "gpai_provider_v1") {
+    if (status === "pass") {
+      return "The structured GPAI provider fields for this workflow meet the current advisory minimum.";
+    }
+    if (status === "warn") {
+      return "The workflow has at least one minimally complete GPAI provider record for each required area, but some captured records are thinner than the current advisory minimum.";
+    }
+    return "The workflow is missing at least one required GPAI provider area or does not yet include a minimally complete record for that area.";
+  }
+  if (status === "pass") {
+    return "The structured fields for this workflow meet the current advisory minimum.";
+  }
+  if (status === "warn") {
+    return "The workflow has at least one minimally complete record for each required area, but some captured records are thinner than the current advisory minimum.";
+  }
+  return "The workflow is missing at least one required area or does not yet include a minimally complete record for that area.";
+}
+
 function buildReadinessSummary(run) {
   const report = run?.completenessReport;
   if (!report) {
@@ -57,7 +91,7 @@ function buildReadinessSummary(run) {
       warnCount: 0,
       failCount: 0,
       topMissingFields: [],
-      summary: "No readiness check is attached to this workflow."
+      summary: "No readiness check is attached to this workflow.",
     };
   }
 
@@ -65,8 +99,8 @@ function buildReadinessSummary(run) {
     ...new Set(
       (report.rules ?? [])
         .filter((rule) => rule.status === "warn" || rule.status === "fail")
-        .flatMap((rule) => rule.missing_fields ?? [])
-    )
+        .flatMap((rule) => rule.missing_fields ?? []),
+    ),
   ].slice(0, 6);
 
   return {
@@ -76,12 +110,7 @@ function buildReadinessSummary(run) {
     warnCount: report.warn_count ?? 0,
     failCount: report.fail_count ?? 0,
     topMissingFields,
-    summary:
-      report.status === "pass"
-        ? "The structured governance fields for this Annex IV workflow meet the current advisory minimum."
-        : report.status === "warn"
-          ? "The workflow has at least one minimally complete governance record for each required area, but some captured records are thinner than the current advisory minimum."
-          : "The workflow is missing at least one required governance area or does not yet include a minimally complete record for that area."
+    summary: readinessCopy(report.profile, report.status),
   };
 }
 
@@ -98,7 +127,7 @@ export function buildComplianceReview(inputScenario, run) {
       label: bundleRun.label,
       bundleId: bundleRun.bundleId,
       itemTypes: bundleRun.itemTypes,
-      summary: bundleRun.summary
+      summary: bundleRun.summary,
     })),
     supportsPack: {
       packType: scenario.packType ?? "No export pack by default",
@@ -107,12 +136,12 @@ export function buildComplianceReview(inputScenario, run) {
       manifestItems:
         run?.packManifest?.bundles?.map((entry) => ({
           bundleId: entry.bundle_id,
-          itemTypes: entry.item_types
-        })) ?? []
+          itemTypes: entry.item_types,
+        })) ?? [],
     },
     readiness,
     lawExplainer: scenario.lawExplainer,
-    commonNextEvidence: scenario.missingEvidence
+    commonNextEvidence: scenario.missingEvidence,
   };
 }
 
@@ -124,15 +153,13 @@ export function buildRecordExplainer(inputScenario, run) {
     intro: scenario.recordExplorerIntro,
     captured: {
       title: "What was stored",
-      body:
-        "This view explains the main record contents in plain English before you open any raw JSON. Start here if you want to understand the story of the run.",
-      lawExplainer: scenario.lawExplainer
+      body: "This view explains the main record contents in plain English before you open any raw JSON. Start here if you want to understand the story of the run.",
+      lawExplainer: scenario.lawExplainer,
     },
     proof: {
       title: "What can be independently checked",
-      body:
-        "This view focuses on whether the record can be verified later and what a reviewer can confirm about integrity, timestamps, transparency, and disclosure decisions.",
-      lawExplainer: scenario.lawExplainer
+      body: "This view focuses on whether the record can be verified later and what a reviewer can confirm about integrity, timestamps, transparency, and disclosure decisions.",
+      lawExplainer: scenario.lawExplainer,
     },
     share: {
       title: "What can leave the system",
@@ -140,8 +167,8 @@ export function buildRecordExplainer(inputScenario, run) {
         ? `This workflow can build a ${packLabel} package for ${defaultShareAudience(scenario)}.`
         : "This example does not automatically build an export package. It teaches capture first, then lets you inspect the record before deciding how to share it.",
       audience: defaultShareAudience(scenario),
-      lawExplainer: scenario.lawExplainer
+      lawExplainer: scenario.lawExplainer,
     },
-    commonNextEvidence: scenario.missingEvidence
+    commonNextEvidence: scenario.missingEvidence,
   };
 }

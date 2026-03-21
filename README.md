@@ -87,6 +87,7 @@ Evidence currently implemented in core and SDKs includes:
 - `model_evaluation`
 - `adversarial_test`
 - `training_provenance`
+- `compute_metrics`
 - `downstream_documentation`
 - `copyright_policy`
 - `training_summary`
@@ -151,6 +152,11 @@ cargo run -p proofctl -- verify --in ./bundle.disclosure.pkg --key ./keys/verify
 cargo run -p proofctl -- assess \
   --in ./annex-iv-bundle.pkg \
   --profile annex_iv_governance_v1
+
+# Assess GPAI provider completeness for a full bundle
+cargo run -p proofctl -- assess \
+  --in ./gpai-provider-bundle.pkg \
+  --profile gpai_provider_v1
 ```
 
 Notes:
@@ -158,6 +164,7 @@ Notes:
 - `proofctl create` accepts both the legacy PoC capture shape and the current v1.0 `CaptureEvent` shape.
 - Migration overrides are available, for example `--system-id`, `--retention-class`, `--evidence-type`, `--role`, and the `--intended-use` / `--risk-tier` compliance flags.
 - Deterministic fixture inputs live under `fixtures/golden/`.
+- Checked completeness fixtures now include both `fixtures/golden/annex_iv_governance/` and `fixtures/golden/gpai_provider/`.
 
 Example with an SDK-first compliance profile stamped at create time:
 

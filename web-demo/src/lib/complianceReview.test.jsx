@@ -1,38 +1,44 @@
 import { describe, expect, test } from "vitest";
-import { buildComplianceReview, buildRecordExplainer } from "./complianceReview";
+import {
+  buildComplianceReview,
+  buildRecordExplainer,
+} from "./complianceReview";
 import { getPlaygroundScenario } from "./sdkPlaygroundScenarios";
 
 describe("buildComplianceReview", () => {
   test("maps bundle runs and pack state into plain-language review output", () => {
-    const review = buildComplianceReview(getPlaygroundScenario("py_incident_escalation"), {
-      bundleRuns: [
-        {
-          label: "Incident report",
-          bundleId: "bundle-1",
-          itemTypes: ["incident_report"],
-          summary: "Initial incident evidence."
-        }
-      ],
-      packManifest: {
-        bundles: [{ bundle_id: "bundle-1", item_types: ["incident_report"] }]
-      },
-      downloadInfo: {
-        fileName: "incident-response.pack"
-      },
-      completenessReport: {
-        profile: "annex_iv_governance_v1",
-        status: "warn",
-        pass_count: 4,
-        warn_count: 1,
-        fail_count: 0,
-        rules: [
+    const review = buildComplianceReview(
+      getPlaygroundScenario("py_incident_escalation"),
+      {
+        bundleRuns: [
           {
-            status: "warn",
-            missing_fields: ["stop_reason"]
-          }
-        ]
-      }
-    });
+            label: "Incident report",
+            bundleId: "bundle-1",
+            itemTypes: ["incident_report"],
+            summary: "Initial incident evidence.",
+          },
+        ],
+        packManifest: {
+          bundles: [{ bundle_id: "bundle-1", item_types: ["incident_report"] }],
+        },
+        downloadInfo: {
+          fileName: "incident-response.pack",
+        },
+        completenessReport: {
+          profile: "annex_iv_governance_v1",
+          status: "warn",
+          pass_count: 4,
+          warn_count: 1,
+          fail_count: 0,
+          rules: [
+            {
+              status: "warn",
+              missing_fields: ["stop_reason"],
+            },
+          ],
+        },
+      },
+    );
 
     expect(review.title).toBe("Incident escalation evidence map");
     expect(review.capturedNow[0].bundleId).toBe("bundle-1");
@@ -45,11 +51,40 @@ describe("buildComplianceReview", () => {
   });
 
   test("builds a record explainer for packless chatbot scenarios", () => {
-    const explainer = buildRecordExplainer(getPlaygroundScenario("ts_chatbot_support"), {
-      packType: null
-    });
+    const explainer = buildRecordExplainer(
+      getPlaygroundScenario("ts_chatbot_support"),
+      {
+        packType: null,
+      },
+    );
 
     expect(explainer.captured.title).toBe("What was stored");
-    expect(explainer.share.body).toContain("does not automatically build an export package");
+    expect(explainer.share.body).toContain(
+      "does not automatically build an export package",
+    );
+  });
+
+  test("uses GPAI-specific readiness wording when the gpai profile is attached", () => {
+    const review = buildComplianceReview(
+      getPlaygroundScenario("ts_gpai_thresholds"),
+      {
+        completenessReport: {
+          profile: "gpai_provider_v1",
+          status: "fail",
+          pass_count: 0,
+          warn_count: 0,
+          fail_count: 2,
+          rules: [
+            {
+              status: "fail",
+              missing_fields: ["compute_resources_summary"],
+            },
+          ],
+        },
+      },
+    );
+
+    expect(review.readiness.profile).toBe("gpai_provider_v1");
+    expect(review.readiness.summary).toContain("GPAI provider");
   });
 });

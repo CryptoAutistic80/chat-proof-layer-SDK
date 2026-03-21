@@ -126,14 +126,23 @@ fn check_risk_assessment(item: &EvidenceItem) -> Option<Vec<String>> {
             "risk_description",
             has_optional_text(evidence.risk_description.as_deref()),
         ),
-        ("likelihood", has_optional_text(evidence.likelihood.as_deref())),
+        (
+            "likelihood",
+            has_optional_text(evidence.likelihood.as_deref()),
+        ),
         ("affected_groups", !evidence.affected_groups.is_empty()),
-        ("mitigation_measures", !evidence.mitigation_measures.is_empty()),
+        (
+            "mitigation_measures",
+            !evidence.mitigation_measures.is_empty(),
+        ),
         (
             "residual_risk_level",
             has_optional_text(evidence.residual_risk_level.as_deref()),
         ),
-        ("risk_owner", has_optional_text(evidence.risk_owner.as_deref())),
+        (
+            "risk_owner",
+            has_optional_text(evidence.risk_owner.as_deref()),
+        ),
         (
             "test_results_summary",
             has_optional_text(evidence.test_results_summary.as_deref()),
@@ -161,7 +170,10 @@ fn check_data_governance(item: &EvidenceItem) -> Option<Vec<String>> {
             has_optional_text(evidence.bias_detection_methodology.as_deref()),
         ),
         ("bias_metrics", !evidence.bias_metrics.is_empty()),
-        ("mitigation_actions", !evidence.mitigation_actions.is_empty()),
+        (
+            "mitigation_actions",
+            !evidence.mitigation_actions.is_empty(),
+        ),
         ("data_gaps", !evidence.data_gaps.is_empty()),
         (
             "personal_data_categories",
@@ -232,7 +244,10 @@ fn check_instructions_for_use(item: &EvidenceItem) -> Option<Vec<String>> {
             "intended_purpose",
             has_optional_text(evidence.intended_purpose.as_deref()),
         ),
-        ("system_capabilities", !evidence.system_capabilities.is_empty()),
+        (
+            "system_capabilities",
+            !evidence.system_capabilities.is_empty(),
+        ),
         ("accuracy_metrics", !evidence.accuracy_metrics.is_empty()),
         ("foreseeable_risks", !evidence.foreseeable_risks.is_empty()),
         (
@@ -253,7 +268,10 @@ fn check_human_oversight(item: &EvidenceItem) -> Option<Vec<String>> {
     Some(required_fields([
         ("action", !evidence.action.trim().is_empty()),
         ("reviewer", has_optional_text(evidence.reviewer.as_deref())),
-        ("actor_role", has_optional_text(evidence.actor_role.as_deref())),
+        (
+            "actor_role",
+            has_optional_text(evidence.actor_role.as_deref()),
+        ),
         ("anomaly_detected", evidence.anomaly_detected.is_some()),
         (
             "override_action",
@@ -264,7 +282,10 @@ fn check_human_oversight(item: &EvidenceItem) -> Option<Vec<String>> {
             evidence.automation_bias_detected.is_some(),
         ),
         ("stop_triggered", evidence.stop_triggered.is_some()),
-        ("stop_reason", has_optional_text(evidence.stop_reason.as_deref())),
+        (
+            "stop_reason",
+            has_optional_text(evidence.stop_reason.as_deref()),
+        ),
     ]))
 }
 

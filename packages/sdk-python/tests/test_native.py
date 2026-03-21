@@ -16,6 +16,7 @@ from proofsdk.native import (
 REPO_ROOT = Path(__file__).resolve().parents[3]
 GOLDEN_DIR = REPO_ROOT / "fixtures" / "golden"
 ANNEX_IV_DIR = GOLDEN_DIR / "annex_iv_governance"
+GPAI_DIR = GOLDEN_DIR / "gpai_provider"
 
 
 class TestNativeBindings(unittest.TestCase):
@@ -158,6 +159,67 @@ class TestNativeBindings(unittest.TestCase):
         report = evaluate_completeness(bundle=bundle, profile="annex_iv_governance_v1")
         self.assertEqual(report["status"], "pass")
         self.assertEqual(report["pass_count"], 5)
+
+    def test_native_evaluate_completeness_supports_gpai_provider_profile(self):
+        bundle = {
+            "bundle_version": "1.0",
+            "bundle_id": "B-gpai-provider",
+            "created_at": "2026-03-21T00:00:00Z",
+            "actor": {
+                "issuer": "proof-layer-test",
+                "app_id": "python-sdk",
+                "env": "test",
+                "signing_key_id": "kid-dev-01",
+                "role": "provider",
+            },
+            "subject": {"system_id": "foundation-model-alpha"},
+            "context": {},
+            "items": [
+                {
+                    "type": "technical_doc",
+                    "data": json.loads((GPAI_DIR / "technical_doc.json").read_text(encoding="utf-8")),
+                },
+                {
+                    "type": "model_evaluation",
+                    "data": json.loads((GPAI_DIR / "model_evaluation.json").read_text(encoding="utf-8")),
+                },
+                {
+                    "type": "training_provenance",
+                    "data": json.loads((GPAI_DIR / "training_provenance.json").read_text(encoding="utf-8")),
+                },
+                {
+                    "type": "compute_metrics",
+                    "data": json.loads((GPAI_DIR / "compute_metrics.json").read_text(encoding="utf-8")),
+                },
+                {
+                    "type": "copyright_policy",
+                    "data": json.loads((GPAI_DIR / "copyright_policy.json").read_text(encoding="utf-8")),
+                },
+                {
+                    "type": "training_summary",
+                    "data": json.loads((GPAI_DIR / "training_summary.json").read_text(encoding="utf-8")),
+                },
+            ],
+            "artefacts": [],
+            "policy": {"redactions": [], "encryption": {"enabled": False}},
+            "integrity": {
+                "canonicalization": "RFC8785-JCS",
+                "hash": "SHA-256",
+                "header_digest": "sha256:" + "a" * 64,
+                "bundle_root_algorithm": "pl-merkle-sha256-v4",
+                "bundle_root": "sha256:" + "b" * 64,
+                "signature": {
+                    "format": "JWS",
+                    "alg": "EdDSA",
+                    "kid": "kid-dev-01",
+                    "value": "sig",
+                },
+            },
+        }
+
+        report = evaluate_completeness(bundle=bundle, profile="gpai_provider_v1")
+        self.assertEqual(report["status"], "pass")
+        self.assertEqual(report["pass_count"], 6)
 
 
 if __name__ == "__main__":

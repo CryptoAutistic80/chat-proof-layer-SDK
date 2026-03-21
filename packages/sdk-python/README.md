@@ -2,8 +2,8 @@
 
 Python SDK for creating Proof Layer evidence bundles around model calls and lifecycle events.
 Integrity-sensitive helpers are backed by the local Rust PyO3 module in `crates/pyo3`.
-The shared builder/facade surface now covers all evidence item types currently implemented in Rust core, including `llm_interaction`, `tool_call`, `retrieval`, `human_oversight`, `policy_decision`, `risk_assessment`, `data_governance`, `technical_doc`, `instructions_for_use`, `qms_record`, `fundamental_rights_assessment`, `standards_alignment`, `post_market_monitoring`, `corrective_action`, `authority_notification`, `authority_submission`, `reporting_deadline`, `regulator_correspondence`, `model_evaluation`, `adversarial_test`, `training_provenance`, `downstream_documentation`, `copyright_policy`, `training_summary`, `literacy_attestation`, `incident_report`, `conformity_assessment`, `declaration`, and `registration`.
-The GPAI helpers default `model_evaluation`, `adversarial_test`, and `training_provenance` captures to the vault's `gpai_documentation` retention class.
+The shared builder/facade surface now covers all evidence item types currently implemented in Rust core, including `llm_interaction`, `tool_call`, `retrieval`, `human_oversight`, `policy_decision`, `risk_assessment`, `data_governance`, `technical_doc`, `instructions_for_use`, `qms_record`, `fundamental_rights_assessment`, `standards_alignment`, `post_market_monitoring`, `corrective_action`, `authority_notification`, `authority_submission`, `reporting_deadline`, `regulator_correspondence`, `model_evaluation`, `adversarial_test`, `training_provenance`, `compute_metrics`, `downstream_documentation`, `copyright_policy`, `training_summary`, `literacy_attestation`, `incident_report`, `conformity_assessment`, `declaration`, and `registration`.
+The GPAI helpers default `model_evaluation`, `adversarial_test`, `training_provenance`, and `compute_metrics` captures to the vault's `gpai_documentation` retention class.
 
 ## Install
 
@@ -109,6 +109,12 @@ readiness = proof_layer.evaluate_completeness(
     profile="annex_iv_governance_v1",
 )
 
+gpai_readiness = proof_layer.evaluate_completeness(
+    # full_gpai_provider_bundle should contain the full structured GPAI provider evidence set.
+    bundle=full_gpai_provider_bundle,
+    profile="gpai_provider_v1",
+)
+
 summary = verify_bundle(
     bundle=locally_sealed["bundle"],
     artefacts=[{"name": "prompt.json", "data": b"{}"}],
@@ -117,6 +123,7 @@ summary = verify_bundle(
 
 print(summary["artefact_count"])
 print(readiness["status"])
+print(gpai_readiness["status"])
 
 redacted = proof_layer.disclose(
     bundle=locally_sealed["bundle"],

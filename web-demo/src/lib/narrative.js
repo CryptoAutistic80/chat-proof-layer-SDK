@@ -28,20 +28,21 @@ function integrityStatus(run) {
     return {
       tone: "good",
       title: "Integrity check passed",
-      summary: "Verified: this proof record and its captured materials match the connected signer."
+      summary:
+        "Verified: this proof record and its captured materials match the connected signer.",
     };
   }
   if (run?.verifyResponse?.message) {
     return {
       tone: "warn",
       title: "Integrity check needs attention",
-      summary: run.verifyResponse.message
+      summary: run.verifyResponse.message,
     };
   }
   return {
     tone: "muted",
     title: "Integrity check pending",
-    summary: "Verification will run after a proof record is created."
+    summary: "Verification will run after a proof record is created.",
   };
 }
 
@@ -50,27 +51,27 @@ function timestampStatus(run, vaultConfig) {
     return {
       tone: "muted",
       title: "Timestamp not configured",
-      summary: "Not configured on this vault."
+      summary: "Not configured on this vault.",
     };
   }
   if (run?.timestampVerification?.valid) {
     return {
       tone: "good",
       title: "Timestamp confirmed",
-      summary: "Verified: the timestamp token matches this proof record."
+      summary: "Verified: the timestamp token matches this proof record.",
     };
   }
   if (run?.timestampVerification?.message) {
     return {
       tone: "warn",
       title: "Timestamp needs attention",
-      summary: run.timestampVerification.message
+      summary: run.timestampVerification.message,
     };
   }
   return {
     tone: "muted",
     title: "Timestamp pending",
-    summary: "Timestamp was requested, but no result is attached yet."
+    summary: "Timestamp was requested, but no result is attached yet.",
   };
 }
 
@@ -79,55 +80,62 @@ function transparencyStatus(run, vaultConfig) {
     return {
       tone: "muted",
       title: "Transparency not configured",
-      summary: "Not configured on this vault."
+      summary: "Not configured on this vault.",
     };
   }
   if (run?.receiptVerification?.valid) {
     return {
       tone: "good",
       title: "Transparency receipt confirmed",
-      summary: "Verified: the transparency receipt matches this proof record."
+      summary: "Verified: the transparency receipt matches this proof record.",
     };
   }
   if (run?.receiptVerification?.message) {
     return {
       tone: "warn",
       title: "Transparency receipt needs attention",
-      summary: run.receiptVerification.message
+      summary: run.receiptVerification.message,
     };
   }
   return {
     tone: "muted",
     title: "Transparency receipt pending",
-    summary: "Transparency was requested, but no receipt result is attached yet."
+    summary:
+      "Transparency was requested, but no receipt result is attached yet.",
   };
 }
 
 function disclosureStatus(run) {
-  const itemCount = Array.isArray(run?.disclosurePreview?.disclosed_item_indices)
+  const itemCount = Array.isArray(
+    run?.disclosurePreview?.disclosed_item_indices,
+  )
     ? run.disclosurePreview.disclosed_item_indices.length
     : 0;
-  const artefactCount = Array.isArray(run?.disclosurePreview?.disclosed_artefact_names)
+  const artefactCount = Array.isArray(
+    run?.disclosurePreview?.disclosed_artefact_names,
+  )
     ? run.disclosurePreview.disclosed_artefact_names.length
     : 0;
   if (!run?.disclosurePreview) {
     return {
       tone: "muted",
       title: "Disclosure preview pending",
-      summary: "Run or load a proof record to see what a reviewer would receive."
+      summary:
+        "Run or load a proof record to see what a reviewer would receive.",
     };
   }
   if (itemCount > 0 || artefactCount > 0) {
     return {
       tone: "accent",
       title: "Disclosure preview available",
-      summary: `${itemCount} item(s) and ${artefactCount} captured material(s) are included under the selected sharing profile.`
+      summary: `${itemCount} item(s) and ${artefactCount} captured material(s) are included under the selected sharing profile.`,
     };
   }
   return {
     tone: "warn",
     title: "No disclosure output",
-    summary: "This sharing profile does not reveal any content for this proof record."
+    summary:
+      "This sharing profile does not reveal any content for this proof record.",
   };
 }
 
@@ -136,33 +144,38 @@ function exportStatus(run) {
     return {
       tone: "good",
       title: "Share package ready",
-      summary: `A ${run.bundleFormat} share package is ready to download.`
+      summary: `A ${run.bundleFormat} share package is ready to download.`,
     };
   }
-  const itemCount = Array.isArray(run?.disclosurePreview?.disclosed_item_indices)
+  const itemCount = Array.isArray(
+    run?.disclosurePreview?.disclosed_item_indices,
+  )
     ? run.disclosurePreview.disclosed_item_indices.length
     : 0;
-  const artefactCount = Array.isArray(run?.disclosurePreview?.disclosed_artefact_names)
+  const artefactCount = Array.isArray(
+    run?.disclosurePreview?.disclosed_artefact_names,
+  )
     ? run.disclosurePreview.disclosed_artefact_names.length
     : 0;
   if (run?.bundleFormat === "full") {
     return {
       tone: "accent",
       title: "Full export available",
-      summary: "This run can be exported as a full share package."
+      summary: "This run can be exported as a full share package.",
     };
   }
   if (itemCount === 0 && artefactCount === 0) {
     return {
       tone: "warn",
       title: "No disclosure package available",
-      summary: "This proof record does not produce a redacted share package under the selected sharing profile."
+      summary:
+        "This proof record does not produce a redacted share package under the selected sharing profile.",
     };
   }
   return {
     tone: "accent",
     title: "Disclosure export available",
-    summary: "This run can be exported as a redacted share package."
+    summary: "This run can be exported as a redacted share package.",
   };
 }
 
@@ -171,14 +184,15 @@ function completenessStatus(run) {
     return {
       tone: "muted",
       title: "Readiness check not attached",
-      summary: "This workflow does not currently run an Annex IV readiness check."
+      summary:
+        "This workflow does not currently run an advisory readiness check.",
     };
   }
   if (!run?.completenessReport) {
     return {
       tone: "muted",
       title: "Readiness check pending",
-      summary: "The advisory readiness result has not been attached yet."
+      summary: "The advisory readiness result has not been attached yet.",
     };
   }
   const report = run.completenessReport;
@@ -186,20 +200,28 @@ function completenessStatus(run) {
     return {
       tone: "good",
       title: "Readiness check passed",
-      summary: `Advisory structured review passed for ${report.profile}.`
+      summary: `Advisory structured review passed for ${report.profile}.`,
     };
   }
   if (report.status === "warn") {
+    const scope =
+      report.profile === "gpai_provider_v1"
+        ? "required GPAI provider area"
+        : "required governance area";
     return {
       tone: "accent",
       title: "Readiness check has warnings",
-      summary: `${report.warn_count} rule(s) need attention even though each required governance area has at least one minimally complete record.`
+      summary: `${report.warn_count} rule(s) need attention even though each ${scope} still has at least one minimally complete record.`,
     };
   }
+  const scope =
+    report.profile === "gpai_provider_v1"
+      ? "required GPAI provider area(s)"
+      : "required governance area(s)";
   return {
     tone: "warn",
     title: "Readiness check failed",
-    summary: `${report.fail_count} required governance area(s) are missing or do not yet have a minimally complete record.`
+    summary: `${report.fail_count} ${scope} are missing or do not yet have a minimally complete record.`,
   };
 }
 
@@ -207,7 +229,12 @@ export function buildRunNarrativeSummary(run, vaultConfig) {
   const preset = getPreset(run?.presetKey);
   const mode = humanCaptureMode(run?.captureMode);
   const scenario = run?.scenarioLabel ?? preset.label;
-  const bundleCount = Array.isArray(run?.bundleRuns) && run.bundleRuns.length > 0 ? run.bundleRuns.length : run?.bundleId ? 1 : 0;
+  const bundleCount =
+    Array.isArray(run?.bundleRuns) && run.bundleRuns.length > 0
+      ? run.bundleRuns.length
+      : run?.bundleId
+        ? 1
+        : 0;
   const headline = run?.bundleId
     ? `${scenario} completed`
     : "Run a scenario to create a proof record";
@@ -229,6 +256,6 @@ export function buildRunNarrativeSummary(run, vaultConfig) {
     transparencyStatus: transparencyStatus(run, vaultConfig),
     completenessStatus: completenessStatus(run),
     disclosureStatus: disclosureStatus(run),
-    exportStatus: exportStatus(run)
+    exportStatus: exportStatus(run),
   };
 }

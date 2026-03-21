@@ -1,0 +1,9 @@
+{
+  "summary_ref": "summary://foundation-model-alpha/training-v5",
+  "status": "published",
+  "audience": "public",
+  "commitment": "sha256:5555555555555555555555555555555555555555555555555555555555555555",
+  "metadata": {
+    "owner": "provider-disclosures"
+  }
+}

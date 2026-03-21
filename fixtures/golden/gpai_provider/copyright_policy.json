@@ -1,0 +1,9 @@
+{
+  "policy_ref": "copyright://foundation-model-alpha/policy-v2",
+  "status": "published",
+  "jurisdiction": "eu",
+  "commitment": "sha256:4444444444444444444444444444444444444444444444444444444444444444",
+  "metadata": {
+    "scope": "training data intake"
+  }
+}

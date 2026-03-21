@@ -7,15 +7,24 @@ test("createBundle posts normalized payload", async () => {
   const fetchImpl = async (url, init) => {
     captured = { url, init };
     return new Response(
-      JSON.stringify({ bundle_id: "B1", bundle_root: "sha256:abc", signature: "sig" }),
-      { status: 201, headers: { "content-type": "application/json" } }
+      JSON.stringify({
+        bundle_id: "B1",
+        bundle_root: "sha256:abc",
+        signature: "sig",
+      }),
+      { status: 201, headers: { "content-type": "application/json" } },
     );
   };
 
-  const client = new ProofLayerClient({ baseUrl: "http://127.0.0.1:8080", fetchImpl });
+  const client = new ProofLayerClient({
+    baseUrl: "http://127.0.0.1:8080",
+    fetchImpl,
+  });
   const result = await client.createBundle({
     capture: { foo: "bar" },
-    artefacts: [{ name: "prompt.json", contentType: "application/json", data: "{\"x\":1}" }]
+    artefacts: [
+      { name: "prompt.json", contentType: "application/json", data: '{"x":1}' },
+    ],
   });
 
   assert.equal(result.bundle_id, "B1");
@@ -32,29 +41,32 @@ test("evaluateCompleteness posts bundle or bundleId to the vault", async () => {
     captured = { url, init };
     return new Response(
       JSON.stringify({
-        profile: "annex_iv_governance_v1",
+        profile: "gpai_provider_v1",
         status: "pass",
         bundle_id: "B1",
-        system_id: "hiring-assistant",
-        pass_count: 5,
+        system_id: "foundation-model-alpha",
+        pass_count: 6,
         warn_count: 0,
         fail_count: 0,
-        rules: []
+        rules: [],
       }),
-      { status: 200, headers: { "content-type": "application/json" } }
+      { status: 200, headers: { "content-type": "application/json" } },
     );
   };
 
-  const client = new ProofLayerClient({ baseUrl: "http://127.0.0.1:8080", fetchImpl });
+  const client = new ProofLayerClient({
+    baseUrl: "http://127.0.0.1:8080",
+    fetchImpl,
+  });
   const result = await client.evaluateCompleteness({
     bundleId: "B1",
-    profile: "annex_iv_governance_v1"
+    profile: "gpai_provider_v1",
   });
 
   assert.equal(captured.url, "http://127.0.0.1:8080/v1/completeness/evaluate");
   assert.deepEqual(JSON.parse(captured.init.body), {
     bundle_id: "B1",
-    profile: "annex_iv_governance_v1"
+    profile: "gpai_provider_v1",
   });
   assert.equal(result.status, "pass");
 });
@@ -71,20 +83,23 @@ test("createPack posts vault pack filters including disclosure bundle_format", a
         bundle_format: "disclosure",
         disclosure_policy: "annex_iv_redacted",
         bundle_count: 1,
-        bundle_ids: ["B1"]
+        bundle_ids: ["B1"],
       }),
-      { status: 201, headers: { "content-type": "application/json" } }
+      { status: 201, headers: { "content-type": "application/json" } },
     );
   };
 
-  const client = new ProofLayerClient({ baseUrl: "http://127.0.0.1:8080", fetchImpl });
+  const client = new ProofLayerClient({
+    baseUrl: "http://127.0.0.1:8080",
+    fetchImpl,
+  });
   const result = await client.createPack({
     packType: "annex_iv",
     systemId: "system-123",
     from: "2026-03-01",
     to: "2026-03-08",
     bundleFormat: "disclosure",
-    disclosurePolicy: "annex_iv_redacted"
+    disclosurePolicy: "annex_iv_redacted",
   });
 
   assert.equal(result.pack_id, "P1");
@@ -96,7 +111,7 @@ test("createPack posts vault pack filters including disclosure bundle_format", a
     from: "2026-03-01",
     to: "2026-03-08",
     bundle_format: "disclosure",
-    disclosure_policy: "annex_iv_redacted"
+    disclosure_policy: "annex_iv_redacted",
   });
 });
 
@@ -112,13 +127,16 @@ test("createPack can post an inline disclosure template request", async () => {
         bundle_format: "disclosure",
         disclosure_policy: "runtime_template_pack",
         bundle_count: 1,
-        bundle_ids: ["B2"]
+        bundle_ids: ["B2"],
       }),
-      { status: 201, headers: { "content-type": "application/json" } }
+      { status: 201, headers: { "content-type": "application/json" } },
     );
   };
 
-  const client = new ProofLayerClient({ baseUrl: "http://127.0.0.1:8080", fetchImpl });
+  const client = new ProofLayerClient({
+    baseUrl: "http://127.0.0.1:8080",
+    fetchImpl,
+  });
   const result = await client.createPack({
     packType: "runtime_logs",
     systemId: "system-456",
@@ -126,8 +144,8 @@ test("createPack can post an inline disclosure template request", async () => {
     disclosureTemplate: {
       profile: "runtime_minimum",
       name: "runtime_template_pack",
-      redactionGroups: ["metadata"]
-    }
+      redactionGroups: ["metadata"],
+    },
   });
 
   assert.equal(result.disclosure_policy, "runtime_template_pack");
@@ -138,8 +156,8 @@ test("createPack can post an inline disclosure template request", async () => {
     disclosure_template: {
       profile: "runtime_minimum",
       name: "runtime_template_pack",
-      redaction_groups: ["metadata"]
-    }
+      redaction_groups: ["metadata"],
+    },
   });
 });
 
@@ -148,10 +166,13 @@ test("downloadPackExport returns raw archive bytes", async () => {
   const fetchImpl = async () =>
     new Response(payload, {
       status: 200,
-      headers: { "content-type": "application/gzip" }
+      headers: { "content-type": "application/gzip" },
     });
 
-  const client = new ProofLayerClient({ baseUrl: "http://127.0.0.1:8080", fetchImpl });
+  const client = new ProofLayerClient({
+    baseUrl: "http://127.0.0.1:8080",
+    fetchImpl,
+  });
   const bytes = await client.downloadPackExport("P1");
 
   assert.deepEqual(Array.from(bytes), [1, 2, 3, 4]);
@@ -164,8 +185,16 @@ test("getDisclosureConfig returns disclosure policies from vault config", async 
         service: { addr: "127.0.0.1:8080", max_payload_bytes: 10485760 },
         signing: { key_id: "kid-dev-01", algorithm: "ed25519-jws" },
         storage: { metadata_backend: "sqlite", blob_backend: "fs" },
-        retention: { grace_period_days: 30, scan_interval_hours: 24, policies: [] },
-        timestamp: { enabled: false, provider: "rfc3161", url: "https://tsa.example.test" },
+        retention: {
+          grace_period_days: 30,
+          scan_interval_hours: 24,
+          policies: [],
+        },
+        timestamp: {
+          enabled: false,
+          provider: "rfc3161",
+          url: "https://tsa.example.test",
+        },
         transparency: { enabled: false, provider: "rekor" },
         disclosure: {
           policies: [
@@ -173,16 +202,19 @@ test("getDisclosureConfig returns disclosure policies from vault config", async 
               name: "annex_iv_redacted",
               include_artefact_metadata: true,
               include_artefact_bytes: true,
-              artefact_names: ["doc.json"]
-            }
-          ]
+              artefact_names: ["doc.json"],
+            },
+          ],
         },
-        audit: { enabled: true }
+        audit: { enabled: true },
       }),
-      { status: 200, headers: { "content-type": "application/json" } }
+      { status: 200, headers: { "content-type": "application/json" } },
     );
 
-  const client = new ProofLayerClient({ baseUrl: "http://127.0.0.1:8080", fetchImpl });
+  const client = new ProofLayerClient({
+    baseUrl: "http://127.0.0.1:8080",
+    fetchImpl,
+  });
   const disclosure = await client.getDisclosureConfig();
 
   assert.equal(disclosure.policies[0].name, "annex_iv_redacted");
@@ -199,28 +231,35 @@ test("getDisclosureTemplates fetches the vault template catalog", async () => {
           {
             profile: "runtime_minimum",
             description: "Runtime disclosure template",
-            default_redaction_groups: ["commitments", "parameters", "operational_metrics"],
+            default_redaction_groups: [
+              "commitments",
+              "parameters",
+              "operational_metrics",
+            ],
             policy: {
               name: "runtime_minimum",
               allowed_item_types: ["llm_interaction"],
               redacted_fields_by_item_type: {
-                llm_interaction: ["/parameters"]
-              }
-            }
-          }
+                llm_interaction: ["/parameters"],
+              },
+            },
+          },
         ],
         redaction_groups: [
           {
             name: "commitments",
-            description: "Hide digest fields."
-          }
-        ]
+            description: "Hide digest fields.",
+          },
+        ],
       }),
-      { status: 200, headers: { "content-type": "application/json" } }
+      { status: 200, headers: { "content-type": "application/json" } },
     );
   };
 
-  const client = new ProofLayerClient({ baseUrl: "http://127.0.0.1:8080", fetchImpl });
+  const client = new ProofLayerClient({
+    baseUrl: "http://127.0.0.1:8080",
+    fetchImpl,
+  });
   const catalog = await client.getDisclosureTemplates();
 
   assert.equal(captured.url, "http://127.0.0.1:8080/v1/disclosure/templates");
@@ -240,39 +279,45 @@ test("renderDisclosureTemplate posts template options to the vault", async () =>
           "commitments",
           "metadata",
           "parameters",
-          "operational_metrics"
+          "operational_metrics",
         ],
         policy: {
           name: "privacy_review_custom",
           allowed_item_types: ["llm_interaction"],
           redacted_fields_by_item_type: {
-            risk_assessment: ["/metadata/internal_notes"]
-          }
-        }
+            risk_assessment: ["/metadata/internal_notes"],
+          },
+        },
       }),
-      { status: 200, headers: { "content-type": "application/json" } }
+      { status: 200, headers: { "content-type": "application/json" } },
     );
   };
 
-  const client = new ProofLayerClient({ baseUrl: "http://127.0.0.1:8080", fetchImpl });
+  const client = new ProofLayerClient({
+    baseUrl: "http://127.0.0.1:8080",
+    fetchImpl,
+  });
   const rendered = await client.renderDisclosureTemplate({
     profile: "privacy_review",
     name: "privacy_review_custom",
     redactionGroups: ["metadata"],
     redactedFieldsByItemType: {
-      risk_assessment: ["/metadata/internal_notes"]
-    }
+      risk_assessment: ["/metadata/internal_notes"],
+    },
   });
 
-  assert.equal(captured.url, "http://127.0.0.1:8080/v1/disclosure/templates/render");
+  assert.equal(
+    captured.url,
+    "http://127.0.0.1:8080/v1/disclosure/templates/render",
+  );
   assert.equal(captured.init.method, "POST");
   assert.deepEqual(JSON.parse(captured.init.body), {
     profile: "privacy_review",
     name: "privacy_review_custom",
     redaction_groups: ["metadata"],
     redacted_fields_by_item_type: {
-      risk_assessment: ["/metadata/internal_notes"]
-    }
+      risk_assessment: ["/metadata/internal_notes"],
+    },
   });
   assert.equal(rendered.policy.name, "privacy_review_custom");
 });
@@ -283,11 +328,14 @@ test("updateDisclosureConfig issues PUT with policy payload", async () => {
     captured = { url, init };
     return new Response(init.body, {
       status: 200,
-      headers: { "content-type": "application/json" }
+      headers: { "content-type": "application/json" },
     });
   };
 
-  const client = new ProofLayerClient({ baseUrl: "http://127.0.0.1:8080", fetchImpl });
+  const client = new ProofLayerClient({
+    baseUrl: "http://127.0.0.1:8080",
+    fetchImpl,
+  });
   const result = await client.updateDisclosureConfig({
     policies: [
       {
@@ -295,9 +343,9 @@ test("updateDisclosureConfig issues PUT with policy payload", async () => {
         allowed_item_types: ["incident_report"],
         include_artefact_metadata: true,
         include_artefact_bytes: false,
-        artefact_names: ["incident.json"]
-      }
-    ]
+        artefact_names: ["incident.json"],
+      },
+    ],
   });
 
   assert.equal(captured.url, "http://127.0.0.1:8080/v1/config/disclosure");
@@ -321,13 +369,16 @@ test("previewDisclosure posts named or inline disclosure policy selection", asyn
         disclosed_item_obligation_refs: ["art9"],
         disclosed_artefact_indices: [],
         disclosed_artefact_names: [],
-        disclosed_artefact_bytes_included: false
+        disclosed_artefact_bytes_included: false,
       }),
-      { status: 200, headers: { "content-type": "application/json" } }
+      { status: 200, headers: { "content-type": "application/json" } },
     );
   };
 
-  const client = new ProofLayerClient({ baseUrl: "http://127.0.0.1:8080", fetchImpl });
+  const client = new ProofLayerClient({
+    baseUrl: "http://127.0.0.1:8080",
+    fetchImpl,
+  });
   const result = await client.previewDisclosure({
     bundleId: "B1",
     packType: "annex_iv",
@@ -335,8 +386,8 @@ test("previewDisclosure posts named or inline disclosure policy selection", asyn
       name: "risk_only",
       allowed_obligation_refs: ["art9"],
       include_artefact_metadata: false,
-      include_artefact_bytes: false
-    }
+      include_artefact_bytes: false,
+    },
   });
 
   assert.equal(captured.url, "http://127.0.0.1:8080/v1/disclosure/preview");
@@ -349,8 +400,8 @@ test("previewDisclosure posts named or inline disclosure policy selection", asyn
       name: "risk_only",
       allowed_obligation_refs: ["art9"],
       include_artefact_metadata: false,
-      include_artefact_bytes: false
-    }
+      include_artefact_bytes: false,
+    },
   });
   assert.deepEqual(result.disclosed_item_indices, [1]);
 });
@@ -369,25 +420,28 @@ test("previewDisclosure can post an inline disclosure template selection", async
         disclosed_item_types: ["llm_interaction"],
         disclosed_item_obligation_refs: ["art12_19_26"],
         disclosed_item_field_redactions: {
-          "0": ["/parameters"]
+          0: ["/parameters"],
         },
         disclosed_artefact_indices: [],
         disclosed_artefact_names: [],
-        disclosed_artefact_bytes_included: false
+        disclosed_artefact_bytes_included: false,
       }),
-      { status: 200, headers: { "content-type": "application/json" } }
+      { status: 200, headers: { "content-type": "application/json" } },
     );
   };
 
-  const client = new ProofLayerClient({ baseUrl: "http://127.0.0.1:8080", fetchImpl });
+  const client = new ProofLayerClient({
+    baseUrl: "http://127.0.0.1:8080",
+    fetchImpl,
+  });
   const result = await client.previewDisclosure({
     bundleId: "B2",
     packType: "runtime_logs",
     disclosureTemplate: {
       profile: "privacy_review",
       name: "privacy_review_internal",
-      redactionGroups: ["metadata"]
-    }
+      redactionGroups: ["metadata"],
+    },
   });
 
   assert.equal(captured.url, "http://127.0.0.1:8080/v1/disclosure/preview");
@@ -397,8 +451,10 @@ test("previewDisclosure can post an inline disclosure template selection", async
     disclosure_template: {
       profile: "privacy_review",
       name: "privacy_review_internal",
-      redaction_groups: ["metadata"]
-    }
+      redaction_groups: ["metadata"],
+    },
   });
-  assert.deepEqual(result.disclosed_item_field_redactions, { "0": ["/parameters"] });
+  assert.deepEqual(result.disclosed_item_field_redactions, {
+    0: ["/parameters"],
+  });
 });

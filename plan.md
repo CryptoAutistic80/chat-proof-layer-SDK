@@ -1114,6 +1114,7 @@ from proof_layer.otel import ProofLayerExporter
 | `model_evaluation` | Art 53, Annex XI | GPAI | Until withdrawn+ |
 | `adversarial_test` | Art 55 | GPAI systemic | Until withdrawn+ |
 | `training_provenance` | Art 53, Annex XI | GPAI | Until withdrawn+ |
+| `compute_metrics` | Art 51, 53, 55 | GPAI provider / systemic risk | Until withdrawn+ |
 | `downstream_documentation` | Art 53, Annex XII | GPAI / downstream providers | Until withdrawn+ |
 | `copyright_policy` | Art 53 | GPAI provider | Until withdrawn+ |
 | `training_summary` | Art 53 | GPAI provider | Public version + evidence retention |
@@ -1131,12 +1132,43 @@ from proof_layer.otel import ProofLayerExporter
 | `annex_xi` | Model description, architecture, training provenance, evaluation results, copyright policy, training summary evidence | AI Office, competent authorities |
 | `annex_xii` | Downstream documentation, capabilities/limitations, usage recommendations, integration constraints | Downstream system providers |
 | `runtime_logs` | Automatic event logs, monitoring events, risk flags, operator overrides | Deployers, authorities |
-| `risk_management` | Risk register snapshots, mitigations, test attestations, corrective actions | Conformity assessment |
+| `risk_mgmt` | Risk register snapshots, mitigations, test attestations, corrective actions | Conformity assessment |
 | `ai_literacy` | Training records, role mapping, competence attestations | Authorities, internal audit |
 | `systemic_risk` | Adversarial tests, evaluations, incident reports, corrective measures, and cybersecurity posture evidence | AI Office |
 | `incident_response` | Incident timeline, corrective measures, root cause analysis, authority reporting artefacts | AI Office, authorities |
 | `conformity` | Conformity assessment, declaration, CE-marking evidence, registration receipts | Market surveillance |
 | `provider_governance` | QMS records, standards/common specs mapping, release approvals, audit checkpoints | Internal compliance, auditors |
+| `fundamental_rights` | FRIA evidence, oversight actions, policy decisions, incident and corrective-action support | Deployer, internal governance |
+| `post_market_monitoring` | Monitoring plans, incident flow, authority notifications/submissions, corrective actions | Provider, authorities |
+
+### 7.3 Schema Enrichment Policy
+
+The implementation rule for the current schema line is:
+
+- keep the current thin required spine and existing commitment fields,
+- add only optional typed enrichment fields,
+- keep long-form or high-volume detail in artefact attachments,
+- avoid a `bundle_version` or Merkle-family reset for additive schema depth.
+
+This is the practical middle ground between the current "thin schema + rich artefacts" model and a much heavier inline-document model. It preserves backward compatibility and tamper evidence while making completeness expectations visible at schema level.
+
+| Evidence type | Additive enrichment policy | Priority |
+|---|---|---|
+| `data_governance` | Add structured dataset identity, collection period, geography, preprocessing, bias, mitigation, gap, personal-data, and safeguard fields. | `P0` |
+| `compute_metrics` | New first-class evidence type for FLOPs estimates, threshold basis/value/status, methodology, measurement date, and compute-resource summaries. | `P0` |
+| `training_provenance` | Add linkage to `compute_metrics`, training-dataset summary, and consortium context. | `P0` |
+| `instructions_for_use` | Add structured provider, purpose, capability, accuracy, risk, explainability, oversight, compute, service-life, and log-management fields. | `P1` |
+| `risk_assessment` | Keep one item per risk and add optional likelihood, affected-group, mitigation, residual-risk, owner, vulnerable-group, and test-summary structure. | `P1` |
+| `human_oversight` | Add actor role, anomaly detection, override, interpretation guidance, automation-bias, two-person verification, and stop-event fields. | `P1` |
+| `technical_doc` | Add Annex IV coverage fields plus concise system/model/design/evaluation/oversight summaries and a post-market-plan reference. | `P2` |
+| `model_evaluation` | Add metric summaries, group performance, and evaluation methodology. | `P2` |
+| `adversarial_test` | Add threat model, test methodology, attack classes, and affected components. | `P2` |
+| `qms_record` | Add optional policy identity, revision, dates, scope, approval, audit summary, and improvement actions. | `P2` |
+| `incident_report` | Add detection method, root-cause summary, corrective-action linkage, and authority-notification status fields. | `P3` |
+| `fundamental_rights_assessment` | Add legal basis, affected rights, stakeholder consultation, mitigation-plan summary, and assessor fields. | `P3` |
+| `literacy_attestation` | Add completion date, training provider, and certificate digest. | `P3` |
+| `conformity_assessment` / `declaration` / `registration` | Add small structured identity fields such as assessment body, certificate ref, signatory, document version, registration number, and submitted date. | `P3` |
+| `llm_interaction` / `tool_call` / `retrieval` | Add explicit `execution_start` / `execution_end`, plus `database_reference` on retrieval. | `P3` |
 
 ---
 
@@ -1532,7 +1564,49 @@ pub fn migrate_v01_to_v10(old: V01Bundle) -> Result<EvidenceBundle> {
 - [ ] PostgreSQL storage backend (optional, behind feature flag)
 - [ ] S3-compatible blob storage (optional, behind feature flag)
 
-### Phase 7: Timestamping (Week 14)
+### Phase 7: AI Act Schema Enrichment (Week 14)
+
+**Goal**: Deepen schema completeness without changing the bundle format, pack family set, or cryptographic design.
+
+#### Phase 7A: Contract and compatibility update
+
+- [ ] Extend Rust core schema types with additive optional enrichment fields and shared helper structs (`DateRange`, `MetricSummary`, `GroupMetricSummary`)
+- [ ] Add first-class `compute_metrics` evidence in Rust core
+- [ ] Regenerate JSON schemas and generated TypeScript/Python contract surfaces
+- [ ] Update CLI evidence-type allowlists and local disclosure-template defaults
+- [ ] Update vault item-type validation, indexing, obligation tagging, and pack curation for enriched types
+- [ ] Extend disclosure defaults so nested JSON-pointer redactions cover new structured governance and incident fields
+
+#### Phase 7B: P0 enrichment slice
+
+- [ ] Enrich `data_governance` with Art. 10-oriented structured fields
+- [ ] Add `compute_metrics` builder/capture support in TypeScript and Python
+- [ ] Link `training_provenance` to `compute_metrics`
+- [ ] Include `compute_metrics` in `annex_xi` and `systemic_risk` pack curation
+- [ ] Add example GPAI threshold capture flow (`training_provenance` + `compute_metrics`)
+
+#### Phase 7C: P1 enrichment slice
+
+- [ ] Enrich `instructions_for_use`, `risk_assessment`, and `human_oversight`
+- [ ] Update provider/deployer examples to show structured Art. 10 + Art. 13 and Art. 14 usage
+- [ ] Keep `serious incident notification` on `authority_notification` and stop events on `human_oversight`
+
+#### Phase 7D: P2/P3 enrichment slice
+
+- [ ] Enrich `technical_doc`, `model_evaluation`, `adversarial_test`, and `qms_record`
+- [ ] Enrich `incident_report`, `fundamental_rights_assessment`, `literacy_attestation`, `conformity_assessment`, `declaration`, and `registration`
+- [ ] Add runtime `execution_start` / `execution_end` and retrieval `database_reference`
+- [ ] Harden disclosure-template defaults for richer nested structures without renaming template profiles
+
+Acceptance criteria:
+
+- [ ] Existing bundles, CLI flows, vault exports, and SDK callers remain valid with no new required fields and no `bundle_version` change
+- [ ] `schemas/evidence_item.schema.json` and `schemas/evidence_bundle.schema.json` include every additive field and the `compute_metrics` union member
+- [ ] `annex_xi` and `systemic_risk` pack exports include `compute_metrics` when present, and obligation-ref filtering can isolate GPAI threshold evidence
+- [ ] TypeScript and Python both expose additive builders and `captureComputeMetrics` / `capture_compute_metrics`
+- [ ] Disclosure preview/export supports nested JSON-pointer redaction for the new structured fields on `pl-merkle-sha256-v4`
+
+### Phase 8: Timestamping (Week 15)
 
 **Goal**: RFC 3161 timestamp support integrated end-to-end.
 
@@ -1545,7 +1619,7 @@ pub fn migrate_v01_to_v10(old: V01Bundle) -> Result<EvidenceBundle> {
 - [ ] Verification: `proofctl verify --check-timestamp`
 - [ ] eIDAS qualified TSA configuration support
 
-### Phase 8: Transparency Anchoring (Week 15)
+### Phase 9: Transparency Anchoring (Week 16)
 
 **Goal**: Pluggable transparency log support.
 
@@ -1557,7 +1631,7 @@ pub fn migrate_v01_to_v10(old: V01Bundle) -> Result<EvidenceBundle> {
 - [ ] Verification: `proofctl verify --check-receipt`
 - [ ] Verifier output explaining assurance level
 
-### Phase 9: Selective Disclosure (Week 16)
+### Phase 10: Selective Disclosure (Week 17)
 
 **Goal**: Merkle-proof selective disclosure for confidential evidence sharing.
 
@@ -1568,7 +1642,7 @@ pub fn migrate_v01_to_v10(old: V01Bundle) -> Result<EvidenceBundle> {
 - [ ] Vault: redacted pack export support
 - [ ] Redacted bundle verification (proof path check)
 
-### Phase 10: Hardening & Launch (Weeks 17–18)
+### Phase 11: Hardening & Launch (Weeks 18–19)
 
 **Goal**: Production readiness for SDKs and local tooling, plus beta readiness for the managed vault layer.
 

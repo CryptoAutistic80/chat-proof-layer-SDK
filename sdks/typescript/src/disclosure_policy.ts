@@ -15,6 +15,7 @@ interface DisclosurePolicyTemplateBase {
     include_artefact_metadata: boolean;
     include_artefact_bytes: boolean;
     artefact_names: string[];
+    redacted_fields_by_item_type?: Record<string, string[]>;
   };
   defaultGroups: DisclosureRedactionGroup[];
 }
@@ -48,8 +49,19 @@ const ALL_ITEM_TYPES = [
   "declaration",
   "registration",
   "literacy_attestation",
-  "incident_report"
+  "incident_report",
+  "compute_metrics"
 ] as const;
+
+const ANNEX_IV_DEFAULT_REDACTIONS = {
+  data_governance: ["/bias_metrics", "/personal_data_categories", "/safeguards"],
+  instructions_for_use: ["/accuracy_metrics", "/compute_requirements", "/log_management_guidance"]
+} satisfies Record<string, string[]>;
+
+const INCIDENT_SUMMARY_DEFAULT_REDACTIONS = {
+  incident_report: ["/root_cause_summary"],
+  adversarial_test: ["/threat_model", "/affected_components"]
+} satisfies Record<string, string[]>;
 
 export const disclosurePolicyTemplateNames: DisclosurePolicyTemplateName[] = [
   "regulator_minimum",
@@ -101,7 +113,8 @@ const GROUP_SELECTORS: Record<DisclosureRedactionGroup, Partial<Record<(typeof A
       declaration: ["document_commitment"],
       registration: ["receipt_commitment"],
       literacy_attestation: ["attestation_commitment"],
-      incident_report: ["report_commitment"]
+      incident_report: ["report_commitment"],
+      compute_metrics: []
     },
     metadata: {
       tool_call: ["/metadata"],
@@ -128,7 +141,8 @@ const GROUP_SELECTORS: Record<DisclosureRedactionGroup, Partial<Record<(typeof A
       conformity_assessment: ["/metadata"],
       declaration: ["/metadata"],
       literacy_attestation: ["/metadata"],
-      incident_report: ["/metadata"]
+      incident_report: ["/metadata"],
+      compute_metrics: ["/metadata"]
     },
     parameters: {
       llm_interaction: ["/parameters"]
@@ -153,13 +167,20 @@ const TEMPLATE_BASES: Record<DisclosurePolicyTemplateName, DisclosurePolicyTempl
   },
   annex_iv_redacted: {
     policy: {
-      allowed_item_types: ["technical_doc", "risk_assessment", "data_governance", "human_oversight"],
+      allowed_item_types: [
+        "technical_doc",
+        "risk_assessment",
+        "data_governance",
+        "instructions_for_use",
+        "human_oversight"
+      ],
       excluded_item_types: [],
       allowed_obligation_refs: [],
       excluded_obligation_refs: [],
       include_artefact_metadata: true,
       include_artefact_bytes: true,
-      artefact_names: []
+      artefact_names: [],
+      redacted_fields_by_item_type: ANNEX_IV_DEFAULT_REDACTIONS
     },
     defaultGroups: []
   },
@@ -173,14 +194,16 @@ const TEMPLATE_BASES: Record<DisclosurePolicyTemplateName, DisclosurePolicyTempl
         "regulator_correspondence",
         "risk_assessment",
         "policy_decision",
-        "human_oversight"
+        "human_oversight",
+        "adversarial_test"
       ],
       excluded_item_types: ["llm_interaction", "retrieval", "tool_call"],
       allowed_obligation_refs: [],
       excluded_obligation_refs: [],
       include_artefact_metadata: false,
       include_artefact_bytes: false,
-      artefact_names: []
+      artefact_names: [],
+      redacted_fields_by_item_type: INCIDENT_SUMMARY_DEFAULT_REDACTIONS
     },
     defaultGroups: []
   },
@@ -314,6 +337,9 @@ export function createDisclosurePolicyTemplate(
     includeArtefactBytes: base.policy.include_artefact_bytes,
     artefactNames: base.policy.artefact_names,
     redactionGroups: [...base.defaultGroups, ...(options.redactionGroups ?? [])],
-    redactedFieldsByItemType: options.redactedFieldsByItemType
+    redactedFieldsByItemType: mergeRedactedSelectors(
+      base.policy.redacted_fields_by_item_type,
+      options.redactedFieldsByItemType
+    )
   });
 }

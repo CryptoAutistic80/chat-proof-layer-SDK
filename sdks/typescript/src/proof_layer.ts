@@ -4,6 +4,7 @@ import {
   createAuthorityNotificationRequest,
   createAuthoritySubmissionRequest,
   createConformityAssessmentRequest,
+  createComputeMetricsRequest,
   createCopyrightPolicyRequest,
   createCorrectiveActionRequest,
   createDataGovernanceRequest,
@@ -39,6 +40,7 @@ import type {
   AuthoritySubmissionRequestOptions,
   BundleCreateClient,
   ComplianceProfileInput,
+  ComputeMetricsRequestOptions,
   CreatePackRequest,
   ConformityAssessmentRequestOptions,
   CopyrightPolicyRequestOptions,
@@ -738,6 +740,27 @@ export class ProofLayer implements BundleCreateClient {
   ): Promise<ProofLayerResult> {
     return this.#submitCapture(
       createTrainingProvenanceRequest({
+        keyId: this.keyId,
+        role: this.role,
+        issuer: this.issuer,
+        appId: this.appId,
+        env: this.env,
+        systemId: options.systemId ?? this.systemId,
+        complianceProfile: options.complianceProfile ?? this.complianceProfile,
+        ...options
+      }),
+      options
+    );
+  }
+
+  async captureComputeMetrics(
+    options: Omit<
+      ComputeMetricsRequestOptions,
+      "keyId" | "role" | "issuer" | "appId" | "env"
+    >
+  ): Promise<ProofLayerResult> {
+    return this.#submitCapture(
+      createComputeMetricsRequest({
         keyId: this.keyId,
         role: this.role,
         issuer: this.issuer,

@@ -47,6 +47,15 @@ async function main() {
     documentRef: "docs://hiring-assistant/operator-handbook",
     versionTag: "2026.03",
     section: "human-review-required",
+    providerIdentity: "Proof Layer Hiring Systems Ltd.",
+    intendedPurpose: "Recruiter support for first-pass candidate review",
+    systemCapabilities: ["candidate_summary", "borderline_case_flagging"],
+    accuracyMetrics: [{ name: "review_precision", value: "0.91", unit: "ratio" }],
+    humanOversightGuidance: [
+      "Review every negative or borderline recommendation before any employment decision."
+    ],
+    computeRequirements: ["4 vCPU", "8GB RAM"],
+    logManagementGuidance: ["Retain runtime logs for internal post-market monitoring reviews."],
     document: {
       summary: "Operators must review all negative or borderline candidate recommendations.",
       owner: "product-compliance"
@@ -54,10 +63,35 @@ async function main() {
     retentionClass: "technical_doc"
   });
 
+  const dataGovernance = await proofLayer.captureDataGovernance({
+    decision: "approved_with_restrictions",
+    datasetRef: "dataset://hiring-assistant/training-v3",
+    datasetName: "hiring-assistant-training",
+    datasetVersion: "2026.03",
+    sourceDescription: "Curated applicant and recruiter-feedback corpus for EU hiring support.",
+    collectionPeriod: {
+      start: "2024-01-01",
+      end: "2025-12-31"
+    },
+    geographicalScope: ["EU"],
+    preprocessingOperations: ["deduplication", "pii_minimization", "label_review"],
+    biasDetectionMethodology: "Quarterly protected-group parity review on held-out evaluation data.",
+    biasMetrics: [{ name: "selection_rate_gap", value: "0.04", unit: "ratio" }],
+    mitigationActions: ["oversample underrepresented profiles", "human review on borderline scores"],
+    dataGaps: ["limited historic data for niche technical roles"],
+    personalDataCategories: ["employment_history", "education_history"],
+    safeguards: ["pseudonymization", "role-based dataset access"],
+    retentionClass: "technical_doc"
+  });
+
   const qmsRecord = await proofLayer.captureQmsRecord({
     recordId: "qms-release-approval-42",
     process: "release_approval",
     status: "approved",
+    policyName: "Hiring Assistant Release Governance",
+    revision: "3.1",
+    effectiveDate: "2026-03-01",
+    scope: "EU provider release control",
     record: {
       approver: "quality-lead",
       gate: "release",
@@ -80,7 +114,9 @@ async function main() {
   console.log("vault_url:", vaultUrl);
   console.log(
     "captured_bundle_ids:",
-    [interaction.bundleId, instructions.bundleId, qmsRecord.bundleId].join(", ")
+    [interaction.bundleId, dataGovernance.bundleId, instructions.bundleId, qmsRecord.bundleId].join(
+      ", "
+    )
   );
   console.log("pack_id:", pack.pack_id);
   console.log("pack_type:", manifest.pack_type);

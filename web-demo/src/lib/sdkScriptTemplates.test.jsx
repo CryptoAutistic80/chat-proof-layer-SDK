@@ -11,21 +11,43 @@ const draft = {
   prohibitedPracticeScreening: "screened_no_prohibited_use",
   riskTier: "high_risk",
   highRiskDomain: "employment",
+  gpaiStatus: "provider",
+  systemicRisk: true,
   deploymentContext: "public_sector",
   friaRequired: true,
   owner: "rights-review-team",
   market: "eu",
   userPrompt: "Summarize the case for a human reviewer.",
+  datasetName: "support-assistant-ops-corpus",
+  datasetVersion: "2026.03",
+  sourceDescription: "Curated support tickets and QA-reviewed agent notes.",
+  biasMethodology: "Monthly parity review.",
+  safeguards: "pseudonymization, role-based access",
   instructionsSummary: "Review all borderline cases.",
   instructionsSection: "human-review-required",
+  humanOversightGuidance: "Escalate sensitive cases for human review.",
+  datasetRef: "dataset://foundation-model-alpha/pretrain-v5",
+  trainingDatasetSummary: "Multilingual curated web, code, and licensed reference corpora.",
+  consortiumContext: "Single-provider training program",
+  trainingFlopsEstimate: "1.2e25",
+  thresholdStatus: "above_threshold",
+  thresholdValue: "1e25",
+  gpuHours: "42000",
+  acceleratorCount: "2048",
   qmsStatus: "approved",
   qmsApprover: "quality-lead",
   monitoringSummary: "Weekly review.",
   authority: "eu_ai_office",
   submissionSummary: "Initial submission.",
   friaSummary: "Human escalation required.",
+  affectedRights: "equal treatment, explanation",
+  assessor: "fundamental-rights-lead",
   reviewer: "rights-panel",
+  overrideAction: "Candidate routed to manual review queue.",
   incidentSummary: "Potentially adverse recommendation surfaced.",
+  rootCauseSummary: "Threshold too permissive for a narrow case segment.",
+  correctiveActionRef: "ca-benefits-42",
+  notificationSummary: "Initial authority notification.",
   dueAt: "2026-03-09T12:00:00Z",
   correspondenceSubject: "Initial authority follow-up"
 };
@@ -35,8 +57,16 @@ describe("renderScenarioScript", () => {
     const script = renderScenarioScript(getPlaygroundScenario("ts_support_rules"), draft);
     expect(script).toContain('new ProofLayer');
     expect(script).toContain('"benefits-review"');
+    expect(script).toContain('captureDataGovernance');
     expect(script).toContain('captureInstructionsForUse');
     expect(script).toContain('captureQmsRecord');
+  });
+
+  test("renders a GPAI threshold script with training provenance and compute metrics", () => {
+    const script = renderScenarioScript(getPlaygroundScenario("ts_gpai_thresholds"), draft);
+    expect(script).toContain('captureTrainingProvenance');
+    expect(script).toContain('captureComputeMetrics');
+    expect(script).toContain('packType: "annex_xi"');
   });
 
   test("renders a CLI script with proofctl commands", () => {

@@ -30,6 +30,8 @@ function defaultShareAudience(scenario) {
   switch (scenario.packType) {
     case "provider_governance":
       return "an internal quality or regulator-facing review";
+    case "annex_xi":
+      return "a GPAI, technical-documentation, or regulator-facing review";
     case "fundamental_rights":
       return "a deployer-side rights, risk, or regulator review";
     case "incident_response":

@@ -4,6 +4,7 @@ import {
   createAdversarialTestRequest,
   createAuthoritySubmissionRequest,
   createConformityAssessmentRequest,
+  createComputeMetricsRequest,
   createDataGovernanceRequest,
   createDeclarationRequest,
   createHumanOversightRequest,
@@ -31,13 +32,17 @@ test("createLlmInteractionRequest emits v1 llm_interaction capture shape", () =>
     output: { role: "assistant", content: "hi" },
     requestId: "req-1",
     modelParameters: { temperature: 0.2 },
-    trace: { usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 } }
+    trace: { usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 } },
+    executionStart: "2026-03-10T09:00:00Z",
+    executionEnd: "2026-03-10T09:00:01Z"
   });
 
   assert.equal(request.capture.actor.role, "deployer");
   assert.equal(request.capture.subject.system_id, "system-123");
   assert.equal(request.capture.context.provider, "openai");
   assert.equal(request.capture.items[0].type, "llm_interaction");
+  assert.equal(request.capture.items[0].data.execution_start, "2026-03-10T09:00:00Z");
+  assert.equal(request.capture.items[0].data.execution_end, "2026-03-10T09:00:01Z");
   assert.ok(request.capture.items[0].data.input_commitment.startsWith("sha256:"));
   assert.equal(request.artefacts[0].name, "prompt.json");
   assert.equal(request.artefacts[1].name, "response.json");
@@ -53,11 +58,17 @@ test("createRiskAssessmentRequest emits lifecycle evidence with default artefact
     summary: "hallucination path under review",
     metadata: { owner: "risk-team" },
     record: { controls: ["approval", "monitoring"] },
-    retentionClass: "provider_documentation_days"
+    retentionClass: "provider_documentation_days",
+    likelihood: "medium",
+    residualRiskLevel: "low",
+    vulnerableGroupsConsidered: true
   });
 
   assert.equal(request.capture.subject.system_id, "system-risk-1");
   assert.equal(request.capture.items[0].type, "risk_assessment");
+  assert.equal(request.capture.items[0].data.likelihood, "medium");
+  assert.equal(request.capture.items[0].data.residual_risk_level, "low");
+  assert.equal(request.capture.items[0].data.vulnerable_groups_considered, true);
   assert.equal(request.capture.policy.retention_class, "provider_documentation_days");
   assert.equal(request.artefacts[0].name, "risk_assessment.json");
 });
@@ -68,11 +79,15 @@ test("createDataGovernanceRequest emits governance evidence with dataset ref", (
     systemId: "system-data-1",
     decision: "approved_with_restrictions",
     datasetRef: "dataset://curated/training-v2",
-    metadata: { reviewer: "privacy" }
+    metadata: { reviewer: "privacy" },
+    datasetName: "curated-training",
+    personalDataCategories: ["support_tickets"]
   });
 
   assert.equal(request.capture.items[0].type, "data_governance");
   assert.equal(request.capture.items[0].data.dataset_ref, "dataset://curated/training-v2");
+  assert.equal(request.capture.items[0].data.dataset_name, "curated-training");
+  assert.deepEqual(request.capture.items[0].data.personal_data_categories, ["support_tickets"]);
   assert.equal(request.artefacts[0].name, "data_governance.json");
 });
 
@@ -98,12 +113,16 @@ test("createToolCallRequest hashes input/output and emits default artefacts", ()
     toolName: "search_database",
     input: { query: "hello" },
     output: { hits: 3 },
-    metadata: { latency_ms: 18 }
+    metadata: { latency_ms: 18 },
+    executionStart: "2026-03-10T10:00:00Z",
+    executionEnd: "2026-03-10T10:00:02Z"
   });
 
   assert.equal(request.capture.items[0].type, "tool_call");
   assert.ok(request.capture.items[0].data.input_commitment.startsWith("sha256:"));
   assert.ok(request.capture.items[0].data.output_commitment.startsWith("sha256:"));
+  assert.equal(request.capture.items[0].data.execution_start, "2026-03-10T10:00:00Z");
+  assert.equal(request.capture.items[0].data.execution_end, "2026-03-10T10:00:02Z");
   assert.equal(request.artefacts[0].name, "tool_call.json");
   assert.equal(request.artefacts[1].name, "tool_input.json");
   assert.equal(request.artefacts[2].name, "tool_output.json");
@@ -116,10 +135,16 @@ test("createRetrievalRequest hashes result/query and emits retrieval artefacts",
     corpus: "knowledge-base",
     query: "refund policy",
     result: { docs: [{ id: "doc-1" }] },
-    metadata: { top_k: 3 }
+    metadata: { top_k: 3 },
+    databaseReference: "pg://rag/chunk_store",
+    executionStart: "2026-03-10T11:00:00Z",
+    executionEnd: "2026-03-10T11:00:01Z"
   });
 
   assert.equal(request.capture.items[0].type, "retrieval");
+  assert.equal(request.capture.items[0].data.database_reference, "pg://rag/chunk_store");
+  assert.equal(request.capture.items[0].data.execution_start, "2026-03-10T11:00:00Z");
+  assert.equal(request.capture.items[0].data.execution_end, "2026-03-10T11:00:01Z");
   assert.ok(request.capture.items[0].data.result_commitment.startsWith("sha256:"));
   assert.ok(request.capture.items[0].data.query_commitment.startsWith("sha256:"));
   assert.equal(request.artefacts[1].name, "retrieval_result.json");
@@ -131,10 +156,16 @@ test("createHumanOversightRequest hashes notes when provided", () => {
     systemId: "system-oversight-1",
     action: "approved_after_review",
     reviewer: "ops-lead",
-    notes: "Reviewed against internal policy"
+    notes: "Reviewed against internal policy",
+    actorRole: "human_reviewer",
+    stopTriggered: true,
+    stopReason: "manual kill switch"
   });
 
   assert.equal(request.capture.items[0].type, "human_oversight");
+  assert.equal(request.capture.items[0].data.actor_role, "human_reviewer");
+  assert.equal(request.capture.items[0].data.stop_triggered, true);
+  assert.equal(request.capture.items[0].data.stop_reason, "manual kill switch");
   assert.ok(request.capture.items[0].data.notes_commitment.startsWith("sha256:"));
   assert.equal(request.artefacts[1].name, "oversight_notes.txt");
 });
@@ -185,11 +216,18 @@ test("createIncidentReportRequest emits incident evidence with report commitment
     summary: "unsafe escalation path",
     report: "timeline and corrective actions",
     metadata: { source: "runtime-monitor" },
-    retentionClass: "risk_mgmt"
+    retentionClass: "risk_mgmt",
+    detectionMethod: "post_market_monitoring",
+    rootCauseSummary: "policy threshold misconfiguration"
   });
 
   assert.equal(request.capture.items[0].type, "incident_report");
   assert.equal(request.capture.items[0].data.occurred_at, "2026-03-06T10:15:00Z");
+  assert.equal(request.capture.items[0].data.detection_method, "post_market_monitoring");
+  assert.equal(
+    request.capture.items[0].data.root_cause_summary,
+    "policy threshold misconfiguration"
+  );
   assert.ok(request.capture.items[0].data.report_commitment.startsWith("sha256:"));
   assert.equal(request.artefacts[0].name, "incident_report.json");
   assert.equal(request.artefacts[1].name, "incident_report_record.txt");
@@ -225,11 +263,20 @@ test("createModelEvaluationRequest emits GPAI evaluation evidence", () => {
     status: "completed",
     summary: "baseline complete",
     report: { score: "0.84" },
-    metadata: { suite: "foundation-evals" }
+    metadata: { suite: "foundation-evals" },
+    evaluationMethodology: "held-out benchmark suite",
+    metricsSummary: [{ name: "accuracy", value: "0.84", unit: "ratio" }]
   });
 
   assert.equal(request.capture.items[0].type, "model_evaluation");
   assert.equal(request.capture.items[0].data.benchmark, "mmlu-pro");
+  assert.equal(
+    request.capture.items[0].data.evaluation_methodology,
+    "held-out benchmark suite"
+  );
+  assert.deepEqual(request.capture.items[0].data.metrics_summary, [
+    { name: "accuracy", value: "0.84", unit: "ratio" }
+  ]);
   assert.equal(request.capture.policy.retention_class, "gpai_documentation");
   assert.ok(request.capture.items[0].data.report_commitment.startsWith("sha256:"));
   assert.equal(request.artefacts[0].name, "model_evaluation.json");
@@ -245,11 +292,15 @@ test("createAdversarialTestRequest emits systemic-risk evidence", () => {
     status: "open",
     findingSeverity: "high",
     report: "exploit transcript",
-    metadata: { suite: "red-team" }
+    metadata: { suite: "red-team" },
+    threatModel: "external red-team operator",
+    affectedComponents: ["prompt-router"]
   });
 
   assert.equal(request.capture.items[0].type, "adversarial_test");
   assert.equal(request.capture.items[0].data.focus, "prompt-injection");
+  assert.equal(request.capture.items[0].data.threat_model, "external red-team operator");
+  assert.deepEqual(request.capture.items[0].data.affected_components, ["prompt-router"]);
   assert.equal(request.capture.policy.retention_class, "gpai_documentation");
   assert.ok(request.capture.items[0].data.report_commitment.startsWith("sha256:"));
   assert.equal(request.artefacts[0].name, "adversarial_test.json");
@@ -264,11 +315,13 @@ test("createTrainingProvenanceRequest emits provenance evidence", () => {
     stage: "pretraining",
     lineageRef: "lineage://snapshot/2026-03-01",
     record: { manifests: 12 },
-    metadata: { source: "registry" }
+    metadata: { source: "registry" },
+    computeMetricsRef: "compute-2026-q1"
   });
 
   assert.equal(request.capture.items[0].type, "training_provenance");
   assert.equal(request.capture.items[0].data.stage, "pretraining");
+  assert.equal(request.capture.items[0].data.compute_metrics_ref, "compute-2026-q1");
   assert.equal(request.capture.policy.retention_class, "gpai_documentation");
   assert.ok(request.capture.items[0].data.record_commitment.startsWith("sha256:"));
   assert.equal(request.artefacts[0].name, "training_provenance.json");
@@ -284,11 +337,13 @@ test("createConformityAssessmentRequest emits conformity evidence", () => {
     status: "completed",
     report: { outcome: "pass" },
     metadata: { notified_body: "nb-1234" },
+    assessmentBody: "NB-1234",
     retentionClass: "technical_doc"
   });
 
   assert.equal(request.capture.items[0].type, "conformity_assessment");
   assert.equal(request.capture.items[0].data.procedure, "annex_vii");
+  assert.equal(request.capture.items[0].data.assessment_body, "NB-1234");
   assert.ok(request.capture.items[0].data.report_commitment.startsWith("sha256:"));
   assert.equal(request.artefacts[0].name, "conformity_assessment.json");
   assert.equal(request.artefacts[1].name, "conformity_assessment_report.json");
@@ -303,11 +358,13 @@ test("createDeclarationRequest emits declaration evidence", () => {
     status: "issued",
     document: "eu declaration body",
     metadata: { annex: "v" },
+    signatory: "Chief Compliance Officer",
     retentionClass: "technical_doc"
   });
 
   assert.equal(request.capture.items[0].type, "declaration");
   assert.equal(request.capture.items[0].data.jurisdiction, "eu");
+  assert.equal(request.capture.items[0].data.signatory, "Chief Compliance Officer");
   assert.ok(request.capture.items[0].data.document_commitment.startsWith("sha256:"));
   assert.equal(request.artefacts[0].name, "declaration.json");
   assert.equal(request.artefacts[1].name, "declaration_document.txt");
@@ -322,12 +379,38 @@ test("createRegistrationRequest emits registration evidence", () => {
     status: "accepted",
     receipt: { receipt_id: "rcpt-1" },
     metadata: { article: "49" },
+    registrationNumber: "EU-REG-49-1",
     retentionClass: "technical_doc"
   });
 
   assert.equal(request.capture.items[0].type, "registration");
   assert.equal(request.capture.items[0].data.authority, "eu_database");
+  assert.equal(request.capture.items[0].data.registration_number, "EU-REG-49-1");
   assert.ok(request.capture.items[0].data.receipt_commitment.startsWith("sha256:"));
   assert.equal(request.artefacts[0].name, "registration.json");
   assert.equal(request.artefacts[1].name, "registration_receipt.json");
+});
+
+test("createComputeMetricsRequest emits GPAI threshold evidence", () => {
+  const request = createComputeMetricsRequest({
+    keyId: "kid-dev-01",
+    systemId: "system-gpai-4",
+    computeId: "compute-2026-q1",
+    trainingFlopsEstimate: "1.2e25",
+    thresholdBasisRef: "art51",
+    thresholdValue: "1e25",
+    thresholdStatus: "above_threshold",
+    measuredAt: "2026-03-10T12:00:00Z",
+    computeResourcesSummary: [{ name: "gpu_hours", value: "42000", unit: "hours" }],
+    metadata: { owner: "foundation-team" }
+  });
+
+  assert.equal(request.capture.items[0].type, "compute_metrics");
+  assert.equal(request.capture.items[0].data.training_flops_estimate, "1.2e25");
+  assert.equal(request.capture.items[0].data.threshold_status, "above_threshold");
+  assert.deepEqual(request.capture.items[0].data.compute_resources_summary, [
+    { name: "gpu_hours", value: "42000", unit: "hours" }
+  ]);
+  assert.equal(request.capture.policy.retention_class, "gpai_documentation");
+  assert.equal(request.artefacts[0].name, "compute_metrics.json");
 });

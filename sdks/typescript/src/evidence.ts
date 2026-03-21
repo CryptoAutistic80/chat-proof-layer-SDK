@@ -9,6 +9,7 @@ import type {
   ConformityAssessmentRequestOptions,
   CopyrightPolicyRequestOptions,
   CorrectiveActionRequestOptions,
+  ComputeMetricsRequestOptions,
   CreateBundleRequest,
   DataGovernanceRequestOptions,
   DeclarationRequestOptions,
@@ -219,7 +220,9 @@ export function createLlmInteractionRequest(
           output_commitment: hashSha256(responseBytes),
           tool_outputs_commitment: options.toolOutputsCommitment ?? null,
           trace_commitment: traceCommitment,
-          trace_semconv_version: traceSemconvVersion
+          trace_semconv_version: traceSemconvVersion,
+          execution_start: options.executionStart ?? null,
+          execution_end: options.executionEnd ?? null
         }
       }
     ],
@@ -238,7 +241,9 @@ export function createToolCallRequest(
     artefacts.push(
       jsonArtefact("tool_call.json", {
         tool_name: options.toolName,
-        metadata: options.metadata ?? null
+        metadata: options.metadata ?? null,
+        execution_start: options.executionStart ?? null,
+        execution_end: options.executionEnd ?? null
       })
     );
     if (options.input !== undefined) {
@@ -269,7 +274,9 @@ export function createToolCallRequest(
           tool_name: options.toolName,
           input_commitment: options.input !== undefined ? hashSha256(options.input) : null,
           output_commitment: options.output !== undefined ? hashSha256(options.output) : null,
-          metadata: options.metadata ?? null
+          metadata: options.metadata ?? null,
+          execution_start: options.executionStart ?? null,
+          execution_end: options.executionEnd ?? null
         }
       }
     ],
@@ -288,7 +295,10 @@ export function createRetrievalRequest(
     artefacts.push(
       jsonArtefact("retrieval.json", {
         corpus: options.corpus,
-        metadata: options.metadata ?? null
+        metadata: options.metadata ?? null,
+        database_reference: options.databaseReference ?? null,
+        execution_start: options.executionStart ?? null,
+        execution_end: options.executionEnd ?? null
       }),
       namedDataArtefact("retrieval_result", options.result)
     );
@@ -317,7 +327,10 @@ export function createRetrievalRequest(
           corpus: options.corpus,
           result_commitment: hashSha256(options.result),
           query_commitment: options.query !== undefined ? hashSha256(options.query) : null,
-          metadata: options.metadata ?? null
+          metadata: options.metadata ?? null,
+          database_reference: options.databaseReference ?? null,
+          execution_start: options.executionStart ?? null,
+          execution_end: options.executionEnd ?? null
         }
       }
     ],
@@ -336,7 +349,15 @@ export function createHumanOversightRequest(
     artefacts.push(
       jsonArtefact("human_oversight.json", {
         action: options.action,
-        reviewer: options.reviewer ?? null
+        reviewer: options.reviewer ?? null,
+        actor_role: options.actorRole ?? null,
+        anomaly_detected: options.anomalyDetected ?? null,
+        override_action: options.overrideAction ?? null,
+        interpretation_guidance_followed: options.interpretationGuidanceFollowed ?? null,
+        automation_bias_detected: options.automationBiasDetected ?? null,
+        two_person_verification: options.twoPersonVerification ?? null,
+        stop_triggered: options.stopTriggered ?? null,
+        stop_reason: options.stopReason ?? null
       })
     );
     if (options.notes !== undefined) {
@@ -363,7 +384,16 @@ export function createHumanOversightRequest(
         data: {
           action: options.action,
           reviewer: options.reviewer ?? null,
-          notes_commitment: options.notes !== undefined ? hashSha256(options.notes) : null
+          notes_commitment: options.notes !== undefined ? hashSha256(options.notes) : null,
+          actor_role: options.actorRole ?? null,
+          anomaly_detected: options.anomalyDetected ?? null,
+          override_action: options.overrideAction ?? null,
+          interpretation_guidance_followed:
+            options.interpretationGuidanceFollowed ?? null,
+          automation_bias_detected: options.automationBiasDetected ?? null,
+          two_person_verification: options.twoPersonVerification ?? null,
+          stop_triggered: options.stopTriggered ?? null,
+          stop_reason: options.stopReason ?? null
         }
       }
     ],
@@ -447,6 +477,14 @@ export function createRiskAssessmentRequest(
           severity: options.severity,
           status: options.status,
           summary: options.summary ?? null,
+          risk_description: options.riskDescription ?? null,
+          likelihood: options.likelihood ?? null,
+          affected_groups: options.affectedGroups ?? [],
+          mitigation_measures: options.mitigationMeasures ?? [],
+          residual_risk_level: options.residualRiskLevel ?? null,
+          risk_owner: options.riskOwner ?? null,
+          vulnerable_groups_considered: options.vulnerableGroupsConsidered ?? null,
+          test_results_summary: options.testResultsSummary ?? null,
           metadata: options.metadata ?? null
         }
       }
@@ -461,6 +499,14 @@ export function createRiskAssessmentRequest(
           severity: options.severity,
           status: options.status,
           summary: options.summary ?? null,
+          risk_description: options.riskDescription ?? null,
+          likelihood: options.likelihood ?? null,
+          affected_groups: options.affectedGroups ?? [],
+          mitigation_measures: options.mitigationMeasures ?? [],
+          residual_risk_level: options.residualRiskLevel ?? null,
+          risk_owner: options.riskOwner ?? null,
+          vulnerable_groups_considered: options.vulnerableGroupsConsidered ?? null,
+          test_results_summary: options.testResultsSummary ?? null,
           metadata: options.metadata ?? null,
           record: options.record ?? null
         })
@@ -490,6 +536,18 @@ export function createDataGovernanceRequest(
         data: {
           decision: options.decision,
           dataset_ref: options.datasetRef ?? null,
+          dataset_name: options.datasetName ?? null,
+          dataset_version: options.datasetVersion ?? null,
+          source_description: options.sourceDescription ?? null,
+          collection_period: options.collectionPeriod ?? null,
+          geographical_scope: options.geographicalScope ?? [],
+          preprocessing_operations: options.preprocessingOperations ?? [],
+          bias_detection_methodology: options.biasDetectionMethodology ?? null,
+          bias_metrics: options.biasMetrics ?? [],
+          mitigation_actions: options.mitigationActions ?? [],
+          data_gaps: options.dataGaps ?? [],
+          personal_data_categories: options.personalDataCategories ?? [],
+          safeguards: options.safeguards ?? [],
           metadata: options.metadata ?? null
         }
       }
@@ -502,6 +560,18 @@ export function createDataGovernanceRequest(
         jsonArtefact("data_governance.json", {
           decision: options.decision,
           dataset_ref: options.datasetRef ?? null,
+          dataset_name: options.datasetName ?? null,
+          dataset_version: options.datasetVersion ?? null,
+          source_description: options.sourceDescription ?? null,
+          collection_period: options.collectionPeriod ?? null,
+          geographical_scope: options.geographicalScope ?? [],
+          preprocessing_operations: options.preprocessingOperations ?? [],
+          bias_detection_methodology: options.biasDetectionMethodology ?? null,
+          bias_metrics: options.biasMetrics ?? [],
+          mitigation_actions: options.mitigationActions ?? [],
+          data_gaps: options.dataGaps ?? [],
+          personal_data_categories: options.personalDataCategories ?? [],
+          safeguards: options.safeguards ?? [],
           metadata: options.metadata ?? null,
           record: options.record ?? null
         })
@@ -528,7 +598,16 @@ export function createTechnicalDocRequest(
         jsonArtefact("technical_doc.json", {
           document_ref: options.documentRef,
           section: options.section ?? null,
-          descriptor: options.descriptor ?? null
+          descriptor: options.descriptor ?? null,
+          annex_iv_sections: options.annexIvSections ?? [],
+          system_description_summary: options.systemDescriptionSummary ?? null,
+          model_description_summary: options.modelDescriptionSummary ?? null,
+          capabilities_and_limitations: options.capabilitiesAndLimitations ?? null,
+          design_choices_summary: options.designChoicesSummary ?? null,
+          evaluation_metrics_summary: options.evaluationMetricsSummary ?? null,
+          human_oversight_design_summary: options.humanOversightDesignSummary ?? null,
+          post_market_monitoring_plan_ref: options.postMarketMonitoringPlanRef ?? null,
+          simplified_tech_doc: options.simplifiedTechDoc ?? null
         })
       );
     }
@@ -555,7 +634,16 @@ export function createTechnicalDocRequest(
           section: options.section ?? null,
           commitment:
             options.commitment ??
-            (options.document !== undefined ? hashSha256(options.document) : null)
+            (options.document !== undefined ? hashSha256(options.document) : null),
+          annex_iv_sections: options.annexIvSections ?? [],
+          system_description_summary: options.systemDescriptionSummary ?? null,
+          model_description_summary: options.modelDescriptionSummary ?? null,
+          capabilities_and_limitations: options.capabilitiesAndLimitations ?? null,
+          design_choices_summary: options.designChoicesSummary ?? null,
+          evaluation_metrics_summary: options.evaluationMetricsSummary ?? null,
+          human_oversight_design_summary: options.humanOversightDesignSummary ?? null,
+          post_market_monitoring_plan_ref: options.postMarketMonitoringPlanRef ?? null,
+          simplified_tech_doc: options.simplifiedTechDoc ?? null
         }
       }
     ],
@@ -585,6 +673,16 @@ export function createInstructionsForUseRequest(
         document_ref: options.documentRef,
         version: options.versionTag ?? null,
         section: options.section ?? null,
+        provider_identity: options.providerIdentity ?? null,
+        intended_purpose: options.intendedPurpose ?? null,
+        system_capabilities: options.systemCapabilities ?? [],
+        accuracy_metrics: options.accuracyMetrics ?? [],
+        foreseeable_risks: options.foreseeableRisks ?? [],
+        explainability_capabilities: options.explainabilityCapabilities ?? [],
+        human_oversight_guidance: options.humanOversightGuidance ?? [],
+        compute_requirements: options.computeRequirements ?? [],
+        service_lifetime: options.serviceLifetime ?? null,
+        log_management_guidance: options.logManagementGuidance ?? [],
         metadata: options.metadata ?? null
       })
     );
@@ -613,6 +711,16 @@ export function createInstructionsForUseRequest(
           commitment:
             options.commitment ??
             (options.document !== undefined ? hashSha256(options.document) : null),
+          provider_identity: options.providerIdentity ?? null,
+          intended_purpose: options.intendedPurpose ?? null,
+          system_capabilities: options.systemCapabilities ?? [],
+          accuracy_metrics: options.accuracyMetrics ?? [],
+          foreseeable_risks: options.foreseeableRisks ?? [],
+          explainability_capabilities: options.explainabilityCapabilities ?? [],
+          human_oversight_guidance: options.humanOversightGuidance ?? [],
+          compute_requirements: options.computeRequirements ?? [],
+          service_lifetime: options.serviceLifetime ?? null,
+          log_management_guidance: options.logManagementGuidance ?? [],
           metadata: options.metadata ?? null
         }
       }
@@ -634,6 +742,14 @@ export function createQmsRecordRequest(
         record_id: options.recordId,
         process: options.process,
         status: options.status,
+        policy_name: options.policyName ?? null,
+        revision: options.revision ?? null,
+        effective_date: options.effectiveDate ?? null,
+        expiry_date: options.expiryDate ?? null,
+        scope: options.scope ?? null,
+        approval_commitment: options.approvalCommitment ?? null,
+        audit_results_summary: options.auditResultsSummary ?? null,
+        continuous_improvement_actions: options.continuousImprovementActions ?? [],
         metadata: options.metadata ?? null
       })
     );
@@ -663,6 +779,14 @@ export function createQmsRecordRequest(
           process: options.process,
           status: options.status,
           record_commitment: options.record !== undefined ? hashSha256(options.record) : null,
+          policy_name: options.policyName ?? null,
+          revision: options.revision ?? null,
+          effective_date: options.effectiveDate ?? null,
+          expiry_date: options.expiryDate ?? null,
+          scope: options.scope ?? null,
+          approval_commitment: options.approvalCommitment ?? null,
+          audit_results_summary: options.auditResultsSummary ?? null,
+          continuous_improvement_actions: options.continuousImprovementActions ?? [],
           metadata: options.metadata ?? null
         }
       }
@@ -684,6 +808,11 @@ export function createFundamentalRightsAssessmentRequest(
         assessment_id: options.assessmentId,
         status: options.status,
         scope: options.scope ?? null,
+        legal_basis: options.legalBasis ?? null,
+        affected_rights: options.affectedRights ?? [],
+        stakeholder_consultation_summary: options.stakeholderConsultationSummary ?? null,
+        mitigation_plan_summary: options.mitigationPlanSummary ?? null,
+        assessor: options.assessor ?? null,
         metadata: options.metadata ?? null
       })
     );
@@ -715,6 +844,12 @@ export function createFundamentalRightsAssessmentRequest(
           status: options.status,
           scope: options.scope ?? null,
           report_commitment: options.report !== undefined ? hashSha256(options.report) : null,
+          legal_basis: options.legalBasis ?? null,
+          affected_rights: options.affectedRights ?? [],
+          stakeholder_consultation_summary:
+            options.stakeholderConsultationSummary ?? null,
+          mitigation_plan_summary: options.mitigationPlanSummary ?? null,
+          assessor: options.assessor ?? null,
           metadata: options.metadata ?? null
         }
       }
@@ -1108,6 +1243,9 @@ export function createModelEvaluationRequest(
         benchmark: options.benchmark,
         status: options.status,
         summary: options.summary ?? null,
+        metrics_summary: options.metricsSummary ?? [],
+        group_performance: options.groupPerformance ?? [],
+        evaluation_methodology: options.evaluationMethodology ?? null,
         metadata: options.metadata ?? null
       })
     );
@@ -1138,6 +1276,9 @@ export function createModelEvaluationRequest(
           status: options.status,
           summary: options.summary ?? null,
           report_commitment: options.report !== undefined ? hashSha256(options.report) : null,
+          metrics_summary: options.metricsSummary ?? [],
+          group_performance: options.groupPerformance ?? [],
+          evaluation_methodology: options.evaluationMethodology ?? null,
           metadata: options.metadata ?? null
         }
       }
@@ -1160,6 +1301,10 @@ export function createAdversarialTestRequest(
         focus: options.focus,
         status: options.status,
         finding_severity: options.findingSeverity ?? null,
+        threat_model: options.threatModel ?? null,
+        test_methodology: options.testMethodology ?? null,
+        attack_classes: options.attackClasses ?? [],
+        affected_components: options.affectedComponents ?? [],
         metadata: options.metadata ?? null
       })
     );
@@ -1190,6 +1335,10 @@ export function createAdversarialTestRequest(
           status: options.status,
           finding_severity: options.findingSeverity ?? null,
           report_commitment: options.report !== undefined ? hashSha256(options.report) : null,
+          threat_model: options.threatModel ?? null,
+          test_methodology: options.testMethodology ?? null,
+          attack_classes: options.attackClasses ?? [],
+          affected_components: options.affectedComponents ?? [],
           metadata: options.metadata ?? null
         }
       }
@@ -1211,6 +1360,9 @@ export function createTrainingProvenanceRequest(
         dataset_ref: options.datasetRef,
         stage: options.stage,
         lineage_ref: options.lineageRef ?? null,
+        compute_metrics_ref: options.computeMetricsRef ?? null,
+        training_dataset_summary: options.trainingDatasetSummary ?? null,
+        consortium_context: options.consortiumContext ?? null,
         metadata: options.metadata ?? null
       })
     );
@@ -1240,6 +1392,68 @@ export function createTrainingProvenanceRequest(
           stage: options.stage,
           lineage_ref: options.lineageRef ?? null,
           record_commitment: options.record !== undefined ? hashSha256(options.record) : null,
+          compute_metrics_ref: options.computeMetricsRef ?? null,
+          training_dataset_summary: options.trainingDatasetSummary ?? null,
+          consortium_context: options.consortiumContext ?? null,
+          metadata: options.metadata ?? null
+        }
+      }
+    ],
+    redactions: options.redactions,
+    encryptionEnabled: options.encryptionEnabled,
+    retentionClass: options.retentionClass ?? "gpai_documentation",
+    artefacts
+  });
+}
+
+export function createComputeMetricsRequest(
+  options: ComputeMetricsRequestOptions
+): CreateBundleRequest {
+  const artefacts = options.artefacts ? [...options.artefacts] : [];
+  if (artefacts.length === 0) {
+    artefacts.push(
+      jsonArtefact("compute_metrics.json", {
+        compute_id: options.computeId,
+        training_flops_estimate: options.trainingFlopsEstimate,
+        threshold_basis_ref: options.thresholdBasisRef,
+        threshold_value: options.thresholdValue,
+        threshold_status: options.thresholdStatus,
+        estimation_methodology: options.estimationMethodology ?? null,
+        measured_at: options.measuredAt ?? null,
+        compute_resources_summary: options.computeResourcesSummary ?? [],
+        consortium_context: options.consortiumContext ?? null,
+        metadata: options.metadata ?? null,
+        record: options.record ?? null
+      })
+    );
+  }
+
+  return createCaptureRequest({
+    keyId: options.keyId,
+    role: options.role,
+    issuer: options.issuer,
+    appId: options.appId,
+    env: options.env,
+    requestId: options.requestId,
+    threadId: options.threadId,
+    userRef: options.userRef,
+    systemId: options.systemId,
+    deploymentId: options.deploymentId,
+    version: options.version,
+    complianceProfile: options.complianceProfile,
+    items: [
+      {
+        type: "compute_metrics",
+        data: {
+          compute_id: options.computeId,
+          training_flops_estimate: options.trainingFlopsEstimate,
+          threshold_basis_ref: options.thresholdBasisRef,
+          threshold_value: options.thresholdValue,
+          threshold_status: options.thresholdStatus,
+          estimation_methodology: options.estimationMethodology ?? null,
+          measured_at: options.measuredAt ?? null,
+          compute_resources_summary: options.computeResourcesSummary ?? [],
+          consortium_context: options.consortiumContext ?? null,
           metadata: options.metadata ?? null
         }
       }
@@ -1411,6 +1625,8 @@ export function createConformityAssessmentRequest(
         assessment_id: options.assessmentId,
         procedure: options.procedure,
         status: options.status,
+        assessment_body: options.assessmentBody ?? null,
+        certificate_ref: options.certificateRef ?? null,
         metadata: options.metadata ?? null
       })
     );
@@ -1440,6 +1656,8 @@ export function createConformityAssessmentRequest(
           procedure: options.procedure,
           status: options.status,
           report_commitment: options.report !== undefined ? hashSha256(options.report) : null,
+          assessment_body: options.assessmentBody ?? null,
+          certificate_ref: options.certificateRef ?? null,
           metadata: options.metadata ?? null
         }
       }
@@ -1461,6 +1679,8 @@ export function createDeclarationRequest(
         declaration_id: options.declarationId,
         jurisdiction: options.jurisdiction,
         status: options.status,
+        signatory: options.signatory ?? null,
+        document_version: options.documentVersion ?? null,
         metadata: options.metadata ?? null
       })
     );
@@ -1491,6 +1711,8 @@ export function createDeclarationRequest(
           status: options.status,
           document_commitment:
             options.document !== undefined ? hashSha256(options.document) : null,
+          signatory: options.signatory ?? null,
+          document_version: options.documentVersion ?? null,
           metadata: options.metadata ?? null
         }
       }
@@ -1512,6 +1734,8 @@ export function createRegistrationRequest(
         registration_id: options.registrationId,
         authority: options.authority,
         status: options.status,
+        registration_number: options.registrationNumber ?? null,
+        submitted_at: options.submittedAt ?? null,
         metadata: options.metadata ?? null
       })
     );
@@ -1542,6 +1766,8 @@ export function createRegistrationRequest(
           status: options.status,
           receipt_commitment:
             options.receipt !== undefined ? hashSha256(options.receipt) : null,
+          registration_number: options.registrationNumber ?? null,
+          submitted_at: options.submittedAt ?? null,
           metadata: options.metadata ?? null
         }
       }
@@ -1563,6 +1789,9 @@ export function createLiteracyAttestationRequest(
         attested_role: options.attestedRole,
         status: options.status,
         training_ref: options.trainingRef ?? null,
+        completion_date: options.completionDate ?? null,
+        training_provider: options.trainingProvider ?? null,
+        certificate_digest: options.certificateDigest ?? null,
         metadata: options.metadata ?? null
       })
     );
@@ -1593,6 +1822,9 @@ export function createLiteracyAttestationRequest(
           training_ref: options.trainingRef ?? null,
           attestation_commitment:
             options.attestation !== undefined ? hashSha256(options.attestation) : null,
+          completion_date: options.completionDate ?? null,
+          training_provider: options.trainingProvider ?? null,
+          certificate_digest: options.certificateDigest ?? null,
           metadata: options.metadata ?? null
         }
       }
@@ -1616,6 +1848,11 @@ export function createIncidentReportRequest(
         status: options.status,
         occurred_at: options.occurredAt ?? null,
         summary: options.summary ?? null,
+        detection_method: options.detectionMethod ?? null,
+        root_cause_summary: options.rootCauseSummary ?? null,
+        corrective_action_ref: options.correctiveActionRef ?? null,
+        authority_notification_required: options.authorityNotificationRequired ?? null,
+        authority_notification_status: options.authorityNotificationStatus ?? null,
         metadata: options.metadata ?? null
       })
     );
@@ -1647,6 +1884,11 @@ export function createIncidentReportRequest(
           occurred_at: options.occurredAt ?? null,
           summary: options.summary ?? null,
           report_commitment: options.report !== undefined ? hashSha256(options.report) : null,
+          detection_method: options.detectionMethod ?? null,
+          root_cause_summary: options.rootCauseSummary ?? null,
+          corrective_action_ref: options.correctiveActionRef ?? null,
+          authority_notification_required: options.authorityNotificationRequired ?? null,
+          authority_notification_status: options.authorityNotificationStatus ?? null,
           metadata: options.metadata ?? null
         }
       }

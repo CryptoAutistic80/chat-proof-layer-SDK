@@ -63,6 +63,23 @@ export interface ProofArtefactInput {
   data: BinaryLike;
 }
 
+export interface DateRange extends JsonObject {
+  start?: string;
+  end?: string;
+}
+
+export interface MetricSummary extends JsonObject {
+  name: string;
+  value: string;
+  unit?: string;
+  methodology?: string;
+}
+
+export interface GroupMetricSummary extends JsonObject {
+  group: string;
+  metrics?: MetricSummary[];
+}
+
 export interface InlineArtefactRequest {
   name: string;
   content_type: string;
@@ -473,6 +490,8 @@ export interface LlmInteractionRequestOptions {
   trace?: JsonValue | JsonObject;
   traceCommitment?: string | null;
   otelSemconvVersion?: string;
+  executionStart?: string;
+  executionEnd?: string;
   redactions?: string[];
   encryptionEnabled?: boolean;
   retentionClass?: string;
@@ -484,6 +503,14 @@ export interface RiskAssessmentRequestOptions extends LifecycleCaptureOptions {
   severity: string;
   status: string;
   summary?: string;
+  riskDescription?: string;
+  likelihood?: string;
+  affectedGroups?: string[];
+  mitigationMeasures?: string[];
+  residualRiskLevel?: string;
+  riskOwner?: string;
+  vulnerableGroupsConsidered?: boolean;
+  testResultsSummary?: string;
   metadata?: JsonValue;
   record?: JsonValue | JsonObject;
 }
@@ -491,6 +518,18 @@ export interface RiskAssessmentRequestOptions extends LifecycleCaptureOptions {
 export interface DataGovernanceRequestOptions extends LifecycleCaptureOptions {
   decision: string;
   datasetRef?: string;
+  datasetName?: string;
+  datasetVersion?: string;
+  sourceDescription?: string;
+  collectionPeriod?: DateRange;
+  geographicalScope?: string[];
+  preprocessingOperations?: string[];
+  biasDetectionMethodology?: string;
+  biasMetrics?: MetricSummary[];
+  mitigationActions?: string[];
+  dataGaps?: string[];
+  personalDataCategories?: string[];
+  safeguards?: string[];
   metadata?: JsonValue;
   record?: JsonValue | JsonObject;
 }
@@ -499,6 +538,15 @@ export interface TechnicalDocRequestOptions extends LifecycleCaptureOptions {
   documentRef: string;
   section?: string;
   commitment?: string;
+  annexIvSections?: string[];
+  systemDescriptionSummary?: string;
+  modelDescriptionSummary?: string;
+  capabilitiesAndLimitations?: string;
+  designChoicesSummary?: string;
+  evaluationMetricsSummary?: string;
+  humanOversightDesignSummary?: string;
+  postMarketMonitoringPlanRef?: string;
+  simplifiedTechDoc?: boolean;
   document?: BinaryLike;
   documentName?: string;
   documentContentType?: string;
@@ -510,6 +558,16 @@ export interface InstructionsForUseRequestOptions extends LifecycleCaptureOption
   versionTag?: string;
   section?: string;
   commitment?: string;
+  providerIdentity?: string;
+  intendedPurpose?: string;
+  systemCapabilities?: string[];
+  accuracyMetrics?: MetricSummary[];
+  foreseeableRisks?: string[];
+  explainabilityCapabilities?: string[];
+  humanOversightGuidance?: string[];
+  computeRequirements?: string[];
+  serviceLifetime?: string;
+  logManagementGuidance?: string[];
   document?: BinaryLike;
   documentName?: string;
   documentContentType?: string;
@@ -520,6 +578,14 @@ export interface QmsRecordRequestOptions extends LifecycleCaptureOptions {
   recordId: string;
   process: string;
   status: string;
+  policyName?: string;
+  revision?: string;
+  effectiveDate?: string;
+  expiryDate?: string;
+  scope?: string;
+  approvalCommitment?: string;
+  auditResultsSummary?: string;
+  continuousImprovementActions?: string[];
   record?: BinaryLike;
   metadata?: JsonValue;
 }
@@ -528,6 +594,11 @@ export interface FundamentalRightsAssessmentRequestOptions extends LifecycleCapt
   assessmentId: string;
   status: string;
   scope?: string;
+  legalBasis?: string;
+  affectedRights?: string[];
+  stakeholderConsultationSummary?: string;
+  mitigationPlanSummary?: string;
+  assessor?: string;
   report?: BinaryLike;
   metadata?: JsonValue;
 }
@@ -602,6 +673,8 @@ export interface ToolCallRequestOptions extends LifecycleCaptureOptions {
   input?: BinaryLike;
   output?: BinaryLike;
   metadata?: JsonValue;
+  executionStart?: string;
+  executionEnd?: string;
 }
 
 export interface RetrievalRequestOptions extends LifecycleCaptureOptions {
@@ -609,12 +682,23 @@ export interface RetrievalRequestOptions extends LifecycleCaptureOptions {
   result: BinaryLike;
   query?: BinaryLike;
   metadata?: JsonValue;
+  databaseReference?: string;
+  executionStart?: string;
+  executionEnd?: string;
 }
 
 export interface HumanOversightRequestOptions extends LifecycleCaptureOptions {
   action: string;
   reviewer?: string;
   notes?: BinaryLike;
+  actorRole?: string;
+  anomalyDetected?: boolean;
+  overrideAction?: string;
+  interpretationGuidanceFollowed?: boolean;
+  automationBiasDetected?: boolean;
+  twoPersonVerification?: boolean;
+  stopTriggered?: boolean;
+  stopReason?: string;
 }
 
 export interface PolicyDecisionRequestOptions extends LifecycleCaptureOptions {
@@ -628,6 +712,9 @@ export interface LiteracyAttestationRequestOptions extends LifecycleCaptureOptio
   attestedRole: string;
   status: string;
   trainingRef?: string;
+  completionDate?: string;
+  trainingProvider?: string;
+  certificateDigest?: string;
   attestation?: BinaryLike;
   metadata?: JsonValue;
 }
@@ -638,6 +725,11 @@ export interface IncidentReportRequestOptions extends LifecycleCaptureOptions {
   status: string;
   occurredAt?: string;
   summary?: string;
+  detectionMethod?: string;
+  rootCauseSummary?: string;
+  correctiveActionRef?: string;
+  authorityNotificationRequired?: boolean;
+  authorityNotificationStatus?: string;
   report?: BinaryLike;
   metadata?: JsonValue;
 }
@@ -647,6 +739,9 @@ export interface ModelEvaluationRequestOptions extends LifecycleCaptureOptions {
   benchmark: string;
   status: string;
   summary?: string;
+  metricsSummary?: MetricSummary[];
+  groupPerformance?: GroupMetricSummary[];
+  evaluationMethodology?: string;
   report?: BinaryLike;
   metadata?: JsonValue;
 }
@@ -656,6 +751,10 @@ export interface AdversarialTestRequestOptions extends LifecycleCaptureOptions {
   focus: string;
   status: string;
   findingSeverity?: string;
+  threatModel?: string;
+  testMethodology?: string;
+  attackClasses?: string[];
+  affectedComponents?: string[];
   report?: BinaryLike;
   metadata?: JsonValue;
 }
@@ -664,8 +763,25 @@ export interface TrainingProvenanceRequestOptions extends LifecycleCaptureOption
   datasetRef: string;
   stage: string;
   lineageRef?: string;
+  computeMetricsRef?: string;
+  trainingDatasetSummary?: string;
+  consortiumContext?: string;
   record?: BinaryLike;
   metadata?: JsonValue;
+}
+
+export interface ComputeMetricsRequestOptions extends LifecycleCaptureOptions {
+  computeId: string;
+  trainingFlopsEstimate: string;
+  thresholdBasisRef: string;
+  thresholdValue: string;
+  thresholdStatus: string;
+  estimationMethodology?: string;
+  measuredAt?: string;
+  computeResourcesSummary?: MetricSummary[];
+  consortiumContext?: string;
+  metadata?: JsonValue;
+  record?: BinaryLike;
 }
 
 export interface DownstreamDocumentationRequestOptions extends LifecycleCaptureOptions {
@@ -696,6 +812,8 @@ export interface ConformityAssessmentRequestOptions extends LifecycleCaptureOpti
   assessmentId: string;
   procedure: string;
   status: string;
+  assessmentBody?: string;
+  certificateRef?: string;
   report?: BinaryLike;
   metadata?: JsonValue;
 }
@@ -704,6 +822,8 @@ export interface DeclarationRequestOptions extends LifecycleCaptureOptions {
   declarationId: string;
   jurisdiction: string;
   status: string;
+  signatory?: string;
+  documentVersion?: string;
   document?: BinaryLike;
   metadata?: JsonValue;
 }
@@ -712,6 +832,8 @@ export interface RegistrationRequestOptions extends LifecycleCaptureOptions {
   registrationId: string;
   authority: string;
   status: string;
+  registrationNumber?: string;
+  submittedAt?: string;
   receipt?: BinaryLike;
   metadata?: JsonValue;
 }
@@ -750,6 +872,8 @@ export interface ProofLayerCaptureOptions {
   trace?: JsonValue | JsonObject;
   traceCommitment?: string | null;
   otelSemconvVersion?: string;
+  executionStart?: string;
+  executionEnd?: string;
   redactions?: string[];
   encryptionEnabled?: boolean;
   retentionClass?: string;

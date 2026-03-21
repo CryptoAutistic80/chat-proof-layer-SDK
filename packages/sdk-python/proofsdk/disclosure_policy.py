@@ -47,7 +47,22 @@ _ALL_ITEM_TYPES = [
     "registration",
     "literacy_attestation",
     "incident_report",
+    "compute_metrics",
 ]
+
+_ANNEX_IV_DEFAULT_REDACTIONS = {
+    "data_governance": ["/bias_metrics", "/personal_data_categories", "/safeguards"],
+    "instructions_for_use": [
+        "/accuracy_metrics",
+        "/compute_requirements",
+        "/log_management_guidance",
+    ],
+}
+
+_INCIDENT_SUMMARY_DEFAULT_REDACTIONS = {
+    "incident_report": ["/root_cause_summary"],
+    "adversarial_test": ["/threat_model", "/affected_components"],
+}
 
 _GROUP_SELECTORS: dict[str, dict[str, list[str]]] = {
     "commitments": {
@@ -84,6 +99,7 @@ _GROUP_SELECTORS: dict[str, dict[str, list[str]]] = {
         "registration": ["receipt_commitment"],
         "literacy_attestation": ["attestation_commitment"],
         "incident_report": ["report_commitment"],
+        "compute_metrics": [],
     },
     "metadata": {
         "tool_call": ["/metadata"],
@@ -111,6 +127,7 @@ _GROUP_SELECTORS: dict[str, dict[str, list[str]]] = {
         "declaration": ["/metadata"],
         "literacy_attestation": ["/metadata"],
         "incident_report": ["/metadata"],
+        "compute_metrics": ["/metadata"],
     },
     "parameters": {
         "llm_interaction": ["/parameters"],
@@ -139,6 +156,7 @@ _TEMPLATE_BASES: dict[str, dict[str, Any]] = {
                 "technical_doc",
                 "risk_assessment",
                 "data_governance",
+                "instructions_for_use",
                 "human_oversight",
             ],
             "excluded_item_types": [],
@@ -147,6 +165,7 @@ _TEMPLATE_BASES: dict[str, dict[str, Any]] = {
             "include_artefact_metadata": True,
             "include_artefact_bytes": True,
             "artefact_names": [],
+            "redacted_fields_by_item_type": _ANNEX_IV_DEFAULT_REDACTIONS,
         },
         "default_groups": [],
     },
@@ -161,6 +180,7 @@ _TEMPLATE_BASES: dict[str, dict[str, Any]] = {
                 "risk_assessment",
                 "policy_decision",
                 "human_oversight",
+                "adversarial_test",
             ],
             "excluded_item_types": ["llm_interaction", "retrieval", "tool_call"],
             "allowed_obligation_refs": [],
@@ -168,6 +188,7 @@ _TEMPLATE_BASES: dict[str, dict[str, Any]] = {
             "include_artefact_metadata": False,
             "include_artefact_bytes": False,
             "artefact_names": [],
+            "redacted_fields_by_item_type": _INCIDENT_SUMMARY_DEFAULT_REDACTIONS,
         },
         "default_groups": [],
     },
@@ -304,5 +325,8 @@ def create_disclosure_policy_template(
         include_artefact_bytes=policy["include_artefact_bytes"],
         artefact_names=policy["artefact_names"],
         redaction_groups=[*base["default_groups"], *(redaction_groups or [])],
-        redacted_fields_by_item_type=redacted_fields_by_item_type,
+        redacted_fields_by_item_type=_merge_redacted_selectors(
+            policy.get("redacted_fields_by_item_type"),
+            redacted_fields_by_item_type,
+        ),
     )

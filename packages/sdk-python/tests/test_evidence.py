@@ -4,6 +4,7 @@ from proofsdk import (
     create_adversarial_test_request,
     create_authority_submission_request,
     create_conformity_assessment_request,
+    create_compute_metrics_request,
     create_instructions_for_use_request,
     create_data_governance_request,
     create_declaration_request,
@@ -35,12 +36,22 @@ class TestEvidenceBuilders(unittest.TestCase):
             request_id="req-1",
             model_parameters={"temperature": 0.2},
             trace={"usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2}},
+            execution_start="2026-03-10T09:00:00Z",
+            execution_end="2026-03-10T09:00:01Z",
         )
 
         self.assertEqual(request["capture"]["actor"]["role"], "deployer")
         self.assertEqual(request["capture"]["subject"]["system_id"], "system-123")
         self.assertEqual(request["capture"]["context"]["provider"], "openai")
         self.assertEqual(request["capture"]["items"][0]["type"], "llm_interaction")
+        self.assertEqual(
+            request["capture"]["items"][0]["data"]["execution_start"],
+            "2026-03-10T09:00:00Z",
+        )
+        self.assertEqual(
+            request["capture"]["items"][0]["data"]["execution_end"],
+            "2026-03-10T09:00:01Z",
+        )
         self.assertTrue(request["capture"]["items"][0]["data"]["input_commitment"].startswith("sha256:"))
         self.assertEqual(request["artefacts"][0]["name"], "prompt.json")
         self.assertEqual(request["artefacts"][1]["name"], "response.json")
@@ -78,9 +89,15 @@ class TestEvidenceBuilders(unittest.TestCase):
             metadata={"owner": "risk-team"},
             record={"controls": ["approval", "monitoring"]},
             retention_class="provider_documentation_days",
+            likelihood="medium",
+            residual_risk_level="low",
+            vulnerable_groups_considered=True,
         )
 
         self.assertEqual(request["capture"]["items"][0]["type"], "risk_assessment")
+        self.assertEqual(request["capture"]["items"][0]["data"]["likelihood"], "medium")
+        self.assertEqual(request["capture"]["items"][0]["data"]["residual_risk_level"], "low")
+        self.assertTrue(request["capture"]["items"][0]["data"]["vulnerable_groups_considered"])
         self.assertEqual(request["capture"]["policy"]["retention_class"], "provider_documentation_days")
         self.assertEqual(request["artefacts"][0]["name"], "risk_assessment.json")
 
@@ -91,12 +108,19 @@ class TestEvidenceBuilders(unittest.TestCase):
             decision="approved_with_restrictions",
             dataset_ref="dataset://curated/training-v2",
             metadata={"reviewer": "privacy"},
+            dataset_name="curated-training",
+            personal_data_categories=["support_tickets"],
         )
 
         self.assertEqual(request["capture"]["items"][0]["type"], "data_governance")
         self.assertEqual(
             request["capture"]["items"][0]["data"]["dataset_ref"],
             "dataset://curated/training-v2",
+        )
+        self.assertEqual(request["capture"]["items"][0]["data"]["dataset_name"], "curated-training")
+        self.assertEqual(
+            request["capture"]["items"][0]["data"]["personal_data_categories"],
+            ["support_tickets"],
         )
 
     def test_technical_doc_request_hashes_inline_document(self):
@@ -121,9 +145,19 @@ class TestEvidenceBuilders(unittest.TestCase):
             input={"query": "hello"},
             output={"hits": 3},
             metadata={"latency_ms": 18},
+            execution_start="2026-03-10T10:00:00Z",
+            execution_end="2026-03-10T10:00:02Z",
         )
 
         self.assertEqual(request["capture"]["items"][0]["type"], "tool_call")
+        self.assertEqual(
+            request["capture"]["items"][0]["data"]["execution_start"],
+            "2026-03-10T10:00:00Z",
+        )
+        self.assertEqual(
+            request["capture"]["items"][0]["data"]["execution_end"],
+            "2026-03-10T10:00:02Z",
+        )
         self.assertTrue(request["capture"]["items"][0]["data"]["input_commitment"].startswith("sha256:"))
         self.assertTrue(request["capture"]["items"][0]["data"]["output_commitment"].startswith("sha256:"))
         self.assertEqual(request["artefacts"][1]["name"], "tool_input.json")
@@ -137,9 +171,16 @@ class TestEvidenceBuilders(unittest.TestCase):
             query="refund policy",
             result={"docs": [{"id": "doc-1"}]},
             metadata={"top_k": 3},
+            database_reference="pg://rag/chunk_store",
+            execution_start="2026-03-10T11:00:00Z",
+            execution_end="2026-03-10T11:00:01Z",
         )
 
         self.assertEqual(request["capture"]["items"][0]["type"], "retrieval")
+        self.assertEqual(
+            request["capture"]["items"][0]["data"]["database_reference"],
+            "pg://rag/chunk_store",
+        )
         self.assertTrue(request["capture"]["items"][0]["data"]["result_commitment"].startswith("sha256:"))
         self.assertTrue(request["capture"]["items"][0]["data"]["query_commitment"].startswith("sha256:"))
 
@@ -150,9 +191,14 @@ class TestEvidenceBuilders(unittest.TestCase):
             action="approved_after_review",
             reviewer="ops-lead",
             notes="Reviewed against internal policy",
+            actor_role="human_reviewer",
+            stop_triggered=True,
+            stop_reason="manual kill switch",
         )
 
         self.assertEqual(request["capture"]["items"][0]["type"], "human_oversight")
+        self.assertEqual(request["capture"]["items"][0]["data"]["actor_role"], "human_reviewer")
+        self.assertTrue(request["capture"]["items"][0]["data"]["stop_triggered"])
         self.assertTrue(request["capture"]["items"][0]["data"]["notes_commitment"].startswith("sha256:"))
 
     def test_policy_decision_request_hashes_rationale(self):
@@ -207,12 +253,18 @@ class TestEvidenceBuilders(unittest.TestCase):
             report="timeline and corrective actions",
             metadata={"source": "runtime-monitor"},
             retention_class="risk_mgmt",
+            detection_method="post_market_monitoring",
+            root_cause_summary="policy threshold misconfiguration",
         )
 
         self.assertEqual(request["capture"]["items"][0]["type"], "incident_report")
         self.assertEqual(
             request["capture"]["items"][0]["data"]["occurred_at"],
             "2026-03-06T10:15:00Z",
+        )
+        self.assertEqual(
+            request["capture"]["items"][0]["data"]["detection_method"],
+            "post_market_monitoring",
         )
         self.assertTrue(
             request["capture"]["items"][0]["data"]["report_commitment"].startswith("sha256:")
@@ -252,10 +304,16 @@ class TestEvidenceBuilders(unittest.TestCase):
             summary="baseline complete",
             report={"score": "0.84"},
             metadata={"suite": "foundation-evals"},
+            evaluation_methodology="held-out benchmark suite",
+            metrics_summary=[{"name": "accuracy", "value": "0.84", "unit": "ratio"}],
         )
 
         self.assertEqual(request["capture"]["items"][0]["type"], "model_evaluation")
         self.assertEqual(request["capture"]["items"][0]["data"]["benchmark"], "mmlu-pro")
+        self.assertEqual(
+            request["capture"]["items"][0]["data"]["evaluation_methodology"],
+            "held-out benchmark suite",
+        )
         self.assertEqual(request["capture"]["policy"]["retention_class"], "gpai_documentation")
         self.assertTrue(
             request["capture"]["items"][0]["data"]["report_commitment"].startswith("sha256:")
@@ -273,10 +331,16 @@ class TestEvidenceBuilders(unittest.TestCase):
             finding_severity="high",
             report="exploit transcript",
             metadata={"suite": "red-team"},
+            threat_model="external red-team operator",
+            affected_components=["prompt-router"],
         )
 
         self.assertEqual(request["capture"]["items"][0]["type"], "adversarial_test")
         self.assertEqual(request["capture"]["items"][0]["data"]["focus"], "prompt-injection")
+        self.assertEqual(
+            request["capture"]["items"][0]["data"]["threat_model"],
+            "external red-team operator",
+        )
         self.assertEqual(request["capture"]["policy"]["retention_class"], "gpai_documentation")
         self.assertTrue(
             request["capture"]["items"][0]["data"]["report_commitment"].startswith("sha256:")
@@ -293,10 +357,15 @@ class TestEvidenceBuilders(unittest.TestCase):
             lineage_ref="lineage://snapshot/2026-03-01",
             record={"manifests": 12},
             metadata={"source": "registry"},
+            compute_metrics_ref="compute-2026-q1",
         )
 
         self.assertEqual(request["capture"]["items"][0]["type"], "training_provenance")
         self.assertEqual(request["capture"]["items"][0]["data"]["stage"], "pretraining")
+        self.assertEqual(
+            request["capture"]["items"][0]["data"]["compute_metrics_ref"],
+            "compute-2026-q1",
+        )
         self.assertEqual(request["capture"]["policy"]["retention_class"], "gpai_documentation")
         self.assertTrue(
             request["capture"]["items"][0]["data"]["record_commitment"].startswith("sha256:")
@@ -313,11 +382,13 @@ class TestEvidenceBuilders(unittest.TestCase):
             status="completed",
             report={"outcome": "pass"},
             metadata={"notified_body": "nb-1234"},
+            assessment_body="NB-1234",
             retention_class="technical_doc",
         )
 
         self.assertEqual(request["capture"]["items"][0]["type"], "conformity_assessment")
         self.assertEqual(request["capture"]["items"][0]["data"]["procedure"], "annex_vii")
+        self.assertEqual(request["capture"]["items"][0]["data"]["assessment_body"], "NB-1234")
         self.assertTrue(
             request["capture"]["items"][0]["data"]["report_commitment"].startswith("sha256:")
         )
@@ -333,11 +404,16 @@ class TestEvidenceBuilders(unittest.TestCase):
             status="issued",
             document="eu declaration body",
             metadata={"annex": "v"},
+            signatory="Chief Compliance Officer",
             retention_class="technical_doc",
         )
 
         self.assertEqual(request["capture"]["items"][0]["type"], "declaration")
         self.assertEqual(request["capture"]["items"][0]["data"]["jurisdiction"], "eu")
+        self.assertEqual(
+            request["capture"]["items"][0]["data"]["signatory"],
+            "Chief Compliance Officer",
+        )
         self.assertTrue(
             request["capture"]["items"][0]["data"]["document_commitment"].startswith("sha256:")
         )
@@ -353,16 +429,47 @@ class TestEvidenceBuilders(unittest.TestCase):
             status="accepted",
             receipt={"receipt_id": "rcpt-1"},
             metadata={"article": "49"},
+            registration_number="EU-REG-49-1",
             retention_class="technical_doc",
         )
 
         self.assertEqual(request["capture"]["items"][0]["type"], "registration")
         self.assertEqual(request["capture"]["items"][0]["data"]["authority"], "eu_database")
+        self.assertEqual(
+            request["capture"]["items"][0]["data"]["registration_number"],
+            "EU-REG-49-1",
+        )
         self.assertTrue(
             request["capture"]["items"][0]["data"]["receipt_commitment"].startswith("sha256:")
         )
         self.assertEqual(request["artefacts"][0]["name"], "registration.json")
         self.assertEqual(request["artefacts"][1]["name"], "registration_receipt.json")
+
+    def test_compute_metrics_request_emits_gpai_threshold_evidence(self):
+        request = create_compute_metrics_request(
+            key_id="kid-dev-01",
+            system_id="system-gpai-4",
+            compute_id="compute-2026-q1",
+            training_flops_estimate="1.2e25",
+            threshold_basis_ref="art51",
+            threshold_value="1e25",
+            threshold_status="above_threshold",
+            measured_at="2026-03-10T12:00:00Z",
+            compute_resources_summary=[{"name": "gpu_hours", "value": "42000", "unit": "hours"}],
+            metadata={"owner": "foundation-team"},
+        )
+
+        self.assertEqual(request["capture"]["items"][0]["type"], "compute_metrics")
+        self.assertEqual(
+            request["capture"]["items"][0]["data"]["training_flops_estimate"],
+            "1.2e25",
+        )
+        self.assertEqual(
+            request["capture"]["items"][0]["data"]["threshold_status"],
+            "above_threshold",
+        )
+        self.assertEqual(request["capture"]["policy"]["retention_class"], "gpai_documentation")
+        self.assertEqual(request["artefacts"][0]["name"], "compute_metrics.json")
 
 
 if __name__ == "__main__":

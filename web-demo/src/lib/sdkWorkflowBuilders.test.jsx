@@ -13,20 +13,42 @@ const baseDraft = {
   prohibitedPracticeScreening: "screened_no_prohibited_use",
   riskTier: "high_risk",
   highRiskDomain: "employment",
+  gpaiStatus: "provider",
+  systemicRisk: true,
   deploymentContext: "public_sector",
   owner: "rights-review-team",
   market: "eu",
+  datasetName: "support-assistant-ops-corpus",
+  datasetVersion: "2026.03",
+  sourceDescription: "Curated support tickets and QA-reviewed agent notes.",
+  biasMethodology: "Monthly parity review.",
+  safeguards: "pseudonymization, role-based access",
   qmsStatus: "approved",
   qmsApprover: "quality-lead",
   instructionsSummary: "Review all borderline cases.",
   instructionsSection: "human-review-required",
+  humanOversightGuidance: "Escalate sensitive cases for human review.",
+  datasetRef: "dataset://foundation-model-alpha/pretrain-v5",
+  trainingDatasetSummary: "Multilingual curated web, code, and licensed reference corpora.",
+  consortiumContext: "Single-provider training program",
+  trainingFlopsEstimate: "1.2e25",
+  thresholdStatus: "above_threshold",
+  thresholdValue: "1e25",
+  gpuHours: "42000",
+  acceleratorCount: "2048",
   monitoringSummary: "Weekly review.",
   authority: "eu_ai_office",
   submissionSummary: "Initial submission.",
   friaRequired: true,
   friaSummary: "Human escalation required.",
+  affectedRights: "equal treatment, explanation",
+  assessor: "fundamental-rights-lead",
   reviewer: "rights-panel",
+  overrideAction: "Candidate routed to manual review queue.",
   incidentSummary: "Potentially adverse recommendation surfaced.",
+  rootCauseSummary: "Threshold too permissive for a narrow case segment.",
+  correctiveActionRef: "ca-benefits-42",
+  notificationSummary: "Initial authority notification.",
   dueAt: "2026-03-09T12:00:00Z",
   correspondenceSubject: "Initial authority follow-up"
 };
@@ -50,10 +72,14 @@ describe("buildScenarioWorkflow", () => {
 
     expect(steps.map((step) => step.itemTypes[0])).toEqual([
       "llm_interaction",
+      "data_governance",
       "instructions_for_use",
       "qms_record"
     ]);
     expect(steps[0].createPayload.capture.compliance_profile.risk_tier).toBe("high_risk");
+    expect(steps[1].createPayload.capture.items[0].data.dataset_name).toBe(
+      "support-assistant-ops-corpus"
+    );
   });
 
   test("builds a governance-only incident-escalation workflow", async () => {
@@ -67,5 +93,19 @@ describe("buildScenarioWorkflow", () => {
       "regulator_correspondence"
     ]);
     expect(steps[0].createPayload.capture.items[0].data.summary).toContain("Potentially adverse");
+  });
+
+  test("builds a GPAI threshold workflow with linked provenance and compute evidence", async () => {
+    const scenario = getPlaygroundScenario("ts_gpai_thresholds");
+    const steps = await buildScenarioWorkflow(scenario, baseDraft, null);
+
+    expect(steps.map((step) => step.itemTypes[0])).toEqual([
+      "training_provenance",
+      "compute_metrics"
+    ]);
+    expect(steps[0].createPayload.capture.items[0].data.compute_metrics_ref).toBe(
+      "compute-benefits-review-v1"
+    );
+    expect(steps[1].createPayload.capture.items[0].data.threshold_status).toBe("above_threshold");
   });
 });

@@ -4746,10 +4746,18 @@ fn normalize_pack_type(raw: &str) -> Result<String> {
     }
 
     match normalized.as_str() {
-        "annex_iv" | "annex_xi" | "annex_xii" | "runtime_logs" | "risk_mgmt" | "ai_literacy"
-        | "fundamental_rights" | "provider_governance" | "post_market_monitoring"
+        "annex_iv"
+        | "annex_xi"
+        | "annex_xii"
+        | "runtime_logs"
+        | "risk_mgmt"
+        | "ai_literacy"
+        | "fundamental_rights"
+        | "provider_governance"
+        | "post_market_monitoring"
         | "systemic_risk"
-        | "incident_response" | "conformity" => Ok(normalized),
+        | "incident_response"
+        | "conformity" => Ok(normalized),
         _ => bail!("unsupported pack_type {}", raw.trim()),
     }
 }
@@ -4838,6 +4846,7 @@ fn pack_profile(pack_type: &str) -> Result<PackProfile> {
                 "risk_assessment",
                 "model_evaluation",
                 "training_provenance",
+                "compute_metrics",
                 "copyright_policy",
                 "training_summary",
             ],
@@ -4849,6 +4858,7 @@ fn pack_profile(pack_type: &str) -> Result<PackProfile> {
                 "art53_annex_xi",
                 "art53_copyright",
                 "art53_training_summary",
+                "art51_compute_threshold",
             ],
             requires_fria: None,
         }),
@@ -4973,6 +4983,7 @@ fn pack_profile(pack_type: &str) -> Result<PackProfile> {
                 "model_evaluation",
                 "adversarial_test",
                 "incident_report",
+                "compute_metrics",
             ],
             retention_classes: &["risk_mgmt", "technical_doc", "gpai_documentation"],
             obligation_refs: &[
@@ -4981,6 +4992,7 @@ fn pack_profile(pack_type: &str) -> Result<PackProfile> {
                 "art53_annex_xi",
                 "art55",
                 "art55_73",
+                "art51_compute_threshold",
             ],
             requires_fria: None,
         }),
@@ -5711,6 +5723,7 @@ fn evidence_item_obligation_ref(bundle: &ProofBundle, item: &EvidenceItem) -> Op
         EvidenceItem::DownstreamDocumentation(_) => Some("art53_annex_xii"),
         EvidenceItem::CopyrightPolicy(_) => Some("art53_copyright"),
         EvidenceItem::TrainingSummary(_) => Some("art53_training_summary"),
+        EvidenceItem::ComputeMetrics(_) => Some("art51_compute_threshold"),
         EvidenceItem::ConformityAssessment(_) => Some("art43_annex_vi_vii"),
         EvidenceItem::Declaration(_) => Some("art47_annex_v"),
         EvidenceItem::Registration(_) => Some("art49_71"),
@@ -7015,6 +7028,7 @@ fn is_known_evidence_item_type(item_type: &str) -> bool {
             | "registration"
             | "literacy_attestation"
             | "incident_report"
+            | "compute_metrics"
     )
 }
 
@@ -7032,37 +7046,134 @@ fn known_item_fields(item_type: &str) -> &'static [&'static str] {
             "latency_ms",
             "trace_commitment",
             "trace_semconv_version",
+            "execution_start",
+            "execution_end",
         ],
         "tool_call" => &[
             "tool_name",
             "input_commitment",
             "output_commitment",
             "metadata",
+            "execution_start",
+            "execution_end",
         ],
         "retrieval" => &[
             "corpus",
             "result_commitment",
             "query_commitment",
+            "database_reference",
             "metadata",
+            "execution_start",
+            "execution_end",
         ],
-        "human_oversight" => &["action", "reviewer", "notes_commitment"],
+        "human_oversight" => &[
+            "action",
+            "reviewer",
+            "notes_commitment",
+            "actor_role",
+            "anomaly_detected",
+            "override_action",
+            "interpretation_guidance_followed",
+            "automation_bias_detected",
+            "two_person_verification",
+            "stop_triggered",
+            "stop_reason",
+        ],
         "policy_decision" => &[
             "policy_name",
             "decision",
             "rationale_commitment",
             "metadata",
         ],
-        "risk_assessment" => &["risk_id", "severity", "status", "summary", "metadata"],
-        "data_governance" => &["decision", "dataset_ref", "metadata"],
-        "technical_doc" => &["document_ref", "section", "commitment"],
-        "instructions_for_use" => &["document_ref", "version", "section", "commitment", "metadata"],
-        "qms_record" => &["record_id", "process", "status", "record_commitment", "metadata"],
+        "risk_assessment" => &[
+            "risk_id",
+            "severity",
+            "status",
+            "summary",
+            "metadata",
+            "risk_description",
+            "likelihood",
+            "affected_groups",
+            "mitigation_measures",
+            "residual_risk_level",
+            "risk_owner",
+            "vulnerable_groups_considered",
+            "test_results_summary",
+        ],
+        "data_governance" => &[
+            "decision",
+            "dataset_ref",
+            "metadata",
+            "dataset_name",
+            "dataset_version",
+            "source_description",
+            "collection_period",
+            "geographical_scope",
+            "preprocessing_operations",
+            "bias_detection_methodology",
+            "bias_metrics",
+            "mitigation_actions",
+            "data_gaps",
+            "personal_data_categories",
+            "safeguards",
+        ],
+        "technical_doc" => &[
+            "document_ref",
+            "section",
+            "commitment",
+            "annex_iv_sections",
+            "system_description_summary",
+            "model_description_summary",
+            "capabilities_and_limitations",
+            "design_choices_summary",
+            "evaluation_metrics_summary",
+            "human_oversight_design_summary",
+            "post_market_monitoring_plan_ref",
+            "simplified_tech_doc",
+        ],
+        "instructions_for_use" => &[
+            "document_ref",
+            "version",
+            "section",
+            "commitment",
+            "metadata",
+            "provider_identity",
+            "intended_purpose",
+            "system_capabilities",
+            "accuracy_metrics",
+            "foreseeable_risks",
+            "explainability_capabilities",
+            "human_oversight_guidance",
+            "compute_requirements",
+            "service_lifetime",
+            "log_management_guidance",
+        ],
+        "qms_record" => &[
+            "record_id",
+            "process",
+            "status",
+            "record_commitment",
+            "metadata",
+            "policy_name",
+            "revision",
+            "effective_date",
+            "expiry_date",
+            "scope",
+            "approval_commitment",
+            "audit_results_summary",
+            "continuous_improvement_actions",
+        ],
         "fundamental_rights_assessment" => &[
             "assessment_id",
             "status",
             "scope",
             "report_commitment",
             "metadata",
+            "legal_basis",
+            "affected_rights",
+            "stakeholder_consultation_summary",
+            "mitigation_plan_summary",
+            "assessor",
         ],
         "standards_alignment" => &[
             "standard_ref",
@@ -7129,6 +7240,9 @@ fn known_item_fields(item_type: &str) -> &'static [&'static str] {
             "summary",
             "report_commitment",
             "metadata",
+            "metrics_summary",
+            "group_performance",
+            "evaluation_methodology",
         ],
         "adversarial_test" => &[
             "test_id",
@@ -7137,6 +7251,10 @@ fn known_item_fields(item_type: &str) -> &'static [&'static str] {
             "finding_severity",
             "report_commitment",
             "metadata",
+            "threat_model",
+            "test_methodology",
+            "attack_classes",
+            "affected_components",
         ],
         "training_provenance" => &[
             "dataset_ref",
@@ -7144,6 +7262,9 @@ fn known_item_fields(item_type: &str) -> &'static [&'static str] {
             "lineage_ref",
             "record_commitment",
             "metadata",
+            "compute_metrics_ref",
+            "training_dataset_summary",
+            "consortium_context",
         ],
         "downstream_documentation" => &[
             "document_ref",
@@ -7172,6 +7293,8 @@ fn known_item_fields(item_type: &str) -> &'static [&'static str] {
             "status",
             "report_commitment",
             "metadata",
+            "assessment_body",
+            "certificate_ref",
         ],
         "declaration" => &[
             "declaration_id",
@@ -7179,6 +7302,8 @@ fn known_item_fields(item_type: &str) -> &'static [&'static str] {
             "status",
             "document_commitment",
             "metadata",
+            "signatory",
+            "document_version",
         ],
         "registration" => &[
             "registration_id",
@@ -7186,6 +7311,8 @@ fn known_item_fields(item_type: &str) -> &'static [&'static str] {
             "status",
             "receipt_commitment",
             "metadata",
+            "registration_number",
+            "submitted_at",
         ],
         "literacy_attestation" => &[
             "attested_role",
@@ -7193,6 +7320,9 @@ fn known_item_fields(item_type: &str) -> &'static [&'static str] {
             "training_ref",
             "attestation_commitment",
             "metadata",
+            "completion_date",
+            "training_provider",
+            "certificate_digest",
         ],
         "incident_report" => &[
             "incident_id",
@@ -7201,6 +7331,23 @@ fn known_item_fields(item_type: &str) -> &'static [&'static str] {
             "occurred_at",
             "summary",
             "report_commitment",
+            "metadata",
+            "detection_method",
+            "root_cause_summary",
+            "corrective_action_ref",
+            "authority_notification_required",
+            "authority_notification_status",
+        ],
+        "compute_metrics" => &[
+            "compute_id",
+            "training_flops_estimate",
+            "threshold_basis_ref",
+            "threshold_value",
+            "threshold_status",
+            "estimation_methodology",
+            "measured_at",
+            "compute_resources_summary",
+            "consortium_context",
             "metadata",
         ],
         _ => &[],
@@ -7233,6 +7380,7 @@ fn is_known_obligation_ref(obligation_ref: &str) -> bool {
         "art11_annex_iv"
             | "art9"
             | "art10"
+            | "art51_compute_threshold"
             | "art13"
             | "art14"
             | "art17"
@@ -7339,7 +7487,45 @@ const ALL_DISCLOSURE_ITEM_TYPES: &[&str] = &[
     "registration",
     "literacy_attestation",
     "incident_report",
+    "compute_metrics",
 ];
+
+fn annex_iv_default_redactions() -> BTreeMap<String, Vec<String>> {
+    BTreeMap::from([
+        (
+            "data_governance".to_string(),
+            vec![
+                "/bias_metrics".to_string(),
+                "/personal_data_categories".to_string(),
+                "/safeguards".to_string(),
+            ],
+        ),
+        (
+            "instructions_for_use".to_string(),
+            vec![
+                "/accuracy_metrics".to_string(),
+                "/compute_requirements".to_string(),
+                "/log_management_guidance".to_string(),
+            ],
+        ),
+    ])
+}
+
+fn incident_summary_default_redactions() -> BTreeMap<String, Vec<String>> {
+    BTreeMap::from([
+        (
+            "incident_report".to_string(),
+            vec!["/root_cause_summary".to_string()],
+        ),
+        (
+            "adversarial_test".to_string(),
+            vec![
+                "/threat_model".to_string(),
+                "/affected_components".to_string(),
+            ],
+        ),
+    ])
+}
 
 fn disclosure_template_catalog() -> Result<DisclosureTemplateCatalogResponse> {
     let templates = [
@@ -7428,6 +7614,7 @@ fn disclosure_policy_template(
                 "technical_doc".to_string(),
                 "risk_assessment".to_string(),
                 "data_governance".to_string(),
+                "instructions_for_use".to_string(),
                 "human_oversight".to_string(),
             ],
             excluded_item_types: Vec::new(),
@@ -7436,7 +7623,7 @@ fn disclosure_policy_template(
             include_artefact_metadata: true,
             include_artefact_bytes: true,
             artefact_names: Vec::new(),
-            redacted_fields_by_item_type: BTreeMap::new(),
+            redacted_fields_by_item_type: annex_iv_default_redactions(),
         },
         DEFAULT_DISCLOSURE_POLICY_INCIDENT_SUMMARY => DisclosurePolicyConfig {
             name: profile.to_string(),
@@ -7449,6 +7636,7 @@ fn disclosure_policy_template(
                 "risk_assessment".to_string(),
                 "policy_decision".to_string(),
                 "human_oversight".to_string(),
+                "adversarial_test".to_string(),
             ],
             excluded_item_types: vec![
                 "llm_interaction".to_string(),
@@ -7460,7 +7648,7 @@ fn disclosure_policy_template(
             include_artefact_metadata: false,
             include_artefact_bytes: false,
             artefact_names: Vec::new(),
-            redacted_fields_by_item_type: BTreeMap::new(),
+            redacted_fields_by_item_type: incident_summary_default_redactions(),
         },
         DEFAULT_DISCLOSURE_POLICY_RUNTIME_MINIMUM => DisclosurePolicyConfig {
             name: profile.to_string(),
@@ -7644,6 +7832,7 @@ fn disclosure_redaction_group_selectors(
             "registration" => &["receipt_commitment"],
             "literacy_attestation" => &["attestation_commitment"],
             "incident_report" => &["report_commitment"],
+            "compute_metrics" => &[],
             _ => &[],
         }),
         "metadata" => Ok(match item_type {
@@ -7671,7 +7860,8 @@ fn disclosure_redaction_group_selectors(
             | "conformity_assessment"
             | "declaration"
             | "literacy_attestation"
-            | "incident_report" => &["/metadata"],
+            | "incident_report"
+            | "compute_metrics" => &["/metadata"],
             _ => &[],
         }),
         "parameters" => Ok(match item_type {
@@ -7708,6 +7898,7 @@ fn default_disclosure_config() -> DisclosureConfig {
                     "technical_doc".to_string(),
                     "risk_assessment".to_string(),
                     "data_governance".to_string(),
+                    "instructions_for_use".to_string(),
                     "human_oversight".to_string(),
                 ],
                 excluded_item_types: Vec::new(),
@@ -7716,7 +7907,7 @@ fn default_disclosure_config() -> DisclosureConfig {
                 include_artefact_metadata: true,
                 include_artefact_bytes: true,
                 artefact_names: Vec::new(),
-                redacted_fields_by_item_type: BTreeMap::new(),
+                redacted_fields_by_item_type: annex_iv_default_redactions(),
             },
             DisclosurePolicyConfig {
                 name: DEFAULT_DISCLOSURE_POLICY_INCIDENT_SUMMARY.to_string(),
@@ -7725,6 +7916,7 @@ fn default_disclosure_config() -> DisclosureConfig {
                     "risk_assessment".to_string(),
                     "policy_decision".to_string(),
                     "human_oversight".to_string(),
+                    "adversarial_test".to_string(),
                 ],
                 excluded_item_types: vec![
                     "llm_interaction".to_string(),
@@ -7736,7 +7928,7 @@ fn default_disclosure_config() -> DisclosureConfig {
                 include_artefact_metadata: false,
                 include_artefact_bytes: false,
                 artefact_names: Vec::new(),
-                redacted_fields_by_item_type: BTreeMap::new(),
+                redacted_fields_by_item_type: incident_summary_default_redactions(),
             },
         ],
     }
@@ -8389,6 +8581,7 @@ fn evidence_item_type(item: &EvidenceItem) -> &'static str {
         EvidenceItem::Registration(_) => "registration",
         EvidenceItem::LiteracyAttestation(_) => "literacy_attestation",
         EvidenceItem::IncidentReport(_) => "incident_report",
+        EvidenceItem::ComputeMetrics(_) => "compute_metrics",
     }
 }
 
@@ -10512,6 +10705,9 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
                             status: "completed".to_string(),
                             training_ref: Some("course://ai-literacy/v1".to_string()),
                             attestation_commitment: None,
+                            completion_date: None,
+                            training_provider: None,
+                            certificate_digest: None,
                             metadata: serde_json::json!({"source": "lms"}),
                         },
                     )],
@@ -10625,6 +10821,9 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
                             status: "approved".to_string(),
                             training_ref: Some("training://eu-ai-act-basics".to_string()),
                             attestation_commitment: None,
+                            completion_date: None,
+                            training_provider: None,
+                            certificate_digest: None,
                             metadata: serde_json::json!({"source": "training"}),
                         },
                     )],
@@ -10806,6 +11005,9 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
                                 "sha256:abababababababababababababababababababababababababababababababab"
                                     .to_string(),
                             ),
+                            metrics_summary: Vec::new(),
+                            group_performance: Vec::new(),
+                            evaluation_methodology: None,
                             metadata: serde_json::json!({"suite": "gpai-retention"}),
                         },
                     )],
@@ -12614,6 +12816,15 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
                                     "sha256:abababababababababababababababababababababababababababababababab"
                                         .to_string(),
                                 ),
+                                annex_iv_sections: Vec::new(),
+                                system_description_summary: None,
+                                model_description_summary: None,
+                                capabilities_and_limitations: None,
+                                design_choices_summary: None,
+                                evaluation_metrics_summary: None,
+                                human_oversight_design_summary: None,
+                                post_market_monitoring_plan_ref: None,
+                                simplified_tech_doc: None,
                             },
                         ),
                         EvidenceItem::RiskAssessment(
@@ -12622,6 +12833,14 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
                                 severity: "high".to_string(),
                                 status: "open".to_string(),
                                 summary: Some("preview policy".to_string()),
+                                risk_description: None,
+                                likelihood: None,
+                                affected_groups: Vec::new(),
+                                mitigation_measures: Vec::new(),
+                                residual_risk_level: None,
+                                risk_owner: None,
+                                vulnerable_groups_considered: None,
+                                test_results_summary: None,
                                 metadata: serde_json::json!({"source":"preview"}),
                             },
                         ),
@@ -12902,6 +13121,15 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
                                 "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
                                     .to_string(),
                             ),
+                            annex_iv_sections: Vec::new(),
+                            system_description_summary: None,
+                            model_description_summary: None,
+                            capabilities_and_limitations: None,
+                            design_choices_summary: None,
+                            evaluation_metrics_summary: None,
+                            human_oversight_design_summary: None,
+                            post_market_monitoring_plan_ref: None,
+                            simplified_tech_doc: None,
                         },
                     )],
                     Some("technical_doc"),
@@ -12927,6 +13155,14 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
                             severity: "high".to_string(),
                             status: "open".to_string(),
                             summary: Some("runtime incident".to_string()),
+                            risk_description: None,
+                            likelihood: None,
+                            affected_groups: Vec::new(),
+                            mitigation_measures: Vec::new(),
+                            residual_risk_level: None,
+                            risk_owner: None,
+                            vulnerable_groups_considered: None,
+                            test_results_summary: None,
                             metadata: serde_json::json!({"source":"monitoring"}),
                         },
                     )],
@@ -13250,6 +13486,15 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
                                 "sha256:abababababababababababababababababababababababababababababababab"
                                     .to_string(),
                             ),
+                            annex_iv_sections: Vec::new(),
+                            system_description_summary: None,
+                            model_description_summary: None,
+                            capabilities_and_limitations: None,
+                            design_choices_summary: None,
+                            evaluation_metrics_summary: None,
+                            human_oversight_design_summary: None,
+                            post_market_monitoring_plan_ref: None,
+                            simplified_tech_doc: None,
                         },
                     )],
                     Some("technical_doc"),
@@ -13629,6 +13874,11 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
                                 "sha256:abababababababababababababababababababababababababababababababab"
                                     .to_string(),
                             ),
+                            detection_method: None,
+                            root_cause_summary: None,
+                            corrective_action_ref: None,
+                            authority_notification_required: None,
+                            authority_notification_status: None,
                             metadata: serde_json::json!({"reported_by": "runtime-monitor"}),
                         },
                     )],
@@ -13840,7 +14090,10 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
         .fetch_one(&db)
         .await
         .unwrap();
-        assert_eq!(authority_obligation_ref.as_deref(), Some("art73_notification"));
+        assert_eq!(
+            authority_obligation_ref.as_deref(),
+            Some("art73_notification")
+        );
     }
 
     #[tokio::test]
@@ -14073,6 +14326,9 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
                                 "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
                                     .to_string(),
                             ),
+                            compute_metrics_ref: None,
+                            training_dataset_summary: None,
+                            consortium_context: None,
                             metadata: serde_json::json!({"source": "registry"}),
                         },
                     )],
@@ -14131,6 +14387,9 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
                                 "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
                                     .to_string(),
                             ),
+                            compute_metrics_ref: None,
+                            training_dataset_summary: None,
+                            consortium_context: None,
                             metadata: serde_json::json!({"source": "integrator-registry"}),
                         },
                     )],
@@ -14259,6 +14518,14 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
                                 "sha256:dadadadadadadadadadadadadadadadadadadadadadadadadadadadadadadada"
                                     .to_string(),
                             ),
+                            policy_name: None,
+                            revision: None,
+                            effective_date: None,
+                            expiry_date: None,
+                            scope: None,
+                            approval_commitment: None,
+                            audit_results_summary: None,
+                            continuous_improvement_actions: Vec::new(),
                             metadata: serde_json::json!({"owner": "quality"}),
                         },
                     )],
@@ -14288,6 +14555,14 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
                                 "sha256:edededededededededededededededededededededededededededededededed"
                                     .to_string(),
                             ),
+                            policy_name: None,
+                            revision: None,
+                            effective_date: None,
+                            expiry_date: None,
+                            scope: None,
+                            approval_commitment: None,
+                            audit_results_summary: None,
+                            continuous_improvement_actions: Vec::new(),
                             metadata: serde_json::json!({"owner": "partner-quality"}),
                         },
                     )],
@@ -14384,6 +14659,11 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
                         "sha256:ababcdcdababcdcdababcdcdababcdcdababcdcdababcdcdababcdcdababcdcd"
                             .to_string(),
                     ),
+                    legal_basis: None,
+                    affected_rights: Vec::new(),
+                    stakeholder_consultation_summary: None,
+                    mitigation_plan_summary: None,
+                    assessor: None,
                     metadata: serde_json::json!({"owner": "rights-review"}),
                 },
             )],
@@ -14422,6 +14702,11 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
                         "sha256:bcbcdcdcbcbcdcdcbcbcdcdcbcbcdcdcbcbcdcdcbcbcdcdcbcbcdcdcbcbcdcdc"
                             .to_string(),
                     ),
+                    legal_basis: None,
+                    affected_rights: Vec::new(),
+                    stakeholder_consultation_summary: None,
+                    mitigation_plan_summary: None,
+                    assessor: None,
                     metadata: serde_json::json!({"owner": "rights-review"}),
                 },
             )],
@@ -14457,6 +14742,11 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
                         "sha256:cdcdababcdcdababcdcdababcdcdababcdcdababcdcdababcdcdababcdcdabab"
                             .to_string(),
                     ),
+                    legal_basis: None,
+                    affected_rights: Vec::new(),
+                    stakeholder_consultation_summary: None,
+                    mitigation_plan_summary: None,
+                    assessor: None,
                     metadata: serde_json::json!({"owner": "provider-review"}),
                 },
             )],
@@ -14569,6 +14859,10 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
                                 "sha256:cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
                                     .to_string(),
                             ),
+                            threat_model: None,
+                            test_methodology: None,
+                            attack_classes: Vec::new(),
+                            affected_components: Vec::new(),
                             metadata: serde_json::json!({"suite": "red-team"}),
                         },
                     )],
@@ -14599,6 +14893,10 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
                                 "sha256:dededededededededededededededededededededededededededededededede"
                                     .to_string(),
                             ),
+                            threat_model: None,
+                            test_methodology: None,
+                            attack_classes: Vec::new(),
+                            affected_components: Vec::new(),
                             metadata: serde_json::json!({"suite": "partner-red-team"}),
                         },
                     )],
@@ -14693,6 +14991,8 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
                                 "sha256:efefefefefefefefefefefefefefefefefefefefefefefefefefefefefefefef"
                                     .to_string(),
                             ),
+                            signatory: None,
+                            document_version: None,
                             metadata: serde_json::json!({"annex": "v"}),
                         },
                     )],
@@ -14722,6 +15022,8 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
                                 "sha256:f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0"
                                     .to_string(),
                             ),
+                            signatory: None,
+                            document_version: None,
                             metadata: serde_json::json!({"annex": "v"}),
                         },
                     )],

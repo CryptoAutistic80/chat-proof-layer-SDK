@@ -951,6 +951,8 @@ mod tests {
                         latency_ms: Some(42),
                         trace_commitment: None,
                         trace_semconv_version: None,
+                        execution_start: Some("2026-03-02T00:00:00Z".to_string()),
+                        execution_end: Some("2026-03-02T00:00:42Z".to_string()),
                     }),
                     EvidenceItem::ToolCall(ToolCallEvidence {
                         tool_name: "search".to_string(),
@@ -963,6 +965,8 @@ mod tests {
                                 .to_string(),
                         ),
                         metadata: json!({"source":"tool"}),
+                        execution_start: Some("2026-03-02T00:00:01Z".to_string()),
+                        execution_end: Some("2026-03-02T00:00:10Z".to_string()),
                     }),
                 ],
                 policy: Policy {

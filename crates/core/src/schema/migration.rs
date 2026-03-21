@@ -36,6 +36,8 @@ pub fn capture_input_v01_to_event(old: v01::CaptureInput) -> CaptureEvent {
             latency_ms: None,
             trace_commitment: Some(old.trace.trace_commitment),
             trace_semconv_version: Some(old.trace.otel_genai_semconv_version),
+            execution_start: None,
+            execution_end: None,
         })],
         policy: old.policy,
     }

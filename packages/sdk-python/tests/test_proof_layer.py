@@ -41,6 +41,29 @@ class TestProofLayer(unittest.TestCase):
         )
         self.assertEqual(result["bundle"]["integrity"]["signature"]["kid"], "kid-dev-01")
 
+    def test_capture_compute_metrics_seals_local_gpai_threshold_bundle(self):
+        signing_key_pem = (GOLDEN_DIR / "signing_key.txt").read_text(encoding="utf-8")
+        proof_layer = ProofLayer(
+            signing_key_pem=signing_key_pem,
+            key_id="kid-dev-01",
+            system_id="system-gpai-threshold",
+        )
+
+        result = proof_layer.capture_compute_metrics(
+            compute_id="compute-2026-q1",
+            training_flops_estimate="1.2e25",
+            threshold_basis_ref="art51",
+            threshold_value="1e25",
+            threshold_status="above_threshold",
+        )
+
+        self.assertEqual(result["bundle"]["items"][0]["type"], "compute_metrics")
+        self.assertEqual(
+            result["bundle"]["items"][0]["data"]["threshold_status"],
+            "above_threshold",
+        )
+        self.assertEqual(result["bundle"]["policy"]["retention_class"], "gpai_documentation")
+
     def test_disclose_returns_a_locally_verifiable_redacted_bundle(self):
         signing_key_pem = (GOLDEN_DIR / "signing_key.txt").read_text(encoding="utf-8")
         public_key_pem = (GOLDEN_DIR / "verify_key.txt").read_text(encoding="utf-8")

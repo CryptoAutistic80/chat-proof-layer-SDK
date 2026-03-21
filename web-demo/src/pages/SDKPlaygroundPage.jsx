@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { useDemo } from "../app/DemoContext";
 import { ActivityFeed } from "../components/ActivityFeed";
 import { BundleRunList } from "../components/BundleRunList";
+import { BundleVisualizer } from "../components/BundleVisualizer";
 import { ComplianceReviewPanel } from "../components/ComplianceReviewPanel";
 import { RecordEvidenceSection } from "../components/RecordEvidenceSection";
 import { ScenarioParameterForm } from "../components/ScenarioParameterForm";
@@ -10,6 +11,7 @@ import { ScriptPanel } from "../components/ScriptPanel";
 import { SdkLaneTabs } from "../components/SdkLaneTabs";
 import { SdkScenarioCard } from "../components/SdkScenarioCard";
 import { buildRunNarrativeSummary } from "../lib/narrative";
+import { buildMerkleTree } from "../lib/clientCrypto";
 import { PLAYGROUND_LANES, listScenariosForLane } from "../lib/sdkPlaygroundScenarios";
 import { renderScenarioScript } from "../lib/sdkScriptTemplates";
 import { LEGAL_BOUNDARY } from "../lib/siteContent";
@@ -50,11 +52,28 @@ export function SDKPlaygroundPage() {
     actions.ensurePlaygroundDraft();
   }, []);
 
+  const [playgroundTree, setPlaygroundTree] = useState(null);
+
   useEffect(() => {
     if (scenarioRun?.primaryBundleId) {
       setActiveTab("recorded");
     }
   }, [scenarioRun?.primaryBundleId]);
+
+  useEffect(() => {
+    if (!scenarioRun?.bundle) {
+      setPlaygroundTree(null);
+      return;
+    }
+    const bundle = scenarioRun.bundle;
+    const leaves = [
+      ...(bundle.items ?? []).map((i) => i.hash ?? i.commitment),
+      ...(bundle.artefacts ?? []).map((a) => a.sha256 ?? a.commitment)
+    ].filter(Boolean);
+    if (leaves.length > 0) {
+      buildMerkleTree(leaves).then(setPlaygroundTree).catch(() => setPlaygroundTree(null));
+    }
+  }, [scenarioRun?.bundle]);
 
   return (
     <section className="page-stack sdk-playground-page">
@@ -76,6 +95,36 @@ export function SDKPlaygroundPage() {
           </Link>
         </aside>
       </section>
+
+      {/* Quick start: one-click run with defaults */}
+      {!scenarioRun && (
+        <section className="panel quick-start-panel">
+          <div className="quick-start-content">
+            <div>
+              <span className="section-label">Quick start</span>
+              <h2>Run the default scenario now</h2>
+              <p className="section-intro">
+                Skip the configuration and run <strong>{currentScenario.label}</strong> with
+                default inputs. You can always tweak settings and re-run afterward.
+              </p>
+            </div>
+            <button
+              type="button"
+              className="primary-cta quick-start-btn"
+              onClick={actions.runScenarioWorkflow}
+              disabled={isRunning}
+            >
+              {isRunning ? "Running\u2026" : "Run with defaults"}
+            </button>
+          </div>
+          {errors.workflow && <p className="inline-error">{errors.workflow}</p>}
+          {errors.connection && (
+            <p className="field-hint">
+              Vault connection issue: {errors.connection}. Make sure proof-service is running.
+            </p>
+          )}
+        </section>
+      )}
 
       <section className="panel selector-panel">
         <div className="panel-head compact">
@@ -201,6 +250,16 @@ export function SDKPlaygroundPage() {
           <button
             type="button"
             role="tab"
+            aria-selected={activeTab === "structure"}
+            className={`toggle-pill ${activeTab === "structure" ? "is-active" : ""}`}
+            onClick={() => setActiveTab("structure")}
+            disabled={!scenarioRun}
+          >
+            Bundle structure
+          </button>
+          <button
+            type="button"
+            role="tab"
             aria-selected={activeTab === "explore"}
             className={`toggle-pill ${activeTab === "explore" ? "is-active" : ""}`}
             onClick={() => setActiveTab("explore")}
@@ -247,6 +306,22 @@ export function SDKPlaygroundPage() {
 
       {scenarioRun && activeTab === "compliance" ? (
         <ComplianceReviewPanel review={scenarioRun.review} />
+      ) : null}
+
+      {scenarioRun && activeTab === "structure" ? (
+        <section className="panel">
+          <div className="panel-head compact">
+            <div>
+              <span className="section-label">Cryptographic structure</span>
+              <h2>How this bundle is assembled</h2>
+            </div>
+          </div>
+          <p className="section-intro" style={{ marginBottom: 18 }}>
+            Each evidence item and artefact is hashed. Those leaf hashes are combined
+            into a Merkle tree whose root is signed with Ed25519. Click any node to inspect it.
+          </p>
+          <BundleVisualizer bundle={scenarioRun.bundle} merkleTree={playgroundTree} />
+        </section>
       ) : null}
 
       {scenarioRun && activeTab === "explore" ? (

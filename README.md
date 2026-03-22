@@ -707,3 +707,5 @@ JSON schemas:
 - Rekor verification checks receipt structure, entry binding, inclusion proof, signed-entry-timestamp signature, and optional live log consistency / freshness when requested.
 - SCITT now writes the COSE/CCF-style receipt body by default and keeps legacy JSON read compatibility, but broader interop and trust-list work are still future work.
 - SQLite is the production-default path in this repo today; PostgreSQL and S3 are future expansion paths, not current backends.
+
+

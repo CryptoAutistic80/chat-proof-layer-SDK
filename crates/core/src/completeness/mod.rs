@@ -1,6 +1,7 @@
 mod annex_iv;
 mod fundamental_rights;
 mod gpai_provider;
+mod post_market_monitoring;
 
 use crate::schema::EvidenceBundle;
 use serde::{Deserialize, Serialize};
@@ -12,6 +13,7 @@ pub enum CompletenessProfile {
     AnnexIvGovernanceV1,
     FundamentalRightsV1,
     GpaiProviderV1,
+    PostMarketMonitoringV1,
 }
 
 impl CompletenessProfile {
@@ -20,6 +22,7 @@ impl CompletenessProfile {
             Self::AnnexIvGovernanceV1 => "annex_iv_governance_v1",
             Self::FundamentalRightsV1 => "fundamental_rights_v1",
             Self::GpaiProviderV1 => "gpai_provider_v1",
+            Self::PostMarketMonitoringV1 => "post_market_monitoring_v1",
         }
     }
 }
@@ -38,6 +41,7 @@ impl FromStr for CompletenessProfile {
             "annex_iv_governance_v1" => Ok(Self::AnnexIvGovernanceV1),
             "fundamental_rights_v1" => Ok(Self::FundamentalRightsV1),
             "gpai_provider_v1" => Ok(Self::GpaiProviderV1),
+            "post_market_monitoring_v1" => Ok(Self::PostMarketMonitoringV1),
             other => Err(format!("unsupported completeness profile {other}")),
         }
     }
@@ -99,6 +103,7 @@ pub fn evaluate_completeness(
         CompletenessProfile::AnnexIvGovernanceV1 => annex_iv::evaluate(bundle),
         CompletenessProfile::FundamentalRightsV1 => fundamental_rights::evaluate(bundle),
         CompletenessProfile::GpaiProviderV1 => gpai_provider::evaluate(bundle),
+        CompletenessProfile::PostMarketMonitoringV1 => post_market_monitoring::evaluate(bundle),
     }
 }
 

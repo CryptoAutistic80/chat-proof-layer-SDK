@@ -53,6 +53,31 @@ describe("buildRunNarrativeSummary", () => {
     );
   });
 
+  test("uses monitoring-specific readiness wording for monitoring flows", () => {
+    const summary = buildRunNarrativeSummary(
+      {
+        presetKey: "investor_summary",
+        scenarioLabel: "Monitoring escalation",
+        bundleId: "bundle-3",
+        bundleRuns: [{ bundleId: "bundle-3" }],
+        completenessProfile: "post_market_monitoring_v1",
+        completenessReport: {
+          profile: "post_market_monitoring_v1",
+          status: "warn",
+          pass_count: 5,
+          warn_count: 1,
+          fail_count: 0,
+          rules: [],
+        },
+      },
+      null,
+    );
+
+    expect(summary.completenessStatus.summary).toContain(
+      "required post-market monitoring area",
+    );
+  });
+
   test("uses timestamp and transparency assessment wording when available", () => {
     const summary = buildRunNarrativeSummary(
       {

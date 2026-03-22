@@ -672,6 +672,56 @@ async function buildAuthoritySubmissionStep(scenario, draft) {
   });
 }
 
+async function buildCorrectiveActionStep(scenario, draft) {
+  const actor = baseActor(scenario);
+  const subject = baseSubject(draft, "corrective-action");
+  const complianceProfile = serializeComplianceProfile(buildPlaygroundComplianceProfile(draft));
+  const record = {
+    incident_id: "inc-benefits-42",
+    owner: draft.owner,
+    change: draft.correctiveActionSummary
+  };
+  const recordArtefact = await buildDocumentArtefact(
+    "corrective_action_record.json",
+    record,
+    "application/json"
+  );
+  return buildSimpleEvidenceCapture({
+    actor,
+    subject,
+    complianceProfile,
+    item: {
+      type: "corrective_action",
+      data: {
+        action_id: draft.correctiveActionRef ?? "ca-benefits-42",
+        status: "in_progress",
+        summary: draft.correctiveActionSummary,
+        due_at: draft.dueAt,
+        record_commitment: recordArtefact.commitment,
+        metadata: {
+          owner: draft.owner
+        }
+      }
+    },
+    artefacts: [
+      jsonArtefact("corrective_action.json", {
+        action_id: draft.correctiveActionRef ?? "ca-benefits-42",
+        status: "in_progress",
+        summary: draft.correctiveActionSummary,
+        due_at: draft.dueAt,
+        metadata: {
+          owner: draft.owner
+        }
+      }),
+      recordArtefact.artefact
+    ],
+    retentionClass: "risk_mgmt",
+    label: "Corrective action",
+    summary: "Corrective action evidence added to the monitoring pack.",
+    localPayloads: { record }
+  });
+}
+
 async function buildFriaStep(scenario, draft) {
   const actor = baseActor(scenario);
   const subject = baseSubject(draft, "fria");
@@ -1123,6 +1173,7 @@ const STEP_BUILDERS = {
   qms_record: buildQmsRecordStep,
   standards_alignment: buildStandardsAlignmentStep,
   post_market_monitoring: buildPostMarketMonitoringStep,
+  corrective_action: buildCorrectiveActionStep,
   authority_submission: buildAuthoritySubmissionStep,
   fundamental_rights_assessment: buildFriaStep,
   human_oversight: buildHumanOversightStep,

@@ -1,0 +1,11 @@
+{
+  "deadline_id": "deadline-claims-42",
+  "authority": "eu_ai_office",
+  "obligation_ref": "art73_notification",
+  "due_at": "2026-03-10T12:00:00Z",
+  "status": "open",
+  "incident_id": "inc-claims-42",
+  "metadata": {
+    "owner": "incident-ops"
+  }
+}

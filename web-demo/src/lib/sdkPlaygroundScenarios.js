@@ -512,24 +512,25 @@ export const PLAYGROUND_SCENARIOS = [
     label: "Incident escalation",
     category: "Incident workflow",
     description:
-      "Capture an incident, the draft authority notification, the reporting deadline, and regulator correspondence in one workflow.",
-    audienceSummary: "An operational incident path where teams need a reviewable escalation trail.",
+      "Capture the monitoring plan, incident trail, corrective action, authority reporting, and correspondence in one workflow.",
+    audienceSummary:
+      "A post-market monitoring path where teams need a reviewable escalation and reporting trail.",
     lawExplainer: explainer(
       "When something goes wrong, teams usually need a clear incident trail that shows what happened, who was notified, and what follow-up is due.",
-      "This example records the incident itself plus authority and deadline material needed for follow-up.",
-      "Your team still needs to decide whether the event is reportable, complete the real submission process, and carry out corrective action outside the tool."
+      "This example records the monitoring plan plus incident, corrective-action, authority, deadline, and correspondence material needed for follow-up.",
+      "Your team still needs to decide whether the event is reportable, complete the real submission process, and carry out closure work outside the tool."
     ),
     sourceRef: "examples/python-incident-response/run.py",
     codeLanguage: "python",
-    packType: "incident_response",
-    reviewKind: "incident_response",
+    packType: "post_market_monitoring",
+    reviewKind: "post_market_monitoring",
     actorRole: "deployer",
     bundleFormat: "full",
     disclosureProfile: "incident_summary",
     templateId: "py_incident_escalation",
-    primaryStepId: "incident_report",
+    primaryStepId: "post_market_monitoring",
     recordExplorerIntro:
-      "This record set shows how an incident trail can be built from the first report through regulator-facing follow-up.",
+      "This record set shows how a post-market monitoring trail can be built from the first monitoring plan through regulator-facing follow-up.",
     defaults: {
       serviceUrl: DEFAULT_SERVICE_URL,
       systemId: "benefits-review",
@@ -542,12 +543,18 @@ export const PLAYGROUND_SCENARIOS = [
       owner: "incident-ops",
       market: "eu",
       authority: "eu_ai_office",
+      monitoringSummary:
+        "Weekly drift review with escalation thresholds for public-service outcomes.",
       incidentSummary: "Potentially adverse recommendation surfaced in a public-service case.",
       rootCauseSummary:
         "Missing-document threshold was too permissive for a narrow public-service case segment.",
       correctiveActionRef: "ca-benefits-42",
+      correctiveActionSummary:
+        "Tighten the borderline threshold and route similar cases to manual review.",
       notificationSummary:
         "Initial authority notification for a potentially adverse recommendation incident.",
+      submissionSummary:
+        "Initial notification package for public-service incident follow-up.",
       dueAt: "2026-03-09T12:00:00Z",
       correspondenceSubject: "Initial authority follow-up"
     },
@@ -558,6 +565,12 @@ export const PLAYGROUND_SCENARIOS = [
         key: "authority",
         label: "Authority",
         type: "text"
+      },
+      {
+        key: "monitoringSummary",
+        label: "Monitoring summary",
+        type: "textarea",
+        rows: 3
       },
       {
         key: "incidentSummary",
@@ -577,6 +590,12 @@ export const PLAYGROUND_SCENARIOS = [
         type: "text"
       },
       {
+        key: "correctiveActionSummary",
+        label: "Corrective action summary",
+        type: "textarea",
+        rows: 3
+      },
+      {
         key: "dueAt",
         label: "Reporting deadline",
         type: "text"
@@ -588,17 +607,41 @@ export const PLAYGROUND_SCENARIOS = [
         rows: 3
       },
       {
+        key: "submissionSummary",
+        label: "Submission summary",
+        type: "textarea",
+        rows: 3
+      },
+      {
         key: "correspondenceSubject",
         label: "Correspondence subject",
         type: "text"
       }
     ],
     steps: [
+      {
+        id: "post_market_monitoring",
+        kind: "evidence",
+        itemType: "post_market_monitoring",
+        bundleRole: "primary"
+      },
       { id: "incident_report", kind: "evidence", itemType: "incident_report", bundleRole: "primary" },
+      {
+        id: "corrective_action",
+        kind: "evidence",
+        itemType: "corrective_action",
+        bundleRole: "support"
+      },
       {
         id: "authority_notification",
         kind: "evidence",
         itemType: "authority_notification",
+        bundleRole: "support"
+      },
+      {
+        id: "authority_submission",
+        kind: "evidence",
+        itemType: "authority_submission",
         bundleRole: "support"
       },
       {
@@ -616,7 +659,7 @@ export const PLAYGROUND_SCENARIOS = [
     ],
     missingEvidence: [
       "Add the final submission receipt if the review needs proof that a regulator actually received the filing.",
-      "Add corrective-action and closure records once the incident moves beyond initial escalation.",
+      "Add closure evidence once the incident moves beyond corrective action and the workflow is fully stabilized.",
       "Add the operational evidence that explains what caused the incident if the reviewer needs deeper root-cause material."
     ]
   },
@@ -713,9 +756,6 @@ export function applyScenarioToDraft(currentDraft, scenario) {
 
 export function inferPackTypeFromItems(items = []) {
   const types = items.map((item) => item.type);
-  if (types.includes("incident_report") || types.includes("authority_notification")) {
-    return "incident_response";
-  }
   if (types.includes("training_provenance") || types.includes("compute_metrics")) {
     return "annex_xi";
   }
@@ -731,6 +771,9 @@ export function inferPackTypeFromItems(items = []) {
   }
   if (types.includes("post_market_monitoring") || types.includes("authority_submission")) {
     return "post_market_monitoring";
+  }
+  if (types.includes("incident_report") || types.includes("authority_notification")) {
+    return "incident_response";
   }
   if (
     types.includes("data_governance") ||
@@ -749,6 +792,9 @@ export function findScenarioByPackType(packType, items = []) {
   const scenario = PLAYGROUND_SCENARIOS.find((entry) => entry.packType === packType);
   if (scenario) {
     return scenario;
+  }
+  if (packType === "post_market_monitoring") {
+    return PLAYGROUND_SCENARIOS.find((entry) => entry.id === "py_incident_escalation") ?? null;
   }
   if (items.some((item) => item.type === "llm_interaction")) {
     return PLAYGROUND_SCENARIOS.find((entry) => entry.id === "ts_chatbot_support") ?? null;

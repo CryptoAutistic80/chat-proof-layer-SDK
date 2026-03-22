@@ -71,6 +71,20 @@ async function main() {
     retentionClass: "risk_mgmt"
   });
 
+  const correctiveAction = await proofLayer.captureCorrectiveAction({
+    actionId: "ca-claims-42",
+    status: "in_progress",
+    summary:
+      "Tighten the missing-document threshold and route borderline claims to manual review.",
+    dueAt: "2026-03-10T12:00:00Z",
+    record: {
+      incidentId: "inc-claims-42",
+      owner: "safety-ops",
+      change: "threshold_tightened"
+    },
+    retentionClass: "risk_mgmt"
+  });
+
   const notification = await proofLayer.captureAuthorityNotification({
     notificationId: "notif-claims-42",
     authority: "eu_ai_office",
@@ -81,6 +95,16 @@ async function main() {
       article: "73",
       summary: "Initial authority notification for claims incident review."
     },
+    retentionClass: "risk_mgmt"
+  });
+
+  const deadline = await proofLayer.captureReportingDeadline({
+    deadlineId: "deadline-claims-42",
+    authority: "eu_ai_office",
+    obligationRef: "art73_notification",
+    dueAt: "2026-03-10T12:00:00Z",
+    status: "open",
+    incidentId: "inc-claims-42",
     retentionClass: "risk_mgmt"
   });
 
@@ -104,6 +128,10 @@ async function main() {
     bundleFormat: "full"
   });
   const manifest = await proofLayer.getPackManifest(pack.pack_id);
+  const readiness = await proofLayer.evaluateCompleteness({
+    packId: pack.pack_id,
+    profile: "post_market_monitoring_v1"
+  });
   const exportBytes = await proofLayer.downloadPackExport(pack.pack_id);
 
   mkdirSync(outputDir, { recursive: true });
@@ -116,13 +144,18 @@ async function main() {
       interaction.bundleId,
       monitoring.bundleId,
       incident.bundleId,
+      correctiveAction.bundleId,
       notification.bundleId,
+      deadline.bundleId,
       submission.bundleId
     ].join(", ")
   );
   console.log("pack_id:", pack.pack_id);
   console.log("pack_type:", manifest.pack_type);
   console.log("manifest_bundle_count:", manifest.bundles.length);
+  console.log("pack_readiness_profile:", readiness.profile);
+  console.log("pack_readiness_status:", readiness.status);
+  console.log("pack_readiness_pass_count:", readiness.pass_count);
   console.log(
     "manifest_items:",
     manifest.bundles.map((entry) => `${entry.bundle_id}:${entry.item_types.join("+")}`).join(", ")

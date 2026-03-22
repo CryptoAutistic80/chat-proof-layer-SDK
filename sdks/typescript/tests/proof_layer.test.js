@@ -11,6 +11,7 @@ const repoRoot = path.resolve(__dirname, "../../..");
 const goldenDir = path.join(repoRoot, "fixtures", "golden");
 const annexIvDir = path.join(goldenDir, "annex_iv_governance");
 const gpaiDir = path.join(goldenDir, "gpai_provider");
+const monitoringDir = path.join(goldenDir, "post_market_monitoring");
 
 async function annexIvBundle() {
   const [
@@ -123,6 +124,75 @@ async function gpaiProviderBundle() {
       { type: "compute_metrics", data: JSON.parse(computeMetrics) },
       { type: "copyright_policy", data: JSON.parse(copyrightPolicy) },
       { type: "training_summary", data: JSON.parse(trainingSummary) },
+    ],
+    artefacts: [],
+    policy: {
+      redactions: [],
+      encryption: { enabled: false },
+    },
+    integrity: {
+      canonicalization: "RFC8785-JCS",
+      hash: "SHA-256",
+      header_digest:
+        "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      bundle_root_algorithm: "pl-merkle-sha256-v4",
+      bundle_root:
+        "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      signature: {
+        format: "JWS",
+        alg: "EdDSA",
+        kid: "kid-dev-01",
+        value: "sig",
+      },
+    },
+  };
+}
+
+async function postMarketMonitoringBundle() {
+  const [
+    monitoring,
+    incidentReport,
+    correctiveAction,
+    authorityNotification,
+    authoritySubmission,
+    reportingDeadline,
+  ] = await Promise.all([
+    readFile(path.join(monitoringDir, "post_market_monitoring.json"), "utf8"),
+    readFile(path.join(monitoringDir, "incident_report.json"), "utf8"),
+    readFile(path.join(monitoringDir, "corrective_action.json"), "utf8"),
+    readFile(path.join(monitoringDir, "authority_notification.json"), "utf8"),
+    readFile(path.join(monitoringDir, "authority_submission.json"), "utf8"),
+    readFile(path.join(monitoringDir, "reporting_deadline.json"), "utf8"),
+  ]);
+
+  return {
+    bundle_version: "1.0",
+    bundle_id: "B-post-market-monitoring",
+    created_at: "2026-03-22T00:00:00Z",
+    actor: {
+      issuer: "proof-layer-test",
+      app_id: "typescript-sdk",
+      env: "test",
+      signing_key_id: "kid-dev-01",
+      role: "provider",
+    },
+    subject: {
+      system_id: "claims-assistant",
+    },
+    context: {},
+    items: [
+      { type: "post_market_monitoring", data: JSON.parse(monitoring) },
+      { type: "incident_report", data: JSON.parse(incidentReport) },
+      { type: "corrective_action", data: JSON.parse(correctiveAction) },
+      {
+        type: "authority_notification",
+        data: JSON.parse(authorityNotification),
+      },
+      {
+        type: "authority_submission",
+        data: JSON.parse(authoritySubmission),
+      },
+      { type: "reporting_deadline", data: JSON.parse(reportingDeadline) },
     ],
     artefacts: [],
     policy: {
@@ -309,6 +379,25 @@ test("ProofLayer local mode can evaluate gpai provider completeness", async () =
   const report = await proofLayer.evaluateCompleteness({
     bundle: await gpaiProviderBundle(),
     profile: "gpai_provider_v1",
+  });
+
+  assert.equal(report.status, "pass");
+  assert.equal(report.pass_count, 6);
+});
+
+test("ProofLayer local mode can evaluate post-market monitoring completeness", async () => {
+  const signingKeyPem = await readFile(
+    path.join(goldenDir, "signing_key.txt"),
+    "utf8",
+  );
+  const proofLayer = new ProofLayer({
+    signingKeyPem,
+    keyId: "kid-dev-01",
+  });
+
+  const report = await proofLayer.evaluateCompleteness({
+    bundle: await postMarketMonitoringBundle(),
+    profile: "post_market_monitoring_v1",
   });
 
   assert.equal(report.status, "pass");

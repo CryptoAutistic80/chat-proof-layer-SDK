@@ -42,6 +42,8 @@ function defaultShareAudience(scenario) {
       return "a GPAI, technical-documentation, or regulator-facing review";
     case "fundamental_rights":
       return "a deployer-side rights, risk, or regulator review";
+    case "post_market_monitoring":
+      return "post-market monitoring leads, incident managers, or regulators";
     case "incident_response":
       return "incident managers, regulators, or internal response leads";
     default:
@@ -80,6 +82,15 @@ function readinessCopy(profile, status, subject = "workflow") {
       return `The ${subject} has at least one minimally complete deployer-side rights record for each required area, but some captured records are thinner than the current advisory minimum.`;
     }
     return `The ${subject} is missing either the deployer-side fundamental-rights assessment record or the linked oversight record, or it does not yet include a minimally complete version of them.`;
+  }
+  if (profile === "post_market_monitoring_v1") {
+    if (status === "pass") {
+      return `The structured post-market monitoring and incident-reporting fields for this ${subject} meet the current advisory minimum.`;
+    }
+    if (status === "warn") {
+      return `The ${subject} has at least one minimally complete post-market monitoring record for each required area, but some captured records are thinner than the current advisory minimum.`;
+    }
+    return `The ${subject} is missing at least one required post-market monitoring or authority-reporting area, or it does not yet include a minimally complete version of that record.`;
   }
   if (status === "pass") {
     return `The structured fields for this ${subject} meet the current advisory minimum.`;

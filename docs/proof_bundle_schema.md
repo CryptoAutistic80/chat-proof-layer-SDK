@@ -216,7 +216,7 @@ Those disclosure policies can now also supply `redacted_fields_by_item_type`, us
 
 This section is normative for the checked-in Annex IV governance fixtures, examples, and pack-acceptance tests. It does not change the bundle contract; it defines the minimum structured detail we expect callers to provide for an audit-ready high-risk governance record.
 
-These minimums are now machine-assessed by the advisory `annex_iv_governance_v1` completeness profile exposed through Rust core, `proofctl assess`, `POST /v1/completeness/evaluate`, the TypeScript/Python SDKs, and the `web-demo` readiness check. The same surface now also evaluates deployer-side FRIA minimums through `fundamental_rights_v1`. Integrity and completeness remain separate concerns: verification answers whether the sealed record changed; completeness answers whether the structured governance record is minimally populated for the selected review profile.
+These minimums are now machine-assessed by the advisory completeness profiles exposed through Rust core, `proofctl assess`, `POST /v1/completeness/evaluate`, the TypeScript/Python SDKs, and the `web-demo` readiness check. Today that includes `annex_iv_governance_v1`, `fundamental_rights_v1`, `gpai_provider_v1`, and `post_market_monitoring_v1`. Integrity and completeness remain separate concerns: verification answers whether the sealed record changed; completeness answers whether the structured governance record is minimally populated for the selected review profile.
 
 ### `risk_assessment`
 
@@ -278,5 +278,33 @@ These minimums are now machine-assessed by the advisory `annex_iv_governance_v1`
   Recommended disclosure-sensitive path: `/metadata`
 - `post_market_monitoring`
   Recommended for Annex IV readiness: `plan_id`, `status`, `summary`
+  Recommended for `post_market_monitoring_v1` readiness: `plan_id`, `status`, `summary`, `report_commitment`
   Typical obligation intent: `art72`
+  Recommended disclosure-sensitive path: `/metadata`
+
+### Monitoring And Incident Reporting Items
+
+- `incident_report`
+  Recommended for `post_market_monitoring_v1` readiness: `incident_id`, `severity`, `status`, `occurred_at`, `summary`, `report_commitment`, `detection_method`, `root_cause_summary`, `corrective_action_ref`, `authority_notification_required`, `authority_notification_status`
+  Typical obligation intent: `art55_73`
+  Recommended disclosure-sensitive path: `/metadata`
+- `corrective_action`
+  Recommended for `post_market_monitoring_v1` readiness: `action_id`, `status`, `summary`, `due_at`, `record_commitment`
+  Typical obligation intent: `art20_73`
+  Recommended disclosure-sensitive path: `/metadata`
+- `authority_notification`
+  Recommended for `post_market_monitoring_v1` readiness: `notification_id`, `authority`, `status`, `incident_id`, `due_at`, `report_commitment`
+  Typical obligation intent: `art73_notification`
+  Recommended disclosure-sensitive path: `/metadata`
+- `authority_submission`
+  Recommended for `post_market_monitoring_v1` readiness: `submission_id`, `authority`, `status`, `channel`, `submitted_at`, `document_commitment`
+  Typical obligation intent: `art73_submission`
+  Recommended disclosure-sensitive path: `/metadata`
+- `reporting_deadline`
+  Recommended for `post_market_monitoring_v1` readiness: `deadline_id`, `authority`, `obligation_ref`, `due_at`, `status`, `incident_id`
+  Typical obligation intent: `art73_deadline`
+  Recommended disclosure-sensitive path: `/metadata`
+- `regulator_correspondence`
+  Useful supporting evidence for monitoring workflows, but not currently required by `post_market_monitoring_v1`
+  Typical obligation intent: `art73_correspondence`
   Recommended disclosure-sensitive path: `/metadata`

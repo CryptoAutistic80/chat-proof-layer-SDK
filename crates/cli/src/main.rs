@@ -389,6 +389,8 @@ enum CompletenessProfileArg {
     FundamentalRightsV1,
     #[value(name = "gpai_provider_v1")]
     GpaiProviderV1,
+    #[value(name = "post_market_monitoring_v1")]
+    PostMarketMonitoringV1,
 }
 
 impl CompletenessProfileArg {
@@ -397,6 +399,7 @@ impl CompletenessProfileArg {
             Self::AnnexIvGovernanceV1 => CompletenessProfile::AnnexIvGovernanceV1,
             Self::FundamentalRightsV1 => CompletenessProfile::FundamentalRightsV1,
             Self::GpaiProviderV1 => CompletenessProfile::GpaiProviderV1,
+            Self::PostMarketMonitoringV1 => CompletenessProfile::PostMarketMonitoringV1,
         }
     }
 }
@@ -5799,6 +5802,28 @@ mod tests {
             Commands::Assess(args) => {
                 assert_eq!(args.input, PathBuf::from("./bundle.pkg"));
                 assert_eq!(args.profile, CompletenessProfileArg::FundamentalRightsV1);
+                assert_eq!(args.format, OutputFormat::Human);
+            }
+            _ => panic!("unexpected command parsed"),
+        }
+    }
+
+    #[test]
+    fn assess_command_accepts_post_market_monitoring_profile_arg() {
+        let cli = Cli::try_parse_from([
+            "proofctl",
+            "assess",
+            "--in",
+            "./bundle.pkg",
+            "--profile",
+            "post_market_monitoring_v1",
+        ])
+        .unwrap();
+
+        match cli.command {
+            Commands::Assess(args) => {
+                assert_eq!(args.input, PathBuf::from("./bundle.pkg"));
+                assert_eq!(args.profile, CompletenessProfileArg::PostMarketMonitoringV1);
                 assert_eq!(args.format, OutputFormat::Human);
             }
             _ => panic!("unexpected command parsed"),

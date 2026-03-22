@@ -58,6 +58,9 @@ const mocks = vi.hoisted(() => {
     if (packType === "annex_xi") {
       return "gpai_provider_v1";
     }
+    if (packType === "post_market_monitoring") {
+      return "post_market_monitoring_v1";
+    }
     return null;
   }
 
@@ -67,6 +70,9 @@ const mocks = vi.hoisted(() => {
     }
     if (profile === "fundamental_rights_v1") {
       return 2;
+    }
+    if (profile === "post_market_monitoring_v1") {
+      return 6;
     }
     return 6;
   }

@@ -120,6 +120,11 @@ const friaReadiness = await proofLayer.evaluateCompleteness({
   bundle: fullFundamentalRightsBundle,
   profile: "fundamental_rights_v1"
 });
+const monitoringReadiness = await proofLayer.evaluateCompleteness({
+  // fullPostMarketMonitoringBundle should contain the monitoring, incident, corrective-action, and authority-reporting evidence set.
+  bundle: fullPostMarketMonitoringBundle,
+  profile: "post_market_monitoring_v1"
+});
 
 const timestampCheck = await proofClient.verifyTimestamp({
   bundleId: "BUNDLE_ID"
@@ -218,6 +223,10 @@ const fundamentalRightsPackReadiness = await proofClient.evaluateCompleteness({
   packId: "PACK_ID",
   profile: "fundamental_rights_v1"
 });
+const monitoringPackReadiness = await proofClient.evaluateCompleteness({
+  packId: "PACK_ID",
+  profile: "post_market_monitoring_v1"
+});
 const packReadiness = selectPackReadiness(pack);
 
 const generic = withGenericProofLayer(
@@ -247,6 +256,7 @@ console.log(preview.disclosed_item_types);
 console.log(templatePack.pack_id, templatePreview.disclosedItemTypes);
 console.log(templateCatalog.templates[0].profile, renderedTemplate.policy.name);
 console.log(annexXiPackReadiness.status);
+console.log(monitoringReadiness.status, monitoringPackReadiness.status);
 console.log(packReadiness?.source, packReadiness?.status);
 console.log(vaultReadiness.status);
 ```
@@ -259,6 +269,7 @@ Use `verifyTimestamp(...)` and `verifyReceipt(...)` when you want both the low-l
 For receipts, `liveCheckMode: "best_effort"` adds an opt-in live Rekor freshness check without turning temporary network problems into a hard failure.
 
 For `annex_iv`, the pack-scoped pass count is currently `8` because `annex_iv_governance_v1` now evaluates the full governance set curated by the pack.
+For `post_market_monitoring`, the pack-scoped pass count is currently `6` because `post_market_monitoring_v1` evaluates the required monitoring and authority-reporting rule families.
 
 For the full provider-side Annex IV governance walkthrough, build the SDK and run:
 

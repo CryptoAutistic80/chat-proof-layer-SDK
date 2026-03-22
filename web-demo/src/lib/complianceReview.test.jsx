@@ -22,7 +22,7 @@ describe("buildComplianceReview", () => {
           bundles: [{ bundle_id: "bundle-1", item_types: ["incident_report"] }],
         },
         downloadInfo: {
-          fileName: "incident-response.pack",
+          fileName: "post-market-monitoring.pack",
         },
         completenessReport: {
           profile: "annex_iv_governance_v1",
@@ -50,7 +50,7 @@ describe("buildComplianceReview", () => {
 
     expect(review.title).toBe("Incident escalation evidence map");
     expect(review.capturedNow[0].bundleId).toBe("bundle-1");
-    expect(review.supportsPack.packType).toBe("incident_response");
+    expect(review.supportsPack.packType).toBe("post_market_monitoring");
     expect(review.supportsPack.exportState).toContain("ready to download");
     expect(review.lawExplainer.expectation).toContain("clear incident trail");
     expect(review.readiness.profile).toBe("annex_iv_governance_v1");
@@ -115,6 +115,30 @@ describe("buildComplianceReview", () => {
 
     expect(review.readiness.profile).toBe("fundamental_rights_v1");
     expect(review.readiness.summary).toContain("fundamental-rights assessment");
+  });
+
+  test("uses monitoring-specific readiness wording when the monitoring profile is attached", () => {
+    const review = buildComplianceReview(
+      getPlaygroundScenario("py_incident_escalation"),
+      {
+        completenessReport: {
+          profile: "post_market_monitoring_v1",
+          status: "fail",
+          pass_count: 0,
+          warn_count: 0,
+          fail_count: 2,
+          rules: [
+            {
+              status: "fail",
+              missing_fields: ["document_commitment"],
+            },
+          ],
+        },
+      },
+    );
+
+    expect(review.readiness.profile).toBe("post_market_monitoring_v1");
+    expect(review.readiness.summary).toContain("post-market monitoring");
   });
 
   test("leaves exported pack readiness empty when no pack completeness report is attached", () => {

@@ -20,6 +20,7 @@ const goldenDir = path.join(repoRoot, "fixtures", "golden");
 const annexIvDir = path.join(goldenDir, "annex_iv_governance");
 const fundamentalRightsDir = path.join(goldenDir, "fundamental_rights");
 const gpaiDir = path.join(goldenDir, "gpai_provider");
+const monitoringDir = path.join(goldenDir, "post_market_monitoring");
 
 test("native sign and verify round-trip uses Rust core logic", async () => {
   const signingKeyPem = await readFile(
@@ -341,6 +342,76 @@ test("native evaluateCompleteness supports fundamental_rights_v1", async () => {
 
   assert.equal(report.status, "pass");
   assert.equal(report.pass_count, 2);
+});
+
+test("native evaluateCompleteness supports post_market_monitoring_v1", async () => {
+  const [
+    monitoring,
+    incidentReport,
+    correctiveAction,
+    authorityNotification,
+    authoritySubmission,
+    reportingDeadline,
+  ] = await Promise.all([
+    readFile(path.join(monitoringDir, "post_market_monitoring.json"), "utf8"),
+    readFile(path.join(monitoringDir, "incident_report.json"), "utf8"),
+    readFile(path.join(monitoringDir, "corrective_action.json"), "utf8"),
+    readFile(path.join(monitoringDir, "authority_notification.json"), "utf8"),
+    readFile(path.join(monitoringDir, "authority_submission.json"), "utf8"),
+    readFile(path.join(monitoringDir, "reporting_deadline.json"), "utf8"),
+  ]);
+
+  const report = evaluateCompleteness({
+    profile: "post_market_monitoring_v1",
+    bundle: {
+      bundle_version: "1.0",
+      bundle_id: "B-post-market-monitoring",
+      created_at: "2026-03-22T00:00:00Z",
+      actor: {
+        issuer: "proof-layer-test",
+        app_id: "native-tests",
+        env: "test",
+        signing_key_id: "kid-dev-01",
+        role: "provider",
+      },
+      subject: { system_id: "claims-assistant" },
+      context: {},
+      items: [
+        { type: "post_market_monitoring", data: JSON.parse(monitoring) },
+        { type: "incident_report", data: JSON.parse(incidentReport) },
+        { type: "corrective_action", data: JSON.parse(correctiveAction) },
+        {
+          type: "authority_notification",
+          data: JSON.parse(authorityNotification),
+        },
+        {
+          type: "authority_submission",
+          data: JSON.parse(authoritySubmission),
+        },
+        { type: "reporting_deadline", data: JSON.parse(reportingDeadline) },
+      ],
+      artefacts: [],
+      policy: { redactions: [], encryption: { enabled: false } },
+      integrity: {
+        canonicalization: "RFC8785-JCS",
+        hash: "SHA-256",
+        header_digest:
+          "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        bundle_root_algorithm: "pl-merkle-sha256-v4",
+        bundle_root:
+          "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        signature: {
+          format: "JWS",
+          alg: "EdDSA",
+          kid: "kid-dev-01",
+          value: "sig",
+        },
+      },
+    },
+  });
+
+  assert.equal(report.status, "pass");
+  assert.equal(report.pass_count, 6);
 });
 
 test("native evaluateCompleteness rejects packId", async () => {

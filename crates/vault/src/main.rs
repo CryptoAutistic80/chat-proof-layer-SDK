@@ -5161,6 +5161,7 @@ fn bundle_completeness_profile_for_pack(pack_type: &str) -> Option<CompletenessP
         "annex_iv" => Some(CompletenessProfile::AnnexIvGovernanceV1),
         "fundamental_rights" => Some(CompletenessProfile::FundamentalRightsV1),
         "annex_xi" => Some(CompletenessProfile::GpaiProviderV1),
+        "post_market_monitoring" => Some(CompletenessProfile::PostMarketMonitoringV1),
         _ => None,
     }
 }
@@ -5175,6 +5176,10 @@ fn pack_completeness_profile_for_pack(pack_type: &str) -> Option<CompletenessPro
         // oversight rule families.
         "fundamental_rights" => Some(CompletenessProfile::FundamentalRightsV1),
         "annex_xi" => Some(CompletenessProfile::GpaiProviderV1),
+        // post_market_monitoring packs can include extra correspondence items, but
+        // the current readiness profile evaluates the six required monitoring and
+        // authority-reporting rule families.
+        "post_market_monitoring" => Some(CompletenessProfile::PostMarketMonitoringV1),
         _ => None,
     }
 }
@@ -9698,6 +9703,23 @@ mod tests {
         }
     }
 
+    fn post_market_monitoring_compliance_profile() -> proof_layer_core::ComplianceProfile {
+        proof_layer_core::ComplianceProfile {
+            intended_use: Some("Claims triage support with human review".to_string()),
+            prohibited_practice_screening: Some("screened_no_prohibited_use".to_string()),
+            risk_tier: Some("high_risk".to_string()),
+            high_risk_domain: None,
+            gpai_status: None,
+            systemic_risk: None,
+            fria_required: None,
+            deployment_context: Some("eu_market_placement".to_string()),
+            metadata: serde_json::json!({
+                "owner": "safety-ops",
+                "market": "eu",
+            }),
+        }
+    }
+
     fn annex_iv_governance_event(
         item: EvidenceItem,
         retention_class: &str,
@@ -9731,6 +9753,24 @@ mod tests {
         event.subject.model_id = Some("foundation-model-alpha-v5".to_string());
         event.subject.version = Some("2026.03".to_string());
         event.compliance_profile = Some(gpai_provider_compliance_profile());
+        event
+    }
+
+    fn post_market_monitoring_event(
+        item: EvidenceItem,
+        retention_class: &str,
+        request_id: &str,
+    ) -> CaptureEvent {
+        let mut event = sample_event_with_profile(
+            "claims-assistant",
+            proof_layer_core::ActorRole::Provider,
+            vec![item],
+            Some(retention_class),
+        );
+        event.subject.request_id = Some(request_id.to_string());
+        event.subject.model_id = Some("claims-model-v2".to_string());
+        event.subject.version = Some("2026.03".to_string());
+        event.compliance_profile = Some(post_market_monitoring_compliance_profile());
         event
     }
 
@@ -9786,6 +9826,32 @@ mod tests {
         .await
     }
 
+    async fn create_post_market_monitoring_bundle(
+        app: &Router,
+        item: EvidenceItem,
+        retention_class: &str,
+        request_id: &str,
+        artefact_name: &str,
+        artefact_bytes: &[u8],
+    ) -> CreateBundleResponse {
+        create_bundle_response(
+            app,
+            &CreateBundleRequest {
+                capture: SealableCaptureInput::V10(post_market_monitoring_event(
+                    item,
+                    retention_class,
+                    request_id,
+                )),
+                artefacts: vec![InlineArtefact {
+                    name: artefact_name.to_string(),
+                    content_type: "application/json".to_string(),
+                    data_base64: Base64::encode_string(artefact_bytes),
+                }],
+            },
+        )
+        .await
+    }
+
     struct AnnexIvScenarioBundles {
         technical_doc: CreateBundleResponse,
         risk_assessment: CreateBundleResponse,
@@ -9812,6 +9878,17 @@ mod tests {
     struct FundamentalRightsScenarioBundles {
         assessment: CreateBundleResponse,
         human_oversight: CreateBundleResponse,
+    }
+
+    struct PostMarketMonitoringScenarioBundles {
+        monitoring: CreateBundleResponse,
+        incident_report: CreateBundleResponse,
+        corrective_action: CreateBundleResponse,
+        authority_notification: CreateBundleResponse,
+        authority_submission: CreateBundleResponse,
+        reporting_deadline: CreateBundleResponse,
+        regulator_correspondence: CreateBundleResponse,
+        other_system_bundle: CreateBundleResponse,
     }
 
     async fn create_annex_iv_scenario(app: &Router) -> AnnexIvScenarioBundles {
@@ -10151,6 +10228,233 @@ mod tests {
             post_market_monitoring,
             runtime_logs,
             other_system_risk,
+        }
+    }
+
+    async fn create_post_market_monitoring_scenario(
+        app: &Router,
+    ) -> PostMarketMonitoringScenarioBundles {
+        let monitoring = create_post_market_monitoring_bundle(
+            app,
+            EvidenceItem::PostMarketMonitoring(
+                proof_layer_core::schema::PostMarketMonitoringEvidence {
+                    plan_id: "pmm-claims-2026-03".to_string(),
+                    status: "active".to_string(),
+                    summary: Some(
+                        "Weekly drift review with escalation thresholds for adverse outcomes."
+                            .to_string(),
+                    ),
+                    report_commitment: Some(
+                        "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                            .to_string(),
+                    ),
+                    metadata: serde_json::json!({
+                        "owner": "safety-ops",
+                        "market": "eu",
+                    }),
+                },
+            ),
+            "risk_mgmt",
+            "req-monitoring-plan",
+            "post_market_monitoring.json",
+            br#"{"plan_id":"pmm-claims-2026-03"}"#,
+        )
+        .await;
+
+        let incident_report = create_post_market_monitoring_bundle(
+            app,
+            EvidenceItem::IncidentReport(proof_layer_core::schema::IncidentReportEvidence {
+                incident_id: "inc-claims-42".to_string(),
+                severity: "serious".to_string(),
+                status: "open".to_string(),
+                occurred_at: Some("2026-03-08T07:15:00Z".to_string()),
+                summary: Some(
+                    "Potentially adverse recommendation surfaced in a sensitive claims case."
+                        .to_string(),
+                ),
+                report_commitment: Some(
+                    "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+                        .to_string(),
+                ),
+                detection_method: Some("post_market_monitoring".to_string()),
+                root_cause_summary: Some(
+                    "Missing-document threshold was too permissive for a narrow claims segment."
+                        .to_string(),
+                ),
+                corrective_action_ref: Some("ca-claims-42".to_string()),
+                authority_notification_required: Some(true),
+                authority_notification_status: Some("drafted".to_string()),
+                metadata: serde_json::json!({
+                    "owner": "incident-ops",
+                }),
+            }),
+            "risk_mgmt",
+            "req-monitoring-incident",
+            "incident_report.json",
+            br#"{"incident_id":"inc-claims-42"}"#,
+        )
+        .await;
+
+        let corrective_action = create_post_market_monitoring_bundle(
+            app,
+            EvidenceItem::CorrectiveAction(proof_layer_core::schema::CorrectiveActionEvidence {
+                action_id: "ca-claims-42".to_string(),
+                status: "in_progress".to_string(),
+                summary: Some(
+                    "Tighten the missing-document threshold and route borderline claims to manual review."
+                        .to_string(),
+                ),
+                due_at: Some("2026-03-10T12:00:00Z".to_string()),
+                record_commitment: Some(
+                    "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+                        .to_string(),
+                ),
+                metadata: serde_json::json!({
+                    "owner": "safety-ops",
+                }),
+            }),
+            "risk_mgmt",
+            "req-monitoring-corrective-action",
+            "corrective_action.json",
+            br#"{"action_id":"ca-claims-42"}"#,
+        )
+        .await;
+
+        let authority_notification = create_post_market_monitoring_bundle(
+            app,
+            EvidenceItem::AuthorityNotification(
+                proof_layer_core::schema::AuthorityNotificationEvidence {
+                    notification_id: "notif-claims-42".to_string(),
+                    authority: "eu_ai_office".to_string(),
+                    status: "drafted".to_string(),
+                    incident_id: Some("inc-claims-42".to_string()),
+                    due_at: Some("2026-03-10T12:00:00Z".to_string()),
+                    report_commitment: Some(
+                        "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+                            .to_string(),
+                    ),
+                    metadata: serde_json::json!({
+                        "channel": "portal",
+                    }),
+                },
+            ),
+            "risk_mgmt",
+            "req-monitoring-authority-notification",
+            "authority_notification.json",
+            br#"{"notification_id":"notif-claims-42"}"#,
+        )
+        .await;
+
+        let authority_submission = create_post_market_monitoring_bundle(
+            app,
+            EvidenceItem::AuthoritySubmission(
+                proof_layer_core::schema::AuthoritySubmissionEvidence {
+                    submission_id: "sub-claims-42".to_string(),
+                    authority: "eu_ai_office".to_string(),
+                    status: "submitted".to_string(),
+                    channel: Some("portal".to_string()),
+                    submitted_at: Some("2026-03-08T09:30:00Z".to_string()),
+                    document_commitment: Some(
+                        "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+                            .to_string(),
+                    ),
+                    metadata: serde_json::json!({
+                        "incident_id": "inc-claims-42",
+                    }),
+                },
+            ),
+            "risk_mgmt",
+            "req-monitoring-authority-submission",
+            "authority_submission.json",
+            br#"{"submission_id":"sub-claims-42"}"#,
+        )
+        .await;
+
+        let reporting_deadline = create_post_market_monitoring_bundle(
+            app,
+            EvidenceItem::ReportingDeadline(proof_layer_core::schema::ReportingDeadlineEvidence {
+                deadline_id: "deadline-claims-42".to_string(),
+                authority: "eu_ai_office".to_string(),
+                obligation_ref: "art73_notification".to_string(),
+                due_at: "2026-03-10T12:00:00Z".to_string(),
+                status: "open".to_string(),
+                incident_id: Some("inc-claims-42".to_string()),
+                metadata: serde_json::json!({
+                    "owner": "incident-ops",
+                }),
+            }),
+            "risk_mgmt",
+            "req-monitoring-deadline",
+            "reporting_deadline.json",
+            br#"{"deadline_id":"deadline-claims-42"}"#,
+        )
+        .await;
+
+        let regulator_correspondence = create_post_market_monitoring_bundle(
+            app,
+            EvidenceItem::RegulatorCorrespondence(
+                proof_layer_core::schema::RegulatorCorrespondenceEvidence {
+                    correspondence_id: "corr-claims-42".to_string(),
+                    authority: "eu_ai_office".to_string(),
+                    direction: "outbound".to_string(),
+                    status: "sent".to_string(),
+                    occurred_at: Some("2026-03-08T10:00:00Z".to_string()),
+                    message_commitment: Some(
+                        "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+                            .to_string(),
+                    ),
+                    metadata: serde_json::json!({
+                        "reference": "inc-claims-42",
+                    }),
+                },
+            ),
+            "risk_mgmt",
+            "req-monitoring-correspondence",
+            "regulator_correspondence.json",
+            br#"{"correspondence_id":"corr-claims-42"}"#,
+        )
+        .await;
+
+        let other_system_bundle = create_bundle_response(
+            app,
+            &CreateBundleRequest {
+                capture: SealableCaptureInput::V10(sample_event_with_profile(
+                    "claims-assistant-other",
+                    proof_layer_core::ActorRole::Provider,
+                    vec![EvidenceItem::PostMarketMonitoring(
+                        proof_layer_core::schema::PostMarketMonitoringEvidence {
+                            plan_id: "pmm-other-2026-03".to_string(),
+                            status: "active".to_string(),
+                            summary: Some("Unrelated system monitoring plan.".to_string()),
+                            report_commitment: Some(
+                                "sha256:0101010101010101010101010101010101010101010101010101010101010101"
+                                    .to_string(),
+                            ),
+                            metadata: serde_json::json!({
+                                "owner": "other-team",
+                            }),
+                        },
+                    )],
+                    Some("risk_mgmt"),
+                )),
+                artefacts: vec![InlineArtefact {
+                    name: "other-monitoring.json".to_string(),
+                    content_type: "application/json".to_string(),
+                    data_base64: Base64::encode_string(br#"{"plan_id":"pmm-other-2026-03"}"#),
+                }],
+            },
+        )
+        .await;
+
+        PostMarketMonitoringScenarioBundles {
+            monitoring,
+            incident_report,
+            corrective_action,
+            authority_notification,
+            authority_submission,
+            reporting_deadline,
+            regulator_correspondence,
+            other_system_bundle,
         }
     }
 
@@ -10872,6 +11176,141 @@ mod tests {
             "kid-dev-01",
             "01JQ0JP7DPC7GRQYTF6MAVVXQJ",
             chrono::DateTime::parse_from_rfc3339("2026-03-21T00:00:00Z")
+                .unwrap()
+                .with_timezone(&Utc),
+        )
+        .unwrap()
+    }
+
+    fn fixture_post_market_monitoring_bundle() -> ProofBundle {
+        let event = sample_event_with_profile(
+            "claims-assistant",
+            proof_layer_core::ActorRole::Provider,
+            vec![
+                EvidenceItem::PostMarketMonitoring(
+                    proof_layer_core::schema::PostMarketMonitoringEvidence {
+                        plan_id: "pmm-claims-2026-03".to_string(),
+                        status: "active".to_string(),
+                        summary: Some(
+                            "Weekly drift review with escalation thresholds for adverse outcomes."
+                                .to_string(),
+                        ),
+                        report_commitment: Some(
+                            "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                                .to_string(),
+                        ),
+                        metadata: serde_json::json!({
+                            "owner": "safety-ops",
+                            "market": "eu",
+                        }),
+                    },
+                ),
+                EvidenceItem::IncidentReport(proof_layer_core::schema::IncidentReportEvidence {
+                    incident_id: "inc-claims-42".to_string(),
+                    severity: "serious".to_string(),
+                    status: "open".to_string(),
+                    occurred_at: Some("2026-03-08T07:15:00Z".to_string()),
+                    summary: Some(
+                        "Potentially adverse recommendation surfaced in a sensitive claims case."
+                            .to_string(),
+                    ),
+                    report_commitment: Some(
+                        "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+                            .to_string(),
+                    ),
+                    detection_method: Some("post_market_monitoring".to_string()),
+                    root_cause_summary: Some(
+                        "Missing-document threshold was too permissive for a narrow claims segment."
+                            .to_string(),
+                    ),
+                    corrective_action_ref: Some("ca-claims-42".to_string()),
+                    authority_notification_required: Some(true),
+                    authority_notification_status: Some("drafted".to_string()),
+                    metadata: serde_json::json!({
+                        "owner": "incident-ops",
+                    }),
+                }),
+                EvidenceItem::CorrectiveAction(proof_layer_core::schema::CorrectiveActionEvidence {
+                    action_id: "ca-claims-42".to_string(),
+                    status: "in_progress".to_string(),
+                    summary: Some(
+                        "Tighten the missing-document threshold and route borderline claims to manual review."
+                            .to_string(),
+                    ),
+                    due_at: Some("2026-03-10T12:00:00Z".to_string()),
+                    record_commitment: Some(
+                        "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+                            .to_string(),
+                    ),
+                    metadata: serde_json::json!({
+                        "owner": "safety-ops",
+                    }),
+                }),
+                EvidenceItem::AuthorityNotification(
+                    proof_layer_core::schema::AuthorityNotificationEvidence {
+                        notification_id: "notif-claims-42".to_string(),
+                        authority: "eu_ai_office".to_string(),
+                        status: "drafted".to_string(),
+                        incident_id: Some("inc-claims-42".to_string()),
+                        due_at: Some("2026-03-10T12:00:00Z".to_string()),
+                        report_commitment: Some(
+                            "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+                                .to_string(),
+                        ),
+                        metadata: serde_json::json!({
+                            "channel": "portal",
+                        }),
+                    },
+                ),
+                EvidenceItem::AuthoritySubmission(
+                    proof_layer_core::schema::AuthoritySubmissionEvidence {
+                        submission_id: "sub-claims-42".to_string(),
+                        authority: "eu_ai_office".to_string(),
+                        status: "submitted".to_string(),
+                        channel: Some("portal".to_string()),
+                        submitted_at: Some("2026-03-08T09:30:00Z".to_string()),
+                        document_commitment: Some(
+                            "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+                                .to_string(),
+                        ),
+                        metadata: serde_json::json!({
+                            "incident_id": "inc-claims-42",
+                        }),
+                    },
+                ),
+                EvidenceItem::ReportingDeadline(
+                    proof_layer_core::schema::ReportingDeadlineEvidence {
+                        deadline_id: "deadline-claims-42".to_string(),
+                        authority: "eu_ai_office".to_string(),
+                        obligation_ref: "art73_notification".to_string(),
+                        due_at: "2026-03-10T12:00:00Z".to_string(),
+                        status: "open".to_string(),
+                        incident_id: Some("inc-claims-42".to_string()),
+                        metadata: serde_json::json!({
+                            "owner": "incident-ops",
+                        }),
+                    },
+                ),
+            ],
+            Some("risk_mgmt"),
+        );
+        let mut event = event;
+        event.subject.request_id = Some("req-monitoring-inline".to_string());
+        event.subject.model_id = Some("claims-model-v2".to_string());
+        event.subject.version = Some("2026.03".to_string());
+        event.compliance_profile = Some(post_market_monitoring_compliance_profile());
+
+        build_bundle(
+            event,
+            &[ArtefactInput {
+                name: "post_market_monitoring_overview.json".to_string(),
+                content_type: "application/json".to_string(),
+                bytes: br#"{"profile":"post_market_monitoring_v1"}"#.to_vec(),
+            }],
+            &SigningKey::from_bytes(&[7_u8; 32]),
+            "kid-dev-01",
+            "01JQ1Y6WT5JFTRF4W6QZPNM2E1",
+            chrono::DateTime::parse_from_rfc3339("2026-03-22T00:00:00Z")
                 .unwrap()
                 .with_timezone(&Utc),
         )
@@ -15499,6 +15938,39 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
     }
 
     #[tokio::test]
+    async fn evaluate_completeness_api_supports_post_market_monitoring_inline_bundle_requests() {
+        let state = test_state(DEFAULT_MAX_PAYLOAD_BYTES).await;
+        let app = build_router(state, DEFAULT_MAX_PAYLOAD_BYTES);
+        let bundle = fixture_post_market_monitoring_bundle();
+
+        let request = Request::builder()
+            .method("POST")
+            .uri("/v1/completeness/evaluate")
+            .header("content-type", "application/json")
+            .body(Body::from(
+                serde_json::to_vec(&EvaluateCompletenessRequest {
+                    bundle_id: None,
+                    pack_id: None,
+                    bundle: Some(bundle),
+                    profile: CompletenessProfile::PostMarketMonitoringV1,
+                })
+                .unwrap(),
+            ))
+            .unwrap();
+        let response = app.oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let report: proof_layer_core::CompletenessReport = serde_json::from_slice(&body).unwrap();
+
+        assert_eq!(report.profile, CompletenessProfile::PostMarketMonitoringV1);
+        assert_eq!(report.status, CompletenessStatus::Pass);
+        assert_eq!(report.pass_count, 6);
+        assert_eq!(report.fail_count, 0);
+    }
+
+    #[tokio::test]
     async fn evaluate_completeness_api_rejects_invalid_selection_combinations() {
         let state = test_state(DEFAULT_MAX_PAYLOAD_BYTES).await;
         let app = build_router(state, DEFAULT_MAX_PAYLOAD_BYTES);
@@ -15665,6 +16137,66 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
         assert_eq!(report.bundle_id, pack.pack_id);
         assert_eq!(report.status, CompletenessStatus::Pass);
         assert_eq!(report.pass_count, 8);
+        assert_eq!(report.warn_count, 0);
+        assert_eq!(report.fail_count, 0);
+    }
+
+    #[tokio::test]
+    async fn evaluate_completeness_api_supports_post_market_monitoring_pack_id_requests() {
+        let state = test_state(DEFAULT_MAX_PAYLOAD_BYTES).await;
+        let app = build_router(state, DEFAULT_MAX_PAYLOAD_BYTES);
+        let _scenario = create_post_market_monitoring_scenario(&app).await;
+
+        let pack_req = Request::builder()
+            .method("POST")
+            .uri("/v1/packs")
+            .header("content-type", "application/json")
+            .body(Body::from(
+                serde_json::to_vec(&CreatePackRequest {
+                    pack_type: "post_market_monitoring".to_string(),
+                    bundle_ids: Vec::new(),
+                    system_id: Some("claims-assistant".to_string()),
+                    from: None,
+                    to: None,
+                    bundle_format: default_pack_bundle_format(),
+                    disclosure_policy: None,
+                    disclosure_template: None,
+                })
+                .unwrap(),
+            ))
+            .unwrap();
+        let pack_res = app.clone().oneshot(pack_req).await.unwrap();
+        assert_eq!(pack_res.status(), StatusCode::CREATED);
+        let body = axum::body::to_bytes(pack_res.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let pack: PackSummaryResponse = serde_json::from_slice(&body).unwrap();
+
+        let request = Request::builder()
+            .method("POST")
+            .uri("/v1/completeness/evaluate")
+            .header("content-type", "application/json")
+            .body(Body::from(
+                serde_json::to_vec(&EvaluateCompletenessRequest {
+                    bundle_id: None,
+                    pack_id: Some(pack.pack_id.clone()),
+                    bundle: None,
+                    profile: CompletenessProfile::PostMarketMonitoringV1,
+                })
+                .unwrap(),
+            ))
+            .unwrap();
+        let response = app.oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let report: proof_layer_core::CompletenessReport = serde_json::from_slice(&body).unwrap();
+
+        assert_eq!(report.profile, CompletenessProfile::PostMarketMonitoringV1);
+        assert_eq!(report.bundle_id, pack.pack_id);
+        assert_eq!(report.status, CompletenessStatus::Pass);
+        assert_eq!(report.pass_count, 6);
         assert_eq!(report.warn_count, 0);
         assert_eq!(report.fail_count, 0);
     }
@@ -17568,6 +18100,110 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
         assert_eq!(manifest.pack_completeness_warn_count, Some(0));
         assert_eq!(manifest.pack_completeness_fail_count, Some(0));
         assert_eq!(manifest.bundles.len(), 2);
+        assert!(
+            manifest
+                .bundles
+                .iter()
+                .all(|entry| entry.completeness_status == Some(CompletenessStatus::Fail))
+        );
+    }
+
+    #[tokio::test]
+    async fn post_market_monitoring_pack_reports_bundle_and_pack_scoped_completeness() {
+        let state = test_state(DEFAULT_MAX_PAYLOAD_BYTES).await;
+        let app = build_router(state, DEFAULT_MAX_PAYLOAD_BYTES);
+        let scenario = create_post_market_monitoring_scenario(&app).await;
+
+        let pack_req = Request::builder()
+            .method("POST")
+            .uri("/v1/packs")
+            .header("content-type", "application/json")
+            .body(Body::from(
+                serde_json::to_vec(&CreatePackRequest {
+                    pack_type: "post_market_monitoring".to_string(),
+                    bundle_ids: Vec::new(),
+                    system_id: Some("claims-assistant".to_string()),
+                    from: None,
+                    to: None,
+                    bundle_format: PACK_BUNDLE_FORMAT_FULL.to_string(),
+                    disclosure_policy: None,
+                    disclosure_template: None,
+                })
+                .unwrap(),
+            ))
+            .unwrap();
+        let pack_res = app.clone().oneshot(pack_req).await.unwrap();
+        assert_eq!(pack_res.status(), StatusCode::CREATED);
+        let body = axum::body::to_bytes(pack_res.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let pack: PackSummaryResponse = serde_json::from_slice(&body).unwrap();
+
+        assert_eq!(
+            pack.completeness_profile,
+            Some(CompletenessProfile::PostMarketMonitoringV1)
+        );
+        assert_eq!(pack.completeness_status, Some(CompletenessStatus::Fail));
+        assert_eq!(
+            pack.pack_completeness_profile,
+            Some(CompletenessProfile::PostMarketMonitoringV1)
+        );
+        assert_eq!(
+            pack.pack_completeness_status,
+            Some(CompletenessStatus::Pass)
+        );
+        assert_eq!(pack.pack_completeness_pass_count, Some(6));
+        assert_eq!(pack.pack_completeness_warn_count, Some(0));
+        assert_eq!(pack.pack_completeness_fail_count, Some(0));
+        assert_eq!(
+            pack.bundle_ids.iter().cloned().collect::<BTreeSet<_>>(),
+            BTreeSet::from([
+                scenario.monitoring.bundle_id.clone(),
+                scenario.incident_report.bundle_id.clone(),
+                scenario.corrective_action.bundle_id.clone(),
+                scenario.authority_notification.bundle_id.clone(),
+                scenario.authority_submission.bundle_id.clone(),
+                scenario.reporting_deadline.bundle_id.clone(),
+                scenario.regulator_correspondence.bundle_id.clone(),
+            ])
+        );
+        assert!(
+            !pack
+                .bundle_ids
+                .contains(&scenario.other_system_bundle.bundle_id)
+        );
+
+        let manifest_req = Request::builder()
+            .method("GET")
+            .uri(format!("/v1/packs/{}/manifest", pack.pack_id))
+            .body(Body::empty())
+            .unwrap();
+        let manifest_res = app.oneshot(manifest_req).await.unwrap();
+        assert_eq!(manifest_res.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(manifest_res.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let manifest: PackManifest = serde_json::from_slice(&body).unwrap();
+
+        assert_eq!(
+            manifest.completeness_profile,
+            Some(CompletenessProfile::PostMarketMonitoringV1)
+        );
+        assert_eq!(manifest.completeness_pass_count, Some(0));
+        assert_eq!(manifest.completeness_warn_count, Some(0));
+        assert_eq!(manifest.completeness_fail_count, Some(7));
+        assert_eq!(
+            manifest.pack_completeness_profile,
+            Some(CompletenessProfile::PostMarketMonitoringV1)
+        );
+        assert_eq!(
+            manifest.pack_completeness_status,
+            Some(CompletenessStatus::Pass)
+        );
+        assert_eq!(manifest.pack_completeness_pass_count, Some(6));
+        assert_eq!(manifest.pack_completeness_warn_count, Some(0));
+        assert_eq!(manifest.pack_completeness_fail_count, Some(0));
+        assert_eq!(manifest.bundles.len(), 7);
         assert!(
             manifest
                 .bundles

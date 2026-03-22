@@ -2,6 +2,7 @@
 
 Completed:
 
+- Added a new advisory `post_market_monitoring_v1` completeness profile for monitoring and incident-response workflows, covering `post_market_monitoring`, `incident_report`, `corrective_action`, `authority_notification`, `authority_submission`, and `reporting_deadline`.
 - Expanded `annex_iv_governance_v1` so it now assesses the full eight-family Annex IV governance bundle, adding `qms_record`, `standards_alignment`, and `post_market_monitoring` minimum-field checks.
 - Added a new advisory `fundamental_rights_v1` completeness profile for deployer-side FRIA workflows, covering structured `fundamental_rights_assessment` and linked `human_oversight` evidence.
 - Wired that profile through Rust core, `proofctl assess`, vault pack readiness for `fundamental_rights`, the TypeScript/Python SDK surfaces, the checked schemas, docs, and the web demo readiness copy.

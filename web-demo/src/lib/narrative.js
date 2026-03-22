@@ -264,6 +264,8 @@ function completenessStatus(run) {
         ? "required GPAI provider area"
         : report.profile === "fundamental_rights_v1"
           ? "required deployer-side rights area"
+          : report.profile === "post_market_monitoring_v1"
+            ? "required post-market monitoring area"
           : "required governance area";
     return {
       tone: "accent",
@@ -276,7 +278,9 @@ function completenessStatus(run) {
       ? "required GPAI provider area(s)"
       : report.profile === "fundamental_rights_v1"
         ? "required deployer-side rights area(s)"
-      : "required governance area(s)";
+        : report.profile === "post_market_monitoring_v1"
+          ? "required post-market monitoring area(s)"
+        : "required governance area(s)";
   return {
     tone: "warn",
     title: "Readiness check failed",

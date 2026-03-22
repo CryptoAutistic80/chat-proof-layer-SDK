@@ -8,6 +8,7 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 GOLDEN_DIR = REPO_ROOT / "fixtures" / "golden"
 ANNEX_IV_DIR = GOLDEN_DIR / "annex_iv_governance"
 GPAI_DIR = GOLDEN_DIR / "gpai_provider"
+POST_MARKET_MONITORING_DIR = GOLDEN_DIR / "post_market_monitoring"
 
 
 def annex_iv_bundle() -> dict[str, object]:
@@ -118,6 +119,88 @@ def gpai_provider_bundle() -> dict[str, object]:
             {
                 "type": "training_summary",
                 "data": json.loads((GPAI_DIR / "training_summary.json").read_text(encoding="utf-8")),
+            },
+        ],
+        "artefacts": [],
+        "policy": {"redactions": [], "encryption": {"enabled": False}},
+        "integrity": {
+            "canonicalization": "RFC8785-JCS",
+            "hash": "SHA-256",
+            "header_digest": "sha256:" + "a" * 64,
+            "bundle_root_algorithm": "pl-merkle-sha256-v4",
+            "bundle_root": "sha256:" + "b" * 64,
+            "signature": {
+                "format": "JWS",
+                "alg": "EdDSA",
+                "kid": "kid-dev-01",
+                "value": "sig",
+            },
+        },
+    }
+
+
+def post_market_monitoring_bundle() -> dict[str, object]:
+    return {
+        "bundle_version": "1.0",
+        "bundle_id": "B-post-market-monitoring",
+        "created_at": "2026-03-22T00:00:00Z",
+        "actor": {
+            "issuer": "proof-layer-test",
+            "app_id": "python-sdk",
+            "env": "test",
+            "signing_key_id": "kid-dev-01",
+            "role": "provider",
+        },
+        "subject": {"system_id": "claims-assistant"},
+        "context": {},
+        "items": [
+            {
+                "type": "post_market_monitoring",
+                "data": json.loads(
+                    (POST_MARKET_MONITORING_DIR / "post_market_monitoring.json").read_text(
+                        encoding="utf-8"
+                    )
+                ),
+            },
+            {
+                "type": "incident_report",
+                "data": json.loads(
+                    (POST_MARKET_MONITORING_DIR / "incident_report.json").read_text(
+                        encoding="utf-8"
+                    )
+                ),
+            },
+            {
+                "type": "corrective_action",
+                "data": json.loads(
+                    (POST_MARKET_MONITORING_DIR / "corrective_action.json").read_text(
+                        encoding="utf-8"
+                    )
+                ),
+            },
+            {
+                "type": "authority_notification",
+                "data": json.loads(
+                    (POST_MARKET_MONITORING_DIR / "authority_notification.json").read_text(
+                        encoding="utf-8"
+                    )
+                ),
+            },
+            {
+                "type": "authority_submission",
+                "data": json.loads(
+                    (POST_MARKET_MONITORING_DIR / "authority_submission.json").read_text(
+                        encoding="utf-8"
+                    )
+                ),
+            },
+            {
+                "type": "reporting_deadline",
+                "data": json.loads(
+                    (POST_MARKET_MONITORING_DIR / "reporting_deadline.json").read_text(
+                        encoding="utf-8"
+                    )
+                ),
             },
         ],
         "artefacts": [],
@@ -260,6 +343,21 @@ class TestProofLayer(unittest.TestCase):
         report = proof_layer.evaluate_completeness(
             bundle=gpai_provider_bundle(),
             profile="gpai_provider_v1",
+        )
+
+        self.assertEqual(report["status"], "pass")
+        self.assertEqual(report["pass_count"], 6)
+
+    def test_local_mode_can_evaluate_post_market_monitoring_completeness(self):
+        signing_key_pem = (GOLDEN_DIR / "signing_key.txt").read_text(encoding="utf-8")
+        proof_layer = ProofLayer(
+            signing_key_pem=signing_key_pem,
+            key_id="kid-dev-01",
+        )
+
+        report = proof_layer.evaluate_completeness(
+            bundle=post_market_monitoring_bundle(),
+            profile="post_market_monitoring_v1",
         )
 
         self.assertEqual(report["status"], "pass")

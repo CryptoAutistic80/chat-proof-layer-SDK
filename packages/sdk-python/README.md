@@ -121,6 +121,11 @@ fria_readiness = proof_layer.evaluate_completeness(
     bundle=full_fundamental_rights_bundle,
     profile="fundamental_rights_v1",
 )
+monitoring_readiness = proof_layer.evaluate_completeness(
+    # full_post_market_monitoring_bundle should contain the monitoring, incident, corrective-action, and authority-reporting evidence set.
+    bundle=full_post_market_monitoring_bundle,
+    profile="post_market_monitoring_v1",
+)
 
 timestamp_check = proof_client.verify_timestamp(bundle_id="BUNDLE_ID")
 receipt_check = proof_client.verify_receipt(
@@ -218,6 +223,10 @@ fundamental_rights_pack_readiness = proof_client.evaluate_completeness(
     pack_id="PACK_ID",
     profile="fundamental_rights_v1",
 )
+monitoring_pack_readiness = proof_client.evaluate_completeness(
+    pack_id="PACK_ID",
+    profile="post_market_monitoring_v1",
+)
 pack_readiness = select_pack_readiness(pack)
 
 risk_bundle = proof_layer.capture_risk_assessment(
@@ -233,6 +242,7 @@ print(preview["disclosed_item_types"])
 print(template_pack["pack_id"], template_preview["disclosed_item_types"])
 print(template_catalog["templates"][0]["profile"], rendered_template["policy"]["name"])
 print(annex_xi_pack_readiness["status"])
+print(monitoring_readiness["status"], monitoring_pack_readiness["status"])
 print(pack_readiness["source"], pack_readiness["status"])
 print(vault_readiness["status"])
 ```
@@ -245,6 +255,7 @@ Use `verify_timestamp(...)` and `verify_receipt(...)` when you want both the low
 For receipts, `live_check_mode="best_effort"` adds an opt-in live Rekor freshness check without turning temporary network problems into a hard failure.
 
 For `annex_iv`, the pack-scoped pass count is currently `8` because `annex_iv_governance_v1` now evaluates the full governance set curated by the pack.
+For `post_market_monitoring`, the pack-scoped pass count is currently `6` because `post_market_monitoring_v1` evaluates the required monitoring and authority-reporting rule families.
 
 For the full provider-side Annex IV governance walkthrough, build the native module and run:
 

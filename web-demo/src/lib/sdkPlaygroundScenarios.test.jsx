@@ -52,4 +52,14 @@ describe("sdkPlaygroundScenarios", () => {
 
     expect(packType).toBe("annex_xi");
   });
+
+  test("prefers post-market monitoring inference when monitoring and incident items coexist", () => {
+    const packType = inferPackTypeFromItems([
+      { type: "post_market_monitoring" },
+      { type: "incident_report" },
+      { type: "authority_submission" }
+    ]);
+
+    expect(packType).toBe("post_market_monitoring");
+  });
 });

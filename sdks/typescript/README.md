@@ -115,6 +115,12 @@ const gpaiReadiness = await proofLayer.evaluateCompleteness({
   profile: "gpai_provider_v1"
 });
 
+const friaReadiness = await proofLayer.evaluateCompleteness({
+  // fullFundamentalRightsBundle should contain the deployer-side FRIA assessment + oversight evidence set.
+  bundle: fullFundamentalRightsBundle,
+  profile: "fundamental_rights_v1"
+});
+
 const timestampCheck = await proofClient.verifyTimestamp({
   bundleId: "BUNDLE_ID"
 });
@@ -207,6 +213,10 @@ const vaultReadiness = await proofClient.evaluateCompleteness({
 const annexXiPackReadiness = await proofClient.evaluateCompleteness({
   packId: "PACK_ID",
   profile: "gpai_provider_v1"
+});
+const fundamentalRightsPackReadiness = await proofClient.evaluateCompleteness({
+  packId: "PACK_ID",
+  profile: "fundamental_rights_v1"
 });
 const packReadiness = selectPackReadiness(pack);
 

@@ -16,6 +16,7 @@ from proofsdk.native import (
 REPO_ROOT = Path(__file__).resolve().parents[3]
 GOLDEN_DIR = REPO_ROOT / "fixtures" / "golden"
 ANNEX_IV_DIR = GOLDEN_DIR / "annex_iv_governance"
+FUNDAMENTAL_RIGHTS_DIR = GOLDEN_DIR / "fundamental_rights"
 GPAI_DIR = GOLDEN_DIR / "gpai_provider"
 
 
@@ -220,6 +221,59 @@ class TestNativeBindings(unittest.TestCase):
         report = evaluate_completeness(bundle=bundle, profile="gpai_provider_v1")
         self.assertEqual(report["status"], "pass")
         self.assertEqual(report["pass_count"], 6)
+
+    def test_native_evaluate_completeness_supports_fundamental_rights_profile(self):
+        bundle = {
+            "bundle_version": "1.0",
+            "bundle_id": "B-fundamental-rights",
+            "created_at": "2026-03-22T00:00:00Z",
+            "actor": {
+                "issuer": "proof-layer-test",
+                "app_id": "python-sdk",
+                "env": "test",
+                "signing_key_id": "kid-dev-01",
+                "role": "deployer",
+            },
+            "subject": {"system_id": "benefits-review"},
+            "context": {},
+            "items": [
+                {
+                    "type": "fundamental_rights_assessment",
+                    "data": json.loads(
+                        (FUNDAMENTAL_RIGHTS_DIR / "fundamental_rights_assessment.json").read_text(
+                            encoding="utf-8"
+                        )
+                    ),
+                },
+                {
+                    "type": "human_oversight",
+                    "data": json.loads(
+                        (FUNDAMENTAL_RIGHTS_DIR / "human_oversight.json").read_text(
+                            encoding="utf-8"
+                        )
+                    ),
+                },
+            ],
+            "artefacts": [],
+            "policy": {"redactions": [], "encryption": {"enabled": False}},
+            "integrity": {
+                "canonicalization": "RFC8785-JCS",
+                "hash": "SHA-256",
+                "header_digest": "sha256:" + "a" * 64,
+                "bundle_root_algorithm": "pl-merkle-sha256-v4",
+                "bundle_root": "sha256:" + "b" * 64,
+                "signature": {
+                    "format": "JWS",
+                    "alg": "EdDSA",
+                    "kid": "kid-dev-01",
+                    "value": "sig",
+                },
+            },
+        }
+
+        report = evaluate_completeness(bundle=bundle, profile="fundamental_rights_v1")
+        self.assertEqual(report["status"], "pass")
+        self.assertEqual(report["pass_count"], 2)
 
 
 if __name__ == "__main__":

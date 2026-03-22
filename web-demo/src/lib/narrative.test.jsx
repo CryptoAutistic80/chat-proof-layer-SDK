@@ -28,6 +28,31 @@ describe("buildRunNarrativeSummary", () => {
     );
   });
 
+  test("uses FRIA-specific readiness wording for deployer rights flows", () => {
+    const summary = buildRunNarrativeSummary(
+      {
+        presetKey: "investor_summary",
+        scenarioLabel: "FRIA review",
+        bundleId: "bundle-2",
+        bundleRuns: [{ bundleId: "bundle-2" }],
+        completenessProfile: "fundamental_rights_v1",
+        completenessReport: {
+          profile: "fundamental_rights_v1",
+          status: "fail",
+          pass_count: 0,
+          warn_count: 0,
+          fail_count: 1,
+          rules: [],
+        },
+      },
+      null,
+    );
+
+    expect(summary.completenessStatus.summary).toContain(
+      "required deployer-side rights area(s)",
+    );
+  });
+
   test("uses timestamp and transparency assessment wording when available", () => {
     const summary = buildRunNarrativeSummary(
       {

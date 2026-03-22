@@ -116,6 +116,12 @@ gpai_readiness = proof_layer.evaluate_completeness(
     profile="gpai_provider_v1",
 )
 
+fria_readiness = proof_layer.evaluate_completeness(
+    # full_fundamental_rights_bundle should contain the deployer-side FRIA assessment + oversight evidence set.
+    bundle=full_fundamental_rights_bundle,
+    profile="fundamental_rights_v1",
+)
+
 timestamp_check = proof_client.verify_timestamp(bundle_id="BUNDLE_ID")
 receipt_check = proof_client.verify_receipt(
     bundle_id="BUNDLE_ID",
@@ -207,6 +213,10 @@ vault_readiness = proof_client.evaluate_completeness(
 annex_xi_pack_readiness = proof_client.evaluate_completeness(
     pack_id="PACK_ID",
     profile="gpai_provider_v1",
+)
+fundamental_rights_pack_readiness = proof_client.evaluate_completeness(
+    pack_id="PACK_ID",
+    profile="fundamental_rights_v1",
 )
 pack_readiness = select_pack_readiness(pack)
 

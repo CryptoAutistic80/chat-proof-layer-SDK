@@ -57,6 +57,7 @@ const DemoContext = createContext(null);
 const COMPLETENESS_PROFILE_BY_PACK_TYPE = {
   annex_iv: "annex_iv_governance_v1",
   annex_xi: "gpai_provider_v1",
+  fundamental_rights: "fundamental_rights_v1",
 };
 
 function arrayValue(value) {

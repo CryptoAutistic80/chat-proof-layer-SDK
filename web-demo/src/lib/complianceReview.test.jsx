@@ -98,6 +98,25 @@ describe("buildComplianceReview", () => {
     expect(review.readiness.summary).toContain("GPAI provider");
   });
 
+  test("uses FRIA-specific readiness wording when the deployer profile is attached", () => {
+    const review = buildComplianceReview(
+      getPlaygroundScenario("py_hiring_review"),
+      {
+        completenessReport: {
+          profile: "fundamental_rights_v1",
+          status: "pass",
+          pass_count: 2,
+          warn_count: 0,
+          fail_count: 0,
+          rules: [],
+        },
+      },
+    );
+
+    expect(review.readiness.profile).toBe("fundamental_rights_v1");
+    expect(review.readiness.summary).toContain("fundamental-rights assessment");
+  });
+
   test("leaves exported pack readiness empty when no pack completeness report is attached", () => {
     const review = buildComplianceReview(
       getPlaygroundScenario("ts_support_rules"),

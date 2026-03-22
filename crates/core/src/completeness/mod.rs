@@ -1,4 +1,5 @@
 mod annex_iv;
+mod fundamental_rights;
 mod gpai_provider;
 
 use crate::schema::EvidenceBundle;
@@ -9,6 +10,7 @@ use std::{fmt, str::FromStr};
 #[serde(rename_all = "snake_case")]
 pub enum CompletenessProfile {
     AnnexIvGovernanceV1,
+    FundamentalRightsV1,
     GpaiProviderV1,
 }
 
@@ -16,6 +18,7 @@ impl CompletenessProfile {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::AnnexIvGovernanceV1 => "annex_iv_governance_v1",
+            Self::FundamentalRightsV1 => "fundamental_rights_v1",
             Self::GpaiProviderV1 => "gpai_provider_v1",
         }
     }
@@ -33,6 +36,7 @@ impl FromStr for CompletenessProfile {
     fn from_str(value: &str) -> Result<Self, Self::Err> {
         match value {
             "annex_iv_governance_v1" => Ok(Self::AnnexIvGovernanceV1),
+            "fundamental_rights_v1" => Ok(Self::FundamentalRightsV1),
             "gpai_provider_v1" => Ok(Self::GpaiProviderV1),
             other => Err(format!("unsupported completeness profile {other}")),
         }
@@ -93,6 +97,7 @@ pub fn evaluate_completeness(
 ) -> CompletenessReport {
     match profile {
         CompletenessProfile::AnnexIvGovernanceV1 => annex_iv::evaluate(bundle),
+        CompletenessProfile::FundamentalRightsV1 => fundamental_rights::evaluate(bundle),
         CompletenessProfile::GpaiProviderV1 => gpai_provider::evaluate(bundle),
     }
 }

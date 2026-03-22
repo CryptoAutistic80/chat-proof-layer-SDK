@@ -18,6 +18,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, "../../..");
 const goldenDir = path.join(repoRoot, "fixtures", "golden");
 const annexIvDir = path.join(goldenDir, "annex_iv_governance");
+const fundamentalRightsDir = path.join(goldenDir, "fundamental_rights");
 const gpaiDir = path.join(goldenDir, "gpai_provider");
 
 test("native sign and verify round-trip uses Rust core logic", async () => {
@@ -273,6 +274,61 @@ test("native evaluateCompleteness supports gpai_provider_v1", async () => {
 
   assert.equal(report.status, "pass");
   assert.equal(report.pass_count, 6);
+});
+
+test("native evaluateCompleteness supports fundamental_rights_v1", async () => {
+  const [assessment, humanOversight] = await Promise.all([
+    readFile(
+      path.join(fundamentalRightsDir, "fundamental_rights_assessment.json"),
+      "utf8",
+    ),
+    readFile(path.join(fundamentalRightsDir, "human_oversight.json"), "utf8"),
+  ]);
+
+  const report = evaluateCompleteness({
+    profile: "fundamental_rights_v1",
+    bundle: {
+      bundle_version: "1.0",
+      bundle_id: "B-fundamental-rights",
+      created_at: "2026-03-22T00:00:00Z",
+      actor: {
+        issuer: "proof-layer-test",
+        app_id: "native-tests",
+        env: "test",
+        signing_key_id: "kid-dev-01",
+        role: "deployer",
+      },
+      subject: { system_id: "benefits-review" },
+      context: {},
+      items: [
+        {
+          type: "fundamental_rights_assessment",
+          data: JSON.parse(assessment),
+        },
+        { type: "human_oversight", data: JSON.parse(humanOversight) },
+      ],
+      artefacts: [],
+      policy: { redactions: [], encryption: { enabled: false } },
+      integrity: {
+        canonicalization: "RFC8785-JCS",
+        hash: "SHA-256",
+        header_digest:
+          "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        bundle_root_algorithm: "pl-merkle-sha256-v4",
+        bundle_root:
+          "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        signature: {
+          format: "JWS",
+          alg: "EdDSA",
+          kid: "kid-dev-01",
+          value: "sig",
+        },
+      },
+    },
+  });
+
+  assert.equal(report.status, "pass");
+  assert.equal(report.pass_count, 2);
 });
 
 test("native evaluateCompleteness rejects packId", async () => {

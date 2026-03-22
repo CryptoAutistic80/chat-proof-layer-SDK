@@ -5159,6 +5159,7 @@ fn pack_summary(manifest: &PackManifest) -> PackSummaryResponse {
 fn bundle_completeness_profile_for_pack(pack_type: &str) -> Option<CompletenessProfile> {
     match pack_type {
         "annex_iv" => Some(CompletenessProfile::AnnexIvGovernanceV1),
+        "fundamental_rights" => Some(CompletenessProfile::FundamentalRightsV1),
         "annex_xi" => Some(CompletenessProfile::GpaiProviderV1),
         _ => None,
     }
@@ -5169,6 +5170,10 @@ fn pack_completeness_profile_for_pack(pack_type: &str) -> Option<CompletenessPro
         // annex_iv packs curate eight evidence families, but the current
         // annex_iv_governance_v1 readiness profile evaluates five rule families.
         "annex_iv" => Some(CompletenessProfile::AnnexIvGovernanceV1),
+        // fundamental_rights packs can contain incident/supporting items, but the
+        // current deployer-side readiness profile evaluates the assessment and
+        // oversight rule families.
+        "fundamental_rights" => Some(CompletenessProfile::FundamentalRightsV1),
         "annex_xi" => Some(CompletenessProfile::GpaiProviderV1),
         _ => None,
     }
@@ -9804,6 +9809,11 @@ mod tests {
         other_system_bundle: CreateBundleResponse,
     }
 
+    struct FundamentalRightsScenarioBundles {
+        assessment: CreateBundleResponse,
+        human_oversight: CreateBundleResponse,
+    }
+
     async fn create_annex_iv_scenario(app: &Router) -> AnnexIvScenarioBundles {
         let technical_doc = create_annex_iv_governance_bundle(
             app,
@@ -10358,6 +10368,122 @@ mod tests {
             copyright_policy,
             training_summary,
             other_system_bundle,
+        }
+    }
+
+    async fn create_fundamental_rights_scenario(app: &Router) -> FundamentalRightsScenarioBundles {
+        let compliance_profile = proof_layer_core::ComplianceProfile {
+            intended_use: Some("Public-sector benefit eligibility review".to_string()),
+            prohibited_practice_screening: Some("screened_no_prohibited_use".to_string()),
+            risk_tier: Some("high_risk".to_string()),
+            high_risk_domain: None,
+            gpai_status: None,
+            systemic_risk: None,
+            fria_required: Some(true),
+            deployment_context: Some("public_sector".to_string()),
+            metadata: serde_json::json!({
+                "owner": "rights-review-team",
+                "market": "eu",
+            }),
+        };
+
+        let mut assessment_event = sample_event_with_profile(
+            "benefits-review",
+            proof_layer_core::ActorRole::Deployer,
+            vec![EvidenceItem::FundamentalRightsAssessment(
+                proof_layer_core::schema::FundamentalRightsAssessmentEvidence {
+                    assessment_id: "fria-2026-03".to_string(),
+                    status: "completed".to_string(),
+                    scope: Some("Public-sector benefit eligibility review".to_string()),
+                    report_commitment: Some(
+                        "sha256:ababcdcdababcdcdababcdcdababcdcdababcdcdababcdcdababcdcdababcdcd"
+                            .to_string(),
+                    ),
+                    legal_basis: Some(
+                        "GDPR Art. 22 and public-service review safeguards".to_string(),
+                    ),
+                    affected_rights: vec![
+                        "equal treatment".to_string(),
+                        "access to public services".to_string(),
+                        "explanation".to_string(),
+                    ],
+                    stakeholder_consultation_summary: Some(
+                        "Legal, service-operations, and rights-review stakeholders approved the workflow."
+                            .to_string(),
+                    ),
+                    mitigation_plan_summary: Some(
+                        "Borderline cases require human review and documented justification before any outcome is finalized."
+                            .to_string(),
+                    ),
+                    assessor: Some("rights-review-team".to_string()),
+                    metadata: serde_json::json!({
+                        "owner": "benefits-review",
+                    }),
+                },
+            )],
+            Some("technical_doc"),
+        );
+        assessment_event.compliance_profile = Some(compliance_profile.clone());
+        let assessment = create_bundle_response(
+            app,
+            &CreateBundleRequest {
+                capture: SealableCaptureInput::V10(assessment_event),
+                artefacts: vec![InlineArtefact {
+                    name: "fria-report.json".to_string(),
+                    content_type: "application/json".to_string(),
+                    data_base64: Base64::encode_string(
+                        br#"{"assessment":"Borderline cases require human review."}"#,
+                    ),
+                }],
+            },
+        )
+        .await;
+
+        let mut oversight_event = sample_event_with_profile(
+            "benefits-review",
+            proof_layer_core::ActorRole::Deployer,
+            vec![EvidenceItem::HumanOversight(
+                proof_layer_core::schema::HumanOversightEvidence {
+                    action: "manual_case_review_required".to_string(),
+                    reviewer: Some("rights-panel".to_string()),
+                    notes_commitment: Some(
+                        "sha256:cdcdababcdcdababcdcdababcdcdababcdcdababcdcdababcdcdababcdcdabab"
+                            .to_string(),
+                    ),
+                    actor_role: Some("case_reviewer".to_string()),
+                    anomaly_detected: Some(true),
+                    override_action: Some("route_to_manual_review".to_string()),
+                    interpretation_guidance_followed: Some(true),
+                    automation_bias_detected: Some(false),
+                    two_person_verification: Some(false),
+                    stop_triggered: Some(false),
+                    stop_reason: Some(
+                        "No automatic stop; human escalation handles borderline outcomes."
+                            .to_string(),
+                    ),
+                },
+            )],
+            Some("risk_mgmt"),
+        );
+        oversight_event.compliance_profile = Some(compliance_profile);
+        let human_oversight = create_bundle_response(
+            app,
+            &CreateBundleRequest {
+                capture: SealableCaptureInput::V10(oversight_event),
+                artefacts: vec![InlineArtefact {
+                    name: "oversight-notes.json".to_string(),
+                    content_type: "application/json".to_string(),
+                    data_base64: Base64::encode_string(
+                        br#"{"reason":"Borderline case routed for manual review."}"#,
+                    ),
+                }],
+            },
+        )
+        .await;
+
+        FundamentalRightsScenarioBundles {
+            assessment,
+            human_oversight,
         }
     }
 
@@ -17300,6 +17426,100 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
         assert_eq!(pack.pack_completeness_pass_count, Some(6));
         assert_eq!(pack.pack_completeness_warn_count, Some(0));
         assert_eq!(pack.pack_completeness_fail_count, Some(0));
+    }
+
+    #[tokio::test]
+    async fn fundamental_rights_pack_reports_bundle_and_pack_scoped_completeness() {
+        let state = test_state(DEFAULT_MAX_PAYLOAD_BYTES).await;
+        let app = build_router(state, DEFAULT_MAX_PAYLOAD_BYTES);
+        let scenario = create_fundamental_rights_scenario(&app).await;
+
+        let pack_req = Request::builder()
+            .method("POST")
+            .uri("/v1/packs")
+            .header("content-type", "application/json")
+            .body(Body::from(
+                serde_json::to_vec(&CreatePackRequest {
+                    pack_type: "fundamental_rights".to_string(),
+                    bundle_ids: Vec::new(),
+                    system_id: Some("benefits-review".to_string()),
+                    from: None,
+                    to: None,
+                    bundle_format: PACK_BUNDLE_FORMAT_FULL.to_string(),
+                    disclosure_policy: None,
+                    disclosure_template: None,
+                })
+                .unwrap(),
+            ))
+            .unwrap();
+        let pack_res = app.clone().oneshot(pack_req).await.unwrap();
+        assert_eq!(pack_res.status(), StatusCode::CREATED);
+        let body = axum::body::to_bytes(pack_res.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let pack: PackSummaryResponse = serde_json::from_slice(&body).unwrap();
+
+        assert_eq!(
+            pack.completeness_profile,
+            Some(CompletenessProfile::FundamentalRightsV1)
+        );
+        assert_eq!(pack.completeness_status, Some(CompletenessStatus::Fail));
+        assert_eq!(
+            pack.pack_completeness_profile,
+            Some(CompletenessProfile::FundamentalRightsV1)
+        );
+        assert_eq!(
+            pack.pack_completeness_status,
+            Some(CompletenessStatus::Pass)
+        );
+        assert_eq!(pack.pack_completeness_pass_count, Some(2));
+        assert_eq!(pack.pack_completeness_warn_count, Some(0));
+        assert_eq!(pack.pack_completeness_fail_count, Some(0));
+        assert_eq!(
+            pack.bundle_ids.iter().cloned().collect::<BTreeSet<_>>(),
+            BTreeSet::from([
+                scenario.assessment.bundle_id.clone(),
+                scenario.human_oversight.bundle_id.clone(),
+            ])
+        );
+
+        let manifest_req = Request::builder()
+            .method("GET")
+            .uri(format!("/v1/packs/{}/manifest", pack.pack_id))
+            .body(Body::empty())
+            .unwrap();
+        let manifest_res = app.oneshot(manifest_req).await.unwrap();
+        assert_eq!(manifest_res.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(manifest_res.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let manifest: PackManifest = serde_json::from_slice(&body).unwrap();
+
+        assert_eq!(
+            manifest.completeness_profile,
+            Some(CompletenessProfile::FundamentalRightsV1)
+        );
+        assert_eq!(manifest.completeness_pass_count, Some(0));
+        assert_eq!(manifest.completeness_warn_count, Some(0));
+        assert_eq!(manifest.completeness_fail_count, Some(2));
+        assert_eq!(
+            manifest.pack_completeness_profile,
+            Some(CompletenessProfile::FundamentalRightsV1)
+        );
+        assert_eq!(
+            manifest.pack_completeness_status,
+            Some(CompletenessStatus::Pass)
+        );
+        assert_eq!(manifest.pack_completeness_pass_count, Some(2));
+        assert_eq!(manifest.pack_completeness_warn_count, Some(0));
+        assert_eq!(manifest.pack_completeness_fail_count, Some(0));
+        assert_eq!(manifest.bundles.len(), 2);
+        assert!(
+            manifest
+                .bundles
+                .iter()
+                .all(|entry| entry.completeness_status == Some(CompletenessStatus::Fail))
+        );
     }
 
     #[tokio::test]

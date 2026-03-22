@@ -216,7 +216,7 @@ Those disclosure policies can now also supply `redacted_fields_by_item_type`, us
 
 This section is normative for the checked-in Annex IV governance fixtures, examples, and pack-acceptance tests. It does not change the bundle contract; it defines the minimum structured detail we expect callers to provide for an audit-ready high-risk governance record.
 
-These minimums are now machine-assessed by the advisory `annex_iv_governance_v1` completeness profile exposed through Rust core, `proofctl assess`, `POST /v1/completeness/evaluate`, the TypeScript/Python SDKs, and the `web-demo` readiness check. Integrity and completeness remain separate concerns: verification answers whether the sealed record changed; completeness answers whether the structured governance record is minimally populated for Annex IV-style review.
+These minimums are now machine-assessed by the advisory `annex_iv_governance_v1` completeness profile exposed through Rust core, `proofctl assess`, `POST /v1/completeness/evaluate`, the TypeScript/Python SDKs, and the `web-demo` readiness check. The same surface now also evaluates deployer-side FRIA minimums through `fundamental_rights_v1`. Integrity and completeness remain separate concerns: verification answers whether the sealed record changed; completeness answers whether the structured governance record is minimally populated for the selected review profile.
 
 ### `risk_assessment`
 
@@ -257,6 +257,14 @@ These minimums are now machine-assessed by the advisory `annex_iv_governance_v1`
 - Typical supporting artefact: `human_oversight.json` plus optional `oversight_notes.*`
 - Typical obligation intent: `art14`
 - Disclosure-sensitive fields: supporting notes artefacts, if present
+
+### `fundamental_rights_assessment`
+
+- Already schema-supported: `assessment_id`, `status`, `scope`, `report_commitment`, `legal_basis`, `affected_rights`, `stakeholder_consultation_summary`, `mitigation_plan_summary`, `assessor`, `metadata`
+- Recommended for `fundamental_rights_v1` readiness: `assessment_id`, `status`, `scope`, `report_commitment`, `legal_basis`, `affected_rights`, `stakeholder_consultation_summary`, `mitigation_plan_summary`, `assessor`
+- Typical supporting artefact: `fundamental_rights_assessment.json` plus optional `fundamental_rights_assessment_report.*`
+- Typical obligation intent: `art27`
+- Disclosure-sensitive paths: `/metadata`
 
 ### Linked Governance Items
 

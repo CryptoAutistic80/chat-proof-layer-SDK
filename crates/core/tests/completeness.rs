@@ -1,8 +1,8 @@
 use proof_layer_core::schema::{
     BUNDLE_VERSION, ComputeMetricsEvidence, CopyrightPolicyEvidence, DataGovernanceEvidence,
-    EvidenceBundle, EvidenceItem, HumanOversightEvidence, InstructionsForUseEvidence,
-    ModelEvaluationEvidence, RiskAssessmentEvidence, TechnicalDocEvidence,
-    TrainingProvenanceEvidence, TrainingSummaryEvidence,
+    EvidenceBundle, EvidenceItem, FundamentalRightsAssessmentEvidence, HumanOversightEvidence,
+    InstructionsForUseEvidence, ModelEvaluationEvidence, RiskAssessmentEvidence,
+    TechnicalDocEvidence, TrainingProvenanceEvidence, TrainingSummaryEvidence,
 };
 use proof_layer_core::{
     Actor, ActorRole, CompletenessProfile, CompletenessStatus, EncryptionPolicy, EvidenceContext,
@@ -110,6 +110,24 @@ fn gpai_provider_bundle() -> EvidenceBundle {
             EvidenceItem::TrainingSummary(summary),
         ],
     )
+}
+
+fn fundamental_rights_bundle() -> EvidenceBundle {
+    let assessment: FundamentalRightsAssessmentEvidence =
+        read_json("fundamental_rights", "fundamental_rights_assessment.json");
+    let oversight: HumanOversightEvidence = read_json("fundamental_rights", "human_oversight.json");
+
+    let mut bundle = minimal_bundle(
+        "benefits-review",
+        "eligibility-ranker-v2",
+        "2026.03",
+        vec![
+            EvidenceItem::FundamentalRightsAssessment(assessment),
+            EvidenceItem::HumanOversight(oversight),
+        ],
+    );
+    bundle.actor.role = ActorRole::Deployer;
+    bundle
 }
 
 #[test]
@@ -256,6 +274,42 @@ fn gpai_provider_missing_required_field_returns_fail() {
         .expect("compute_metrics rule should exist");
     assert_eq!(rule.status, CompletenessStatus::Fail);
     assert_eq!(rule.missing_fields, vec!["compute_resources_summary"]);
+}
+
+#[test]
+fn passing_fundamental_rights_fixture_returns_pass() {
+    let bundle = fundamental_rights_bundle();
+    let report = evaluate_completeness(&bundle, CompletenessProfile::FundamentalRightsV1);
+
+    assert_eq!(report.status, CompletenessStatus::Pass);
+    assert_eq!(report.pass_count, 2);
+    assert_eq!(report.warn_count, 0);
+    assert_eq!(report.fail_count, 0);
+}
+
+#[test]
+fn fundamental_rights_missing_mitigation_summary_returns_fail() {
+    let mut bundle = fundamental_rights_bundle();
+    let evidence = bundle
+        .items
+        .iter_mut()
+        .find_map(|item| match item {
+            EvidenceItem::FundamentalRightsAssessment(evidence) => Some(evidence),
+            _ => None,
+        })
+        .expect("fundamental_rights_assessment should exist");
+    evidence.mitigation_plan_summary = None;
+
+    let report = evaluate_completeness(&bundle, CompletenessProfile::FundamentalRightsV1);
+
+    assert_eq!(report.status, CompletenessStatus::Fail);
+    let rule = report
+        .rules
+        .iter()
+        .find(|rule| rule.item_type == "fundamental_rights_assessment")
+        .expect("fundamental_rights_assessment rule should exist");
+    assert_eq!(rule.status, CompletenessStatus::Fail);
+    assert_eq!(rule.missing_fields, vec!["mitigation_plan_summary"]);
 }
 
 #[test]

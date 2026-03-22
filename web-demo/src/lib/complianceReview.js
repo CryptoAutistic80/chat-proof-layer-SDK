@@ -72,6 +72,15 @@ function readinessCopy(profile, status, subject = "workflow") {
     }
     return `The ${subject} is missing at least one required GPAI provider area or does not yet include a minimally complete record for that area.`;
   }
+  if (profile === "fundamental_rights_v1") {
+    if (status === "pass") {
+      return `The structured fundamental-rights assessment and oversight fields for this ${subject} meet the current advisory minimum.`;
+    }
+    if (status === "warn") {
+      return `The ${subject} has at least one minimally complete deployer-side rights record for each required area, but some captured records are thinner than the current advisory minimum.`;
+    }
+    return `The ${subject} is missing either the deployer-side fundamental-rights assessment record or the linked oversight record, or it does not yet include a minimally complete version of them.`;
+  }
   if (status === "pass") {
     return `The structured fields for this ${subject} meet the current advisory minimum.`;
   }

@@ -2,6 +2,9 @@
 
 Completed:
 
+- Added a new advisory `fundamental_rights_v1` completeness profile for deployer-side FRIA workflows, covering structured `fundamental_rights_assessment` and linked `human_oversight` evidence.
+- Wired that profile through Rust core, `proofctl assess`, vault pack readiness for `fundamental_rights`, the TypeScript/Python SDK surfaces, the checked schemas, docs, and the web demo readiness copy.
+- Added checked FRIA completeness fixtures plus stronger TypeScript/Python builder/native coverage, and refreshed the Python FRIA example to emit the fuller structured assessment shape and print pack readiness.
 - Added a shared assurance-reporting layer in Rust core with plain-English trust levels, stable check IDs, and additive `assessment` payloads for timestamp and receipt verification.
 - Updated vault `POST /v1/verify/timestamp` and `POST /v1/verify/receipt` to return those assessments, plus additive receipt `live_check_mode` support with `off`, `best_effort`, and `required`.
 - Added opt-in Rekor live-log consistency and freshness verification against the current tree head and entry body.

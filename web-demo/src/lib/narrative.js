@@ -262,7 +262,9 @@ function completenessStatus(run) {
     const scope =
       report.profile === "gpai_provider_v1"
         ? "required GPAI provider area"
-        : "required governance area";
+        : report.profile === "fundamental_rights_v1"
+          ? "required deployer-side rights area"
+          : "required governance area";
     return {
       tone: "accent",
       title: "Readiness check has warnings",
@@ -272,6 +274,8 @@ function completenessStatus(run) {
   const scope =
     report.profile === "gpai_provider_v1"
       ? "required GPAI provider area(s)"
+      : report.profile === "fundamental_rights_v1"
+        ? "required deployer-side rights area(s)"
       : "required governance area(s)";
   return {
     tone: "warn",

@@ -59,6 +59,7 @@
       "type": "string",
       "enum": [
         "annex_iv_governance_v1",
+        "fundamental_rights_v1",
         "gpai_provider_v1"
       ]
     },
@@ -86,6 +87,7 @@
       "type": "string",
       "enum": [
         "annex_iv_governance_v1",
+        "fundamental_rights_v1",
         "gpai_provider_v1"
       ]
     },

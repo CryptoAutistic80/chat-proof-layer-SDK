@@ -22,7 +22,7 @@ Current implemented surface:
 
 - Rust core for canonicalization, hashing, signing, verification, timestamping, transparency, disclosure, and backup-envelope crypto.
 - `proofctl` CLI for local keygen, create, verify, inspect, disclose, plus optional vault query/export/backup/restore flows.
-- Advisory readiness/completeness evaluation for full governance bundles via `proofctl assess`, the vault API, and the SDK facades.
+- Advisory readiness/completeness evaluation for full governance and deployer-side rights bundles via `proofctl assess`, the vault API, and the SDK facades.
 - `proof-service` optional self-hosted vault with SQLite storage, filesystem blobs, TLS, bearer auth, single-tenant enforcement, retention, legal holds, audit log, metrics, backup, restore layout export, and pack assembly.
 - TypeScript SDK in `sdks/typescript`, packaged as `@proof-layer/sdk`.
 - Python SDK in `packages/sdk-python`, packaged as `proof-layer-sdk-python`.
@@ -157,6 +157,11 @@ cargo run -p proofctl -- assess \
 cargo run -p proofctl -- assess \
   --in ./gpai-provider-bundle.pkg \
   --profile gpai_provider_v1
+
+# Assess deployer-side FRIA completeness for a full bundle
+cargo run -p proofctl -- assess \
+  --in ./fundamental-rights-bundle.pkg \
+  --profile fundamental_rights_v1
 ```
 
 Notes:
@@ -164,7 +169,7 @@ Notes:
 - `proofctl create` accepts both the legacy PoC capture shape and the current v1.0 `CaptureEvent` shape.
 - Migration overrides are available, for example `--system-id`, `--retention-class`, `--evidence-type`, `--role`, and the `--intended-use` / `--risk-tier` compliance flags.
 - Deterministic fixture inputs live under `fixtures/golden/`.
-- Checked completeness fixtures now include both `fixtures/golden/annex_iv_governance/` and `fixtures/golden/gpai_provider/`.
+- Checked completeness fixtures now include `fixtures/golden/annex_iv_governance/`, `fixtures/golden/fundamental_rights/`, and `fixtures/golden/gpai_provider/`.
 
 Example with an SDK-first compliance profile stamped at create time:
 
@@ -259,10 +264,11 @@ The service auto-loads `./vault.toml` when present. Environment variables still 
 
 The vault also exposes `POST /v1/completeness/evaluate` for advisory readiness checks against stored full bundles, inline full bundles, or stored packs with pack-scoped completeness support. The TypeScript and Python SDK facades mirror that as `evaluateCompleteness(...)` and `evaluate_completeness(...)`.
 
-For pack responses, the legacy `completeness_*` fields remain the per-bundle aggregate view. New `pack_completeness_*` fields carry the true synthesized pack-level readiness result where supported for `annex_iv` and `annex_xi`.
+For pack responses, the legacy `completeness_*` fields remain the per-bundle aggregate view. New `pack_completeness_*` fields carry the true synthesized pack-level readiness result where supported for `annex_iv`, `fundamental_rights`, and `annex_xi`.
 Pack summaries and manifests may now include `pack_completeness_profile`, `pack_completeness_status`, `pack_completeness_pass_count`, `pack_completeness_warn_count`, and `pack_completeness_fail_count`.
 
 For `annex_iv`, the current pack-scoped pass count is `5`, not `8`, because `annex_iv_governance_v1` currently evaluates five rule families even though the pack curates eight governance evidence families.
+For `fundamental_rights`, the current pack-scoped pass count is `2` because `fundamental_rights_v1` currently evaluates the deployer-side assessment and oversight rule families.
 
 ```json
 {
@@ -707,5 +713,4 @@ JSON schemas:
 - Rekor verification checks receipt structure, entry binding, inclusion proof, signed-entry-timestamp signature, and optional live log consistency / freshness when requested.
 - SCITT now writes the COSE/CCF-style receipt body by default and keeps legacy JSON read compatibility, but broader interop and trust-list work are still future work.
 - SQLite is the production-default path in this repo today; PostgreSQL and S3 are future expansion paths, not current backends.
-
 

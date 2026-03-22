@@ -24,14 +24,14 @@ jobs:
           - os: windows-latest
             target: windows-x86_64
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: 20
           cache: npm
           cache-dependency-path: sdks/typescript/package-lock.json
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
       - name: Install OpenSSL (Windows)
@@ -57,7 +57,7 @@ jobs:
           cp sdks/typescript/dist/artifacts/*.tgz "release-assets/proof-layer-sdk-${{ matrix.target }}.tgz"
           cp packages/sdk-python/dist/*.whl release-assets/
       - name: Upload release candidate artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: sdk-release-assets-${{ matrix.target }}
           path: release-assets/*
@@ -76,11 +76,11 @@ jobs:
     env:
       PYPI_API_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
     steps:
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
       - name: Download staged release assets
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           pattern: sdk-release-assets-*
           merge-multiple: true

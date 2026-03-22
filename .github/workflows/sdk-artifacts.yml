@@ -40,9 +40,9 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: 20
           cache: npm
@@ -62,7 +62,7 @@ jobs:
           PROOF_SDK_NATIVE_PROFILE: release
         run: npm run pack:smoke
       - name: Upload TypeScript tarball
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: proof-layer-sdk-tarball-${{ matrix.os }}
           path: sdks/typescript/dist/artifacts/*.tgz
@@ -76,9 +76,9 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
       - name: Install OpenSSL (Windows)
@@ -95,7 +95,7 @@ jobs:
           PROOF_SDK_NATIVE_PROFILE: release
         run: python ./scripts/build_dist.py
       - name: Upload Python wheel
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: proof-layer-sdk-python-wheel-${{ matrix.os }}
           path: packages/sdk-python/dist/*.whl

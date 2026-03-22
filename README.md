@@ -158,6 +158,11 @@ cargo run -p proofctl -- assess \
   --in ./provider-governance-bundle.pkg \
   --profile provider_governance_v1
 
+# Assess conformity readiness for a full bundle
+cargo run -p proofctl -- assess \
+  --in ./conformity-bundle.pkg \
+  --profile conformity_v1
+
 # Assess GPAI provider completeness for a full bundle
 cargo run -p proofctl -- assess \
   --in ./gpai-provider-bundle.pkg \
@@ -167,6 +172,11 @@ cargo run -p proofctl -- assess \
 cargo run -p proofctl -- assess \
   --in ./fundamental-rights-bundle.pkg \
   --profile fundamental_rights_v1
+
+# Assess incident-response completeness for a full bundle
+cargo run -p proofctl -- assess \
+  --in ./incident-response-bundle.pkg \
+  --profile incident_response_v1
 
 # Assess post-market monitoring completeness for a full bundle
 cargo run -p proofctl -- assess \
@@ -179,7 +189,7 @@ Notes:
 - `proofctl create` accepts both the legacy PoC capture shape and the current v1.0 `CaptureEvent` shape.
 - Migration overrides are available, for example `--system-id`, `--retention-class`, `--evidence-type`, `--role`, and the `--intended-use` / `--risk-tier` compliance flags.
 - Deterministic fixture inputs live under `fixtures/golden/`.
-- Checked completeness fixtures now include `fixtures/golden/annex_iv_governance/`, `fixtures/golden/fundamental_rights/`, `fixtures/golden/gpai_provider/`, `fixtures/golden/post_market_monitoring/`, and `fixtures/golden/provider_governance/`.
+- Checked completeness fixtures now include `fixtures/golden/annex_iv_governance/`, `fixtures/golden/conformity/`, `fixtures/golden/fundamental_rights/`, `fixtures/golden/gpai_provider/`, `fixtures/golden/incident_response/`, `fixtures/golden/post_market_monitoring/`, and `fixtures/golden/provider_governance/`.
 
 Example with an SDK-first compliance profile stamped at create time:
 
@@ -274,12 +284,14 @@ The service auto-loads `./vault.toml` when present. Environment variables still 
 
 The vault also exposes `POST /v1/completeness/evaluate` for advisory readiness checks against stored full bundles, inline full bundles, or stored packs with pack-scoped completeness support. The TypeScript and Python SDK facades mirror that as `evaluateCompleteness(...)` and `evaluate_completeness(...)`.
 
-For pack responses, the legacy `completeness_*` fields remain the per-bundle aggregate view. New `pack_completeness_*` fields carry the true synthesized pack-level readiness result where supported for `annex_iv`, `fundamental_rights`, `annex_xi`, `post_market_monitoring`, and `provider_governance`.
+For pack responses, the legacy `completeness_*` fields remain the per-bundle aggregate view. New `pack_completeness_*` fields carry the true synthesized pack-level readiness result where supported for `annex_iv`, `conformity`, `fundamental_rights`, `annex_xi`, `incident_response`, `post_market_monitoring`, and `provider_governance`.
 Pack summaries and manifests may now include `pack_completeness_profile`, `pack_completeness_status`, `pack_completeness_pass_count`, `pack_completeness_warn_count`, and `pack_completeness_fail_count`.
 
 For `annex_iv`, the current pack-scoped pass count is `8` because `annex_iv_governance_v1` now evaluates the full governance set curated by the pack.
+For `conformity`, the current pack-scoped pass count is `3` because `conformity_v1` evaluates the conformity assessment, declaration, and registration artefacts curated by that pack.
 For `provider_governance`, the current pack-scoped pass count is `8` because `provider_governance_v1` evaluates the provider-side governance set curated by that pack, including corrective action follow-up.
 For `fundamental_rights`, the current pack-scoped pass count is `2` because `fundamental_rights_v1` currently evaluates the deployer-side assessment and oversight rule families.
+For `incident_response`, the current pack-scoped pass count is `10` because `incident_response_v1` evaluates the incident context, triage, oversight, corrective-action, authority-reporting, and correspondence families curated by that pack.
 For `post_market_monitoring`, the current pack-scoped pass count is `6` because `post_market_monitoring_v1` evaluates the required monitoring, incident, corrective-action, authority-reporting, and deadline rule families.
 
 ```json

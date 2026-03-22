@@ -1,0 +1,11 @@
+{
+  "submission_id": "sub-benefits-42",
+  "authority": "eu_ai_office",
+  "status": "submitted",
+  "channel": "portal",
+  "submitted_at": "2026-03-08T09:45:00Z",
+  "document_commitment": "sha256:7777777777777777777777777777777777777777777777777777777777777777",
+  "metadata": {
+    "owner": "incident-ops"
+  }
+}

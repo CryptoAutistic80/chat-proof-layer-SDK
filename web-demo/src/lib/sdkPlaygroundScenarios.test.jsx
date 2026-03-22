@@ -38,7 +38,7 @@ describe("sdkPlaygroundScenarios", () => {
     const packType = inferPackTypeFromItems([
       { type: "technical_doc" },
       { type: "risk_assessment" },
-      { type: "post_market_monitoring" }
+      { type: "standards_alignment" }
     ]);
 
     expect(packType).toBe("annex_iv");
@@ -61,5 +61,26 @@ describe("sdkPlaygroundScenarios", () => {
     ]);
 
     expect(packType).toBe("post_market_monitoring");
+  });
+
+  test("infers incident-response pack selection when incident items coexist with context items", () => {
+    const packType = inferPackTypeFromItems([
+      { type: "technical_doc" },
+      { type: "risk_assessment" },
+      { type: "policy_decision" },
+      { type: "incident_report" }
+    ]);
+
+    expect(packType).toBe("incident_response");
+  });
+
+  test("infers conformity pack selection from conformity evidence items", () => {
+    const packType = inferPackTypeFromItems([
+      { type: "conformity_assessment" },
+      { type: "declaration" },
+      { type: "registration" }
+    ]);
+
+    expect(packType).toBe("conformity");
   });
 });

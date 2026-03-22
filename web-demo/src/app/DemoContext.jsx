@@ -57,7 +57,9 @@ const DemoContext = createContext(null);
 const COMPLETENESS_PROFILE_BY_PACK_TYPE = {
   annex_iv: "annex_iv_governance_v1",
   annex_xi: "gpai_provider_v1",
+  conformity: "conformity_v1",
   fundamental_rights: "fundamental_rights_v1",
+  incident_response: "incident_response_v1",
   post_market_monitoring: "post_market_monitoring_v1",
   provider_governance: "provider_governance_v1",
 };

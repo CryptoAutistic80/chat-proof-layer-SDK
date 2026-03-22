@@ -512,25 +512,25 @@ export const PLAYGROUND_SCENARIOS = [
     label: "Incident escalation",
     category: "Incident workflow",
     description:
-      "Capture the monitoring plan, incident trail, corrective action, authority reporting, and correspondence in one workflow.",
+      "Capture the incident context, triage decision, corrective action, authority reporting, and correspondence in one workflow.",
     audienceSummary:
-      "A post-market monitoring path where teams need a reviewable escalation and reporting trail.",
+      "An incident-response path where teams need a reviewable escalation and reporting trail.",
     lawExplainer: explainer(
       "When something goes wrong, teams usually need a clear incident trail that shows what happened, who was notified, and what follow-up is due.",
-      "This example records the monitoring plan plus incident, corrective-action, authority, deadline, and correspondence material needed for follow-up.",
+      "This example records the incident context, triage decision, human-oversight evidence, incident, corrective-action, authority, deadline, and correspondence material needed for follow-up.",
       "Your team still needs to decide whether the event is reportable, complete the real submission process, and carry out closure work outside the tool."
     ),
     sourceRef: "examples/python-incident-response/run.py",
     codeLanguage: "python",
-    packType: "post_market_monitoring",
-    reviewKind: "post_market_monitoring",
+    packType: "incident_response",
+    reviewKind: "incident_response",
     actorRole: "deployer",
     bundleFormat: "full",
     disclosureProfile: "incident_summary",
     templateId: "py_incident_escalation",
-    primaryStepId: "post_market_monitoring",
+    primaryStepId: "incident_report",
     recordExplorerIntro:
-      "This record set shows how a post-market monitoring trail can be built from the first monitoring plan through regulator-facing follow-up.",
+      "This record set shows how an incident-response file can be built from the first triage decision through regulator-facing follow-up.",
     defaults: {
       serviceUrl: DEFAULT_SERVICE_URL,
       systemId: "benefits-review",
@@ -543,8 +543,6 @@ export const PLAYGROUND_SCENARIOS = [
       owner: "incident-ops",
       market: "eu",
       authority: "eu_ai_office",
-      monitoringSummary:
-        "Weekly drift review with escalation thresholds for public-service outcomes.",
       incidentSummary: "Potentially adverse recommendation surfaced in a public-service case.",
       rootCauseSummary:
         "Missing-document threshold was too permissive for a narrow public-service case segment.",
@@ -565,12 +563,6 @@ export const PLAYGROUND_SCENARIOS = [
         key: "authority",
         label: "Authority",
         type: "text"
-      },
-      {
-        key: "monitoringSummary",
-        label: "Monitoring summary",
-        type: "textarea",
-        rows: 3
       },
       {
         key: "incidentSummary",
@@ -620,9 +612,27 @@ export const PLAYGROUND_SCENARIOS = [
     ],
     steps: [
       {
-        id: "post_market_monitoring",
+        id: "technical_doc",
         kind: "evidence",
-        itemType: "post_market_monitoring",
+        itemType: "technical_doc",
+        bundleRole: "support"
+      },
+      {
+        id: "risk_assessment",
+        kind: "evidence",
+        itemType: "risk_assessment",
+        bundleRole: "support"
+      },
+      {
+        id: "human_oversight",
+        kind: "evidence",
+        itemType: "human_oversight",
+        bundleRole: "support"
+      },
+      {
+        id: "policy_decision",
+        kind: "evidence",
+        itemType: "policy_decision",
         bundleRole: "primary"
       },
       { id: "incident_report", kind: "evidence", itemType: "incident_report", bundleRole: "primary" },
@@ -660,7 +670,7 @@ export const PLAYGROUND_SCENARIOS = [
     missingEvidence: [
       "Add the final submission receipt if the review needs proof that a regulator actually received the filing.",
       "Add closure evidence once the incident moves beyond corrective action and the workflow is fully stabilized.",
-      "Add the operational evidence that explains what caused the incident if the reviewer needs deeper root-cause material."
+      "Add underlying runtime or model-evaluation evidence if the reviewer needs deeper technical root-cause material."
     ]
   },
   {
@@ -760,6 +770,24 @@ export function inferPackTypeFromItems(items = []) {
     return "annex_xi";
   }
   if (
+    types.includes("conformity_assessment") ||
+    types.includes("declaration") ||
+    types.includes("registration")
+  ) {
+    return "conformity";
+  }
+  if (types.includes("post_market_monitoring")) {
+    return "post_market_monitoring";
+  }
+  if (
+    types.includes("incident_report") ||
+    types.includes("authority_notification") ||
+    types.includes("regulator_correspondence") ||
+    types.includes("policy_decision")
+  ) {
+    return "incident_response";
+  }
+  if (
     types.includes("technical_doc") ||
     types.includes("risk_assessment") ||
     types.includes("standards_alignment")
@@ -768,12 +796,6 @@ export function inferPackTypeFromItems(items = []) {
   }
   if (types.includes("fundamental_rights_assessment") || types.includes("human_oversight")) {
     return "fundamental_rights";
-  }
-  if (types.includes("post_market_monitoring") || types.includes("authority_submission")) {
-    return "post_market_monitoring";
-  }
-  if (types.includes("incident_report") || types.includes("authority_notification")) {
-    return "incident_response";
   }
   if (
     types.includes("data_governance") ||
@@ -792,6 +814,9 @@ export function findScenarioByPackType(packType, items = []) {
   const scenario = PLAYGROUND_SCENARIOS.find((entry) => entry.packType === packType);
   if (scenario) {
     return scenario;
+  }
+  if (packType === "conformity" || packType === "provider_governance") {
+    return PLAYGROUND_SCENARIOS.find((entry) => entry.id === "ts_support_rules") ?? null;
   }
   if (packType === "post_market_monitoring") {
     return PLAYGROUND_SCENARIOS.find((entry) => entry.id === "py_incident_escalation") ?? null;

@@ -52,6 +52,9 @@ const mocks = vi.hoisted(() => {
     if (packType === "annex_iv") {
       return "annex_iv_governance_v1";
     }
+    if (packType === "conformity") {
+      return "conformity_v1";
+    }
     if (packType === "provider_governance") {
       return "provider_governance_v1";
     }
@@ -60,6 +63,9 @@ const mocks = vi.hoisted(() => {
     }
     if (packType === "annex_xi") {
       return "gpai_provider_v1";
+    }
+    if (packType === "incident_response") {
+      return "incident_response_v1";
     }
     if (packType === "post_market_monitoring") {
       return "post_market_monitoring_v1";
@@ -71,11 +77,17 @@ const mocks = vi.hoisted(() => {
     if (profile === "annex_iv_governance_v1") {
       return 8;
     }
+    if (profile === "conformity_v1") {
+      return 3;
+    }
     if (profile === "provider_governance_v1") {
       return 8;
     }
     if (profile === "fundamental_rights_v1") {
       return 2;
+    }
+    if (profile === "incident_response_v1") {
+      return 10;
     }
     if (profile === "post_market_monitoring_v1") {
       return 6;

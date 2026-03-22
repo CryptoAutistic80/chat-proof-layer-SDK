@@ -116,6 +116,12 @@ provider_governance_readiness = proof_layer.evaluate_completeness(
     profile="provider_governance_v1",
 )
 
+conformity_readiness = proof_layer.evaluate_completeness(
+    # full_conformity_bundle should contain the conformity assessment, declaration, and registration evidence set.
+    bundle=full_conformity_bundle,
+    profile="conformity_v1",
+)
+
 gpai_readiness = proof_layer.evaluate_completeness(
     # full_gpai_provider_bundle should contain the full structured GPAI provider evidence set.
     bundle=full_gpai_provider_bundle,
@@ -126,6 +132,11 @@ fria_readiness = proof_layer.evaluate_completeness(
     # full_fundamental_rights_bundle should contain the deployer-side FRIA assessment + oversight evidence set.
     bundle=full_fundamental_rights_bundle,
     profile="fundamental_rights_v1",
+)
+incident_response_readiness = proof_layer.evaluate_completeness(
+    # full_incident_response_bundle should contain the incident context, triage, oversight, incident, and authority-reporting evidence set.
+    bundle=full_incident_response_bundle,
+    profile="incident_response_v1",
 )
 monitoring_readiness = proof_layer.evaluate_completeness(
     # full_post_market_monitoring_bundle should contain the monitoring, incident, corrective-action, and authority-reporting evidence set.
@@ -229,9 +240,17 @@ provider_governance_pack_readiness = proof_client.evaluate_completeness(
     pack_id="PACK_ID",
     profile="provider_governance_v1",
 )
+conformity_pack_readiness = proof_client.evaluate_completeness(
+    pack_id="PACK_ID",
+    profile="conformity_v1",
+)
 fundamental_rights_pack_readiness = proof_client.evaluate_completeness(
     pack_id="PACK_ID",
     profile="fundamental_rights_v1",
+)
+incident_response_pack_readiness = proof_client.evaluate_completeness(
+    pack_id="PACK_ID",
+    profile="incident_response_v1",
 )
 monitoring_pack_readiness = proof_client.evaluate_completeness(
     pack_id="PACK_ID",
@@ -251,8 +270,17 @@ print(redacted_summary["disclosed_item_count"], len(archive))
 print(preview["disclosed_item_types"])
 print(template_pack["pack_id"], template_preview["disclosed_item_types"])
 print(template_catalog["templates"][0]["profile"], rendered_template["policy"]["name"])
-print(annex_xi_pack_readiness["status"], provider_governance_pack_readiness["status"])
-print(monitoring_readiness["status"], monitoring_pack_readiness["status"])
+print(
+    annex_xi_pack_readiness["status"],
+    provider_governance_pack_readiness["status"],
+    conformity_pack_readiness["status"],
+)
+print(
+    incident_response_readiness["status"],
+    incident_response_pack_readiness["status"],
+    monitoring_readiness["status"],
+    monitoring_pack_readiness["status"],
+)
 print(pack_readiness["source"], pack_readiness["status"])
 print(vault_readiness["status"])
 ```
@@ -265,7 +293,9 @@ Use `verify_timestamp(...)` and `verify_receipt(...)` when you want both the low
 For receipts, `live_check_mode="best_effort"` adds an opt-in live Rekor freshness check without turning temporary network problems into a hard failure.
 
 For `annex_iv`, the pack-scoped pass count is currently `8` because `annex_iv_governance_v1` now evaluates the full governance set curated by the pack.
+For `conformity`, the pack-scoped pass count is currently `3` because `conformity_v1` evaluates the conformity assessment, declaration, and registration artefacts curated by that pack.
 For `provider_governance`, the pack-scoped pass count is currently `8` because `provider_governance_v1` evaluates the provider-side governance set curated by that pack, including corrective action follow-up.
+For `incident_response`, the pack-scoped pass count is currently `10` because `incident_response_v1` evaluates the incident context, triage, oversight, corrective-action, authority-reporting, and correspondence families curated by that pack.
 For `post_market_monitoring`, the pack-scoped pass count is currently `6` because `post_market_monitoring_v1` evaluates the required monitoring and authority-reporting rule families.
 
 For the full provider-side Annex IV governance walkthrough, build the native module and run:

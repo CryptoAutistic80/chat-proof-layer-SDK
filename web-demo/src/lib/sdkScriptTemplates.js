@@ -430,13 +430,85 @@ proof_layer = ProofLayer(
     compliance_profile=${indent(renderPyComplianceProfile(draft), 4).trimStart()},
 )
 
+technical_doc = proof_layer.capture_technical_doc(
+    document_ref=${q(`docs://${draft.systemId}/incident-response-context`)},
+    section="incident_context",
+    descriptor={
+        "owner": ${q(draft.owner)},
+        "document_class": "incident_response_context",
+        "system_id": ${q(draft.systemId)},
+        "authority": ${q(draft.authority)},
+    },
+    system_description_summary="Public-sector benefit eligibility workflow with incident triage and regulator-facing escalation controls.",
+    model_description_summary=${q(`Advisory eligibility review workflow using ${draft.provider}:${draft.model} for case summaries and escalation prompts.`)},
+    capabilities_and_limitations="Flags incomplete or high-risk cases, but does not finalize benefit determinations.",
+    design_choices_summary="Incident-response records capture triage, notification, corrective action, and regulator follow-up in one reviewable file.",
+    evaluation_metrics_summary="Appeal-rate, false-negative, and escalation-timeliness checks are reviewed after reportable incidents.",
+    human_oversight_design_summary="Human case officers review adverse or borderline recommendations before any public-service outcome is finalized.",
+    post_market_monitoring_plan_ref=${q(`incident://${draft.systemId}/triage-playbook-2026-03`)},
+    simplified_tech_doc=True,
+    retention_class="technical_doc",
+)
+
+risk = proof_layer.capture_risk_assessment(
+    risk_id=${q(`risk-${draft.systemId}-001`)},
+    severity="high",
+    status="mitigated",
+    summary="Incident-response risk for adverse public-service recommendations is tracked in the response file.",
+    risk_description="A borderline threshold could over-rely on incomplete evidence and surface adverse recommendations without sufficient escalation.",
+    likelihood="medium",
+    affected_groups=["benefit_applicants", "case_officers"],
+    mitigation_measures=[
+        "Mandatory manual review for borderline or adverse recommendations.",
+        "Escalation to incident operations when an affected person could receive an adverse outcome.",
+        "Authority-notification and corrective-action workflow when serious incidents are suspected.",
+    ],
+    residual_risk_level="medium",
+    risk_owner=${q(draft.owner)},
+    vulnerable_groups_considered=True,
+    test_results_summary="Replay and reviewer-agreement checks are acceptable only when the escalation workflow remains active.",
+    record={"review_cycle": "quarterly", "reviewer": "rights-review-team"},
+    retention_class="risk_mgmt",
+)
+
+oversight = proof_layer.capture_human_oversight(
+    action="manual_case_review_required",
+    reviewer="rights-panel",
+    notes={
+        "incident_summary": ${q(draft.incidentSummary)},
+        "root_cause_summary": ${q(draft.rootCauseSummary)},
+        "override_action": "route_to_manual_review",
+    },
+    actor_role="case_reviewer",
+    anomaly_detected=True,
+    override_action="route_to_manual_review",
+    interpretation_guidance_followed=True,
+    automation_bias_detected=False,
+    two_person_verification=False,
+    stop_triggered=False,
+    stop_reason="Human escalation handled the affected public-service case without a global stop.",
+    retention_class="risk_mgmt",
+)
+
+triage_decision = proof_layer.capture_policy_decision(
+    policy_name="incident_reportability_triage",
+    decision="notify_and_continue_manual_review",
+    rationale={
+        "authority": ${q(draft.authority)},
+        "notification_summary": ${q(draft.notificationSummary)},
+        "owner": ${q(draft.owner)},
+    },
+    metadata={"article": "73", "owner": ${q(draft.owner)}},
+    retention_class="risk_mgmt",
+)
+
 incident = proof_layer.capture_incident_report(
     incident_id="inc-benefits-42",
     severity="serious",
     status="open",
     occurred_at="2026-03-07T18:30:00Z",
     summary=${q(draft.incidentSummary)},
-    detection_method="post_market_monitoring",
+    detection_method="human_review_escalation",
     root_cause_summary=${q(draft.rootCauseSummary)},
     corrective_action_ref=${q(draft.correctiveActionRef)},
     authority_notification_required=True,
@@ -482,6 +554,11 @@ pack = proof_layer.create_pack(
     pack_type="incident_response",
     system_id=${q(draft.systemId)},
     bundle_format="full",
+)
+
+readiness = proof_layer.evaluate_completeness(
+    pack_id=pack["pack_id"],
+    profile="incident_response_v1",
 )`;
 }
 

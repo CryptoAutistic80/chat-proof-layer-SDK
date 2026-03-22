@@ -1,0 +1,13 @@
+{
+  "action": "manual_case_review_required",
+  "reviewer": "rights-panel",
+  "notes_commitment": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+  "actor_role": "case_reviewer",
+  "anomaly_detected": true,
+  "override_action": "route_to_manual_review",
+  "interpretation_guidance_followed": true,
+  "automation_bias_detected": false,
+  "two_person_verification": false,
+  "stop_triggered": false,
+  "stop_reason": "Human escalation handled the affected public-service case without a global stop."
+}

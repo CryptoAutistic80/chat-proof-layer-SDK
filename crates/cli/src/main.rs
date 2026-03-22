@@ -385,10 +385,14 @@ enum OutputFormat {
 enum CompletenessProfileArg {
     #[value(name = "annex_iv_governance_v1")]
     AnnexIvGovernanceV1,
+    #[value(name = "conformity_v1")]
+    ConformityV1,
     #[value(name = "fundamental_rights_v1")]
     FundamentalRightsV1,
     #[value(name = "gpai_provider_v1")]
     GpaiProviderV1,
+    #[value(name = "incident_response_v1")]
+    IncidentResponseV1,
     #[value(name = "post_market_monitoring_v1")]
     PostMarketMonitoringV1,
     #[value(name = "provider_governance_v1")]
@@ -399,8 +403,10 @@ impl CompletenessProfileArg {
     fn as_core(self) -> CompletenessProfile {
         match self {
             Self::AnnexIvGovernanceV1 => CompletenessProfile::AnnexIvGovernanceV1,
+            Self::ConformityV1 => CompletenessProfile::ConformityV1,
             Self::FundamentalRightsV1 => CompletenessProfile::FundamentalRightsV1,
             Self::GpaiProviderV1 => CompletenessProfile::GpaiProviderV1,
+            Self::IncidentResponseV1 => CompletenessProfile::IncidentResponseV1,
             Self::PostMarketMonitoringV1 => CompletenessProfile::PostMarketMonitoringV1,
             Self::ProviderGovernanceV1 => CompletenessProfile::ProviderGovernanceV1,
         }
@@ -5834,6 +5840,28 @@ mod tests {
     }
 
     #[test]
+    fn assess_command_accepts_incident_response_profile_arg() {
+        let cli = Cli::try_parse_from([
+            "proofctl",
+            "assess",
+            "--in",
+            "./bundle.pkg",
+            "--profile",
+            "incident_response_v1",
+        ])
+        .unwrap();
+
+        match cli.command {
+            Commands::Assess(args) => {
+                assert_eq!(args.input, PathBuf::from("./bundle.pkg"));
+                assert_eq!(args.profile, CompletenessProfileArg::IncidentResponseV1);
+                assert_eq!(args.format, OutputFormat::Human);
+            }
+            _ => panic!("unexpected command parsed"),
+        }
+    }
+
+    #[test]
     fn assess_command_accepts_provider_governance_profile_arg() {
         let cli = Cli::try_parse_from([
             "proofctl",
@@ -5849,6 +5877,28 @@ mod tests {
             Commands::Assess(args) => {
                 assert_eq!(args.input, PathBuf::from("./bundle.pkg"));
                 assert_eq!(args.profile, CompletenessProfileArg::ProviderGovernanceV1);
+                assert_eq!(args.format, OutputFormat::Human);
+            }
+            _ => panic!("unexpected command parsed"),
+        }
+    }
+
+    #[test]
+    fn assess_command_accepts_conformity_profile_arg() {
+        let cli = Cli::try_parse_from([
+            "proofctl",
+            "assess",
+            "--in",
+            "./bundle.pkg",
+            "--profile",
+            "conformity_v1",
+        ])
+        .unwrap();
+
+        match cli.command {
+            Commands::Assess(args) => {
+                assert_eq!(args.input, PathBuf::from("./bundle.pkg"));
+                assert_eq!(args.profile, CompletenessProfileArg::ConformityV1);
                 assert_eq!(args.format, OutputFormat::Human);
             }
             _ => panic!("unexpected command parsed"),

@@ -1,0 +1,11 @@
+{
+  "notification_id": "notif-benefits-42",
+  "authority": "eu_ai_office",
+  "status": "drafted",
+  "incident_id": "inc-benefits-42",
+  "due_at": "2026-03-09T12:00:00Z",
+  "report_commitment": "sha256:6666666666666666666666666666666666666666666666666666666666666666",
+  "metadata": {
+    "channel": "portal"
+  }
+}

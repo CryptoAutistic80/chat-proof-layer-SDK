@@ -9,8 +9,10 @@ Deterministic fixture inputs for CLI/service integration and cross-language veri
 - `response.json`: Response artifact fixture.
 - `expected_digests.json`: Expected SHA-256 digest strings for artifact bytes.
 - `annex_iv_governance/`: Checked source fixtures for Annex IV completeness tests.
+- `conformity/`: Checked source fixtures for conformity completeness tests.
 - `fundamental_rights/`: Checked source fixtures for FRIA completeness tests.
 - `gpai_provider/`: Checked source fixtures for GPAI provider completeness tests.
+- `incident_response/`: Checked source fixtures for incident-response completeness tests.
 - `post_market_monitoring/`: Checked source fixtures for monitoring completeness tests.
 - `provider_governance/`: Checked source fixtures for provider-governance completeness tests.
 

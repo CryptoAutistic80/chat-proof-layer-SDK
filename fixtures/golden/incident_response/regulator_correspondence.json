@@ -1,0 +1,12 @@
+{
+  "correspondence_id": "corr-benefits-42",
+  "authority": "eu_ai_office",
+  "direction": "outbound",
+  "status": "sent",
+  "occurred_at": "2026-03-08T10:00:00Z",
+  "message_commitment": "sha256:8888888888888888888888888888888888888888888888888888888888888888",
+  "metadata": {
+    "owner": "incident-ops",
+    "reference": "inc-benefits-42"
+  }
+}

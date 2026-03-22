@@ -2,6 +2,8 @@
 
 Completed:
 
+- Added a new advisory `incident_response_v1` completeness profile for incident-handling workflows, covering `technical_doc`, `risk_assessment`, `human_oversight`, `policy_decision`, `incident_report`, `corrective_action`, `authority_notification`, `authority_submission`, `reporting_deadline`, and `regulator_correspondence`.
+- Added a new advisory `conformity_v1` completeness profile for market-placement workflows, covering `conformity_assessment`, `declaration`, and `registration`.
 - Added a new advisory `provider_governance_v1` completeness profile for provider-side governance workflows, covering `technical_doc`, `risk_assessment`, `data_governance`, `instructions_for_use`, `qms_record`, `standards_alignment`, `post_market_monitoring`, and `corrective_action`.
 - Added a new advisory `post_market_monitoring_v1` completeness profile for monitoring and incident-response workflows, covering `post_market_monitoring`, `incident_report`, `corrective_action`, `authority_notification`, `authority_submission`, and `reporting_deadline`.
 - Expanded `annex_iv_governance_v1` so it now assesses the full eight-family Annex IV governance bundle, adding `qms_record`, `standards_alignment`, and `post_market_monitoring` minimum-field checks.
@@ -398,7 +400,7 @@ Completed:
   `examples/typescript-compliance` now captures the full Annex IV governance workflow and exports both full and disclosure packs,
   and `examples/python-annex-iv` provides the matching Python walkthrough while preserving the older FRIA example separately.
 - Landed advisory Annex IV readiness/completeness evaluation across the stack:
-  Rust core now ships `annex_iv_governance_v1`, `provider_governance_v1`,
+  Rust core now ships `annex_iv_governance_v1`, `conformity_v1`, `incident_response_v1`, `provider_governance_v1`,
   `proofctl` now exposes `assess`,
   the vault now exposes `POST /v1/completeness/evaluate` and attaches completeness summary fields to `annex_iv` pack manifests,
   TypeScript/Python now expose `evaluateCompleteness` / `evaluate_completeness`,

@@ -1,0 +1,11 @@
+{
+  "registration_id": "reg-42",
+  "authority": "eu_database",
+  "status": "submitted",
+  "receipt_commitment": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+  "registration_number": "EU-REG-49-42",
+  "submitted_at": "2026-03-12T15:00:00Z",
+  "metadata": {
+    "owner": "conformity-team"
+  }
+}

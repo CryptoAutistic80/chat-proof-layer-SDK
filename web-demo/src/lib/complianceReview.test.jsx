@@ -22,7 +22,7 @@ describe("buildComplianceReview", () => {
           bundles: [{ bundle_id: "bundle-1", item_types: ["incident_report"] }],
         },
         downloadInfo: {
-          fileName: "post-market-monitoring.pack",
+          fileName: "incident-response.pack",
         },
         completenessReport: {
           profile: "annex_iv_governance_v1",
@@ -50,7 +50,7 @@ describe("buildComplianceReview", () => {
 
     expect(review.title).toBe("Incident escalation evidence map");
     expect(review.capturedNow[0].bundleId).toBe("bundle-1");
-    expect(review.supportsPack.packType).toBe("post_market_monitoring");
+    expect(review.supportsPack.packType).toBe("incident_response");
     expect(review.supportsPack.exportState).toContain("ready to download");
     expect(review.lawExplainer.expectation).toContain("clear incident trail");
     expect(review.readiness.profile).toBe("annex_iv_governance_v1");
@@ -96,6 +96,30 @@ describe("buildComplianceReview", () => {
 
     expect(review.readiness.profile).toBe("gpai_provider_v1");
     expect(review.readiness.summary).toContain("GPAI provider");
+  });
+
+  test("uses conformity-specific readiness wording when the conformity profile is attached", () => {
+    const review = buildComplianceReview(
+      getPlaygroundScenario("ts_support_rules"),
+      {
+        completenessReport: {
+          profile: "conformity_v1",
+          status: "fail",
+          pass_count: 0,
+          warn_count: 0,
+          fail_count: 1,
+          rules: [
+            {
+              status: "fail",
+              missing_fields: ["registration_number"],
+            },
+          ],
+        },
+      },
+    );
+
+    expect(review.readiness.profile).toBe("conformity_v1");
+    expect(review.readiness.summary).toContain("conformity");
   });
 
   test("uses FRIA-specific readiness wording when the deployer profile is attached", () => {
@@ -163,6 +187,30 @@ describe("buildComplianceReview", () => {
 
     expect(review.readiness.profile).toBe("provider_governance_v1");
     expect(review.readiness.summary).toContain("provider-governance");
+  });
+
+  test("uses incident-response-specific readiness wording when that profile is attached", () => {
+    const review = buildComplianceReview(
+      getPlaygroundScenario("py_incident_escalation"),
+      {
+        completenessReport: {
+          profile: "incident_response_v1",
+          status: "fail",
+          pass_count: 0,
+          warn_count: 0,
+          fail_count: 2,
+          rules: [
+            {
+              status: "fail",
+              missing_fields: ["rationale_commitment"],
+            },
+          ],
+        },
+      },
+    );
+
+    expect(review.readiness.profile).toBe("incident_response_v1");
+    expect(review.readiness.summary).toContain("incident-response");
   });
 
   test("leaves exported pack readiness empty when no pack completeness report is attached", () => {

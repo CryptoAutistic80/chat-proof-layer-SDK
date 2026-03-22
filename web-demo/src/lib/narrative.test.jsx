@@ -53,6 +53,31 @@ describe("buildRunNarrativeSummary", () => {
     );
   });
 
+  test("uses conformity-specific readiness wording for conformity flows", () => {
+    const summary = buildRunNarrativeSummary(
+      {
+        presetKey: "investor_summary",
+        scenarioLabel: "Conformity file",
+        bundleId: "bundle-5",
+        bundleRuns: [{ bundleId: "bundle-5" }],
+        completenessProfile: "conformity_v1",
+        completenessReport: {
+          profile: "conformity_v1",
+          status: "warn",
+          pass_count: 2,
+          warn_count: 1,
+          fail_count: 0,
+          rules: [],
+        },
+      },
+      null,
+    );
+
+    expect(summary.completenessStatus.summary).toContain(
+      "required conformity area",
+    );
+  });
+
   test("uses monitoring-specific readiness wording for monitoring flows", () => {
     const summary = buildRunNarrativeSummary(
       {
@@ -75,6 +100,31 @@ describe("buildRunNarrativeSummary", () => {
 
     expect(summary.completenessStatus.summary).toContain(
       "required post-market monitoring area",
+    );
+  });
+
+  test("uses incident-response readiness wording for incident flows", () => {
+    const summary = buildRunNarrativeSummary(
+      {
+        presetKey: "investor_summary",
+        scenarioLabel: "Incident response",
+        bundleId: "bundle-6",
+        bundleRuns: [{ bundleId: "bundle-6" }],
+        completenessProfile: "incident_response_v1",
+        completenessReport: {
+          profile: "incident_response_v1",
+          status: "fail",
+          pass_count: 0,
+          warn_count: 0,
+          fail_count: 1,
+          rules: [],
+        },
+      },
+      null,
+    );
+
+    expect(summary.completenessStatus.summary).toContain(
+      "required incident-response area(s)",
     );
   });
 

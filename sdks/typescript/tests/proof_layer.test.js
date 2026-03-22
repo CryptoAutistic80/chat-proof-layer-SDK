@@ -11,8 +11,10 @@ const repoRoot = path.resolve(__dirname, "../../..");
 const goldenDir = path.join(repoRoot, "fixtures", "golden");
 const annexIvDir = path.join(goldenDir, "annex_iv_governance");
 const gpaiDir = path.join(goldenDir, "gpai_provider");
+const incidentResponseDir = path.join(goldenDir, "incident_response");
 const monitoringDir = path.join(goldenDir, "post_market_monitoring");
 const providerGovernanceDir = path.join(goldenDir, "provider_governance");
+const conformityDir = path.join(goldenDir, "conformity");
 
 async function annexIvBundle() {
   const [
@@ -233,6 +235,59 @@ async function providerGovernanceBundle() {
   };
 }
 
+async function conformityBundle() {
+  const [conformityAssessment, declaration, registration] = await Promise.all([
+    readFile(path.join(conformityDir, "conformity_assessment.json"), "utf8"),
+    readFile(path.join(conformityDir, "declaration.json"), "utf8"),
+    readFile(path.join(conformityDir, "registration.json"), "utf8"),
+  ]);
+
+  return {
+    bundle_version: "1.0",
+    bundle_id: "B-conformity",
+    created_at: "2026-03-22T15:00:00Z",
+    actor: {
+      issuer: "proof-layer-test",
+      app_id: "typescript-sdk",
+      env: "test",
+      signing_key_id: "kid-dev-01",
+      role: "provider",
+    },
+    subject: {
+      system_id: "system-conformity",
+    },
+    context: {},
+    items: [
+      {
+        type: "conformity_assessment",
+        data: JSON.parse(conformityAssessment),
+      },
+      { type: "declaration", data: JSON.parse(declaration) },
+      { type: "registration", data: JSON.parse(registration) },
+    ],
+    artefacts: [],
+    policy: {
+      redactions: [],
+      encryption: { enabled: false },
+    },
+    integrity: {
+      canonicalization: "RFC8785-JCS",
+      hash: "SHA-256",
+      header_digest:
+        "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      bundle_root_algorithm: "pl-merkle-sha256-v4",
+      bundle_root:
+        "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      signature: {
+        format: "JWS",
+        alg: "EdDSA",
+        kid: "kid-dev-01",
+        value: "sig",
+      },
+    },
+  };
+}
+
 async function postMarketMonitoringBundle() {
   const [
     monitoring,
@@ -278,6 +333,99 @@ async function postMarketMonitoringBundle() {
         data: JSON.parse(authoritySubmission),
       },
       { type: "reporting_deadline", data: JSON.parse(reportingDeadline) },
+    ],
+    artefacts: [],
+    policy: {
+      redactions: [],
+      encryption: { enabled: false },
+    },
+    integrity: {
+      canonicalization: "RFC8785-JCS",
+      hash: "SHA-256",
+      header_digest:
+        "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      bundle_root_algorithm: "pl-merkle-sha256-v4",
+      bundle_root:
+        "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      signature: {
+        format: "JWS",
+        alg: "EdDSA",
+        kid: "kid-dev-01",
+        value: "sig",
+      },
+    },
+  };
+}
+
+async function incidentResponseBundle() {
+  const [
+    technicalDoc,
+    riskAssessment,
+    humanOversight,
+    policyDecision,
+    incidentReport,
+    correctiveAction,
+    authorityNotification,
+    authoritySubmission,
+    reportingDeadline,
+    regulatorCorrespondence,
+  ] = await Promise.all([
+    readFile(path.join(incidentResponseDir, "technical_doc.json"), "utf8"),
+    readFile(path.join(incidentResponseDir, "risk_assessment.json"), "utf8"),
+    readFile(path.join(incidentResponseDir, "human_oversight.json"), "utf8"),
+    readFile(path.join(incidentResponseDir, "policy_decision.json"), "utf8"),
+    readFile(path.join(incidentResponseDir, "incident_report.json"), "utf8"),
+    readFile(path.join(incidentResponseDir, "corrective_action.json"), "utf8"),
+    readFile(
+      path.join(incidentResponseDir, "authority_notification.json"),
+      "utf8",
+    ),
+    readFile(
+      path.join(incidentResponseDir, "authority_submission.json"),
+      "utf8",
+    ),
+    readFile(path.join(incidentResponseDir, "reporting_deadline.json"), "utf8"),
+    readFile(
+      path.join(incidentResponseDir, "regulator_correspondence.json"),
+      "utf8",
+    ),
+  ]);
+
+  return {
+    bundle_version: "1.0",
+    bundle_id: "B-incident-response",
+    created_at: "2026-03-22T18:00:00Z",
+    actor: {
+      issuer: "proof-layer-test",
+      app_id: "typescript-sdk",
+      env: "test",
+      signing_key_id: "kid-dev-01",
+      role: "deployer",
+    },
+    subject: {
+      system_id: "benefits-review",
+    },
+    context: {},
+    items: [
+      { type: "technical_doc", data: JSON.parse(technicalDoc) },
+      { type: "risk_assessment", data: JSON.parse(riskAssessment) },
+      { type: "human_oversight", data: JSON.parse(humanOversight) },
+      { type: "policy_decision", data: JSON.parse(policyDecision) },
+      { type: "incident_report", data: JSON.parse(incidentReport) },
+      { type: "corrective_action", data: JSON.parse(correctiveAction) },
+      {
+        type: "authority_notification",
+        data: JSON.parse(authorityNotification),
+      },
+      {
+        type: "authority_submission",
+        data: JSON.parse(authoritySubmission),
+      },
+      { type: "reporting_deadline", data: JSON.parse(reportingDeadline) },
+      {
+        type: "regulator_correspondence",
+        data: JSON.parse(regulatorCorrespondence),
+      },
     ],
     artefacts: [],
     policy: {
@@ -489,6 +637,25 @@ test("ProofLayer local mode can evaluate provider governance completeness", asyn
   assert.equal(report.pass_count, 8);
 });
 
+test("ProofLayer local mode can evaluate conformity completeness", async () => {
+  const signingKeyPem = await readFile(
+    path.join(goldenDir, "signing_key.txt"),
+    "utf8",
+  );
+  const proofLayer = new ProofLayer({
+    signingKeyPem,
+    keyId: "kid-dev-01",
+  });
+
+  const report = await proofLayer.evaluateCompleteness({
+    bundle: await conformityBundle(),
+    profile: "conformity_v1",
+  });
+
+  assert.equal(report.status, "pass");
+  assert.equal(report.pass_count, 3);
+});
+
 test("ProofLayer local mode can evaluate post-market monitoring completeness", async () => {
   const signingKeyPem = await readFile(
     path.join(goldenDir, "signing_key.txt"),
@@ -506,6 +673,25 @@ test("ProofLayer local mode can evaluate post-market monitoring completeness", a
 
   assert.equal(report.status, "pass");
   assert.equal(report.pass_count, 6);
+});
+
+test("ProofLayer local mode can evaluate incident response completeness", async () => {
+  const signingKeyPem = await readFile(
+    path.join(goldenDir, "signing_key.txt"),
+    "utf8",
+  );
+  const proofLayer = new ProofLayer({
+    signingKeyPem,
+    keyId: "kid-dev-01",
+  });
+
+  const report = await proofLayer.evaluateCompleteness({
+    bundle: await incidentResponseBundle(),
+    profile: "incident_response_v1",
+  });
+
+  assert.equal(report.status, "pass");
+  assert.equal(report.pass_count, 10);
 });
 
 test("ProofLayer vault mode can verify timestamp", async () => {

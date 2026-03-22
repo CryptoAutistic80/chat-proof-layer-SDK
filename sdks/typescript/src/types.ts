@@ -340,8 +340,10 @@ export interface VerifyReceiptResponse extends JsonObject {
 
 export type CompletenessProfile =
   | "annex_iv_governance_v1"
+  | "conformity_v1"
   | "fundamental_rights_v1"
   | "gpai_provider_v1"
+  | "incident_response_v1"
   | "post_market_monitoring_v1"
   | "provider_governance_v1";
 

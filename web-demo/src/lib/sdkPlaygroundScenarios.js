@@ -315,6 +315,12 @@ export const PLAYGROUND_SCENARIOS = [
     primaryStepId: "training_provenance",
     recordExplorerIntro:
       "This record set shows a GPAI provider workflow where provenance and compute-threshold evidence are captured as separate but linked records.",
+    readinessScope: {
+      mode: "partial_profile",
+      label: "full GPAI provider file",
+      note:
+        "This example only captures training provenance and compute-threshold evidence, so the full GPAI provider readiness check will stay incomplete until technical documentation, model evaluation, copyright policy, and training summary records are added."
+    },
     defaults: {
       serviceUrl: DEFAULT_SERVICE_URL,
       systemId: "foundation-model-alpha",

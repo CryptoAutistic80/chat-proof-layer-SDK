@@ -98,6 +98,14 @@ function packCompletenessProfile(packSummary, packManifest) {
   );
 }
 
+function readinessActivityDetail(report, scenario = null) {
+  const base = `${report.status} · ${report.pass_count} pass / ${report.warn_count} warn / ${report.fail_count} fail`;
+  if (scenario?.readinessScope?.mode === "partial_profile") {
+    return `${base} · advisory against the ${scenario.readinessScope.label}`;
+  }
+  return base;
+}
+
 function trustTone(level) {
   return level === "trusted" || level === "qualified" ? "good" : "accent";
 }
@@ -482,7 +490,12 @@ export function DemoProvider({ children }) {
     });
   }
 
-  async function evaluateReadinessFor(bundleId, packType, bundle = null) {
+  async function evaluateReadinessFor(
+    bundleId,
+    packType,
+    bundle = null,
+    scenario = null,
+  ) {
     const profile = readinessProfileForPackType(packType);
     if (!profile) {
       return {
@@ -500,7 +513,7 @@ export function DemoProvider({ children }) {
     );
     appendActivity(
       "Readiness check updated",
-      `${completenessReport.status} · ${completenessReport.pass_count} pass / ${completenessReport.warn_count} warn / ${completenessReport.fail_count} fail`,
+      readinessActivityDetail(completenessReport, scenario),
       completenessReport.status === "fail"
         ? "warn"
         : completenessReport.status === "warn"
@@ -559,6 +572,7 @@ export function DemoProvider({ children }) {
     const packType = Object.prototype.hasOwnProperty.call(options, "packType")
       ? options.packType
       : currentPreset.packType;
+    const scenario = options.scenario ?? currentScenario;
     const bundleIds = Array.isArray(options.bundleIds)
       ? options.bundleIds.filter((value) => typeof value === "string" && value.trim())
       : [];
@@ -601,7 +615,7 @@ export function DemoProvider({ children }) {
         );
         appendActivity(
           "Exported pack readiness updated",
-          `${packCompletenessReport.status} · ${packCompletenessReport.pass_count} pass / ${packCompletenessReport.warn_count} warn / ${packCompletenessReport.fail_count} fail`,
+          readinessActivityDetail(packCompletenessReport, scenario),
           packCompletenessReport.status === "fail"
             ? "warn"
             : packCompletenessReport.status === "warn"
@@ -694,7 +708,7 @@ export function DemoProvider({ children }) {
             completenessProfile: currentRun.completenessProfile,
             completenessReport: currentRun.completenessReport,
           }
-        : await evaluateReadinessFor(bundleId, inferredPackType, bundle);
+        : await evaluateReadinessFor(bundleId, inferredPackType, bundle, scenario);
     const systemSummary = await fetchSystemSummary(
       draft.serviceUrl,
       draft.apiKey,
@@ -1151,6 +1165,7 @@ export function DemoProvider({ children }) {
             packType: preset.packType,
             bundleFormat: draft.bundleFormat,
             bundleIds: [createMeta.bundle_id],
+            scenario: null,
           },
         );
       } else {
@@ -1165,6 +1180,7 @@ export function DemoProvider({ children }) {
         createMeta.bundle_id,
         preset.packType,
         bundle,
+        null,
       );
 
       const systemSummary = await fetchSystemSummary(
@@ -1311,6 +1327,7 @@ export function DemoProvider({ children }) {
               bundleFormat: scenario.bundleFormat,
               templateProfile: scenario.disclosureProfile,
               bundleIds: bundleRuns.map((bundleRun) => bundleRun.bundleId),
+              scenario,
             })
           : {
               packSummary: null,
@@ -1318,11 +1335,24 @@ export function DemoProvider({ children }) {
               packCompletenessReport: null,
               downloadInfo: null,
             };
-      const readinessState = await evaluateReadinessFor(
-        primaryBundle.bundleId,
-        scenario.packType,
-        primaryBundle.bundle,
-      );
+      const readinessState =
+        scenario.packType !== null &&
+        bundleRuns.length > 1 &&
+        exportState.packCompletenessReport
+          ? {
+              completenessProfile:
+                packCompletenessProfile(
+                  exportState.packSummary,
+                  exportState.packManifest,
+                ) ?? readinessProfileForPackType(scenario.packType),
+              completenessReport: exportState.packCompletenessReport,
+            }
+          : await evaluateReadinessFor(
+              primaryBundle.bundleId,
+              scenario.packType,
+              primaryBundle.bundle,
+              scenario,
+            );
       const systemSummary = await fetchSystemSummary(
         draft.serviceUrl,
         draft.apiKey,
@@ -1462,6 +1492,9 @@ export function DemoProvider({ children }) {
           bundleFormat: currentRun.bundleFormat,
           templateProfile: currentRun.disclosureProfile,
           bundleIds: currentRun.bundleRuns.map((bundleRun) => bundleRun.bundleId),
+          scenario: currentRun.scenarioId
+            ? getPlaygroundScenario(currentRun.scenarioId)
+            : null,
         },
       );
       setCurrentRun((run) => {

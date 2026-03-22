@@ -467,7 +467,7 @@ describe("AppRoutes", () => {
         "The structured governance fields for this Annex IV exported pack meet the current advisory minimum."
       )
     ).toBeTruthy();
-    expect(screen.getByText("8 pass · 0 warn · 0 fail")).toBeTruthy();
+    expect(screen.getAllByText("8 pass · 0 warn · 0 fail").length).toBeGreaterThan(0);
     expect(mocks.evaluateCompleteness).toHaveBeenCalledWith(
       expect.any(String),
       expect.any(String),

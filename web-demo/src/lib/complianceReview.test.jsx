@@ -96,6 +96,9 @@ describe("buildComplianceReview", () => {
 
     expect(review.readiness.profile).toBe("gpai_provider_v1");
     expect(review.readiness.summary).toContain("GPAI provider");
+    expect(review.readinessScopeNote).toContain(
+      "training provenance and compute-threshold evidence",
+    );
   });
 
   test("uses conformity-specific readiness wording when the conformity profile is attached", () => {

@@ -57,6 +57,17 @@ function bundleRunsFromRun(run) {
   return Array.isArray(run?.bundleRuns) ? run.bundleRuns : [];
 }
 
+function readinessScopeNote(scenario, report) {
+  if (
+    !scenario?.readinessScope ||
+    !report ||
+    scenario.readinessScope.mode !== "partial_profile"
+  ) {
+    return null;
+  }
+  return scenario.readinessScope.note;
+}
+
 function readinessCopy(profile, status, subject = "workflow") {
   if (profile === "annex_iv_governance_v1") {
     if (status === "pass") {
@@ -199,6 +210,11 @@ export function buildComplianceReview(inputScenario, run) {
     },
     readiness,
     packReadiness,
+    readinessScopeNote: readinessScopeNote(scenario, run?.completenessReport),
+    packReadinessScopeNote: readinessScopeNote(
+      scenario,
+      run?.packCompletenessReport,
+    ),
     lawExplainer: scenario.lawExplainer,
     commonNextEvidence: scenario.missingEvidence,
   };

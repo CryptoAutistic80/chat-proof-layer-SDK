@@ -7,6 +7,7 @@ describe("buildRunNarrativeSummary", () => {
       {
         presetKey: "investor_summary",
         scenarioLabel: "GPAI thresholds",
+        scenarioId: "ts_gpai_thresholds",
         bundleId: "bundle-1",
         bundleRuns: [{ bundleId: "bundle-1" }],
         completenessProfile: "gpai_provider_v1",
@@ -25,6 +26,9 @@ describe("buildRunNarrativeSummary", () => {
     expect(summary.completenessStatus.title).toBe("Readiness check failed");
     expect(summary.completenessStatus.summary).toContain(
       "required GPAI provider area(s)",
+    );
+    expect(summary.completenessStatus.summary).toContain(
+      "training provenance and compute-threshold evidence",
     );
   });
 

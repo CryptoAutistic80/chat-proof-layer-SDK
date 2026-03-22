@@ -63,7 +63,9 @@
   "pack_types": [
     "annex_iv",
     "annex_xi",
+    "annex_xii",
     "runtime_logs",
+    "risk_mgmt",
     "ai_literacy",
     "fundamental_rights",
     "provider_governance",

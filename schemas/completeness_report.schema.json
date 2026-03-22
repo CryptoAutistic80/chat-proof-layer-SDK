@@ -18,7 +18,8 @@
     "profile": {
       "type": "string",
       "enum": [
-        "annex_iv_governance_v1"
+        "annex_iv_governance_v1",
+        "gpai_provider_v1"
       ]
     },
     "status": {

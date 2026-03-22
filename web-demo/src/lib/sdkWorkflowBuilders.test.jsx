@@ -118,17 +118,33 @@ describe("buildScenarioWorkflow", () => {
     expect(steps[4].createPayload.capture.items[0].data.summary).toContain("Potentially adverse");
   });
 
-  test("builds a GPAI threshold workflow with linked provenance and compute evidence", async () => {
+  test("builds a full GPAI provider workflow for Annex XI export", async () => {
     const scenario = getPlaygroundScenario("ts_gpai_thresholds");
     const steps = await buildScenarioWorkflow(scenario, baseDraft, null);
 
     expect(steps.map((step) => step.itemTypes[0])).toEqual([
+      "technical_doc",
+      "model_evaluation",
       "training_provenance",
-      "compute_metrics"
+      "compute_metrics",
+      "copyright_policy",
+      "training_summary"
     ]);
-    expect(steps[0].createPayload.capture.items[0].data.compute_metrics_ref).toBe(
+    expect(steps[0].createPayload.capture.items[0].data.document_ref).toBe(
+      "docs://benefits-review/gpai-provider-overview"
+    );
+    expect(steps[1].createPayload.capture.items[0].data.benchmark).toBe(
+      "gpai_provider_release_suite"
+    );
+    expect(steps[2].createPayload.capture.items[0].data.compute_metrics_ref).toBe(
       "compute-benefits-review-v1"
     );
-    expect(steps[1].createPayload.capture.items[0].data.threshold_status).toBe("above_threshold");
+    expect(steps[3].createPayload.capture.items[0].data.threshold_status).toBe("above_threshold");
+    expect(steps[4].createPayload.capture.items[0].data.policy_ref).toBe(
+      "policy://benefits-review/copyright-compliance"
+    );
+    expect(steps[5].createPayload.capture.items[0].data.summary_ref).toBe(
+      "summary://benefits-review/training-2026-03"
+    );
   });
 });

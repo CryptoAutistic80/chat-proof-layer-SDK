@@ -68,10 +68,14 @@ describe("renderScenarioScript", () => {
     expect(script).toContain('packType: "annex_iv"');
   });
 
-  test("renders a GPAI threshold script with training provenance and compute metrics", () => {
+  test("renders a GPAI provider script with the full Annex XI evidence set", () => {
     const script = renderScenarioScript(getPlaygroundScenario("ts_gpai_thresholds"), draft);
+    expect(script).toContain('captureTechnicalDoc');
+    expect(script).toContain('captureModelEvaluation');
     expect(script).toContain('captureTrainingProvenance');
     expect(script).toContain('captureComputeMetrics');
+    expect(script).toContain('captureCopyrightPolicy');
+    expect(script).toContain('captureTrainingSummary');
     expect(script).toContain('packType: "annex_xi"');
   });
 

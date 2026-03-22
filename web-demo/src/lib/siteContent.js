@@ -82,9 +82,9 @@ export const COMMON_WORKFLOWS = [
   },
   {
     slug: "foundation-model-thresholds",
-    title: "Foundation model threshold tracking",
+    title: "GPAI provider Annex XI pack",
     body:
-      "Capture training provenance and compute-threshold evidence for GPAI or Annex XI style review."
+      "Capture the main GPAI provider evidence set, including evaluation, provenance, compute-threshold, copyright, and training-summary records."
   },
   {
     slug: "hiring-review",

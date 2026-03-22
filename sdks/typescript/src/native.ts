@@ -4,6 +4,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type {
   BinaryLike,
+  CompletenessReport,
+  EvaluateCompletenessRequest,
   LocalBuildOptions,
   ProofArtefactInput,
   ProofBundle,
@@ -37,6 +39,7 @@ interface NativeModule {
     fieldRedactionsJson: string
   ): string;
   verifyRedactedBundle(bundleJson: string, artefactsJson: string, publicKeyPem: string): string;
+  evaluateCompleteness(bundleJson: string, profile: string): string;
 }
 
 type NamedBinaryArtefact = { name: string; data: BinaryLike };
@@ -175,4 +178,19 @@ export function verifyRedactedBundle({
   return JSON.parse(
     native.verifyRedactedBundle(bundleJson, artefactsJson, publicKeyPem)
   ) as VerifyRedactedBundleSummary;
+}
+
+export function evaluateCompleteness({
+  bundle,
+  packId,
+  profile
+}: EvaluateCompletenessRequest): CompletenessReport {
+  if (packId) {
+    throw new Error("packId is not supported for local completeness evaluation");
+  }
+  if (!bundle) {
+    throw new Error("bundle is required for local completeness evaluation");
+  }
+  const bundleJson = typeof bundle === "string" ? bundle : JSON.stringify(bundle);
+  return JSON.parse(native.evaluateCompleteness(bundleJson, profile)) as CompletenessReport;
 }

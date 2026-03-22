@@ -211,3 +211,61 @@ Current CLI support is:
 
 Vault-side redacted pack assembly is implemented through `/v1/packs` with `bundle_format = "disclosure"` and optional named `disclosure_policy` selection.
 Those disclosure policies can now also supply `redacted_fields_by_item_type`, using either top-level field names or JSON-pointer paths, which becomes a per-item field/path redaction map in preview responses and pack manifests for v3/v4 bundles.
+
+## Recommended Minimum Governance Fields
+
+This section is normative for the checked-in Annex IV governance fixtures, examples, and pack-acceptance tests. It does not change the bundle contract; it defines the minimum structured detail we expect callers to provide for an audit-ready high-risk governance record.
+
+These minimums are now machine-assessed by the advisory `annex_iv_governance_v1` completeness profile exposed through Rust core, `proofctl assess`, `POST /v1/completeness/evaluate`, the TypeScript/Python SDKs, and the `web-demo` readiness check. Integrity and completeness remain separate concerns: verification answers whether the sealed record changed; completeness answers whether the structured governance record is minimally populated for Annex IV-style review.
+
+### `risk_assessment`
+
+- Already schema-supported: `risk_id`, `severity`, `status`, `summary`, `risk_description`, `likelihood`, `affected_groups`, `mitigation_measures`, `residual_risk_level`, `risk_owner`, `vulnerable_groups_considered`, `test_results_summary`, `metadata`
+- Recommended for Annex IV readiness: `risk_id`, `severity`, `status`, `risk_description`, `likelihood`, `affected_groups`, `mitigation_measures`, `residual_risk_level`, `risk_owner`, `test_results_summary`
+- Typical supporting artefact: `risk_assessment.json`
+- Typical obligation intent: `art9`
+- Disclosure-sensitive paths: `/metadata`
+
+### `data_governance`
+
+- Already schema-supported: `decision`, `dataset_ref`, `dataset_name`, `dataset_version`, `source_description`, `collection_period`, `geographical_scope`, `preprocessing_operations`, `bias_detection_methodology`, `bias_metrics`, `mitigation_actions`, `data_gaps`, `personal_data_categories`, `safeguards`, `metadata`
+- Recommended for Annex IV readiness: `decision`, `dataset_ref` or `dataset_name`, `source_description`, `collection_period`, `preprocessing_operations`, `bias_detection_methodology`, `bias_metrics`, `mitigation_actions`, `data_gaps`, `personal_data_categories`, `safeguards`
+- Typical supporting artefact: `data_governance.json`
+- Typical obligation intent: `art10`
+- Disclosure-sensitive paths: `/metadata`, `/personal_data_categories`, `/safeguards`
+
+### `technical_doc`
+
+- Already schema-supported: `document_ref`, `section`, `commitment`, `annex_iv_sections`, `system_description_summary`, `model_description_summary`, `capabilities_and_limitations`, `design_choices_summary`, `evaluation_metrics_summary`, `human_oversight_design_summary`, `post_market_monitoring_plan_ref`, `simplified_tech_doc`
+- Recommended for Annex IV readiness: `document_ref`, `annex_iv_sections`, `system_description_summary`, `model_description_summary`, `capabilities_and_limitations`, `design_choices_summary`, `evaluation_metrics_summary`, `human_oversight_design_summary`, `post_market_monitoring_plan_ref`
+- Typical supporting artefact: `technical_doc.json` plus optional binary document attachment
+- Typical obligation intent: `art11_annex_iv`
+- Disclosure-sensitive fields: typically the attached document artefacts rather than the structured item itself
+
+### `instructions_for_use`
+
+- Already schema-supported: `document_ref`, `version`, `section`, `commitment`, `provider_identity`, `intended_purpose`, `system_capabilities`, `accuracy_metrics`, `foreseeable_risks`, `explainability_capabilities`, `human_oversight_guidance`, `compute_requirements`, `service_lifetime`, `log_management_guidance`, `metadata`
+- Recommended for Annex IV readiness: `document_ref`, `version`, `provider_identity`, `intended_purpose`, `system_capabilities`, `accuracy_metrics`, `foreseeable_risks`, `human_oversight_guidance`, `log_management_guidance`
+- Typical supporting artefact: `instructions_for_use.json` plus optional binary document attachment
+- Typical obligation intent: `art13`
+- Disclosure-sensitive paths: `/metadata`
+
+### `human_oversight`
+
+- Already schema-supported: `action`, `reviewer`, `notes_commitment`, `actor_role`, `anomaly_detected`, `override_action`, `interpretation_guidance_followed`, `automation_bias_detected`, `two_person_verification`, `stop_triggered`, `stop_reason`
+- Recommended for Annex IV readiness: `action`, `reviewer`, `actor_role`, `anomaly_detected`, `override_action`, `automation_bias_detected`, `stop_triggered`, `stop_reason`
+- Typical supporting artefact: `human_oversight.json` plus optional `oversight_notes.*`
+- Typical obligation intent: `art14`
+- Disclosure-sensitive fields: supporting notes artefacts, if present
+
+### Linked Governance Items
+
+- `qms_record`
+  Typical obligation intent: `art17`
+  Recommended disclosure-sensitive path: `/metadata`
+- `standards_alignment`
+  Typical obligation intent: `art40_43`
+  Recommended disclosure-sensitive path: `/metadata`
+- `post_market_monitoring`
+  Typical obligation intent: `art72`
+  Recommended disclosure-sensitive path: `/metadata`

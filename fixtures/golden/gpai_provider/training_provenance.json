@@ -1,0 +1,12 @@
+{
+  "dataset_ref": "dataset://foundation-model-alpha/pretrain-v5",
+  "stage": "pretraining",
+  "lineage_ref": null,
+  "record_commitment": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+  "compute_metrics_ref": "compute-foundation-alpha-v5",
+  "training_dataset_summary": "Curated multilingual web, code, and licensed reference corpora reviewed under provider intake controls.",
+  "consortium_context": "Single-provider training program",
+  "metadata": {
+    "source": "provider-registry"
+  }
+}

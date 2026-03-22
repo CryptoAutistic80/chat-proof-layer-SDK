@@ -90,24 +90,65 @@ function renderTsSupportRules(draft) {
 
 const proofLayer = new ProofLayer({
   vaultUrl: ${q(draft.serviceUrl)},
-  appId: "typescript-support-rules-example",
+  appId: "typescript-annex-iv-example",
   env: "dev",
   systemId: ${q(draft.systemId)},
   role: "provider",
   complianceProfile: ${indent(renderTsComplianceProfile(draft), 2).trimStart()}
 });
 
-const interaction = await proofLayer.capture({
-  provider: ${q(draft.provider)},
-  model: ${q(draft.model)},
-  requestId: "req-support-002",
-  input: {
-    prompt: ${q(draft.userPrompt)}
+const technicalDoc = await proofLayer.captureTechnicalDoc({
+  documentRef: "docs://${draft.systemId}/annex-iv-system-card",
+  section: "system_description",
+  annexIvSections: ["section_2", "section_3", "section_5", "section_7"],
+  systemDescriptionSummary:
+    "Provider-operated employment-screening assistant for first-pass candidate review in the EU market.",
+  modelDescriptionSummary:
+    "Structured reviewer support workflow with mandatory human oversight before any adverse decision.",
+  capabilitiesAndLimitations:
+    "Summarizes candidate materials and highlights gaps, but does not make autonomous employment decisions.",
+  designChoicesSummary:
+    "The workflow prioritizes explanation, escalation, and review traceability over full automation.",
+  evaluationMetricsSummary:
+    "Quarterly fairness, reviewer-agreement, and false-negative checks are tracked in the provider file.",
+  humanOversightDesignSummary:
+    "Borderline or adverse recommendations route to a human reviewer with documented override controls.",
+  postMarketMonitoringPlanRef: "pmm-${draft.systemId}-2026-03",
+  descriptor: {
+    owner: ${q(draft.owner)},
+    document_class: "annex_iv_system_card"
   },
-  output: {
-    summary: "Support reply captured for review."
+  modelId: "${draft.systemId}-model-v3",
+  version: "2026.03",
+  retentionClass: "technical_doc"
+});
+
+const riskAssessment = await proofLayer.captureRiskAssessment({
+  riskId: "risk-${draft.systemId}-001",
+  severity: "high",
+  status: "mitigated",
+  summary: "High-risk employment workflow risk tracked for Annex IV readiness.",
+  riskDescription:
+    "Candidate summaries could over-weight incomplete or proxy-sensitive profile signals without explicit human review.",
+  likelihood: "medium",
+  affectedGroups: ["job_candidates", "recruiters"],
+  mitigationMeasures: [
+    "Mandatory human review before shortlist or rejection actions.",
+    "Escalation for low-confidence or incomplete-profile cases.",
+    "Quarterly fairness and reviewer-agreement sampling."
+  ],
+  residualRiskLevel: "medium",
+  riskOwner: ${q(draft.owner)},
+  vulnerableGroupsConsidered: true,
+  testResultsSummary:
+    "Offline validation and reviewer-agreement checks show acceptable performance only when human oversight remains enabled.",
+  metadata: {
+    owner: ${q(draft.owner)},
+    review_board: ${q(draft.reviewer)}
   },
-  retentionClass: "runtime_logs"
+  modelId: "${draft.systemId}-model-v3",
+  version: "2026.03",
+  retentionClass: "risk_mgmt"
 });
 
 const dataGovernance = await proofLayer.captureDataGovernance({
@@ -121,7 +162,7 @@ const dataGovernance = await proofLayer.captureDataGovernance({
     end: "2025-12-31"
   },
   geographicalScope: ["EU"],
-  preprocessingOperations: ["deduplication", "pii_minimization", "label_review"],
+  preprocessingOperations: ["deduplication", "pseudonymization", "label_review"],
   biasDetectionMethodology: ${q(draft.biasMethodology)},
   biasMetrics: [
     {
@@ -132,12 +173,18 @@ const dataGovernance = await proofLayer.captureDataGovernance({
     }
   ],
   mitigationActions: [
-    "Escalate sensitive support actions to human review.",
-    "Sample multilingual support outputs for quality assurance."
+    "Escalate sensitive employment actions to human review.",
+    "Sample multilingual candidate summaries for quality assurance."
   ],
-  dataGaps: ["Limited historic examples for rare safety escalations."],
-  personalDataCategories: ["customer_messages", "account_status"],
+  dataGaps: ["Limited historic examples for non-linear career paths."],
+  personalDataCategories: ["cv_data", "employment_history"],
   safeguards: ${pretty(splitList(draft.safeguards))},
+  metadata: {
+    owner: ${q(draft.owner)},
+    market: ${q(draft.market)}
+  },
+  modelId: "${draft.systemId}-model-v3",
+  version: "2026.03",
   retentionClass: "technical_doc"
 });
 
@@ -147,10 +194,17 @@ const instructions = await proofLayer.captureInstructionsForUse({
   section: ${q(draft.instructionsSection)},
   providerIdentity: ${q(`${draft.owner} provider team`)},
   intendedPurpose: ${q(draft.intendedUse)},
-  systemCapabilities: ["issue_summary", "safe_response_drafting", "escalation_flagging"],
+  systemCapabilities: [
+    "candidate_summary",
+    "qualification_gap_flagging",
+    "follow_up_question_suggestions"
+  ],
   accuracyMetrics: [{ name: "review_precision", value: "0.91", unit: "ratio" }],
-  foreseeableRisks: ["overconfident refund guidance", "missed escalation on account-access edge cases"],
-  explainabilityCapabilities: ["reason_summary", "policy-grounded escalation note"],
+  foreseeableRisks: [
+    "overconfident qualification summaries",
+    "missed context for non-linear career paths"
+  ],
+  explainabilityCapabilities: ["reason_summary", "criteria_trace"],
   humanOversightGuidance: ${pretty(splitList(draft.humanOversightGuidance))},
   computeRequirements: ["4 vCPU", "8GB RAM"],
   serviceLifetime: "Review quarterly or whenever operator rules change.",
@@ -158,32 +212,101 @@ const instructions = await proofLayer.captureInstructionsForUse({
     "Retain runtime logs for post-market monitoring reviews.",
     "Escalate incident-linked logs to safety operations."
   ],
-  document: {
-    summary: ${q(draft.instructionsSummary)},
-    owner: ${q(draft.owner)}
+  metadata: {
+    distribution: "internal_reviewer_only"
   },
+  modelId: "${draft.systemId}-model-v3",
+  version: "2026.03",
   retentionClass: "technical_doc"
 });
 
+const humanOversight = await proofLayer.captureHumanOversight({
+  action: "manual_case_review_required",
+  reviewer: ${q(draft.reviewer)},
+  actorRole: "human_reviewer",
+  anomalyDetected: false,
+  overrideAction: "Route borderline cases to manual review queue.",
+  interpretationGuidanceFollowed: true,
+  automationBiasDetected: false,
+  twoPersonVerification: true,
+  stopTriggered: false,
+  stopReason: null,
+  notes: {
+    escalation_path: "quality-panel",
+    sla_hours: 24
+  },
+  modelId: "${draft.systemId}-model-v3",
+  version: "2026.03",
+  retentionClass: "risk_mgmt"
+});
+
 const qmsRecord = await proofLayer.captureQmsRecord({
-  recordId: "qms-release-approval-42",
+  recordId: "qms-${draft.systemId}-release-42",
   process: "release_approval",
   status: "approved",
-  policyName: "Support Assistant Release Governance",
+  policyName: "Hiring Assistant Release Governance",
   revision: "3.1",
   effectiveDate: "2026-03-01",
   scope: "EU provider release control",
+  auditResultsSummary:
+    "No blocking findings. Quarterly oversight-quality review requested before broader rollout.",
+  continuousImprovementActions: [
+    "Extend fairness review coverage for non-linear career histories.",
+    "Refresh recruiter guidance before the next release."
+  ],
+  metadata: {
+    owner: ${q(draft.owner)}
+  },
   record: {
     approver: ${q(draft.qmsApprover)},
     release: "2026.03"
   },
+  modelId: "${draft.systemId}-model-v3",
+  version: "2026.03",
   retentionClass: "technical_doc"
 });
 
-const pack = await proofLayer.createPack({
-  packType: "provider_governance",
+const standardsAlignment = await proofLayer.captureStandardsAlignment({
+  standardRef: "EN ISO/IEC 42001:2023",
+  status: "aligned_with_internal_controls",
+  scope: "Provider governance process for ${draft.systemId}",
+  metadata: {
+    owner: ${q(draft.owner)}
+  },
+  modelId: "${draft.systemId}-model-v3",
+  version: "2026.03",
+  retentionClass: "technical_doc"
+});
+
+const postMarketMonitoring = await proofLayer.capturePostMarketMonitoring({
+  planId: "pmm-${draft.systemId}-2026-03",
+  status: "active",
+  summary: ${q(draft.monitoringSummary)},
+  metadata: {
+    owner: ${q(draft.owner)}
+  },
+  modelId: "${draft.systemId}-model-v3",
+  version: "2026.03",
+  retentionClass: "risk_mgmt"
+});
+
+const preview = await proofLayer.previewDisclosure({
+  bundleId: dataGovernance.bundleId,
+  packType: "annex_iv",
+  disclosurePolicy: "annex_iv_redacted"
+});
+
+const fullPack = await proofLayer.createPack({
+  packType: "annex_iv",
   systemId: ${q(draft.systemId)},
   bundleFormat: "full"
+});
+
+const disclosurePack = await proofLayer.createPack({
+  packType: "annex_iv",
+  systemId: ${q(draft.systemId)},
+  bundleFormat: "disclosure",
+  disclosurePolicy: "annex_iv_redacted"
 });`;
 }
 

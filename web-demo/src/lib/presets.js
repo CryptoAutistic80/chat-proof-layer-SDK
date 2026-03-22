@@ -60,20 +60,35 @@ export const PRESETS = [
   },
   {
     key: "annex_iv_filing",
-    label: "Annex IV filing",
-    description: "Capture a technical summary and wrap it in documentation-oriented artefacts for Annex IV style review.",
-    businessReason: "Show how technical documentation evidence can be assembled for regulator or conformity review without building a full filing by hand.",
+    label: "Annex IV governance pack",
+    description:
+      "Capture one interaction and derive the governance evidence needed for an Annex IV style provider pack preview.",
+    businessReason:
+      "Show how a high-risk provider workflow can turn one governed scenario into technical, risk, oversight, QMS, and monitoring evidence for regulator or conformity review.",
     audience: "compliance",
-    outcomeLabel: "One documentation-oriented proof record with artefacts suitable for Annex IV style review.",
+    outcomeLabel:
+      "One governance-oriented proof record with derived Annex IV evidence suitable for provider-side review.",
     actorRole: "provider",
     packType: "annex_iv",
     disclosureProfile: "annex_iv_redacted",
     bundleFormat: "full",
     retentionClass: "technical_doc",
     defaultMode: "live_if_available",
-    evidenceShape: ["llm_interaction", "technical_doc"],
-    systemPrompt: "You are a technical documentation assistant preparing material for EU AI Act Annex IV style review. Stay precise, factual, and implementation-oriented.",
-    userPrompt: "Provide a technical summary of this AI system's capabilities, intended purpose, and any known limitations for an EU AI Act Annex IV compliance filing."
+    evidenceShape: [
+      "llm_interaction",
+      "technical_doc",
+      "risk_assessment",
+      "data_governance",
+      "instructions_for_use",
+      "human_oversight",
+      "qms_record",
+      "standards_alignment",
+      "post_market_monitoring"
+    ],
+    systemPrompt:
+      "You are a provider-side governance assistant preparing material for EU AI Act Annex IV style review. Stay precise, factual, and implementation-oriented.",
+    userPrompt:
+      "Summarize this employment-screening AI system's intended purpose, known limitations, oversight model, and the evidence a provider would need for Annex IV review."
   }
 ];
 

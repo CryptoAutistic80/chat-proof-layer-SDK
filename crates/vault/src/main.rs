@@ -14,17 +14,21 @@ use chrono::Utc;
 use ed25519_dalek::SigningKey;
 use flate2::{Compression, read::GzDecoder, write::GzEncoder};
 use proof_layer_core::{
-    ArtefactInput, BuildBundleError, CaptureEvent, CaptureInput, EvidenceItem, ProofBundle,
-    ReceiptVerification, RedactedBundle, RekorTransparencyProvider, Rfc3161HttpTimestampProvider,
-    ScittTransparencyProvider, TimestampAssuranceProfile, TimestampToken, TimestampTrustPolicy,
-    TimestampVerification, TransparencyReceipt, TransparencyTrustPolicy,
-    VAULT_BACKUP_ENCRYPTION_ALGORITHM, anchor_bundle as anchor_bundle_receipt, build_bundle,
-    canonicalize_value, decode_backup_encryption_key, decode_private_key_pem,
-    decode_public_key_pem, encode_public_key_pem, encrypt_backup_archive, redact_bundle,
-    redact_bundle_with_field_redactions, sha256_prefixed, timestamp_digest,
-    validate_bundle_integrity_fields, validate_timestamp_trust_policy,
-    validate_transparency_trust_policy, verify_receipt, verify_receipt_with_policy,
-    verify_redacted_bundle, verify_timestamp, verify_timestamp_with_policy,
+    ArtefactInput, BuildBundleError, CaptureEvent, CaptureInput, CheckState, CompletenessProfile,
+    CompletenessReport, CompletenessStatus, EvidenceContext, EvidenceItem, Integrity, Policy,
+    ProofBundle, ReceiptAssessment, ReceiptLiveCheckMode, ReceiptVerification, RedactedBundle,
+    RekorTransparencyProvider, Rfc3161HttpTimestampProvider, ScittFormat, ScittStatementSigner,
+    ScittTransparencyProvider, TimestampAssessment, TimestampAssuranceProfile, TimestampToken,
+    TimestampTrustPolicy, TimestampVerification, TransparencyReceipt, TransparencyTrustPolicy,
+    VAULT_BACKUP_ENCRYPTION_ALGORITHM, anchor_bundle as anchor_bundle_receipt,
+    assess_receipt_error, assess_receipt_verification, assess_timestamp_error,
+    assess_timestamp_verification, build_bundle, canonicalize_value, decode_backup_encryption_key,
+    decode_private_key_pem, decode_public_key_pem, encode_public_key_pem, encrypt_backup_archive,
+    evaluate_completeness, redact_bundle, redact_bundle_with_field_redactions, sha256_prefixed,
+    timestamp_digest, validate_bundle_integrity_fields, validate_timestamp_trust_policy,
+    validate_transparency_trust_policy, verify_receipt, verify_receipt_with_live_check,
+    verify_receipt_with_policy, verify_receipt_with_policy_and_live_check, verify_redacted_bundle,
+    verify_timestamp, verify_timestamp_with_policy,
 };
 use reqwest::Client;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
@@ -262,6 +266,7 @@ struct VaultTransparencyFileConfig {
     provider: Option<String>,
     url: Option<String>,
     rekor_url: Option<String>,
+    scitt_format: Option<String>,
     log_public_key_pem: Option<String>,
     log_public_key_path: Option<String>,
 }
@@ -468,10 +473,14 @@ enum VerifyTimestampRequest {
 enum VerifyReceiptRequest {
     BundleId {
         bundle_id: String,
+        #[serde(default)]
+        live_check_mode: ReceiptLiveCheckMode,
     },
     Direct {
         bundle_root: String,
         receipt: TransparencyReceipt,
+        #[serde(default)]
+        live_check_mode: ReceiptLiveCheckMode,
     },
 }
 
@@ -481,6 +490,7 @@ struct VerifyTimestampResponse {
     message: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     verification: Option<TimestampVerification>,
+    assessment: TimestampAssessment,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -489,6 +499,7 @@ struct VerifyReceiptResponse {
     message: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     verification: Option<ReceiptVerification>,
+    assessment: ReceiptAssessment,
 }
 
 #[derive(Debug, Deserialize)]
@@ -838,6 +849,8 @@ struct TransparencyConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     url: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    scitt_format: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     log_public_key_pem: Option<String>,
 }
 
@@ -919,6 +932,8 @@ struct LegalHoldResponse {
 #[derive(Debug, Deserialize, Serialize)]
 struct CreatePackRequest {
     pack_type: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    bundle_ids: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     system_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -944,6 +959,17 @@ struct DisclosurePreviewRequest {
     policy: Option<DisclosurePolicyConfig>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     disclosure_template: Option<DisclosureTemplateRenderRequest>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct EvaluateCompletenessRequest {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    bundle_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pack_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    bundle: Option<ProofBundle>,
+    profile: CompletenessProfile,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -1017,6 +1043,20 @@ struct PackSummaryResponse {
     bundle_format: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     disclosure_policy: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    completeness_profile: Option<CompletenessProfile>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    completeness_status: Option<CompletenessStatus>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pack_completeness_profile: Option<CompletenessProfile>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pack_completeness_status: Option<CompletenessStatus>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pack_completeness_pass_count: Option<usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pack_completeness_warn_count: Option<usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pack_completeness_fail_count: Option<usize>,
     bundle_count: usize,
     bundle_ids: Vec<String>,
 }
@@ -1037,6 +1077,24 @@ struct PackManifest {
     bundle_format: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     disclosure_policy: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    completeness_profile: Option<CompletenessProfile>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    completeness_pass_count: Option<usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    completeness_warn_count: Option<usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    completeness_fail_count: Option<usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pack_completeness_profile: Option<CompletenessProfile>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pack_completeness_status: Option<CompletenessStatus>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pack_completeness_pass_count: Option<usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pack_completeness_warn_count: Option<usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pack_completeness_fail_count: Option<usize>,
     bundle_ids: Vec<String>,
     bundles: Vec<PackBundleEntry>,
 }
@@ -1070,6 +1128,8 @@ struct PackBundleEntry {
     disclosed_artefact_bytes_included: bool,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     obligation_refs: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    completeness_status: Option<CompletenessStatus>,
     matched_rules: Vec<String>,
 }
 
@@ -1102,6 +1162,7 @@ struct StoredPackRow {
     bundle_count: i64,
     export_path: String,
     manifest_json: String,
+    pack_completeness_report_json: Option<String>,
 }
 
 #[derive(Debug, FromRow)]
@@ -1167,6 +1228,18 @@ struct CuratedPackBundle {
     disclosed_artefact_bytes_included: bool,
     matched_rules: Vec<String>,
 }
+
+const ANNEX_IV_ITEM_PRIORITY: &[&str] = &[
+    "technical_doc",
+    "risk_assessment",
+    "data_governance",
+    "instructions_for_use",
+    "human_oversight",
+    "qms_record",
+    "standards_alignment",
+    "post_market_monitoring",
+    "corrective_action",
+];
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -1305,6 +1378,7 @@ fn build_router(state: AppState, max_payload_bytes: usize) -> Router {
             post(render_disclosure_template),
         )
         .route("/v1/disclosure/preview", post(preview_disclosure))
+        .route("/v1/completeness/evaluate", post(evaluate_completeness_api))
         .route("/v1/systems", get(list_systems))
         .route("/v1/systems/{system_id}/summary", get(get_system_summary))
         .route("/v1/packs", post(create_pack))
@@ -1825,6 +1899,8 @@ fn resolve_transparency_file_config(
     if let Some(url) = file_config.url.or(file_config.rekor_url) {
         config.url = Some(url);
     }
+    config.scitt_format =
+        normalize_optional_string(file_config.scitt_format).map(|value| value.to_ascii_lowercase());
     config.log_public_key_pem = normalize_optional_string(file_config.log_public_key_pem);
     if let Some(path) = file_config.log_public_key_path {
         config.log_public_key_pem = Some(read_config_text_file(
@@ -3348,6 +3424,7 @@ async fn update_transparency_config(
             "enabled": config.enabled,
             "provider": &config.provider,
             "url": &config.url,
+            "scitt_format": &config.scitt_format,
             "has_log_public_key": config.log_public_key_pem.is_some(),
         }),
     )
@@ -3533,6 +3610,137 @@ async fn preview_disclosure(
     Ok((StatusCode::OK, Json(response)))
 }
 
+async fn evaluate_completeness_api(
+    State(state): State<AppState>,
+    actor: Option<Extension<AuthenticatedActor>>,
+    Json(request): Json<EvaluateCompletenessRequest>,
+) -> Result<impl IntoResponse, ApiError> {
+    let EvaluateCompletenessRequest {
+        bundle_id,
+        pack_id,
+        bundle,
+        profile,
+    } = request;
+    let selection_count = usize::from(bundle_id.is_some())
+        + usize::from(pack_id.is_some())
+        + usize::from(bundle.is_some());
+    if selection_count != 1 {
+        return Err(ApiError::bad_request(
+            "provide exactly one of bundle_id, bundle, or pack_id",
+        ));
+    }
+
+    let (report, audit_bundle_id, audit_pack_id) = if let Some(pack_id) = pack_id {
+        let row = load_pack_row(&state.db, &pack_id)
+            .await
+            .map_err(ApiError::internal_anyhow)?
+            .ok_or_else(|| ApiError::not_found("pack not found"))?;
+        let manifest = parse_pack_manifest(&row).map_err(ApiError::internal_anyhow)?;
+        let pack_profile = manifest
+            .pack_completeness_profile
+            .ok_or_else(|| ApiError::conflict("pack does not have pack-scoped completeness"))?;
+        if pack_profile != profile {
+            return Err(ApiError::bad_request(
+                "requested profile does not match pack completeness profile",
+            ));
+        }
+        let report = parse_pack_completeness_report(&row)
+            .map_err(ApiError::internal_anyhow)?
+            .ok_or_else(|| {
+                ApiError::conflict(
+                    "pack-scoped completeness report unavailable for this pack; recreate the pack",
+                )
+            })?;
+        (report, None, Some(pack_id))
+    } else {
+        let bundle = if let Some(bundle_id) = bundle_id.as_deref() {
+            load_active_bundle(&state.db, bundle_id)
+                .await
+                .map_err(ApiError::internal_anyhow)?
+                .ok_or_else(|| ApiError::not_found("bundle not found"))?
+        } else {
+            bundle.expect("selection_count ensures bundle is present")
+        };
+        let report = evaluate_completeness(&bundle, profile);
+        (report, Some(bundle.bundle_id), None)
+    };
+
+    append_audit_log(
+        &state.db,
+        "evaluate_completeness",
+        Some(request_actor_label(&actor)),
+        audit_bundle_id.as_deref(),
+        audit_pack_id.as_deref(),
+        serde_json::json!({
+            "profile": report.profile,
+            "status": report.status,
+            "pass_count": report.pass_count,
+            "warn_count": report.warn_count,
+            "fail_count": report.fail_count,
+        }),
+    )
+    .await
+    .map_err(ApiError::internal_anyhow)?;
+
+    Ok((StatusCode::OK, Json(report)))
+}
+
+fn build_pack_completeness_bundle(
+    pack_id: &str,
+    created_at: &str,
+    requested_system_id: Option<&str>,
+    curated_rows: &[CuratedPackBundle],
+) -> ProofBundle {
+    let first_bundle = &curated_rows
+        .first()
+        .expect("pack completeness requires at least one curated bundle")
+        .bundle;
+    let mut subject = first_bundle.subject.clone();
+    if let Some(system_id) = requested_system_id {
+        subject.system_id = Some(system_id.to_string());
+    }
+
+    ProofBundle {
+        bundle_version: first_bundle.bundle_version.clone(),
+        bundle_id: pack_id.to_string(),
+        created_at: created_at.to_string(),
+        actor: first_bundle.actor.clone(),
+        subject,
+        compliance_profile: curated_rows
+            .iter()
+            .find_map(|curated| curated.bundle.compliance_profile.clone()),
+        context: EvidenceContext::default(),
+        items: curated_rows
+            .iter()
+            .flat_map(|curated| curated.bundle.items.iter().cloned())
+            .collect(),
+        artefacts: curated_rows
+            .iter()
+            .flat_map(|curated| curated.bundle.artefacts.iter().cloned())
+            .collect(),
+        policy: Policy::default(),
+        integrity: Integrity::default(),
+        timestamp: None,
+        receipt: None,
+    }
+}
+
+fn parse_pack_completeness_report(row: &StoredPackRow) -> Result<Option<CompletenessReport>> {
+    let Some(report_json) = row.pack_completeness_report_json.as_deref() else {
+        return Ok(None);
+    };
+    let report: CompletenessReport = serde_json::from_str(report_json).with_context(|| {
+        format!(
+            "failed to parse pack completeness report for pack {}",
+            row.pack_id
+        )
+    })?;
+    if report.bundle_id != row.pack_id {
+        bail!("pack completeness report id mismatch for {}", row.pack_id);
+    }
+    Ok(Some(report))
+}
+
 async fn delete_bundle(
     State(state): State<AppState>,
     actor: Option<Extension<AuthenticatedActor>>,
@@ -3712,9 +3920,20 @@ async fn anchor_bundle(
                 ))
             })?;
             let provider_label = config.provider.clone();
+            let scitt_format = parse_scitt_format(config.scitt_format.as_deref());
             let bundle_for_submission = bundle.clone();
+            let signing_key = state.signing_key.clone();
+            let signing_kid = state.signing_kid.clone();
             tokio::task::spawn_blocking(move || {
-                let provider = ScittTransparencyProvider::with_label(url, provider_label);
+                let provider = ScittTransparencyProvider::with_statement_signer(
+                    url,
+                    provider_label,
+                    scitt_format,
+                    ScittStatementSigner {
+                        signing_key,
+                        key_id: signing_kid,
+                    },
+                );
                 anchor_bundle_receipt(&bundle_for_submission, &provider)
             })
             .await
@@ -3898,11 +4117,38 @@ async fn create_pack(
     let pack_id = generate_bundle_id();
     let created_at = Utc::now().to_rfc3339();
     let disclosure_policy_name = disclosure_policy.as_ref().map(|policy| policy.name.clone());
+    let completeness_profile = bundle_completeness_profile_for_pack(&request.pack_type);
+    let pack_completeness_profile = pack_completeness_profile_for_pack(&request.pack_type);
+    let manifest_system_id = request
+        .system_id
+        .clone()
+        .or_else(|| infer_curated_system_id(&curated_rows));
+    let pack_completeness_report = pack_completeness_profile.map(|profile| {
+        let bundle = build_pack_completeness_bundle(
+            &pack_id,
+            &created_at,
+            manifest_system_id.as_deref(),
+            &curated_rows,
+        );
+        evaluate_completeness(&bundle, profile)
+    });
+    let mut completeness_pass_count = 0usize;
+    let mut completeness_warn_count = 0usize;
+    let mut completeness_fail_count = 0usize;
     let mut bundle_ids = Vec::with_capacity(curated_rows.len());
     let mut bundle_entries = Vec::with_capacity(curated_rows.len());
     let mut files = Vec::with_capacity(curated_rows.len());
 
     for curated in curated_rows {
+        let completeness_status = completeness_profile.map(|profile| {
+            let report = evaluate_completeness(&curated.bundle, profile);
+            match report.status {
+                CompletenessStatus::Pass => completeness_pass_count += 1,
+                CompletenessStatus::Warn => completeness_warn_count += 1,
+                CompletenessStatus::Fail => completeness_fail_count += 1,
+            }
+            report.status
+        });
         let package_name = pack_bundle_file_name(&curated.row.bundle_id, &request.bundle_format);
         let package_bytes = match request.bundle_format.as_str() {
             PACK_BUNDLE_FORMAT_FULL => {
@@ -3964,6 +4210,7 @@ async fn create_pack(
             disclosed_artefact_names: curated.disclosed_artefact_names,
             disclosed_artefact_bytes_included: curated.disclosed_artefact_bytes_included,
             obligation_refs: curated.obligation_refs,
+            completeness_status,
             matched_rules: curated.matched_rules,
         });
         files.push(PackagedFile {
@@ -3977,11 +4224,28 @@ async fn create_pack(
         pack_type: request.pack_type.clone(),
         curation_profile: PACK_CURATION_PROFILE.to_string(),
         generated_at: created_at.clone(),
-        system_id: request.system_id.clone(),
+        system_id: manifest_system_id,
         from: request.from.clone(),
         to: request.to.clone(),
         bundle_format: request.bundle_format.clone(),
         disclosure_policy: disclosure_policy_name.clone(),
+        completeness_profile,
+        completeness_pass_count: completeness_profile.map(|_| completeness_pass_count),
+        completeness_warn_count: completeness_profile.map(|_| completeness_warn_count),
+        completeness_fail_count: completeness_profile.map(|_| completeness_fail_count),
+        pack_completeness_profile,
+        pack_completeness_status: pack_completeness_report
+            .as_ref()
+            .map(|report| report.status),
+        pack_completeness_pass_count: pack_completeness_report
+            .as_ref()
+            .map(|report| report.pass_count),
+        pack_completeness_warn_count: pack_completeness_report
+            .as_ref()
+            .map(|report| report.warn_count),
+        pack_completeness_fail_count: pack_completeness_report
+            .as_ref()
+            .map(|report| report.fail_count),
         bundle_ids,
         bundles: bundle_entries,
     };
@@ -3993,9 +4257,14 @@ async fn create_pack(
     let export_bytes = gzip_json_bytes(&archive).map_err(ApiError::internal_anyhow)?;
     let export_path = pack_export_path(&state.storage_dir, &pack_id);
     persist_pack_export(&export_path, &export_bytes).map_err(ApiError::internal_anyhow)?;
-    persist_pack_metadata(&state.db, &manifest, &export_path)
-        .await
-        .map_err(ApiError::internal_anyhow)?;
+    persist_pack_metadata(
+        &state.db,
+        &manifest,
+        pack_completeness_report.as_ref(),
+        &export_path,
+    )
+    .await
+    .map_err(ApiError::internal_anyhow)?;
     append_audit_log(
         &state.db,
         "create_pack",
@@ -4006,6 +4275,15 @@ async fn create_pack(
             "pack_type": manifest.pack_type.clone(),
             "bundle_format": manifest.bundle_format.clone(),
             "disclosure_policy": manifest.disclosure_policy.clone(),
+            "completeness_profile": manifest.completeness_profile,
+            "completeness_pass_count": manifest.completeness_pass_count,
+            "completeness_warn_count": manifest.completeness_warn_count,
+            "completeness_fail_count": manifest.completeness_fail_count,
+            "pack_completeness_profile": manifest.pack_completeness_profile,
+            "pack_completeness_status": manifest.pack_completeness_status,
+            "pack_completeness_pass_count": manifest.pack_completeness_pass_count,
+            "pack_completeness_warn_count": manifest.pack_completeness_warn_count,
+            "pack_completeness_fail_count": manifest.pack_completeness_fail_count,
             "bundle_count": manifest.bundle_ids.len(),
             "system_id": manifest.system_id.clone(),
         }),
@@ -4223,24 +4501,25 @@ async fn verify_timestamp_token(
         Some(policy) => verify_timestamp_with_policy(&timestamp, &bundle_root, policy),
         None => verify_timestamp(&timestamp, &bundle_root),
     } {
-        Ok(verification) => VerifyTimestampResponse {
-            valid: true,
-            message: format!(
-                "VALID: RFC 3161 token {} at {}",
-                if verification.trusted {
-                    "trusted"
-                } else {
-                    "verified"
-                },
-                verification.generated_at
-            ),
-            verification: Some(verification),
-        },
-        Err(err) => VerifyTimestampResponse {
-            valid: false,
-            message: format!("INVALID: {err}"),
-            verification: None,
-        },
+        Ok(verification) => {
+            let assessment =
+                assess_timestamp_verification(&verification, timestamp_policy.as_ref());
+            VerifyTimestampResponse {
+                valid: true,
+                message: format!("VALID: {} {}", assessment.headline, assessment.summary),
+                verification: Some(verification),
+                assessment,
+            }
+        }
+        Err(err) => {
+            let assessment = assess_timestamp_error(&err, timestamp_policy.as_ref());
+            VerifyTimestampResponse {
+                valid: false,
+                message: format!("INVALID: {}", assessment.summary),
+                verification: None,
+                assessment,
+            }
+        }
     };
     append_audit_log(
         &state.db,
@@ -4264,9 +4543,10 @@ async fn verify_transparency_receipt(
     actor: Option<Extension<AuthenticatedActor>>,
     Json(request): Json<VerifyReceiptRequest>,
 ) -> Result<impl IntoResponse, ApiError> {
-    let (bundle_id, bundle_root, receipt) = resolve_receipt_verification_target(&state.db, request)
-        .await
-        .map_err(ApiError::bad_request_anyhow)?;
+    let (bundle_id, bundle_root, receipt, live_check_mode) =
+        resolve_receipt_verification_target(&state.db, request)
+            .await
+            .map_err(ApiError::bad_request_anyhow)?;
     let timestamp_config = load_timestamp_config(&state.db)
         .await
         .map_err(ApiError::internal_anyhow)?;
@@ -4276,27 +4556,53 @@ async fn verify_transparency_receipt(
     let transparency_policy = transparency_trust_policy(&transparency_config, &timestamp_config);
 
     let response = match match transparency_policy.as_ref() {
-        Some(policy) => verify_receipt_with_policy(&receipt, &bundle_root, policy),
-        None => verify_receipt(&receipt, &bundle_root),
+        Some(policy) if live_check_mode == ReceiptLiveCheckMode::Off => {
+            verify_receipt_with_policy(&receipt, &bundle_root, policy)
+        }
+        Some(policy) => verify_receipt_with_policy_and_live_check(
+            &receipt,
+            &bundle_root,
+            policy,
+            live_check_mode,
+        ),
+        None if live_check_mode == ReceiptLiveCheckMode::Off => {
+            verify_receipt(&receipt, &bundle_root)
+        }
+        None => verify_receipt_with_live_check(&receipt, &bundle_root, live_check_mode),
     } {
-        Ok(verification) => VerifyReceiptResponse {
-            valid: true,
-            message: format!(
-                "VALID: transparency receipt {} at {}",
-                if verification.trusted {
-                    "trusted"
-                } else {
-                    "verified"
-                },
-                verification.integrated_time
-            ),
-            verification: Some(verification),
-        },
-        Err(err) => VerifyReceiptResponse {
-            valid: false,
-            message: format!("INVALID: {err}"),
-            verification: None,
-        },
+        Ok(verification) => {
+            let assessment =
+                assess_receipt_verification(&verification, transparency_policy.as_ref());
+            VerifyReceiptResponse {
+                valid: true,
+                message: format!("VALID: {} {}", assessment.headline, assessment.summary),
+                verification: Some(verification),
+                assessment,
+            }
+        }
+        Err(err) => {
+            let live_check = if live_check_mode == ReceiptLiveCheckMode::Off {
+                None
+            } else {
+                Some(proof_layer_core::ReceiptLiveVerification {
+                    mode: live_check_mode,
+                    state: CheckState::Fail,
+                    checked_at: Utc::now().to_rfc3339(),
+                    summary: err.to_string(),
+                    current_tree_size: None,
+                    current_root_hash: None,
+                    entry_retrieved: None,
+                    consistency_verified: None,
+                })
+            };
+            let assessment = assess_receipt_error(&err, transparency_policy.as_ref(), live_check);
+            VerifyReceiptResponse {
+                valid: false,
+                message: format!("INVALID: {}", assessment.summary),
+                verification: None,
+                assessment,
+            }
+        }
     };
     append_audit_log(
         &state.db,
@@ -4307,6 +4613,7 @@ async fn verify_transparency_receipt(
         serde_json::json!({
             "valid": response.valid,
             "message": response.message.clone(),
+            "live_check_mode": live_check_mode,
         }),
     )
     .await
@@ -4505,21 +4812,35 @@ async fn resolve_timestamp_verification_target(
 async fn resolve_receipt_verification_target(
     db: &SqlitePool,
     request: VerifyReceiptRequest,
-) -> Result<(Option<String>, String, TransparencyReceipt)> {
+) -> Result<(
+    Option<String>,
+    String,
+    TransparencyReceipt,
+    ReceiptLiveCheckMode,
+)> {
     match request {
-        VerifyReceiptRequest::BundleId { bundle_id } => {
+        VerifyReceiptRequest::BundleId {
+            bundle_id,
+            live_check_mode,
+        } => {
             let bundle = load_active_bundle(db, &bundle_id)
                 .await?
                 .ok_or_else(|| anyhow::anyhow!("bundle not found"))?;
             let receipt = bundle
                 .receipt
                 .ok_or_else(|| anyhow::anyhow!("bundle has no transparency receipt"))?;
-            Ok((Some(bundle_id), bundle.integrity.bundle_root, receipt))
+            Ok((
+                Some(bundle_id),
+                bundle.integrity.bundle_root,
+                receipt,
+                live_check_mode,
+            ))
         }
         VerifyReceiptRequest::Direct {
             bundle_root,
             receipt,
-        } => Ok((None, bundle_root, receipt)),
+            live_check_mode,
+        } => Ok((None, bundle_root, receipt, live_check_mode)),
     }
 }
 
@@ -4643,6 +4964,7 @@ fn extract_artefacts(files: &BTreeMap<String, Vec<u8>>) -> Result<BTreeMap<Strin
 
 fn normalize_create_pack_request(mut request: CreatePackRequest) -> Result<CreatePackRequest> {
     request.pack_type = normalize_pack_type(&request.pack_type)?;
+    request.bundle_ids = normalize_bundle_ids(&request.bundle_ids)?;
     request.system_id = normalize_optional_nonempty("system_id", request.system_id)?;
     request.from = normalize_optional_rfc3339("from", request.from)?;
     request.to = normalize_optional_rfc3339("to", request.to)?;
@@ -4663,6 +4985,11 @@ fn normalize_create_pack_request(mut request: CreatePackRequest) -> Result<Creat
             bail!("from must be <= to");
         }
     }
+    if !request.bundle_ids.is_empty()
+        && (request.system_id.is_some() || request.from.is_some() || request.to.is_some())
+    {
+        bail!("bundle_ids cannot be combined with system_id, from, or to");
+    }
     if request.bundle_format == PACK_BUNDLE_FORMAT_FULL
         && (request.disclosure_policy.is_some() || request.disclosure_template.is_some())
     {
@@ -4673,6 +5000,23 @@ fn normalize_create_pack_request(mut request: CreatePackRequest) -> Result<Creat
     }
 
     Ok(request)
+}
+
+fn normalize_bundle_ids(values: &[String]) -> Result<Vec<String>> {
+    let mut normalized = Vec::with_capacity(values.len());
+    let mut seen = BTreeSet::new();
+
+    for value in values {
+        let trimmed = value.trim();
+        if trimmed.is_empty() {
+            bail!("bundle_ids must not contain empty values");
+        }
+        if seen.insert(trimmed.to_string()) {
+            normalized.push(trimmed.to_string());
+        }
+    }
+
+    Ok(normalized)
 }
 
 fn normalize_disclosure_template_render_request(
@@ -4800,8 +5144,48 @@ fn pack_summary(manifest: &PackManifest) -> PackSummaryResponse {
         to: manifest.to.clone(),
         bundle_format: manifest.bundle_format.clone(),
         disclosure_policy: manifest.disclosure_policy.clone(),
+        completeness_profile: manifest.completeness_profile,
+        completeness_status: aggregate_manifest_completeness_status(manifest),
+        pack_completeness_profile: manifest.pack_completeness_profile,
+        pack_completeness_status: manifest.pack_completeness_status,
+        pack_completeness_pass_count: manifest.pack_completeness_pass_count,
+        pack_completeness_warn_count: manifest.pack_completeness_warn_count,
+        pack_completeness_fail_count: manifest.pack_completeness_fail_count,
         bundle_count: manifest.bundle_ids.len(),
         bundle_ids: manifest.bundle_ids.clone(),
+    }
+}
+
+fn bundle_completeness_profile_for_pack(pack_type: &str) -> Option<CompletenessProfile> {
+    match pack_type {
+        "annex_iv" => Some(CompletenessProfile::AnnexIvGovernanceV1),
+        "annex_xi" => Some(CompletenessProfile::GpaiProviderV1),
+        _ => None,
+    }
+}
+
+fn pack_completeness_profile_for_pack(pack_type: &str) -> Option<CompletenessProfile> {
+    match pack_type {
+        // annex_iv packs curate eight evidence families, but the current
+        // annex_iv_governance_v1 readiness profile evaluates five rule families.
+        "annex_iv" => Some(CompletenessProfile::AnnexIvGovernanceV1),
+        "annex_xi" => Some(CompletenessProfile::GpaiProviderV1),
+        _ => None,
+    }
+}
+
+fn aggregate_manifest_completeness_status(manifest: &PackManifest) -> Option<CompletenessStatus> {
+    if manifest.completeness_profile.is_none() {
+        return None;
+    }
+    if manifest.completeness_fail_count.unwrap_or_default() > 0 {
+        Some(CompletenessStatus::Fail)
+    } else if manifest.completeness_warn_count.unwrap_or_default() > 0 {
+        Some(CompletenessStatus::Warn)
+    } else if manifest.completeness_pass_count.unwrap_or_default() > 0 {
+        Some(CompletenessStatus::Pass)
+    } else {
+        None
     }
 }
 
@@ -5152,8 +5536,11 @@ fn curate_pack_bundles(
             .retention_classes
             .contains(&retention_class.as_str());
 
-        if matched_item_types.is_empty() && matched_obligation_refs.is_empty() && !matched_retention
-        {
+        let matched_governance_content =
+            !matched_item_types.is_empty() || !matched_obligation_refs.is_empty();
+        let allow_retention_only_match = profile.pack_type != "annex_iv";
+
+        if !matched_governance_content && (!matched_retention || !allow_retention_only_match) {
             continue;
         }
 
@@ -5195,9 +5582,7 @@ fn curate_pack_bundles(
 
         let mut matched_rules = Vec::new();
         matched_rules.push(format!("pack_type:{}", profile.pack_type));
-        if !profile.allowed_roles.is_empty() {
-            matched_rules.push(format!("actor_role:{bundle_role}"));
-        }
+        matched_rules.push(format!("actor_role:{bundle_role}"));
         if let Some(required_fria) = profile.requires_fria {
             matched_rules.push(format!("compliance_profile.fria_required:{required_fria}"));
         }
@@ -5229,7 +5614,35 @@ fn curate_pack_bundles(
         });
     }
 
+    if profile.pack_type == "annex_iv" {
+        curated.sort_by(|left, right| {
+            annex_iv_bundle_priority(&left.item_types)
+                .cmp(&annex_iv_bundle_priority(&right.item_types))
+                .then_with(|| left.row.created_at.cmp(&right.row.created_at))
+                .then_with(|| left.row.bundle_id.cmp(&right.row.bundle_id))
+        });
+    }
+
     Ok(curated)
+}
+
+fn annex_iv_bundle_priority(item_types: &[String]) -> usize {
+    ANNEX_IV_ITEM_PRIORITY
+        .iter()
+        .position(|expected| item_types.iter().any(|actual| actual == expected))
+        .unwrap_or(ANNEX_IV_ITEM_PRIORITY.len())
+}
+
+fn infer_curated_system_id(curated_rows: &[CuratedPackBundle]) -> Option<String> {
+    let mut system_ids = curated_rows
+        .iter()
+        .filter_map(|curated| curated.row.system_id.as_deref());
+    let first = system_ids.next()?;
+    if system_ids.all(|system_id| system_id == first) {
+        Some(first.to_string())
+    } else {
+        None
+    }
 }
 
 fn apply_disclosure_policy_to_items(
@@ -5455,6 +5868,14 @@ async fn query_pack_source_bundles(
          WHERE deleted_at IS NULL",
     );
 
+    if !request.bundle_ids.is_empty() {
+        builder.push(" AND bundle_id IN (");
+        let mut separated = builder.separated(", ");
+        for bundle_id in &request.bundle_ids {
+            separated.push_bind(bundle_id);
+        }
+        separated.push_unseparated(")");
+    }
     if let Some(system_id) = request.system_id.as_deref() {
         builder.push(" AND system_id = ");
         builder.push_bind(system_id);
@@ -5470,11 +5891,29 @@ async fn query_pack_source_bundles(
 
     builder.push(" ORDER BY created_at ASC, bundle_id ASC");
 
-    builder
+    let rows = builder
         .build_query_as::<PackSourceBundleRow>()
         .fetch_all(db)
         .await
-        .context("failed to fetch bundles for pack assembly")
+        .context("failed to fetch bundles for pack assembly")?;
+
+    if !request.bundle_ids.is_empty() {
+        let found_bundle_ids = rows
+            .iter()
+            .map(|row| row.bundle_id.as_str())
+            .collect::<BTreeSet<_>>();
+        let missing_bundle_ids = request
+            .bundle_ids
+            .iter()
+            .filter(|bundle_id| !found_bundle_ids.contains(bundle_id.as_str()))
+            .cloned()
+            .collect::<Vec<_>>();
+        if !missing_bundle_ids.is_empty() {
+            bail!("unknown bundle_ids: {}", missing_bundle_ids.join(", "));
+        }
+    }
+
+    Ok(rows)
 }
 
 async fn load_pack_artefacts(db: &SqlitePool, bundle_id: &str) -> Result<Vec<PackArtefactBytes>> {
@@ -5789,6 +6228,7 @@ fn persist_pack_export(path: &FsPath, bytes: &[u8]) -> Result<()> {
 async fn persist_pack_metadata(
     db: &SqlitePool,
     manifest: &PackManifest,
+    pack_completeness_report: Option<&CompletenessReport>,
     export_path: &FsPath,
 ) -> Result<()> {
     sqlx::query(
@@ -5801,8 +6241,9 @@ async fn persist_pack_metadata(
             to_date,
             bundle_count,
             export_path,
-            manifest_json
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            manifest_json,
+            pack_completeness_report_json
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(&manifest.pack_id)
     .bind(&manifest.pack_type)
@@ -5813,6 +6254,11 @@ async fn persist_pack_metadata(
     .bind(manifest.bundle_ids.len() as i64)
     .bind(export_path.to_string_lossy().to_string())
     .bind(serde_json::to_string(manifest)?)
+    .bind(
+        pack_completeness_report
+            .map(serde_json::to_string)
+            .transpose()?,
+    )
     .execute(db)
     .await
     .with_context(|| format!("failed to insert pack {}", manifest.pack_id))?;
@@ -5830,7 +6276,8 @@ async fn load_pack_row(db: &SqlitePool, pack_id: &str) -> Result<Option<StoredPa
             to_date,
             bundle_count,
             export_path,
-            manifest_json
+            manifest_json,
+            pack_completeness_report_json
          FROM packs
          WHERE pack_id = ?",
     )
@@ -5927,6 +6374,13 @@ fn parse_timestamp_assurance_profile(value: Option<&str>) -> Option<TimestampAss
         Some("standard") => Some(TimestampAssuranceProfile::Standard),
         Some("qualified") => Some(TimestampAssuranceProfile::Qualified),
         _ => None,
+    }
+}
+
+fn parse_scitt_format(value: Option<&str>) -> ScittFormat {
+    match value.map(str::trim).filter(|value| !value.is_empty()) {
+        Some("legacy_json") => ScittFormat::LegacyJson,
+        _ => ScittFormat::CoseCcf,
     }
 }
 
@@ -6737,6 +7191,8 @@ fn validate_timestamp_config(mut config: TimestampConfig) -> Result<TimestampCon
 fn validate_transparency_config(mut config: TransparencyConfig) -> Result<TransparencyConfig> {
     config.provider = config.provider.trim().to_ascii_lowercase();
     config.url = normalize_optional_string(config.url);
+    config.scitt_format =
+        normalize_optional_string(config.scitt_format).map(|value| value.to_ascii_lowercase());
     config.log_public_key_pem = normalize_optional_string(config.log_public_key_pem);
 
     match config.provider.as_str() {
@@ -6747,15 +7203,33 @@ fn validate_transparency_config(mut config: TransparencyConfig) -> Result<Transp
             if config.url.is_some() {
                 bail!("transparency url must be omitted when provider is none");
             }
+            if config.scitt_format.is_some() {
+                bail!("transparency scitt_format must be omitted when provider is none");
+            }
             if config.log_public_key_pem.is_some() {
                 bail!("transparency log public key must be omitted when provider is none");
             }
         }
-        "rekor" | "scitt" => {
+        "rekor" => {
             let url = config.url.as_deref().ok_or_else(|| {
                 anyhow::anyhow!("transparency url is required when provider is configured")
             })?;
             validate_http_url(url, "transparency url")?;
+            if config.scitt_format.is_some() {
+                bail!("transparency scitt_format is only valid when provider is scitt");
+            }
+        }
+        "scitt" => {
+            let url = config.url.as_deref().ok_or_else(|| {
+                anyhow::anyhow!("transparency url is required when provider is configured")
+            })?;
+            validate_http_url(url, "transparency url")?;
+            if let Some(format) = config.scitt_format.as_deref()
+                && format != "legacy_json"
+                && format != "cose_ccf"
+            {
+                bail!("transparency scitt_format must be legacy_json or cose_ccf");
+            }
         }
         _ => bail!("transparency provider must be one of none, rekor, or scitt"),
     }
@@ -7453,6 +7927,7 @@ fn default_transparency_config() -> TransparencyConfig {
         enabled: false,
         provider: DEFAULT_TRANSPARENCY_PROVIDER.to_string(),
         url: None,
+        scitt_format: None,
         log_public_key_pem: None,
     }
 }
@@ -7492,21 +7967,27 @@ const ALL_DISCLOSURE_ITEM_TYPES: &[&str] = &[
 
 fn annex_iv_default_redactions() -> BTreeMap<String, Vec<String>> {
     BTreeMap::from([
+        ("risk_assessment".to_string(), vec!["/metadata".to_string()]),
         (
             "data_governance".to_string(),
             vec![
-                "/bias_metrics".to_string(),
+                "/metadata".to_string(),
                 "/personal_data_categories".to_string(),
                 "/safeguards".to_string(),
             ],
         ),
         (
             "instructions_for_use".to_string(),
-            vec![
-                "/accuracy_metrics".to_string(),
-                "/compute_requirements".to_string(),
-                "/log_management_guidance".to_string(),
-            ],
+            vec!["/metadata".to_string()],
+        ),
+        ("qms_record".to_string(), vec!["/metadata".to_string()]),
+        (
+            "standards_alignment".to_string(),
+            vec!["/metadata".to_string()],
+        ),
+        (
+            "post_market_monitoring".to_string(),
+            vec!["/metadata".to_string()],
         ),
     ])
 }
@@ -7616,12 +8097,16 @@ fn disclosure_policy_template(
                 "data_governance".to_string(),
                 "instructions_for_use".to_string(),
                 "human_oversight".to_string(),
+                "qms_record".to_string(),
+                "standards_alignment".to_string(),
+                "post_market_monitoring".to_string(),
+                "corrective_action".to_string(),
             ],
             excluded_item_types: Vec::new(),
             allowed_obligation_refs: Vec::new(),
             excluded_obligation_refs: Vec::new(),
             include_artefact_metadata: true,
-            include_artefact_bytes: true,
+            include_artefact_bytes: false,
             artefact_names: Vec::new(),
             redacted_fields_by_item_type: annex_iv_default_redactions(),
         },
@@ -7900,12 +8385,16 @@ fn default_disclosure_config() -> DisclosureConfig {
                     "data_governance".to_string(),
                     "instructions_for_use".to_string(),
                     "human_oversight".to_string(),
+                    "qms_record".to_string(),
+                    "standards_alignment".to_string(),
+                    "post_market_monitoring".to_string(),
+                    "corrective_action".to_string(),
                 ],
                 excluded_item_types: Vec::new(),
                 allowed_obligation_refs: Vec::new(),
                 excluded_obligation_refs: Vec::new(),
                 include_artefact_metadata: true,
-                include_artefact_bytes: true,
+                include_artefact_bytes: false,
                 artefact_names: Vec::new(),
                 redacted_fields_by_item_type: annex_iv_default_redactions(),
             },
@@ -8816,6 +9305,7 @@ async fn initialize_sqlite_schema(db: &SqlitePool) -> Result<()> {
     ensure_sqlite_column(db, "bundles", "legal_hold_reason", "TEXT").await?;
     ensure_sqlite_column(db, "bundles", "legal_hold_until", "TEXT").await?;
     ensure_sqlite_column(db, "bundles", "legal_hold_placed_at", "TEXT").await?;
+    ensure_sqlite_column(db, "packs", "pack_completeness_report_json", "TEXT").await?;
     ensure_sqlite_column(
         db,
         "retention_policies",
@@ -9167,6 +9657,1045 @@ mod tests {
         event.items = items;
         event.policy.retention_class = retention_class.map(str::to_string);
         event
+    }
+
+    fn hiring_assistant_compliance_profile() -> proof_layer_core::ComplianceProfile {
+        proof_layer_core::ComplianceProfile {
+            intended_use: Some("Recruiter support for first-pass candidate review".to_string()),
+            prohibited_practice_screening: Some("screened_no_prohibited_use".to_string()),
+            risk_tier: Some("high_risk".to_string()),
+            high_risk_domain: Some("employment".to_string()),
+            gpai_status: None,
+            systemic_risk: None,
+            fria_required: None,
+            deployment_context: Some("eu_market_placement".to_string()),
+            metadata: serde_json::json!({
+                "owner": "quality-team",
+                "market": "eu",
+            }),
+        }
+    }
+
+    fn gpai_provider_compliance_profile() -> proof_layer_core::ComplianceProfile {
+        proof_layer_core::ComplianceProfile {
+            intended_use: Some("General-purpose text and workflow assistance".to_string()),
+            prohibited_practice_screening: Some("screened_no_prohibited_use".to_string()),
+            risk_tier: Some("gpai".to_string()),
+            high_risk_domain: None,
+            gpai_status: Some("provider".to_string()),
+            systemic_risk: Some(true),
+            fria_required: None,
+            deployment_context: Some("eu_market_placement".to_string()),
+            metadata: serde_json::json!({
+                "owner": "foundation-governance",
+                "market": "eu",
+            }),
+        }
+    }
+
+    fn annex_iv_governance_event(
+        item: EvidenceItem,
+        retention_class: &str,
+        request_id: &str,
+    ) -> CaptureEvent {
+        let mut event = sample_event_with_profile(
+            "hiring-assistant",
+            proof_layer_core::ActorRole::Provider,
+            vec![item],
+            Some(retention_class),
+        );
+        event.subject.request_id = Some(request_id.to_string());
+        event.subject.model_id = Some("hiring-model-v3".to_string());
+        event.subject.version = Some("2026.03".to_string());
+        event.compliance_profile = Some(hiring_assistant_compliance_profile());
+        event
+    }
+
+    fn gpai_provider_event(
+        item: EvidenceItem,
+        retention_class: &str,
+        request_id: &str,
+    ) -> CaptureEvent {
+        let mut event = sample_event_with_profile(
+            "foundation-model-alpha",
+            proof_layer_core::ActorRole::Provider,
+            vec![item],
+            Some(retention_class),
+        );
+        event.subject.request_id = Some(request_id.to_string());
+        event.subject.model_id = Some("foundation-model-alpha-v5".to_string());
+        event.subject.version = Some("2026.03".to_string());
+        event.compliance_profile = Some(gpai_provider_compliance_profile());
+        event
+    }
+
+    async fn create_annex_iv_governance_bundle(
+        app: &Router,
+        item: EvidenceItem,
+        retention_class: &str,
+        request_id: &str,
+        artefact_name: &str,
+        artefact_bytes: &[u8],
+    ) -> CreateBundleResponse {
+        create_bundle_response(
+            app,
+            &CreateBundleRequest {
+                capture: SealableCaptureInput::V10(annex_iv_governance_event(
+                    item,
+                    retention_class,
+                    request_id,
+                )),
+                artefacts: vec![InlineArtefact {
+                    name: artefact_name.to_string(),
+                    content_type: "application/json".to_string(),
+                    data_base64: Base64::encode_string(artefact_bytes),
+                }],
+            },
+        )
+        .await
+    }
+
+    async fn create_gpai_provider_bundle(
+        app: &Router,
+        item: EvidenceItem,
+        retention_class: &str,
+        request_id: &str,
+        artefact_name: &str,
+        artefact_bytes: &[u8],
+    ) -> CreateBundleResponse {
+        create_bundle_response(
+            app,
+            &CreateBundleRequest {
+                capture: SealableCaptureInput::V10(gpai_provider_event(
+                    item,
+                    retention_class,
+                    request_id,
+                )),
+                artefacts: vec![InlineArtefact {
+                    name: artefact_name.to_string(),
+                    content_type: "application/json".to_string(),
+                    data_base64: Base64::encode_string(artefact_bytes),
+                }],
+            },
+        )
+        .await
+    }
+
+    struct AnnexIvScenarioBundles {
+        technical_doc: CreateBundleResponse,
+        risk_assessment: CreateBundleResponse,
+        data_governance: CreateBundleResponse,
+        instructions_for_use: CreateBundleResponse,
+        human_oversight: CreateBundleResponse,
+        qms_record: CreateBundleResponse,
+        standards_alignment: CreateBundleResponse,
+        post_market_monitoring: CreateBundleResponse,
+        runtime_logs: CreateBundleResponse,
+        other_system_risk: CreateBundleResponse,
+    }
+
+    struct GpaiProviderScenarioBundles {
+        technical_doc: CreateBundleResponse,
+        model_evaluation: CreateBundleResponse,
+        training_provenance: CreateBundleResponse,
+        compute_metrics: CreateBundleResponse,
+        copyright_policy: CreateBundleResponse,
+        training_summary: CreateBundleResponse,
+        other_system_bundle: CreateBundleResponse,
+    }
+
+    async fn create_annex_iv_scenario(app: &Router) -> AnnexIvScenarioBundles {
+        let technical_doc = create_annex_iv_governance_bundle(
+            app,
+            EvidenceItem::TechnicalDoc(proof_layer_core::schema::TechnicalDocEvidence {
+                document_ref: "annex-iv/system-card".to_string(),
+                section: Some("system_overview".to_string()),
+                commitment: Some(
+                    "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                        .to_string(),
+                ),
+                annex_iv_sections: vec!["section_2".to_string(), "section_3".to_string()],
+                system_description_summary: Some(
+                    "Ranks candidates for recruiter review.".to_string(),
+                ),
+                model_description_summary: Some("Fine-tuned ranking model.".to_string()),
+                capabilities_and_limitations: Some(
+                    "Advisory only for first-pass screening.".to_string(),
+                ),
+                design_choices_summary: Some(
+                    "Human review is required before employment decisions.".to_string(),
+                ),
+                evaluation_metrics_summary: Some(
+                    "Precision and subgroup parity are reviewed monthly.".to_string(),
+                ),
+                human_oversight_design_summary: Some(
+                    "Recruiters must review every adverse or borderline case.".to_string(),
+                ),
+                post_market_monitoring_plan_ref: Some("pmm://hiring-assistant/2026.03".to_string()),
+                simplified_tech_doc: None,
+            }),
+            "technical_doc",
+            "req-annex-iv-tech-doc",
+            "technical_doc.json",
+            br#"{"document_ref":"annex-iv/system-card"}"#,
+        )
+        .await;
+
+        let risk_assessment = create_annex_iv_governance_bundle(
+            app,
+            EvidenceItem::RiskAssessment(proof_layer_core::schema::RiskAssessmentEvidence {
+                risk_id: "risk-001".to_string(),
+                severity: "high".to_string(),
+                status: "mitigated".to_string(),
+                summary: Some("Bias and over-reliance risk reviewed.".to_string()),
+                risk_description: Some(
+                    "Potential unfair ranking of borderline candidates.".to_string(),
+                ),
+                likelihood: Some("medium".to_string()),
+                affected_groups: vec!["job_applicants".to_string()],
+                mitigation_measures: vec![
+                    "mandatory human review".to_string(),
+                    "monthly subgroup parity review".to_string(),
+                ],
+                residual_risk_level: Some("low".to_string()),
+                risk_owner: Some("quality-team".to_string()),
+                vulnerable_groups_considered: Some(true),
+                test_results_summary: Some(
+                    "No blocking disparity found in March review.".to_string(),
+                ),
+                metadata: serde_json::json!({
+                    "internal_notes": "Escalate if parity delta exceeds 5%",
+                }),
+            }),
+            "risk_mgmt",
+            "req-annex-iv-risk",
+            "risk_assessment.json",
+            br#"{"risk_id":"risk-001"}"#,
+        )
+        .await;
+
+        let data_governance = create_annex_iv_governance_bundle(
+            app,
+            EvidenceItem::DataGovernance(proof_layer_core::schema::DataGovernanceEvidence {
+                decision: "approved_with_restrictions".to_string(),
+                dataset_ref: Some("dataset://hiring-assistant/training-v3".to_string()),
+                dataset_name: Some("hiring-assistant-training".to_string()),
+                dataset_version: Some("2026.03".to_string()),
+                source_description: Some(
+                    "Curated applicant and recruiter-feedback corpus.".to_string(),
+                ),
+                collection_period: Some(proof_layer_core::schema::DateRange {
+                    start: Some("2024-01-01".to_string()),
+                    end: Some("2025-12-31".to_string()),
+                }),
+                geographical_scope: vec!["EU".to_string()],
+                preprocessing_operations: vec![
+                    "deduplication".to_string(),
+                    "pii_minimization".to_string(),
+                    "label_review".to_string(),
+                ],
+                bias_detection_methodology: Some(
+                    "Quarterly protected-group parity review.".to_string(),
+                ),
+                bias_metrics: vec![proof_layer_core::schema::MetricSummary {
+                    name: "selection_rate_gap".to_string(),
+                    value: "0.04".to_string(),
+                    unit: Some("ratio".to_string()),
+                    methodology: None,
+                }],
+                mitigation_actions: vec![
+                    "oversample underrepresented profiles".to_string(),
+                    "human review on borderline scores".to_string(),
+                ],
+                data_gaps: vec!["limited historic data for niche technical roles".to_string()],
+                personal_data_categories: vec![
+                    "employment_history".to_string(),
+                    "education_history".to_string(),
+                ],
+                safeguards: vec![
+                    "pseudonymization".to_string(),
+                    "role-based dataset access".to_string(),
+                ],
+                metadata: serde_json::json!({
+                    "owner": "data-governance-board",
+                }),
+            }),
+            "technical_doc",
+            "req-annex-iv-data",
+            "data_governance.json",
+            br#"{"dataset_ref":"dataset://hiring-assistant/training-v3"}"#,
+        )
+        .await;
+
+        let instructions_for_use = create_annex_iv_governance_bundle(
+            app,
+            EvidenceItem::InstructionsForUse(
+                proof_layer_core::schema::InstructionsForUseEvidence {
+                    document_ref: "docs://hiring-assistant/operator-handbook".to_string(),
+                    version: Some("2026.03".to_string()),
+                    section: Some("human-review-required".to_string()),
+                    commitment: Some(
+                        "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+                            .to_string(),
+                    ),
+                    provider_identity: Some("Proof Layer Hiring Systems Ltd.".to_string()),
+                    intended_purpose: Some(
+                        "Recruiter support for first-pass candidate review".to_string(),
+                    ),
+                    system_capabilities: vec![
+                        "candidate_summary".to_string(),
+                        "borderline_case_flagging".to_string(),
+                    ],
+                    accuracy_metrics: vec![proof_layer_core::schema::MetricSummary {
+                        name: "review_precision".to_string(),
+                        value: "0.91".to_string(),
+                        unit: Some("ratio".to_string()),
+                        methodology: None,
+                    }],
+                    foreseeable_risks: vec!["automation bias".to_string()],
+                    explainability_capabilities: Vec::new(),
+                    human_oversight_guidance: vec![
+                        "Review every negative or borderline recommendation.".to_string(),
+                    ],
+                    compute_requirements: vec!["4 vCPU".to_string(), "8GB RAM".to_string()],
+                    service_lifetime: Some("12 months".to_string()),
+                    log_management_guidance: vec![
+                        "Retain runtime logs for post-market monitoring.".to_string(),
+                    ],
+                    metadata: serde_json::json!({
+                        "distribution": "internal_only",
+                    }),
+                },
+            ),
+            "technical_doc",
+            "req-annex-iv-ifu",
+            "instructions_for_use.json",
+            br#"{"document_ref":"docs://hiring-assistant/operator-handbook"}"#,
+        )
+        .await;
+
+        let human_oversight = create_annex_iv_governance_bundle(
+            app,
+            EvidenceItem::HumanOversight(proof_layer_core::schema::HumanOversightEvidence {
+                action: "manual_case_review_required".to_string(),
+                reviewer: Some("quality-panel".to_string()),
+                notes_commitment: Some(
+                    "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+                        .to_string(),
+                ),
+                actor_role: Some("human_reviewer".to_string()),
+                anomaly_detected: Some(true),
+                override_action: Some("escalate_to_recruiter".to_string()),
+                interpretation_guidance_followed: Some(true),
+                automation_bias_detected: Some(false),
+                two_person_verification: Some(true),
+                stop_triggered: Some(false),
+                stop_reason: Some(
+                    "No emergency stop was required for this review path.".to_string(),
+                ),
+            }),
+            "risk_mgmt",
+            "req-annex-iv-oversight",
+            "human_oversight.json",
+            br#"{"action":"manual_case_review_required"}"#,
+        )
+        .await;
+
+        let qms_record = create_annex_iv_governance_bundle(
+            app,
+            EvidenceItem::QmsRecord(proof_layer_core::schema::QmsRecordEvidence {
+                record_id: "qms-release-approval-42".to_string(),
+                process: "release_approval".to_string(),
+                status: "approved".to_string(),
+                record_commitment: Some(
+                    "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+                        .to_string(),
+                ),
+                policy_name: Some("Hiring Assistant Release Governance".to_string()),
+                revision: Some("3.1".to_string()),
+                effective_date: Some("2026-03-01".to_string()),
+                expiry_date: None,
+                scope: Some("EU provider release control".to_string()),
+                approval_commitment: None,
+                audit_results_summary: Some(
+                    "Release gate approved after compliance review.".to_string(),
+                ),
+                continuous_improvement_actions: vec!["monitor subgroup parity monthly".to_string()],
+                metadata: serde_json::json!({
+                    "owner": "quality-lead",
+                }),
+            }),
+            "technical_doc",
+            "req-annex-iv-qms",
+            "qms_record.json",
+            br#"{"record_id":"qms-release-approval-42"}"#,
+        )
+        .await;
+
+        let standards_alignment = create_annex_iv_governance_bundle(
+            app,
+            EvidenceItem::StandardsAlignment(
+                proof_layer_core::schema::StandardsAlignmentEvidence {
+                    standard_ref: "harmonized://eu-ai-act/annex-iv".to_string(),
+                    status: "aligned".to_string(),
+                    scope: Some("high-risk technical documentation".to_string()),
+                    mapping_commitment: Some(
+                        "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+                            .to_string(),
+                    ),
+                    metadata: serde_json::json!({
+                        "owner": "compliance-mapping-team",
+                    }),
+                },
+            ),
+            "technical_doc",
+            "req-annex-iv-standards",
+            "standards_alignment.json",
+            br#"{"standard_ref":"harmonized://eu-ai-act/annex-iv"}"#,
+        )
+        .await;
+
+        let post_market_monitoring = create_annex_iv_governance_bundle(
+            app,
+            EvidenceItem::PostMarketMonitoring(
+                proof_layer_core::schema::PostMarketMonitoringEvidence {
+                    plan_id: "pmm-42".to_string(),
+                    status: "active".to_string(),
+                    summary: Some("Weekly drift review with escalation thresholds.".to_string()),
+                    report_commitment: Some(
+                        "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+                            .to_string(),
+                    ),
+                    metadata: serde_json::json!({
+                        "owner": "safety-ops",
+                    }),
+                },
+            ),
+            "risk_mgmt",
+            "req-annex-iv-pmm",
+            "post_market_monitoring.json",
+            br#"{"plan_id":"pmm-42"}"#,
+        )
+        .await;
+
+        let runtime_logs = create_bundle_response(
+            app,
+            &CreateBundleRequest {
+                capture: SealableCaptureInput::V10(sample_event_with_profile(
+                    "hiring-assistant",
+                    proof_layer_core::ActorRole::Provider,
+                    sample_event_with_system("hiring-assistant").items,
+                    Some("runtime_logs"),
+                )),
+                artefacts: vec![InlineArtefact {
+                    name: "prompt.json".to_string(),
+                    content_type: "application/json".to_string(),
+                    data_base64: Base64::encode_string(br#"{"prompt":"hello"}"#),
+                }],
+            },
+        )
+        .await;
+
+        let other_system_risk = create_bundle_response(
+            app,
+            &CreateBundleRequest {
+                capture: SealableCaptureInput::V10(sample_event_with_profile(
+                    "other-hiring-system",
+                    proof_layer_core::ActorRole::Provider,
+                    vec![EvidenceItem::RiskAssessment(
+                        proof_layer_core::schema::RiskAssessmentEvidence {
+                            risk_id: "risk-other".to_string(),
+                            severity: "high".to_string(),
+                            status: "open".to_string(),
+                            summary: Some("unrelated system".to_string()),
+                            risk_description: None,
+                            likelihood: None,
+                            affected_groups: Vec::new(),
+                            mitigation_measures: Vec::new(),
+                            residual_risk_level: None,
+                            risk_owner: None,
+                            vulnerable_groups_considered: None,
+                            test_results_summary: None,
+                            metadata: serde_json::Value::Null,
+                        },
+                    )],
+                    Some("risk_mgmt"),
+                )),
+                artefacts: vec![InlineArtefact {
+                    name: "risk_assessment.json".to_string(),
+                    content_type: "application/json".to_string(),
+                    data_base64: Base64::encode_string(br#"{"risk_id":"risk-other"}"#),
+                }],
+            },
+        )
+        .await;
+
+        AnnexIvScenarioBundles {
+            technical_doc,
+            risk_assessment,
+            data_governance,
+            instructions_for_use,
+            human_oversight,
+            qms_record,
+            standards_alignment,
+            post_market_monitoring,
+            runtime_logs,
+            other_system_risk,
+        }
+    }
+
+    async fn create_gpai_provider_scenario(app: &Router) -> GpaiProviderScenarioBundles {
+        let technical_doc = create_gpai_provider_bundle(
+            app,
+            EvidenceItem::TechnicalDoc(proof_layer_core::schema::TechnicalDocEvidence {
+                document_ref: "annex-xi/foundation-model-alpha/system-card".to_string(),
+                section: Some("model_overview".to_string()),
+                commitment: Some(
+                    "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+                        .to_string(),
+                ),
+                annex_iv_sections: Vec::new(),
+                system_description_summary: Some(
+                    "General-purpose provider-controlled model service.".to_string(),
+                ),
+                model_description_summary: None,
+                capabilities_and_limitations: Some(
+                    "Supports drafting and summarization with known hallucination limits."
+                        .to_string(),
+                ),
+                design_choices_summary: Some(
+                    "Provider policy filters and release gates apply before deployment."
+                        .to_string(),
+                ),
+                evaluation_metrics_summary: Some(
+                    "Provider benchmarks cover multilingual quality, safety, and subgroup performance."
+                        .to_string(),
+                ),
+                human_oversight_design_summary: None,
+                post_market_monitoring_plan_ref: None,
+                simplified_tech_doc: Some(false),
+            }),
+            "technical_doc",
+            "req-gpai-tech-doc",
+            "technical_doc.json",
+            br#"{"document_ref":"annex-xi/foundation-model-alpha/system-card"}"#,
+        )
+        .await;
+
+        let model_evaluation = create_gpai_provider_bundle(
+            app,
+            EvidenceItem::ModelEvaluation(proof_layer_core::schema::ModelEvaluationEvidence {
+                evaluation_id: "eval-foundation-alpha-v5".to_string(),
+                benchmark: "provider-release-suite-2026q1".to_string(),
+                status: "passed".to_string(),
+                summary: Some("Release benchmark suite met provider thresholds.".to_string()),
+                report_commitment: Some(
+                    "sha256:2222222222222222222222222222222222222222222222222222222222222222"
+                        .to_string(),
+                ),
+                metrics_summary: vec![proof_layer_core::schema::MetricSummary {
+                    name: "instruction_following".to_string(),
+                    value: "0.93".to_string(),
+                    unit: Some("ratio".to_string()),
+                    methodology: Some("Provider release suite average.".to_string()),
+                }],
+                group_performance: vec![proof_layer_core::schema::GroupMetricSummary {
+                    group: "eu_languages".to_string(),
+                    metrics: vec![proof_layer_core::schema::MetricSummary {
+                        name: "quality_score".to_string(),
+                        value: "0.91".to_string(),
+                        unit: Some("ratio".to_string()),
+                        methodology: Some("Held-out multilingual review set.".to_string()),
+                    }],
+                }],
+                evaluation_methodology: Some(
+                    "Held-out multilingual and safety benchmark suites.".to_string(),
+                ),
+                metadata: serde_json::json!({"owner": "provider-evals"}),
+            }),
+            "gpai_documentation",
+            "req-gpai-eval",
+            "model_evaluation.json",
+            br#"{"evaluation_id":"eval-foundation-alpha-v5"}"#,
+        )
+        .await;
+
+        let training_provenance = create_gpai_provider_bundle(
+            app,
+            EvidenceItem::TrainingProvenance(
+                proof_layer_core::schema::TrainingProvenanceEvidence {
+                    dataset_ref: "dataset://foundation-model-alpha/pretrain-v5".to_string(),
+                    stage: "pretraining".to_string(),
+                    lineage_ref: None,
+                    record_commitment: Some(
+                        "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+                            .to_string(),
+                    ),
+                    compute_metrics_ref: Some("compute-foundation-alpha-v5".to_string()),
+                    training_dataset_summary: Some(
+                        "Curated multilingual web, code, and licensed reference corpora."
+                            .to_string(),
+                    ),
+                    consortium_context: Some("Single-provider training program".to_string()),
+                    metadata: serde_json::json!({"source": "provider-registry"}),
+                },
+            ),
+            "gpai_documentation",
+            "req-gpai-training",
+            "training_provenance.json",
+            br#"{"dataset_ref":"dataset://foundation-model-alpha/pretrain-v5"}"#,
+        )
+        .await;
+
+        let compute_metrics = create_gpai_provider_bundle(
+            app,
+            EvidenceItem::ComputeMetrics(proof_layer_core::schema::ComputeMetricsEvidence {
+                compute_id: "compute-foundation-alpha-v5".to_string(),
+                training_flops_estimate: "1.2e25".to_string(),
+                threshold_basis_ref: "art51_systemic_risk_threshold".to_string(),
+                threshold_value: "1e25".to_string(),
+                threshold_status: "above_threshold".to_string(),
+                estimation_methodology: Some(
+                    "Cluster scheduler logs and accelerator utilization rollup.".to_string(),
+                ),
+                measured_at: Some("2026-03-10T12:00:00Z".to_string()),
+                compute_resources_summary: vec![
+                    proof_layer_core::schema::MetricSummary {
+                        name: "gpu_hours".to_string(),
+                        value: "42000".to_string(),
+                        unit: Some("hours".to_string()),
+                        methodology: Some("Provider training cluster accounting.".to_string()),
+                    },
+                    proof_layer_core::schema::MetricSummary {
+                        name: "accelerator_count".to_string(),
+                        value: "2048".to_string(),
+                        unit: Some("gpus".to_string()),
+                        methodology: Some("Peak provisioned accelerator count.".to_string()),
+                    },
+                ],
+                consortium_context: Some("Single-provider training program".to_string()),
+                metadata: serde_json::json!({"owner": "foundation-ops"}),
+            }),
+            "gpai_documentation",
+            "req-gpai-compute",
+            "compute_metrics.json",
+            br#"{"compute_id":"compute-foundation-alpha-v5"}"#,
+        )
+        .await;
+
+        let copyright_policy = create_gpai_provider_bundle(
+            app,
+            EvidenceItem::CopyrightPolicy(proof_layer_core::schema::CopyrightPolicyEvidence {
+                policy_ref: "copyright://foundation-model-alpha/policy-v2".to_string(),
+                status: "published".to_string(),
+                jurisdiction: Some("eu".to_string()),
+                commitment: Some(
+                    "sha256:4444444444444444444444444444444444444444444444444444444444444444"
+                        .to_string(),
+                ),
+                metadata: serde_json::json!({"scope": "training data intake"}),
+            }),
+            "gpai_documentation",
+            "req-gpai-copyright",
+            "copyright_policy.json",
+            br#"{"policy_ref":"copyright://foundation-model-alpha/policy-v2"}"#,
+        )
+        .await;
+
+        let training_summary = create_gpai_provider_bundle(
+            app,
+            EvidenceItem::TrainingSummary(proof_layer_core::schema::TrainingSummaryEvidence {
+                summary_ref: "summary://foundation-model-alpha/training-v5".to_string(),
+                status: "published".to_string(),
+                audience: Some("public".to_string()),
+                commitment: Some(
+                    "sha256:5555555555555555555555555555555555555555555555555555555555555555"
+                        .to_string(),
+                ),
+                metadata: serde_json::json!({"owner": "provider-disclosures"}),
+            }),
+            "gpai_documentation",
+            "req-gpai-summary",
+            "training_summary.json",
+            br#"{"summary_ref":"summary://foundation-model-alpha/training-v5"}"#,
+        )
+        .await;
+
+        let other_system_bundle = create_bundle_response(
+            app,
+            &CreateBundleRequest {
+                capture: SealableCaptureInput::V10(sample_event_with_profile(
+                    "other-foundation-model",
+                    proof_layer_core::ActorRole::Provider,
+                    vec![EvidenceItem::TrainingProvenance(
+                        proof_layer_core::schema::TrainingProvenanceEvidence {
+                            dataset_ref: "dataset://other/pretrain-v1".to_string(),
+                            stage: "pretraining".to_string(),
+                            lineage_ref: Some("lineage://other/provider".to_string()),
+                            record_commitment: None,
+                            compute_metrics_ref: Some("compute-other-v1".to_string()),
+                            training_dataset_summary: Some("Other provider dataset.".to_string()),
+                            consortium_context: None,
+                            metadata: serde_json::json!({"source": "other-registry"}),
+                        },
+                    )],
+                    Some("gpai_documentation"),
+                )),
+                artefacts: vec![InlineArtefact {
+                    name: "other-training-provenance.json".to_string(),
+                    content_type: "application/json".to_string(),
+                    data_base64: Base64::encode_string(br#"{"dataset":"other"}"#),
+                }],
+            },
+        )
+        .await;
+
+        GpaiProviderScenarioBundles {
+            technical_doc,
+            model_evaluation,
+            training_provenance,
+            compute_metrics,
+            copyright_policy,
+            training_summary,
+            other_system_bundle,
+        }
+    }
+
+    fn fixture_annex_iv_bundle() -> ProofBundle {
+        let event = sample_event_with_profile(
+            "hiring-assistant",
+            proof_layer_core::ActorRole::Provider,
+            vec![
+                EvidenceItem::TechnicalDoc(proof_layer_core::schema::TechnicalDocEvidence {
+                    document_ref: "annex-iv/system-card".to_string(),
+                    section: Some("system_overview".to_string()),
+                    commitment: Some(
+                        "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                            .to_string(),
+                    ),
+                    annex_iv_sections: vec!["section_2".to_string(), "section_3".to_string()],
+                    system_description_summary: Some(
+                        "Ranks candidates for recruiter review.".to_string(),
+                    ),
+                    model_description_summary: Some("Fine-tuned ranking model.".to_string()),
+                    capabilities_and_limitations: Some(
+                        "Advisory only for first-pass screening.".to_string(),
+                    ),
+                    design_choices_summary: Some(
+                        "Human review is required before employment decisions.".to_string(),
+                    ),
+                    evaluation_metrics_summary: Some(
+                        "Precision and subgroup parity are reviewed monthly.".to_string(),
+                    ),
+                    human_oversight_design_summary: Some(
+                        "Recruiters must review every adverse or borderline case.".to_string(),
+                    ),
+                    post_market_monitoring_plan_ref: Some(
+                        "pmm://hiring-assistant/2026.03".to_string(),
+                    ),
+                    simplified_tech_doc: None,
+                }),
+                EvidenceItem::RiskAssessment(proof_layer_core::schema::RiskAssessmentEvidence {
+                    risk_id: "risk-001".to_string(),
+                    severity: "high".to_string(),
+                    status: "mitigated".to_string(),
+                    summary: Some("Bias and over-reliance risk reviewed.".to_string()),
+                    risk_description: Some(
+                        "Potential unfair ranking of borderline candidates.".to_string(),
+                    ),
+                    likelihood: Some("medium".to_string()),
+                    affected_groups: vec!["job_applicants".to_string()],
+                    mitigation_measures: vec![
+                        "mandatory human review".to_string(),
+                        "monthly subgroup parity review".to_string(),
+                    ],
+                    residual_risk_level: Some("low".to_string()),
+                    risk_owner: Some("quality-team".to_string()),
+                    vulnerable_groups_considered: Some(true),
+                    test_results_summary: Some(
+                        "No blocking disparity found in March review.".to_string(),
+                    ),
+                    metadata: serde_json::json!({
+                        "owner": "quality-team",
+                    }),
+                }),
+                EvidenceItem::DataGovernance(proof_layer_core::schema::DataGovernanceEvidence {
+                    decision: "approved".to_string(),
+                    dataset_ref: Some("dataset://candidates/2026-03".to_string()),
+                    dataset_name: None,
+                    dataset_version: Some("2026.03".to_string()),
+                    source_description: Some(
+                        "EU recruitment applicant and hiring outcome corpus.".to_string(),
+                    ),
+                    collection_period: Some(proof_layer_core::schema::DateRange {
+                        start: Some("2025-01-01".to_string()),
+                        end: Some("2025-12-31".to_string()),
+                    }),
+                    geographical_scope: vec!["EU".to_string()],
+                    preprocessing_operations: vec![
+                        "deduplication".to_string(),
+                        "feature scaling".to_string(),
+                    ],
+                    bias_detection_methodology: Some(
+                        "Subgroup parity review across protected attributes.".to_string(),
+                    ),
+                    bias_metrics: vec![proof_layer_core::schema::MetricSummary {
+                        name: "selection_rate_ratio".to_string(),
+                        value: "0.96".to_string(),
+                        unit: Some("ratio".to_string()),
+                        methodology: Some("Measured on March validation set.".to_string()),
+                    }],
+                    mitigation_actions: vec!["rebalance training sample".to_string()],
+                    data_gaps: vec!["low historical volume for niche roles".to_string()],
+                    personal_data_categories: vec![
+                        "employment_history".to_string(),
+                        "education".to_string(),
+                    ],
+                    safeguards: vec![
+                        "role-based access".to_string(),
+                        "retention caps".to_string(),
+                    ],
+                    metadata: serde_json::json!({
+                        "owner": "data-governance",
+                    }),
+                }),
+                EvidenceItem::InstructionsForUse(
+                    proof_layer_core::schema::InstructionsForUseEvidence {
+                        document_ref: "ifu://hiring-assistant/2026.03".to_string(),
+                        version: Some("2026.03".to_string()),
+                        section: Some("operator_guidance".to_string()),
+                        commitment: Some(
+                            "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+                                .to_string(),
+                        ),
+                        provider_identity: Some("Proof Layer Labs".to_string()),
+                        intended_purpose: Some(
+                            "Assist recruiters with first-pass candidate screening.".to_string(),
+                        ),
+                        system_capabilities: vec![
+                            "candidate ranking".to_string(),
+                            "confidence banding".to_string(),
+                        ],
+                        accuracy_metrics: vec![proof_layer_core::schema::MetricSummary {
+                            name: "precision_at_10".to_string(),
+                            value: "0.87".to_string(),
+                            unit: Some("ratio".to_string()),
+                            methodology: Some("Measured on validation cohort.".to_string()),
+                        }],
+                        foreseeable_risks: vec!["automation bias".to_string()],
+                        explainability_capabilities: vec!["reason codes".to_string()],
+                        human_oversight_guidance: vec![
+                            "review all adverse recommendations".to_string(),
+                        ],
+                        compute_requirements: vec!["cpu-only inference".to_string()],
+                        service_lifetime: Some("12 months".to_string()),
+                        log_management_guidance: vec![
+                            "retain audit logs for 12 months".to_string(),
+                        ],
+                        metadata: serde_json::json!({
+                            "distribution": "internal_only",
+                        }),
+                    },
+                ),
+                EvidenceItem::HumanOversight(proof_layer_core::schema::HumanOversightEvidence {
+                    action: "manual_review".to_string(),
+                    reviewer: Some("reviewer-123".to_string()),
+                    notes_commitment: Some(
+                        "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+                            .to_string(),
+                    ),
+                    actor_role: Some("recruiter".to_string()),
+                    anomaly_detected: Some(false),
+                    override_action: Some("none".to_string()),
+                    interpretation_guidance_followed: Some(true),
+                    automation_bias_detected: Some(false),
+                    two_person_verification: Some(false),
+                    stop_triggered: Some(false),
+                    stop_reason: Some(
+                        "No emergency stop was required for this review path.".to_string(),
+                    ),
+                }),
+            ],
+            Some("annex_iv"),
+        );
+        let mut event = event;
+        event.subject.request_id = Some("req-annex-iv-inline".to_string());
+        event.subject.model_id = Some("hiring-model-v3".to_string());
+        event.subject.version = Some("2026.03".to_string());
+        event.compliance_profile = Some(hiring_assistant_compliance_profile());
+
+        build_bundle(
+            event,
+            &[ArtefactInput {
+                name: "annex_iv_overview.json".to_string(),
+                content_type: "application/json".to_string(),
+                bytes: br#"{"profile":"annex_iv_governance_v1"}"#.to_vec(),
+            }],
+            &SigningKey::from_bytes(&[7_u8; 32]),
+            "kid-dev-01",
+            "01JPGG4QFZZ0X0P3N2JDMQ6K3V",
+            chrono::DateTime::parse_from_rfc3339("2026-03-02T00:00:00Z")
+                .unwrap()
+                .with_timezone(&Utc),
+        )
+        .unwrap()
+    }
+
+    fn fixture_gpai_provider_bundle() -> ProofBundle {
+        let event = sample_event_with_profile(
+            "foundation-model-alpha",
+            proof_layer_core::ActorRole::Provider,
+            vec![
+                EvidenceItem::TechnicalDoc(proof_layer_core::schema::TechnicalDocEvidence {
+                    document_ref: "annex-xi/foundation-model-alpha/system-card".to_string(),
+                    section: Some("model_overview".to_string()),
+                    commitment: Some(
+                        "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+                            .to_string(),
+                    ),
+                    annex_iv_sections: Vec::new(),
+                    system_description_summary: Some(
+                        "General-purpose provider-controlled model service.".to_string(),
+                    ),
+                    model_description_summary: None,
+                    capabilities_and_limitations: Some(
+                        "Supports drafting and summarization with known hallucination limits."
+                            .to_string(),
+                    ),
+                    design_choices_summary: Some(
+                        "Provider policy filters and release gates apply before deployment."
+                            .to_string(),
+                    ),
+                    evaluation_metrics_summary: Some(
+                        "Provider benchmarks cover multilingual quality, safety, and subgroup performance."
+                            .to_string(),
+                    ),
+                    human_oversight_design_summary: None,
+                    post_market_monitoring_plan_ref: None,
+                    simplified_tech_doc: Some(false),
+                }),
+                EvidenceItem::ModelEvaluation(proof_layer_core::schema::ModelEvaluationEvidence {
+                    evaluation_id: "eval-foundation-alpha-v5".to_string(),
+                    benchmark: "provider-release-suite-2026q1".to_string(),
+                    status: "passed".to_string(),
+                    summary: Some(
+                        "Release benchmark suite met provider thresholds.".to_string(),
+                    ),
+                    report_commitment: Some(
+                        "sha256:2222222222222222222222222222222222222222222222222222222222222222"
+                            .to_string(),
+                    ),
+                    metrics_summary: vec![proof_layer_core::schema::MetricSummary {
+                        name: "instruction_following".to_string(),
+                        value: "0.93".to_string(),
+                        unit: Some("ratio".to_string()),
+                        methodology: Some("Provider release suite average.".to_string()),
+                    }],
+                    group_performance: vec![proof_layer_core::schema::GroupMetricSummary {
+                        group: "eu_languages".to_string(),
+                        metrics: vec![proof_layer_core::schema::MetricSummary {
+                            name: "quality_score".to_string(),
+                            value: "0.91".to_string(),
+                            unit: Some("ratio".to_string()),
+                            methodology: Some("Held-out multilingual review set.".to_string()),
+                        }],
+                    }],
+                    evaluation_methodology: Some(
+                        "Held-out multilingual and safety benchmark suites.".to_string(),
+                    ),
+                    metadata: serde_json::json!({"owner": "provider-evals"}),
+                }),
+                EvidenceItem::TrainingProvenance(
+                    proof_layer_core::schema::TrainingProvenanceEvidence {
+                        dataset_ref: "dataset://foundation-model-alpha/pretrain-v5".to_string(),
+                        stage: "pretraining".to_string(),
+                        lineage_ref: None,
+                        record_commitment: Some(
+                            "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+                                .to_string(),
+                        ),
+                        compute_metrics_ref: Some("compute-foundation-alpha-v5".to_string()),
+                        training_dataset_summary: Some(
+                            "Curated multilingual web, code, and licensed reference corpora."
+                                .to_string(),
+                        ),
+                        consortium_context: Some("Single-provider training program".to_string()),
+                        metadata: serde_json::json!({"source": "provider-registry"}),
+                    },
+                ),
+                EvidenceItem::ComputeMetrics(proof_layer_core::schema::ComputeMetricsEvidence {
+                    compute_id: "compute-foundation-alpha-v5".to_string(),
+                    training_flops_estimate: "1.2e25".to_string(),
+                    threshold_basis_ref: "art51_systemic_risk_threshold".to_string(),
+                    threshold_value: "1e25".to_string(),
+                    threshold_status: "above_threshold".to_string(),
+                    estimation_methodology: Some(
+                        "Cluster scheduler logs and accelerator utilization rollup.".to_string(),
+                    ),
+                    measured_at: Some("2026-03-10T12:00:00Z".to_string()),
+                    compute_resources_summary: vec![
+                        proof_layer_core::schema::MetricSummary {
+                            name: "gpu_hours".to_string(),
+                            value: "42000".to_string(),
+                            unit: Some("hours".to_string()),
+                            methodology: Some("Provider training cluster accounting.".to_string()),
+                        },
+                        proof_layer_core::schema::MetricSummary {
+                            name: "accelerator_count".to_string(),
+                            value: "2048".to_string(),
+                            unit: Some("gpus".to_string()),
+                            methodology: Some("Peak provisioned accelerator count.".to_string()),
+                        },
+                    ],
+                    consortium_context: Some("Single-provider training program".to_string()),
+                    metadata: serde_json::json!({"owner": "foundation-ops"}),
+                }),
+                EvidenceItem::CopyrightPolicy(
+                    proof_layer_core::schema::CopyrightPolicyEvidence {
+                        policy_ref: "copyright://foundation-model-alpha/policy-v2".to_string(),
+                        status: "published".to_string(),
+                        jurisdiction: Some("eu".to_string()),
+                        commitment: Some(
+                            "sha256:4444444444444444444444444444444444444444444444444444444444444444"
+                                .to_string(),
+                        ),
+                        metadata: serde_json::json!({"scope": "training data intake"}),
+                    },
+                ),
+                EvidenceItem::TrainingSummary(proof_layer_core::schema::TrainingSummaryEvidence {
+                    summary_ref: "summary://foundation-model-alpha/training-v5".to_string(),
+                    status: "published".to_string(),
+                    audience: Some("public".to_string()),
+                    commitment: Some(
+                        "sha256:5555555555555555555555555555555555555555555555555555555555555555"
+                            .to_string(),
+                    ),
+                    metadata: serde_json::json!({"owner": "provider-disclosures"}),
+                }),
+            ],
+            Some("gpai_documentation"),
+        );
+        let mut event = event;
+        event.subject.request_id = Some("req-gpai-inline".to_string());
+        event.subject.model_id = Some("foundation-model-alpha-v5".to_string());
+        event.subject.version = Some("2026.03".to_string());
+        event.compliance_profile = Some(gpai_provider_compliance_profile());
+
+        build_bundle(
+            event,
+            &[ArtefactInput {
+                name: "gpai_provider_overview.json".to_string(),
+                content_type: "application/json".to_string(),
+                bytes: br#"{"profile":"gpai_provider_v1"}"#.to_vec(),
+            }],
+            &SigningKey::from_bytes(&[7_u8; 32]),
+            "kid-dev-01",
+            "01JQ0JP7DPC7GRQYTF6MAVVXQJ",
+            chrono::DateTime::parse_from_rfc3339("2026-03-21T00:00:00Z")
+                .unwrap()
+                .with_timezone(&Utc),
+        )
+        .unwrap()
     }
 
     async fn test_state(max_payload_bytes: usize) -> AppState {
@@ -9609,6 +11138,7 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
                 provider: Some("rekor".to_string()),
                 url: None,
                 rekor_url: Some("https://rekor.example.test".to_string()),
+                scitt_format: None,
                 log_public_key_pem: None,
                 log_public_key_path: None,
             }),
@@ -9843,6 +11373,7 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
             .body(Body::from(
                 serde_json::to_vec(&CreatePackRequest {
                     pack_type: "runtime_logs".to_string(),
+                    bundle_ids: Vec::new(),
                     system_id: None,
                     from: None,
                     to: None,
@@ -11507,6 +13038,7 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
                 enabled: true,
                 provider: "rekor".to_string(),
                 url: Some("https://rekor.example.test".to_string()),
+                scitt_format: None,
                 log_public_key_pem: None,
             }),
             config_path: Some(state.storage_dir.join("vault.toml")),
@@ -11869,6 +13401,7 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
                 enabled: true,
                 provider: "rekor".to_string(),
                 url: Some("https://rekor.example.test".to_string()),
+                scitt_format: None,
                 log_public_key_pem: None,
             },
         )
@@ -11900,6 +13433,20 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
     #[tokio::test]
     async fn anchor_bundle_endpoint_supports_scitt_provider() {
         use std::{net::TcpListener, thread};
+
+        #[derive(Serialize)]
+        struct ScittCoseReceiptPayload<'a> {
+            entry_id: &'a str,
+            service_id: &'a str,
+            registered_at: &'a str,
+            statement_hash: &'a str,
+        }
+
+        #[derive(Serialize)]
+        struct ScittCoseReceiptEnvelope<'a> {
+            payload: ScittCoseReceiptPayload<'a>,
+            signature_der_b64: String,
+        }
 
         let state = test_state(DEFAULT_MAX_PAYLOAD_BYTES).await;
         let db = state.db.clone();
@@ -11942,20 +13489,39 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
             let mut body = vec![0_u8; content_length];
             reader.read_exact(&mut body).unwrap();
             let payload: serde_json::Value = serde_json::from_slice(&body).unwrap();
+            assert!(payload["statement_cose_b64"].is_string());
             let statement_hash = payload["statement_hash"].as_str().unwrap();
-            let response_payload = canonicalize_value(&serde_json::json!({
-                "entryId": "entry-scitt-001",
-                "registeredAt": "2026-03-06T13:15:00Z",
-                "serviceId": service_id,
-                "statementHash": statement_hash,
-            }))
-            .unwrap();
+            let response_payload = {
+                let payload = ScittCoseReceiptPayload {
+                    entry_id: "entry-scitt-001",
+                    service_id: &service_id,
+                    registered_at: "2026-03-06T13:15:00Z",
+                    statement_hash,
+                };
+                let mut bytes = Vec::new();
+                ciborium::into_writer(&payload, &mut bytes).unwrap();
+                bytes
+            };
             let signature: Signature = signing_key.sign(&response_payload);
+            let mut receipt_cbor = Vec::new();
+            ciborium::into_writer(
+                &ScittCoseReceiptEnvelope {
+                    payload: ScittCoseReceiptPayload {
+                        entry_id: "entry-scitt-001",
+                        service_id: &service_id,
+                        registered_at: "2026-03-06T13:15:00Z",
+                        statement_hash,
+                    },
+                    signature_der_b64: Base64::encode_string(signature.to_der().as_bytes()),
+                },
+                &mut receipt_cbor,
+            )
+            .unwrap();
             let response_body = serde_json::json!({
                 "entry_id": "entry-scitt-001",
                 "service_id": service_id,
                 "registered_at": "2026-03-06T13:15:00Z",
-                "receipt_b64": Base64::encode_string(signature.to_der().as_bytes()),
+                "receipt_cbor_b64": Base64::encode_string(&receipt_cbor),
             })
             .to_string();
 
@@ -11975,6 +13541,7 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
                 enabled: true,
                 provider: "scitt".to_string(),
                 url: Some(format!("http://{addr}/entries")),
+                scitt_format: None,
                 log_public_key_pem: Some(public_key_pem),
             },
         )
@@ -12195,6 +13762,7 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
             .body(Body::from(
                 serde_json::to_vec(&VerifyReceiptRequest::BundleId {
                     bundle_id: created.bundle_id.clone(),
+                    live_check_mode: ReceiptLiveCheckMode::Off,
                 })
                 .unwrap(),
             ))
@@ -12540,6 +14108,7 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
                     enabled: true,
                     provider: "none".to_string(),
                     url: None,
+                    scitt_format: None,
                     log_public_key_pem: None,
                 })
                 .unwrap(),
@@ -12557,6 +14126,7 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
                     enabled: true,
                     provider: "Rekor".to_string(),
                     url: Some("https://rekor.example.test".to_string()),
+                    scitt_format: None,
                     log_public_key_pem: None,
                 })
                 .unwrap(),
@@ -12574,6 +14144,7 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
                 enabled: true,
                 provider: "rekor".to_string(),
                 url: Some("https://rekor.example.test".to_string()),
+                scitt_format: None,
                 log_public_key_pem: None,
             }
         );
@@ -13003,6 +14574,7 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
             .body(Body::from(
                 serde_json::to_vec(&CreatePackRequest {
                     pack_type: "runtime_logs".to_string(),
+                    bundle_ids: Vec::new(),
                     system_id: Some("system-privacy-pack".to_string()),
                     from: None,
                     to: None,
@@ -13202,6 +14774,7 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
             .body(Body::from(
                 serde_json::to_vec(&CreatePackRequest {
                     pack_type: "runtime_logs".to_string(),
+                    bundle_ids: Vec::new(),
                     system_id: Some("system-a".to_string()),
                     from: None,
                     to: None,
@@ -13357,6 +14930,7 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
             .body(Body::from(
                 serde_json::to_vec(&CreatePackRequest {
                     pack_type: "runtime_logs".to_string(),
+                    bundle_ids: Vec::new(),
                     system_id: Some("system-a".to_string()),
                     from: None,
                     to: None,
@@ -13467,7 +15041,7 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
     }
 
     #[tokio::test]
-    async fn create_pack_applies_named_disclosure_policy_with_artefact_metadata() {
+    async fn create_pack_applies_named_disclosure_policy_with_artefact_metadata_only_by_default() {
         let state = test_state(DEFAULT_MAX_PAYLOAD_BYTES).await;
         let public_key_pem = encode_public_key_pem(&state.signing_key.verifying_key());
         let app = build_router(state, DEFAULT_MAX_PAYLOAD_BYTES);
@@ -13522,6 +15096,7 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
             .body(Body::from(
                 serde_json::to_vec(&CreatePackRequest {
                     pack_type: "annex_iv".to_string(),
+                    bundle_ids: Vec::new(),
                     system_id: Some("system-docs".to_string()),
                     from: None,
                     to: None,
@@ -13565,7 +15140,7 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
             manifest.bundles[0].disclosed_artefact_names,
             vec!["doc.json".to_string(), "diagram.txt".to_string()]
         );
-        assert!(manifest.bundles[0].disclosed_artefact_bytes_included);
+        assert!(!manifest.bundles[0].disclosed_artefact_bytes_included);
 
         let export_req = Request::builder()
             .method("GET")
@@ -13588,17 +15163,8 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
         assert_eq!(redacted.disclosed_artefacts.len(), 2);
         assert_eq!(redacted.disclosed_artefacts[0].meta.name, "doc.json");
         assert_eq!(redacted.disclosed_artefacts[1].meta.name, "diagram.txt");
-        assert_eq!(
-            decoded.files.get("artefacts/doc.json").map(Vec::as_slice),
-            Some(br#"{"doc":"system-card"}"#.as_slice())
-        );
-        assert_eq!(
-            decoded
-                .files
-                .get("artefacts/diagram.txt")
-                .map(Vec::as_slice),
-            Some(b"annex-iv-diagram".as_slice())
-        );
+        assert!(!decoded.files.contains_key("artefacts/doc.json"));
+        assert!(!decoded.files.contains_key("artefacts/diagram.txt"));
 
         let verify_req = Request::builder()
             .method("POST")
@@ -13619,7 +15185,1065 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
             .unwrap();
         let verify_response: VerifyResponse = serde_json::from_slice(&body).unwrap();
         assert!(verify_response.valid);
-        assert_eq!(verify_response.artefacts_verified, 2);
+        assert_eq!(verify_response.artefacts_verified, 0);
+    }
+
+    #[tokio::test]
+    async fn evaluate_completeness_api_supports_bundle_id_requests() {
+        let state = test_state(DEFAULT_MAX_PAYLOAD_BYTES).await;
+        let app = build_router(state, DEFAULT_MAX_PAYLOAD_BYTES);
+        let scenario = create_annex_iv_scenario(&app).await;
+
+        let request = Request::builder()
+            .method("POST")
+            .uri("/v1/completeness/evaluate")
+            .header("content-type", "application/json")
+            .body(Body::from(
+                serde_json::to_vec(&EvaluateCompletenessRequest {
+                    bundle_id: Some(scenario.technical_doc.bundle_id.clone()),
+                    pack_id: None,
+                    bundle: None,
+                    profile: CompletenessProfile::AnnexIvGovernanceV1,
+                })
+                .unwrap(),
+            ))
+            .unwrap();
+        let response = app.oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let report: proof_layer_core::CompletenessReport = serde_json::from_slice(&body).unwrap();
+
+        assert_eq!(report.profile, CompletenessProfile::AnnexIvGovernanceV1);
+        assert_eq!(report.bundle_id, scenario.technical_doc.bundle_id);
+        assert_eq!(report.status, CompletenessStatus::Fail);
+        assert!(report.fail_count > 0);
+    }
+
+    #[tokio::test]
+    async fn evaluate_completeness_api_supports_inline_bundle_requests() {
+        let state = test_state(DEFAULT_MAX_PAYLOAD_BYTES).await;
+        let app = build_router(state, DEFAULT_MAX_PAYLOAD_BYTES);
+        let bundle = fixture_annex_iv_bundle();
+
+        let request = Request::builder()
+            .method("POST")
+            .uri("/v1/completeness/evaluate")
+            .header("content-type", "application/json")
+            .body(Body::from(
+                serde_json::to_vec(&EvaluateCompletenessRequest {
+                    bundle_id: None,
+                    pack_id: None,
+                    bundle: Some(bundle),
+                    profile: CompletenessProfile::AnnexIvGovernanceV1,
+                })
+                .unwrap(),
+            ))
+            .unwrap();
+        let response = app.oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let report: proof_layer_core::CompletenessReport = serde_json::from_slice(&body).unwrap();
+
+        assert_eq!(report.profile, CompletenessProfile::AnnexIvGovernanceV1);
+        assert_eq!(report.status, CompletenessStatus::Pass);
+        assert_eq!(report.fail_count, 0);
+    }
+
+    #[tokio::test]
+    async fn evaluate_completeness_api_supports_gpai_provider_bundle_id_requests() {
+        let state = test_state(DEFAULT_MAX_PAYLOAD_BYTES).await;
+        let app = build_router(state, DEFAULT_MAX_PAYLOAD_BYTES);
+        let scenario = create_gpai_provider_scenario(&app).await;
+
+        let request = Request::builder()
+            .method("POST")
+            .uri("/v1/completeness/evaluate")
+            .header("content-type", "application/json")
+            .body(Body::from(
+                serde_json::to_vec(&EvaluateCompletenessRequest {
+                    bundle_id: Some(scenario.compute_metrics.bundle_id.clone()),
+                    pack_id: None,
+                    bundle: None,
+                    profile: CompletenessProfile::GpaiProviderV1,
+                })
+                .unwrap(),
+            ))
+            .unwrap();
+        let response = app.oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let report: proof_layer_core::CompletenessReport = serde_json::from_slice(&body).unwrap();
+
+        assert_eq!(report.profile, CompletenessProfile::GpaiProviderV1);
+        assert_eq!(report.bundle_id, scenario.compute_metrics.bundle_id);
+        assert_eq!(report.status, CompletenessStatus::Fail);
+        assert!(report.fail_count > 0);
+    }
+
+    #[tokio::test]
+    async fn evaluate_completeness_api_supports_gpai_provider_inline_bundle_requests() {
+        let state = test_state(DEFAULT_MAX_PAYLOAD_BYTES).await;
+        let app = build_router(state, DEFAULT_MAX_PAYLOAD_BYTES);
+        let bundle = fixture_gpai_provider_bundle();
+
+        let request = Request::builder()
+            .method("POST")
+            .uri("/v1/completeness/evaluate")
+            .header("content-type", "application/json")
+            .body(Body::from(
+                serde_json::to_vec(&EvaluateCompletenessRequest {
+                    bundle_id: None,
+                    pack_id: None,
+                    bundle: Some(bundle),
+                    profile: CompletenessProfile::GpaiProviderV1,
+                })
+                .unwrap(),
+            ))
+            .unwrap();
+        let response = app.oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let report: proof_layer_core::CompletenessReport = serde_json::from_slice(&body).unwrap();
+
+        assert_eq!(report.profile, CompletenessProfile::GpaiProviderV1);
+        assert_eq!(report.status, CompletenessStatus::Pass);
+        assert_eq!(report.fail_count, 0);
+    }
+
+    #[tokio::test]
+    async fn evaluate_completeness_api_rejects_invalid_selection_combinations() {
+        let state = test_state(DEFAULT_MAX_PAYLOAD_BYTES).await;
+        let app = build_router(state, DEFAULT_MAX_PAYLOAD_BYTES);
+        let bundle = fixture_annex_iv_bundle();
+
+        for payload in [
+            EvaluateCompletenessRequest {
+                bundle_id: None,
+                pack_id: None,
+                bundle: None,
+                profile: CompletenessProfile::AnnexIvGovernanceV1,
+            },
+            EvaluateCompletenessRequest {
+                bundle_id: Some("bundle-123".to_string()),
+                pack_id: None,
+                bundle: Some(bundle.clone()),
+                profile: CompletenessProfile::AnnexIvGovernanceV1,
+            },
+            EvaluateCompletenessRequest {
+                bundle_id: Some("bundle-123".to_string()),
+                pack_id: Some("pack-123".to_string()),
+                bundle: None,
+                profile: CompletenessProfile::AnnexIvGovernanceV1,
+            },
+            EvaluateCompletenessRequest {
+                bundle_id: None,
+                pack_id: Some("pack-123".to_string()),
+                bundle: Some(bundle.clone()),
+                profile: CompletenessProfile::AnnexIvGovernanceV1,
+            },
+        ] {
+            let request = Request::builder()
+                .method("POST")
+                .uri("/v1/completeness/evaluate")
+                .header("content-type", "application/json")
+                .body(Body::from(serde_json::to_vec(&payload).unwrap()))
+                .unwrap();
+            let response = app.clone().oneshot(request).await.unwrap();
+            assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+            let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+                .await
+                .unwrap();
+            let error: serde_json::Value = serde_json::from_slice(&body).unwrap();
+            assert_eq!(
+                error["error"],
+                "provide exactly one of bundle_id, bundle, or pack_id"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn evaluate_completeness_api_supports_pack_id_requests() {
+        let state = test_state(DEFAULT_MAX_PAYLOAD_BYTES).await;
+        let app = build_router(state, DEFAULT_MAX_PAYLOAD_BYTES);
+        let _scenario = create_gpai_provider_scenario(&app).await;
+
+        let pack_req = Request::builder()
+            .method("POST")
+            .uri("/v1/packs")
+            .header("content-type", "application/json")
+            .body(Body::from(
+                serde_json::to_vec(&CreatePackRequest {
+                    pack_type: "annex_xi".to_string(),
+                    bundle_ids: Vec::new(),
+                    system_id: Some("foundation-model-alpha".to_string()),
+                    from: None,
+                    to: None,
+                    bundle_format: default_pack_bundle_format(),
+                    disclosure_policy: None,
+                    disclosure_template: None,
+                })
+                .unwrap(),
+            ))
+            .unwrap();
+        let pack_res = app.clone().oneshot(pack_req).await.unwrap();
+        assert_eq!(pack_res.status(), StatusCode::CREATED);
+        let body = axum::body::to_bytes(pack_res.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let pack: PackSummaryResponse = serde_json::from_slice(&body).unwrap();
+
+        let request = Request::builder()
+            .method("POST")
+            .uri("/v1/completeness/evaluate")
+            .header("content-type", "application/json")
+            .body(Body::from(
+                serde_json::to_vec(&EvaluateCompletenessRequest {
+                    bundle_id: None,
+                    pack_id: Some(pack.pack_id.clone()),
+                    bundle: None,
+                    profile: CompletenessProfile::GpaiProviderV1,
+                })
+                .unwrap(),
+            ))
+            .unwrap();
+        let response = app.oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let report: proof_layer_core::CompletenessReport = serde_json::from_slice(&body).unwrap();
+
+        assert_eq!(report.profile, CompletenessProfile::GpaiProviderV1);
+        assert_eq!(report.bundle_id, pack.pack_id);
+        assert_eq!(report.status, CompletenessStatus::Pass);
+        assert_eq!(report.pass_count, 6);
+        assert_eq!(report.warn_count, 0);
+        assert_eq!(report.fail_count, 0);
+    }
+
+    #[tokio::test]
+    async fn evaluate_completeness_api_supports_annex_iv_pack_id_requests() {
+        let state = test_state(DEFAULT_MAX_PAYLOAD_BYTES).await;
+        let app = build_router(state, DEFAULT_MAX_PAYLOAD_BYTES);
+        let _scenario = create_annex_iv_scenario(&app).await;
+
+        let pack_req = Request::builder()
+            .method("POST")
+            .uri("/v1/packs")
+            .header("content-type", "application/json")
+            .body(Body::from(
+                serde_json::to_vec(&CreatePackRequest {
+                    pack_type: "annex_iv".to_string(),
+                    bundle_ids: Vec::new(),
+                    system_id: Some("hiring-assistant".to_string()),
+                    from: None,
+                    to: None,
+                    bundle_format: PACK_BUNDLE_FORMAT_FULL.to_string(),
+                    disclosure_policy: None,
+                    disclosure_template: None,
+                })
+                .unwrap(),
+            ))
+            .unwrap();
+        let pack_res = app.clone().oneshot(pack_req).await.unwrap();
+        assert_eq!(pack_res.status(), StatusCode::CREATED);
+        let body = axum::body::to_bytes(pack_res.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let pack: PackSummaryResponse = serde_json::from_slice(&body).unwrap();
+
+        let request = Request::builder()
+            .method("POST")
+            .uri("/v1/completeness/evaluate")
+            .header("content-type", "application/json")
+            .body(Body::from(
+                serde_json::to_vec(&EvaluateCompletenessRequest {
+                    bundle_id: None,
+                    pack_id: Some(pack.pack_id.clone()),
+                    bundle: None,
+                    profile: CompletenessProfile::AnnexIvGovernanceV1,
+                })
+                .unwrap(),
+            ))
+            .unwrap();
+        let response = app.oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let report: proof_layer_core::CompletenessReport = serde_json::from_slice(&body).unwrap();
+
+        assert_eq!(report.profile, CompletenessProfile::AnnexIvGovernanceV1);
+        assert_eq!(report.bundle_id, pack.pack_id);
+        assert_eq!(report.status, CompletenessStatus::Pass);
+        assert_eq!(report.pass_count, 5);
+        assert_eq!(report.warn_count, 0);
+        assert_eq!(report.fail_count, 0);
+    }
+
+    #[tokio::test]
+    async fn evaluate_completeness_api_rejects_pack_profile_mismatch() {
+        let state = test_state(DEFAULT_MAX_PAYLOAD_BYTES).await;
+        let app = build_router(state, DEFAULT_MAX_PAYLOAD_BYTES);
+        let _scenario = create_gpai_provider_scenario(&app).await;
+
+        let pack_req = Request::builder()
+            .method("POST")
+            .uri("/v1/packs")
+            .header("content-type", "application/json")
+            .body(Body::from(
+                serde_json::to_vec(&CreatePackRequest {
+                    pack_type: "annex_xi".to_string(),
+                    bundle_ids: Vec::new(),
+                    system_id: Some("foundation-model-alpha".to_string()),
+                    from: None,
+                    to: None,
+                    bundle_format: default_pack_bundle_format(),
+                    disclosure_policy: None,
+                    disclosure_template: None,
+                })
+                .unwrap(),
+            ))
+            .unwrap();
+        let pack_res = app.clone().oneshot(pack_req).await.unwrap();
+        assert_eq!(pack_res.status(), StatusCode::CREATED);
+        let body = axum::body::to_bytes(pack_res.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let pack: PackSummaryResponse = serde_json::from_slice(&body).unwrap();
+
+        let request = Request::builder()
+            .method("POST")
+            .uri("/v1/completeness/evaluate")
+            .header("content-type", "application/json")
+            .body(Body::from(
+                serde_json::to_vec(&EvaluateCompletenessRequest {
+                    bundle_id: None,
+                    pack_id: Some(pack.pack_id),
+                    bundle: None,
+                    profile: CompletenessProfile::AnnexIvGovernanceV1,
+                })
+                .unwrap(),
+            ))
+            .unwrap();
+        let response = app.oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let error: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(
+            error["error"],
+            "requested profile does not match pack completeness profile"
+        );
+    }
+
+    #[tokio::test]
+    async fn evaluate_completeness_api_rejects_pack_without_pack_scoped_completeness() {
+        let state = test_state(DEFAULT_MAX_PAYLOAD_BYTES).await;
+        let app = build_router(state, DEFAULT_MAX_PAYLOAD_BYTES);
+        let _scenario = create_annex_iv_scenario(&app).await;
+
+        let pack_req = Request::builder()
+            .method("POST")
+            .uri("/v1/packs")
+            .header("content-type", "application/json")
+            .body(Body::from(
+                serde_json::to_vec(&CreatePackRequest {
+                    pack_type: "runtime_logs".to_string(),
+                    bundle_ids: Vec::new(),
+                    system_id: Some("hiring-assistant".to_string()),
+                    from: None,
+                    to: None,
+                    bundle_format: PACK_BUNDLE_FORMAT_FULL.to_string(),
+                    disclosure_policy: None,
+                    disclosure_template: None,
+                })
+                .unwrap(),
+            ))
+            .unwrap();
+        let pack_res = app.clone().oneshot(pack_req).await.unwrap();
+        assert_eq!(pack_res.status(), StatusCode::CREATED);
+        let body = axum::body::to_bytes(pack_res.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let pack: PackSummaryResponse = serde_json::from_slice(&body).unwrap();
+
+        let request = Request::builder()
+            .method("POST")
+            .uri("/v1/completeness/evaluate")
+            .header("content-type", "application/json")
+            .body(Body::from(
+                serde_json::to_vec(&EvaluateCompletenessRequest {
+                    bundle_id: None,
+                    pack_id: Some(pack.pack_id),
+                    bundle: None,
+                    profile: CompletenessProfile::GpaiProviderV1,
+                })
+                .unwrap(),
+            ))
+            .unwrap();
+        let response = app.oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::CONFLICT);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let error: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(
+            error["error"],
+            "pack does not have pack-scoped completeness"
+        );
+    }
+
+    #[tokio::test]
+    async fn evaluate_completeness_api_rejects_missing_pack_completeness_report() {
+        let state = test_state(DEFAULT_MAX_PAYLOAD_BYTES).await;
+        let db = state.db.clone();
+        let app = build_router(state, DEFAULT_MAX_PAYLOAD_BYTES);
+        let _scenario = create_gpai_provider_scenario(&app).await;
+
+        let pack_req = Request::builder()
+            .method("POST")
+            .uri("/v1/packs")
+            .header("content-type", "application/json")
+            .body(Body::from(
+                serde_json::to_vec(&CreatePackRequest {
+                    pack_type: "annex_xi".to_string(),
+                    bundle_ids: Vec::new(),
+                    system_id: Some("foundation-model-alpha".to_string()),
+                    from: None,
+                    to: None,
+                    bundle_format: default_pack_bundle_format(),
+                    disclosure_policy: None,
+                    disclosure_template: None,
+                })
+                .unwrap(),
+            ))
+            .unwrap();
+        let pack_res = app.clone().oneshot(pack_req).await.unwrap();
+        assert_eq!(pack_res.status(), StatusCode::CREATED);
+        let body = axum::body::to_bytes(pack_res.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let pack: PackSummaryResponse = serde_json::from_slice(&body).unwrap();
+
+        sqlx::query("UPDATE packs SET pack_completeness_report_json = NULL WHERE pack_id = ?")
+            .bind(&pack.pack_id)
+            .execute(&db)
+            .await
+            .unwrap();
+
+        let request = Request::builder()
+            .method("POST")
+            .uri("/v1/completeness/evaluate")
+            .header("content-type", "application/json")
+            .body(Body::from(
+                serde_json::to_vec(&EvaluateCompletenessRequest {
+                    bundle_id: None,
+                    pack_id: Some(pack.pack_id),
+                    bundle: None,
+                    profile: CompletenessProfile::GpaiProviderV1,
+                })
+                .unwrap(),
+            ))
+            .unwrap();
+        let response = app.oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::CONFLICT);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let error: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(
+            error["error"],
+            "pack-scoped completeness report unavailable for this pack; recreate the pack"
+        );
+    }
+
+    #[tokio::test]
+    async fn annex_iv_pack_curates_expected_governance_bundle_set() {
+        let state = test_state(DEFAULT_MAX_PAYLOAD_BYTES).await;
+        let app = build_router(state, DEFAULT_MAX_PAYLOAD_BYTES);
+        let scenario = create_annex_iv_scenario(&app).await;
+
+        let pack_req = Request::builder()
+            .method("POST")
+            .uri("/v1/packs")
+            .header("content-type", "application/json")
+            .body(Body::from(
+                serde_json::to_vec(&CreatePackRequest {
+                    pack_type: "annex_iv".to_string(),
+                    bundle_ids: Vec::new(),
+                    system_id: Some("hiring-assistant".to_string()),
+                    from: None,
+                    to: None,
+                    bundle_format: PACK_BUNDLE_FORMAT_FULL.to_string(),
+                    disclosure_policy: None,
+                    disclosure_template: None,
+                })
+                .unwrap(),
+            ))
+            .unwrap();
+        let pack_res = app.clone().oneshot(pack_req).await.unwrap();
+        assert_eq!(pack_res.status(), StatusCode::CREATED);
+        let body = axum::body::to_bytes(pack_res.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let pack: PackSummaryResponse = serde_json::from_slice(&body).unwrap();
+        assert_eq!(
+            pack.completeness_profile,
+            Some(CompletenessProfile::AnnexIvGovernanceV1)
+        );
+        assert_eq!(pack.completeness_status, Some(CompletenessStatus::Fail));
+        assert_eq!(
+            pack.pack_completeness_profile,
+            Some(CompletenessProfile::AnnexIvGovernanceV1)
+        );
+        assert_eq!(
+            pack.pack_completeness_status,
+            Some(CompletenessStatus::Pass)
+        );
+        assert_eq!(pack.pack_completeness_pass_count, Some(5));
+        assert_eq!(pack.pack_completeness_warn_count, Some(0));
+        assert_eq!(pack.pack_completeness_fail_count, Some(0));
+
+        let expected_bundle_ids = BTreeSet::from([
+            scenario.technical_doc.bundle_id.clone(),
+            scenario.risk_assessment.bundle_id.clone(),
+            scenario.data_governance.bundle_id.clone(),
+            scenario.instructions_for_use.bundle_id.clone(),
+            scenario.human_oversight.bundle_id.clone(),
+            scenario.qms_record.bundle_id.clone(),
+            scenario.standards_alignment.bundle_id.clone(),
+            scenario.post_market_monitoring.bundle_id.clone(),
+        ]);
+        let actual_bundle_ids = pack.bundle_ids.iter().cloned().collect::<BTreeSet<_>>();
+
+        assert_eq!(actual_bundle_ids, expected_bundle_ids);
+        assert!(!pack.bundle_ids.contains(&scenario.runtime_logs.bundle_id));
+        assert!(
+            !pack
+                .bundle_ids
+                .contains(&scenario.other_system_risk.bundle_id)
+        );
+    }
+
+    #[tokio::test]
+    async fn create_pack_can_target_explicit_bundle_ids_without_sweeping_same_system_history() {
+        let state = test_state(DEFAULT_MAX_PAYLOAD_BYTES).await;
+        let app = build_router(state, DEFAULT_MAX_PAYLOAD_BYTES);
+        let scenario = create_annex_iv_scenario(&app).await;
+        let extra_same_system_bundle = create_annex_iv_governance_bundle(
+            &app,
+            EvidenceItem::RiskAssessment(proof_layer_core::schema::RiskAssessmentEvidence {
+                risk_id: "risk-historical".to_string(),
+                severity: "medium".to_string(),
+                status: "open".to_string(),
+                summary: Some(
+                    "Older same-system risk bundle that should stay out of this export".to_string(),
+                ),
+                risk_description: None,
+                likelihood: None,
+                affected_groups: Vec::new(),
+                mitigation_measures: Vec::new(),
+                residual_risk_level: None,
+                risk_owner: None,
+                vulnerable_groups_considered: None,
+                test_results_summary: None,
+                metadata: serde_json::json!({
+                    "source": "historical-run",
+                }),
+            }),
+            "risk_mgmt",
+            "req-historical-risk",
+            "historical-risk.json",
+            br#"{"risk":"historical"}"#,
+        )
+        .await;
+        let selected_bundle_ids = vec![
+            scenario.technical_doc.bundle_id.clone(),
+            scenario.risk_assessment.bundle_id.clone(),
+            scenario.data_governance.bundle_id.clone(),
+            scenario.instructions_for_use.bundle_id.clone(),
+            scenario.human_oversight.bundle_id.clone(),
+            scenario.qms_record.bundle_id.clone(),
+            scenario.standards_alignment.bundle_id.clone(),
+            scenario.post_market_monitoring.bundle_id.clone(),
+        ];
+
+        let pack_req = Request::builder()
+            .method("POST")
+            .uri("/v1/packs")
+            .header("content-type", "application/json")
+            .body(Body::from(
+                serde_json::to_vec(&CreatePackRequest {
+                    pack_type: "annex_iv".to_string(),
+                    bundle_ids: selected_bundle_ids.clone(),
+                    system_id: None,
+                    from: None,
+                    to: None,
+                    bundle_format: PACK_BUNDLE_FORMAT_FULL.to_string(),
+                    disclosure_policy: None,
+                    disclosure_template: None,
+                })
+                .unwrap(),
+            ))
+            .unwrap();
+        let pack_res = app.clone().oneshot(pack_req).await.unwrap();
+        assert_eq!(pack_res.status(), StatusCode::CREATED);
+        let body = axum::body::to_bytes(pack_res.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let pack: PackSummaryResponse = serde_json::from_slice(&body).unwrap();
+
+        assert_eq!(
+            pack.bundle_ids.iter().cloned().collect::<BTreeSet<_>>(),
+            selected_bundle_ids.into_iter().collect::<BTreeSet<_>>()
+        );
+        assert!(
+            !pack
+                .bundle_ids
+                .contains(&extra_same_system_bundle.bundle_id)
+        );
+        assert_eq!(
+            pack.pack_completeness_status,
+            Some(CompletenessStatus::Pass)
+        );
+    }
+
+    #[tokio::test]
+    async fn annex_iv_pack_manifest_records_expected_match_metadata() {
+        let state = test_state(DEFAULT_MAX_PAYLOAD_BYTES).await;
+        let app = build_router(state, DEFAULT_MAX_PAYLOAD_BYTES);
+        let scenario = create_annex_iv_scenario(&app).await;
+
+        let pack_req = Request::builder()
+            .method("POST")
+            .uri("/v1/packs")
+            .header("content-type", "application/json")
+            .body(Body::from(
+                serde_json::to_vec(&CreatePackRequest {
+                    pack_type: "annex_iv".to_string(),
+                    bundle_ids: Vec::new(),
+                    system_id: Some("hiring-assistant".to_string()),
+                    from: None,
+                    to: None,
+                    bundle_format: PACK_BUNDLE_FORMAT_FULL.to_string(),
+                    disclosure_policy: None,
+                    disclosure_template: None,
+                })
+                .unwrap(),
+            ))
+            .unwrap();
+        let pack_res = app.clone().oneshot(pack_req).await.unwrap();
+        assert_eq!(pack_res.status(), StatusCode::CREATED);
+        let body = axum::body::to_bytes(pack_res.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let pack: PackSummaryResponse = serde_json::from_slice(&body).unwrap();
+
+        let manifest_req = Request::builder()
+            .method("GET")
+            .uri(format!("/v1/packs/{}/manifest", pack.pack_id))
+            .body(Body::empty())
+            .unwrap();
+        let manifest_res = app.clone().oneshot(manifest_req).await.unwrap();
+        assert_eq!(manifest_res.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(manifest_res.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let manifest: PackManifest = serde_json::from_slice(&body).unwrap();
+        assert_eq!(
+            manifest.completeness_profile,
+            Some(CompletenessProfile::AnnexIvGovernanceV1)
+        );
+        assert_eq!(manifest.completeness_pass_count, Some(0));
+        assert_eq!(manifest.completeness_warn_count, Some(0));
+        assert_eq!(manifest.completeness_fail_count, Some(8));
+        assert_eq!(
+            manifest.pack_completeness_profile,
+            Some(CompletenessProfile::AnnexIvGovernanceV1)
+        );
+        assert_eq!(
+            manifest.pack_completeness_status,
+            Some(CompletenessStatus::Pass)
+        );
+        assert_eq!(manifest.pack_completeness_pass_count, Some(5));
+        assert_eq!(manifest.pack_completeness_warn_count, Some(0));
+        assert_eq!(manifest.pack_completeness_fail_count, Some(0));
+
+        let technical_entry = manifest
+            .bundles
+            .iter()
+            .find(|entry| entry.bundle_id == scenario.technical_doc.bundle_id)
+            .unwrap();
+        assert_eq!(technical_entry.actor_role, "provider");
+        assert_eq!(
+            technical_entry.system_id.as_deref(),
+            Some("hiring-assistant")
+        );
+        assert_eq!(technical_entry.item_types, vec!["technical_doc"]);
+        assert_eq!(technical_entry.obligation_refs, vec!["art11_annex_iv"]);
+        assert!(
+            technical_entry
+                .matched_rules
+                .contains(&"pack_type:annex_iv".to_string())
+        );
+        assert!(
+            technical_entry
+                .matched_rules
+                .contains(&"actor_role:provider".to_string())
+        );
+        assert!(
+            technical_entry
+                .matched_rules
+                .contains(&"item_type:technical_doc".to_string())
+        );
+        assert!(
+            technical_entry
+                .matched_rules
+                .contains(&"obligation_ref:art11_annex_iv".to_string())
+        );
+        assert_eq!(
+            technical_entry.completeness_status,
+            Some(CompletenessStatus::Fail)
+        );
+
+        let expected_refs = BTreeMap::from([
+            (
+                scenario.risk_assessment.bundle_id.clone(),
+                "art9".to_string(),
+            ),
+            (
+                scenario.data_governance.bundle_id.clone(),
+                "art10".to_string(),
+            ),
+            (
+                scenario.instructions_for_use.bundle_id.clone(),
+                "art13".to_string(),
+            ),
+            (
+                scenario.human_oversight.bundle_id.clone(),
+                "art14".to_string(),
+            ),
+            (scenario.qms_record.bundle_id.clone(), "art17".to_string()),
+            (
+                scenario.standards_alignment.bundle_id.clone(),
+                "art40_43".to_string(),
+            ),
+            (
+                scenario.post_market_monitoring.bundle_id.clone(),
+                "art72".to_string(),
+            ),
+        ]);
+
+        for entry in &manifest.bundles {
+            assert_eq!(entry.actor_role, "provider");
+            assert_eq!(entry.system_id.as_deref(), Some("hiring-assistant"));
+            assert_eq!(entry.completeness_status, Some(CompletenessStatus::Fail));
+            if let Some(expected_ref) = expected_refs.get(&entry.bundle_id) {
+                assert_eq!(entry.obligation_refs, vec![expected_ref.clone()]);
+                assert!(
+                    entry
+                        .matched_rules
+                        .contains(&format!("obligation_ref:{expected_ref}"))
+                );
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn annex_iv_disclosure_pack_verifies_and_preserves_redactions() {
+        let state = test_state(DEFAULT_MAX_PAYLOAD_BYTES).await;
+        let public_key_pem = encode_public_key_pem(&state.signing_key.verifying_key());
+        let app = build_router(state, DEFAULT_MAX_PAYLOAD_BYTES);
+        let scenario = create_annex_iv_scenario(&app).await;
+
+        let pack_req = Request::builder()
+            .method("POST")
+            .uri("/v1/packs")
+            .header("content-type", "application/json")
+            .body(Body::from(
+                serde_json::to_vec(&CreatePackRequest {
+                    pack_type: "annex_iv".to_string(),
+                    bundle_ids: Vec::new(),
+                    system_id: Some("hiring-assistant".to_string()),
+                    from: None,
+                    to: None,
+                    bundle_format: PACK_BUNDLE_FORMAT_DISCLOSURE.to_string(),
+                    disclosure_policy: Some(
+                        DEFAULT_DISCLOSURE_POLICY_ANNEX_IV_REDACTED.to_string(),
+                    ),
+                    disclosure_template: None,
+                })
+                .unwrap(),
+            ))
+            .unwrap();
+        let pack_res = app.clone().oneshot(pack_req).await.unwrap();
+        assert_eq!(pack_res.status(), StatusCode::CREATED);
+        let body = axum::body::to_bytes(pack_res.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let pack: PackSummaryResponse = serde_json::from_slice(&body).unwrap();
+        assert_eq!(pack.bundle_ids.len(), 8);
+
+        let manifest_req = Request::builder()
+            .method("GET")
+            .uri(format!("/v1/packs/{}/manifest", pack.pack_id))
+            .body(Body::empty())
+            .unwrap();
+        let manifest_res = app.clone().oneshot(manifest_req).await.unwrap();
+        assert_eq!(manifest_res.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(manifest_res.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let manifest: PackManifest = serde_json::from_slice(&body).unwrap();
+
+        let risk_entry = manifest
+            .bundles
+            .iter()
+            .find(|entry| entry.bundle_id == scenario.risk_assessment.bundle_id)
+            .unwrap();
+        assert_eq!(
+            risk_entry.disclosed_item_field_redactions,
+            BTreeMap::from([(0usize, vec!["/metadata".to_string()])])
+        );
+
+        let data_entry = manifest
+            .bundles
+            .iter()
+            .find(|entry| entry.bundle_id == scenario.data_governance.bundle_id)
+            .unwrap();
+        assert_eq!(
+            data_entry.disclosed_item_field_redactions,
+            BTreeMap::from([(
+                0usize,
+                vec![
+                    "/metadata".to_string(),
+                    "/personal_data_categories".to_string(),
+                    "/safeguards".to_string(),
+                ],
+            )])
+        );
+
+        let ifu_entry = manifest
+            .bundles
+            .iter()
+            .find(|entry| entry.bundle_id == scenario.instructions_for_use.bundle_id)
+            .unwrap();
+        assert_eq!(
+            ifu_entry.disclosed_item_field_redactions,
+            BTreeMap::from([(0usize, vec!["/metadata".to_string()])])
+        );
+
+        for entry in &manifest.bundles {
+            assert!(!entry.disclosed_artefact_bytes_included);
+        }
+
+        let export_req = Request::builder()
+            .method("GET")
+            .uri(format!("/v1/packs/{}/export", pack.pack_id))
+            .body(Body::empty())
+            .unwrap();
+        let export_res = app.clone().oneshot(export_req).await.unwrap();
+        assert_eq!(export_res.status(), StatusCode::OK);
+        let export_bytes = axum::body::to_bytes(export_res.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let archive = decode_pack_archive(&export_bytes);
+        assert_eq!(archive.files.len(), 8);
+
+        let mut seen_bundle_ids = BTreeSet::new();
+        for packaged in &archive.files {
+            let verify_req = Request::builder()
+                .method("POST")
+                .uri("/v1/verify")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::to_vec(&VerifyRequest::Package(Box::new(PackageVerifyRequest {
+                        bundle_pkg_base64: packaged.data_base64.clone(),
+                        public_key_pem: public_key_pem.clone(),
+                    })))
+                    .unwrap(),
+                ))
+                .unwrap();
+            let verify_res = app.clone().oneshot(verify_req).await.unwrap();
+            assert_eq!(verify_res.status(), StatusCode::OK);
+            let body = axum::body::to_bytes(verify_res.into_body(), usize::MAX)
+                .await
+                .unwrap();
+            let verify_response: VerifyResponse = serde_json::from_slice(&body).unwrap();
+            assert!(verify_response.valid);
+            assert_eq!(verify_response.artefacts_verified, 0);
+
+            let disclosure_package = Base64::decode_vec(&packaged.data_base64).unwrap();
+            let decoded =
+                read_package_from_bytes(&disclosure_package, DEFAULT_MAX_PAYLOAD_BYTES).unwrap();
+            let redacted = parse_redacted_bundle_file(&decoded.files).unwrap();
+            seen_bundle_ids.insert(redacted.bundle_id.clone());
+            assert!(
+                !decoded
+                    .files
+                    .keys()
+                    .any(|name| name.starts_with("artefacts/"))
+            );
+
+            if redacted.bundle_id == scenario.risk_assessment.bundle_id {
+                assert_eq!(
+                    redacted.disclosed_items[0]
+                        .field_redacted_item
+                        .as_ref()
+                        .unwrap()
+                        .redacted_paths,
+                    vec!["/metadata/internal_notes".to_string()]
+                );
+            }
+            if redacted.bundle_id == scenario.data_governance.bundle_id {
+                assert_eq!(
+                    redacted.disclosed_items[0]
+                        .field_redacted_item
+                        .as_ref()
+                        .unwrap()
+                        .redacted_paths,
+                    vec![
+                        "/metadata/owner".to_string(),
+                        "/personal_data_categories/0".to_string(),
+                        "/personal_data_categories/1".to_string(),
+                        "/safeguards/0".to_string(),
+                        "/safeguards/1".to_string(),
+                    ]
+                );
+            }
+            if redacted.bundle_id == scenario.instructions_for_use.bundle_id {
+                assert_eq!(
+                    redacted.disclosed_items[0]
+                        .field_redacted_item
+                        .as_ref()
+                        .unwrap()
+                        .redacted_paths,
+                    vec!["/metadata/distribution".to_string()]
+                );
+            }
+        }
+
+        assert_eq!(
+            seen_bundle_ids,
+            pack.bundle_ids.into_iter().collect::<BTreeSet<_>>()
+        );
+    }
+
+    #[tokio::test]
+    async fn annex_iv_disclosure_pack_uses_full_bundle_inputs_for_pack_completeness() {
+        let state = test_state(DEFAULT_MAX_PAYLOAD_BYTES).await;
+        let app = build_router(state, DEFAULT_MAX_PAYLOAD_BYTES);
+        let _scenario = create_annex_iv_scenario(&app).await;
+
+        let pack_req = Request::builder()
+            .method("POST")
+            .uri("/v1/packs")
+            .header("content-type", "application/json")
+            .body(Body::from(
+                serde_json::to_vec(&CreatePackRequest {
+                    pack_type: "annex_iv".to_string(),
+                    bundle_ids: Vec::new(),
+                    system_id: Some("hiring-assistant".to_string()),
+                    from: None,
+                    to: None,
+                    bundle_format: PACK_BUNDLE_FORMAT_DISCLOSURE.to_string(),
+                    disclosure_policy: None,
+                    disclosure_template: None,
+                })
+                .unwrap(),
+            ))
+            .unwrap();
+        let pack_res = app.clone().oneshot(pack_req).await.unwrap();
+        assert_eq!(pack_res.status(), StatusCode::CREATED);
+        let body = axum::body::to_bytes(pack_res.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let pack: PackSummaryResponse = serde_json::from_slice(&body).unwrap();
+
+        assert_eq!(
+            pack.pack_completeness_profile,
+            Some(CompletenessProfile::AnnexIvGovernanceV1)
+        );
+        assert_eq!(
+            pack.pack_completeness_status,
+            Some(CompletenessStatus::Pass)
+        );
+        assert_eq!(pack.pack_completeness_pass_count, Some(5));
+        assert_eq!(pack.pack_completeness_warn_count, Some(0));
+        assert_eq!(pack.pack_completeness_fail_count, Some(0));
+    }
+
+    #[tokio::test]
+    async fn annex_iv_pack_order_is_stable() {
+        let state = test_state(DEFAULT_MAX_PAYLOAD_BYTES).await;
+        let app = build_router(state, DEFAULT_MAX_PAYLOAD_BYTES);
+        create_annex_iv_scenario(&app).await;
+
+        let pack_req = Request::builder()
+            .method("POST")
+            .uri("/v1/packs")
+            .header("content-type", "application/json")
+            .body(Body::from(
+                serde_json::to_vec(&CreatePackRequest {
+                    pack_type: "annex_iv".to_string(),
+                    bundle_ids: Vec::new(),
+                    system_id: Some("hiring-assistant".to_string()),
+                    from: None,
+                    to: None,
+                    bundle_format: PACK_BUNDLE_FORMAT_FULL.to_string(),
+                    disclosure_policy: None,
+                    disclosure_template: None,
+                })
+                .unwrap(),
+            ))
+            .unwrap();
+        let pack_res = app.clone().oneshot(pack_req).await.unwrap();
+        assert_eq!(pack_res.status(), StatusCode::CREATED);
+        let body = axum::body::to_bytes(pack_res.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let pack: PackSummaryResponse = serde_json::from_slice(&body).unwrap();
+
+        let manifest_req = Request::builder()
+            .method("GET")
+            .uri(format!("/v1/packs/{}/manifest", pack.pack_id))
+            .body(Body::empty())
+            .unwrap();
+        let manifest_res = app.clone().oneshot(manifest_req).await.unwrap();
+        assert_eq!(manifest_res.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(manifest_res.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let manifest: PackManifest = serde_json::from_slice(&body).unwrap();
+
+        let ordered_item_types = manifest
+            .bundles
+            .iter()
+            .map(|entry| entry.item_types[0].clone())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            ordered_item_types,
+            vec![
+                "technical_doc".to_string(),
+                "risk_assessment".to_string(),
+                "data_governance".to_string(),
+                "instructions_for_use".to_string(),
+                "human_oversight".to_string(),
+                "qms_record".to_string(),
+                "standards_alignment".to_string(),
+                "post_market_monitoring".to_string(),
+            ]
+        );
     }
 
     #[tokio::test]
@@ -13652,6 +16276,7 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
             .body(Body::from(
                 serde_json::to_vec(&CreatePackRequest {
                     pack_type: "runtime_logs".to_string(),
+                    bundle_ids: Vec::new(),
                     system_id: Some("system-template-pack".to_string()),
                     from: None,
                     to: None,
@@ -13770,6 +16395,7 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
             .body(Body::from(
                 serde_json::to_vec(&CreatePackRequest {
                     pack_type: "runtime_logs".to_string(),
+                    bundle_ids: Vec::new(),
                     system_id: Some("system-redacted".to_string()),
                     from: None,
                     to: None,
@@ -13967,6 +16593,7 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
             .body(Body::from(
                 serde_json::to_vec(&CreatePackRequest {
                     pack_type: "incident_response".to_string(),
+                    bundle_ids: Vec::new(),
                     system_id: Some("system-incident".to_string()),
                     from: None,
                     to: None,
@@ -14215,6 +16842,7 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
             .body(Body::from(
                 serde_json::to_vec(&CreatePackRequest {
                     pack_type: "post_market_monitoring".to_string(),
+                    bundle_ids: Vec::new(),
                     system_id: Some("system-monitoring".to_string()),
                     from: None,
                     to: None,
@@ -14411,6 +17039,7 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
             .body(Body::from(
                 serde_json::to_vec(&CreatePackRequest {
                     pack_type: "annex_xi".to_string(),
+                    bundle_ids: Vec::new(),
                     system_id: Some("system-z".to_string()),
                     from: None,
                     to: None,
@@ -14499,6 +17128,181 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
     }
 
     #[tokio::test]
+    async fn annex_xi_pack_attaches_gpai_provider_completeness_profile_and_excludes_other_systems()
+    {
+        let state = test_state(DEFAULT_MAX_PAYLOAD_BYTES).await;
+        let app = build_router(state, DEFAULT_MAX_PAYLOAD_BYTES);
+        let scenario = create_gpai_provider_scenario(&app).await;
+
+        let pack_req = Request::builder()
+            .method("POST")
+            .uri("/v1/packs")
+            .header("content-type", "application/json")
+            .body(Body::from(
+                serde_json::to_vec(&CreatePackRequest {
+                    pack_type: "annex_xi".to_string(),
+                    bundle_ids: Vec::new(),
+                    system_id: Some("foundation-model-alpha".to_string()),
+                    from: None,
+                    to: None,
+                    bundle_format: default_pack_bundle_format(),
+                    disclosure_policy: None,
+                    disclosure_template: None,
+                })
+                .unwrap(),
+            ))
+            .unwrap();
+        let pack_res = app.clone().oneshot(pack_req).await.unwrap();
+        assert_eq!(pack_res.status(), StatusCode::CREATED);
+        let body = axum::body::to_bytes(pack_res.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let pack: PackSummaryResponse = serde_json::from_slice(&body).unwrap();
+
+        assert_eq!(
+            pack.completeness_profile,
+            Some(CompletenessProfile::GpaiProviderV1)
+        );
+        assert_eq!(pack.completeness_status, Some(CompletenessStatus::Fail));
+        assert_eq!(
+            pack.pack_completeness_profile,
+            Some(CompletenessProfile::GpaiProviderV1)
+        );
+        assert_eq!(
+            pack.pack_completeness_status,
+            Some(CompletenessStatus::Pass)
+        );
+        assert_eq!(pack.pack_completeness_pass_count, Some(6));
+        assert_eq!(pack.pack_completeness_warn_count, Some(0));
+        assert_eq!(pack.pack_completeness_fail_count, Some(0));
+        assert_eq!(pack.bundle_count, 6);
+        assert_eq!(
+            pack.bundle_ids,
+            vec![
+                scenario.technical_doc.bundle_id.clone(),
+                scenario.model_evaluation.bundle_id.clone(),
+                scenario.training_provenance.bundle_id.clone(),
+                scenario.compute_metrics.bundle_id.clone(),
+                scenario.copyright_policy.bundle_id.clone(),
+                scenario.training_summary.bundle_id.clone(),
+            ]
+        );
+        assert!(
+            !pack
+                .bundle_ids
+                .contains(&scenario.other_system_bundle.bundle_id)
+        );
+
+        let manifest_req = Request::builder()
+            .method("GET")
+            .uri(format!("/v1/packs/{}/manifest", pack.pack_id))
+            .body(Body::empty())
+            .unwrap();
+        let manifest_res = app.oneshot(manifest_req).await.unwrap();
+        assert_eq!(manifest_res.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(manifest_res.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let manifest: PackManifest = serde_json::from_slice(&body).unwrap();
+
+        assert_eq!(
+            manifest.completeness_profile,
+            Some(CompletenessProfile::GpaiProviderV1)
+        );
+        assert_eq!(manifest.completeness_pass_count, Some(0));
+        assert_eq!(manifest.completeness_warn_count, Some(0));
+        assert_eq!(manifest.completeness_fail_count, Some(6));
+        assert_eq!(
+            manifest.pack_completeness_profile,
+            Some(CompletenessProfile::GpaiProviderV1)
+        );
+        assert_eq!(
+            manifest.pack_completeness_status,
+            Some(CompletenessStatus::Pass)
+        );
+        assert_eq!(manifest.pack_completeness_pass_count, Some(6));
+        assert_eq!(manifest.pack_completeness_warn_count, Some(0));
+        assert_eq!(manifest.pack_completeness_fail_count, Some(0));
+        assert_eq!(manifest.bundles.len(), 6);
+        assert!(
+            manifest
+                .bundles
+                .iter()
+                .all(|entry| entry.completeness_status == Some(CompletenessStatus::Fail))
+        );
+
+        let compute_entry = manifest
+            .bundles
+            .iter()
+            .find(|entry| entry.bundle_id == scenario.compute_metrics.bundle_id)
+            .unwrap();
+        assert_eq!(compute_entry.item_types, vec!["compute_metrics"]);
+        assert_eq!(
+            compute_entry.obligation_refs,
+            vec!["art51_compute_threshold"]
+        );
+        assert!(
+            compute_entry
+                .matched_rules
+                .contains(&"pack_type:annex_xi".to_string())
+        );
+        assert!(
+            compute_entry
+                .matched_rules
+                .contains(&"item_type:compute_metrics".to_string())
+        );
+        assert!(
+            compute_entry
+                .matched_rules
+                .contains(&"obligation_ref:art51_compute_threshold".to_string())
+        );
+    }
+
+    #[tokio::test]
+    async fn annex_xi_disclosure_pack_uses_full_bundle_inputs_for_pack_completeness() {
+        let state = test_state(DEFAULT_MAX_PAYLOAD_BYTES).await;
+        let app = build_router(state, DEFAULT_MAX_PAYLOAD_BYTES);
+        let _scenario = create_gpai_provider_scenario(&app).await;
+
+        let pack_req = Request::builder()
+            .method("POST")
+            .uri("/v1/packs")
+            .header("content-type", "application/json")
+            .body(Body::from(
+                serde_json::to_vec(&CreatePackRequest {
+                    pack_type: "annex_xi".to_string(),
+                    bundle_ids: Vec::new(),
+                    system_id: Some("foundation-model-alpha".to_string()),
+                    from: None,
+                    to: None,
+                    bundle_format: PACK_BUNDLE_FORMAT_DISCLOSURE.to_string(),
+                    disclosure_policy: None,
+                    disclosure_template: None,
+                })
+                .unwrap(),
+            ))
+            .unwrap();
+        let pack_res = app.clone().oneshot(pack_req).await.unwrap();
+        assert_eq!(pack_res.status(), StatusCode::CREATED);
+        let body = axum::body::to_bytes(pack_res.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let pack: PackSummaryResponse = serde_json::from_slice(&body).unwrap();
+
+        assert_eq!(
+            pack.pack_completeness_profile,
+            Some(CompletenessProfile::GpaiProviderV1)
+        );
+        assert_eq!(
+            pack.pack_completeness_status,
+            Some(CompletenessStatus::Pass)
+        );
+        assert_eq!(pack.pack_completeness_pass_count, Some(6));
+        assert_eq!(pack.pack_completeness_warn_count, Some(0));
+        assert_eq!(pack.pack_completeness_fail_count, Some(0));
+    }
+
+    #[tokio::test]
     async fn provider_governance_pack_curates_qms_records_for_provider_role() {
         let state = test_state(DEFAULT_MAX_PAYLOAD_BYTES).await;
         let app = build_router(state, DEFAULT_MAX_PAYLOAD_BYTES);
@@ -14584,6 +17388,7 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
             .body(Body::from(
                 serde_json::to_vec(&CreatePackRequest {
                     pack_type: "provider_governance".to_string(),
+                    bundle_ids: Vec::new(),
                     system_id: Some("system-governance".to_string()),
                     from: None,
                     to: None,
@@ -14777,6 +17582,7 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
             .body(Body::from(
                 serde_json::to_vec(&CreatePackRequest {
                     pack_type: "fundamental_rights".to_string(),
+                    bundle_ids: Vec::new(),
                     system_id: Some("system-fria".to_string()),
                     from: None,
                     to: None,
@@ -14918,6 +17724,7 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
             .body(Body::from(
                 serde_json::to_vec(&CreatePackRequest {
                     pack_type: "systemic_risk".to_string(),
+                    bundle_ids: Vec::new(),
                     system_id: Some("system-risk".to_string()),
                     from: None,
                     to: None,
@@ -15045,6 +17852,7 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
             .body(Body::from(
                 serde_json::to_vec(&CreatePackRequest {
                     pack_type: "conformity".to_string(),
+                    bundle_ids: Vec::new(),
                     system_id: Some("system-conformity".to_string()),
                     from: None,
                     to: None,

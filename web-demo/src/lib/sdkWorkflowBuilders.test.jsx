@@ -54,7 +54,7 @@ const baseDraft = {
 };
 
 describe("buildScenarioWorkflow", () => {
-  test("builds a multi-step TypeScript support workflow", async () => {
+  test("builds a multi-step TypeScript annex iv workflow", async () => {
     const scenario = getPlaygroundScenario("ts_support_rules");
     const providerResult = {
       capture_mode: "synthetic_demo_capture",
@@ -71,14 +71,24 @@ describe("buildScenarioWorkflow", () => {
     const steps = await buildScenarioWorkflow(scenario, baseDraft, providerResult);
 
     expect(steps.map((step) => step.itemTypes[0])).toEqual([
-      "llm_interaction",
+      "technical_doc",
+      "risk_assessment",
       "data_governance",
       "instructions_for_use",
-      "qms_record"
+      "human_oversight",
+      "qms_record",
+      "standards_alignment",
+      "post_market_monitoring"
     ]);
     expect(steps[0].createPayload.capture.compliance_profile.risk_tier).toBe("high_risk");
-    expect(steps[1].createPayload.capture.items[0].data.dataset_name).toBe(
+    expect(steps[0].createPayload.capture.items[0].data.document_ref).toBe(
+      "docs://benefits-review/annex-iv-system-card"
+    );
+    expect(steps[2].createPayload.capture.items[0].data.dataset_name).toBe(
       "support-assistant-ops-corpus"
+    );
+    expect(steps[6].createPayload.capture.items[0].data.standard_ref).toBe(
+      "EN ISO/IEC 42001:2023"
     );
   });
 

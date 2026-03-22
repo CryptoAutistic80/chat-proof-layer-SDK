@@ -43,6 +43,7 @@ from .native import (
     build_bundle,
     canonicalize_json,
     compute_merkle_root,
+    evaluate_completeness,
     hash_sha256,
     redact_bundle,
     sign_bundle_root,
@@ -50,6 +51,7 @@ from .native import (
     verify_redacted_bundle,
     verify_bundle_root,
 )
+from .pack_readiness import select_pack_readiness
 from .proof_layer import ProofLayer
 
 __all__ = [
@@ -59,6 +61,7 @@ __all__ = [
     "build_bundle",
     "canonicalize_json",
     "compute_merkle_root",
+    "evaluate_completeness",
     "DISCLOSURE_POLICY_TEMPLATE_NAMES",
     "DISCLOSURE_REDACTION_GROUPS",
     "create_disclosure_policy",
@@ -96,6 +99,7 @@ __all__ = [
     "hash_sha256",
     "prove_llm_call",
     "redact_bundle",
+    "select_pack_readiness",
     "sign_bundle_root",
     "verify_bundle",
     "verify_redacted_bundle",

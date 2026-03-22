@@ -1,6 +1,7 @@
 import { Buffer } from "node:buffer";
 import type {
   BinaryLike,
+  CompletenessReport,
   CreatePackRequest,
   CreateBundleRequest,
   CreateBundleResponse,
@@ -10,12 +11,17 @@ import type {
   DisclosureTemplateCatalog,
   DisclosureTemplateInfo,
   DisclosureTemplateRenderRequest,
+  EvaluateCompletenessRequest,
   FetchLike,
   HttpClientOptions,
   InlineArtefactRequest,
   JsonObject,
   PackManifest,
   PackSummaryResponse,
+  VerifyReceiptRequest,
+  VerifyReceiptResponse,
+  VerifyTimestampRequest,
+  VerifyTimestampResponse,
   VaultConfigResponse,
   VerifyBundleRequest,
   VerifyBundleSummary,
@@ -93,8 +99,75 @@ export class ProofLayerClient {
     return this.#post("/v1/verify", payload);
   }
 
+  async verifyTimestamp({
+    bundleId,
+    bundleRoot,
+    timestamp
+  }: VerifyTimestampRequest): Promise<VerifyTimestampResponse> {
+    const selectionCount =
+      Number(Boolean(bundleId)) + Number(Boolean(bundleRoot || timestamp));
+    if (selectionCount !== 1) {
+      throw new Error("provide exactly one of bundleId or bundleRoot/timestamp");
+    }
+    if ((bundleRoot && !timestamp) || (!bundleRoot && timestamp)) {
+      throw new Error("bundleRoot and timestamp must be provided together");
+    }
+    const payload = bundleId
+      ? { bundle_id: bundleId }
+      : { bundle_root: bundleRoot, timestamp };
+    return this.#post("/v1/verify/timestamp", payload);
+  }
+
+  async verifyReceipt({
+    bundleId,
+    bundleRoot,
+    receipt,
+    liveCheckMode
+  }: VerifyReceiptRequest): Promise<VerifyReceiptResponse> {
+    const selectionCount =
+      Number(Boolean(bundleId)) + Number(Boolean(bundleRoot || receipt));
+    if (selectionCount !== 1) {
+      throw new Error("provide exactly one of bundleId or bundleRoot/receipt");
+    }
+    if ((bundleRoot && !receipt) || (!bundleRoot && receipt)) {
+      throw new Error("bundleRoot and receipt must be provided together");
+    }
+    const payload = bundleId
+      ? {
+          bundle_id: bundleId,
+          ...(liveCheckMode ? { live_check_mode: liveCheckMode } : {})
+        }
+      : {
+          bundle_root: bundleRoot,
+          receipt,
+          ...(liveCheckMode ? { live_check_mode: liveCheckMode } : {})
+        };
+    return this.#post("/v1/verify/receipt", payload);
+  }
+
+  async evaluateCompleteness({
+    bundle,
+    bundleId,
+    packId,
+    profile
+  }: EvaluateCompletenessRequest): Promise<CompletenessReport> {
+    const selectionCount =
+      Number(Boolean(bundle)) + Number(Boolean(bundleId)) + Number(Boolean(packId));
+    if (selectionCount !== 1) {
+      throw new Error("provide exactly one of bundle_id, bundle, or pack_id");
+    }
+    const payload = {
+      profile,
+      ...(bundle ? { bundle } : {}),
+      ...(bundleId ? { bundle_id: bundleId } : {}),
+      ...(packId ? { pack_id: packId } : {})
+    };
+    return this.#post("/v1/completeness/evaluate", payload);
+  }
+
   async createPack({
     packType,
+    bundleIds,
     systemId,
     from,
     to,
@@ -102,14 +175,18 @@ export class ProofLayerClient {
     disclosurePolicy,
     disclosureTemplate
   }: CreatePackRequest): Promise<PackSummaryResponse> {
+    if (bundleIds && bundleIds.length > 0 && (systemId || from || to)) {
+      throw new Error("bundleIds cannot be combined with systemId, from, or to");
+    }
     if (disclosurePolicy && disclosureTemplate) {
       throw new Error("provide either disclosurePolicy or disclosureTemplate, not both");
     }
     const payload = {
       pack_type: packType,
-      system_id: systemId,
-      from,
-      to,
+      ...(bundleIds && bundleIds.length > 0 ? { bundle_ids: bundleIds } : {}),
+      ...(systemId ? { system_id: systemId } : {}),
+      ...(from ? { from } : {}),
+      ...(to ? { to } : {}),
       ...(bundleFormat ? { bundle_format: bundleFormat } : {}),
       ...(disclosurePolicy ? { disclosure_policy: disclosurePolicy } : {}),
       ...(disclosureTemplate

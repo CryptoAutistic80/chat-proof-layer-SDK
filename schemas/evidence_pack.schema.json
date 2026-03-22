@@ -22,6 +22,17 @@
       "type": "string",
       "minLength": 1,
       "enum": [
+        "annex_iv",
+        "annex_xi",
+        "annex_xii",
+        "runtime_logs",
+        "risk_mgmt",
+        "ai_literacy",
+        "fundamental_rights",
+        "provider_governance",
+        "post_market_monitoring",
+        "systemic_risk",
+        "incident_response",
         "conformity"
       ]
     },
@@ -43,6 +54,60 @@
     "disclosure_policy": {
       "type": "string",
       "minLength": 1
+    },
+    "completeness_profile": {
+      "type": "string",
+      "enum": [
+        "annex_iv_governance_v1",
+        "gpai_provider_v1"
+      ]
+    },
+    "completeness_status": {
+      "type": "string",
+      "enum": [
+        "pass",
+        "warn",
+        "fail"
+      ]
+    },
+    "completeness_pass_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "completeness_warn_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "completeness_fail_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "pack_completeness_profile": {
+      "type": "string",
+      "enum": [
+        "annex_iv_governance_v1",
+        "gpai_provider_v1"
+      ]
+    },
+    "pack_completeness_status": {
+      "type": "string",
+      "enum": [
+        "pass",
+        "warn",
+        "fail"
+      ]
+    },
+    "pack_completeness_pass_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "pack_completeness_warn_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "pack_completeness_fail_count": {
+      "type": "integer",
+      "minimum": 0
     },
     "system_id": {
       "type": "string",
@@ -169,6 +234,14 @@
               "type": "string",
               "minLength": 1
             }
+          },
+          "completeness_status": {
+            "type": "string",
+            "enum": [
+              "pass",
+              "warn",
+              "fail"
+            ]
           },
           "matched_rules": {
             "type": "array",

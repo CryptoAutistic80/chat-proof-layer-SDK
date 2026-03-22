@@ -1,5 +1,8 @@
 export type JsonPrimitive = string | number | boolean | null;
-export type JsonValue = JsonPrimitive | JsonValue[] | { [key: string]: JsonValue };
+export type JsonValue =
+  | JsonPrimitive
+  | JsonValue[]
+  | { [key: string]: JsonValue };
 export type JsonObject = Record<string, unknown>;
 export type BinaryLike = Uint8Array | string | JsonValue | JsonObject;
 export type ActorRole =
@@ -48,9 +51,7 @@ export interface EvidenceActorOptions {
 }
 
 export interface LifecycleCaptureOptions
-  extends EvidenceActorOptions,
-    EvidenceSubjectOptions,
-    EvidencePolicyOptions {
+  extends EvidenceActorOptions, EvidenceSubjectOptions, EvidencePolicyOptions {
   complianceProfile?: ComplianceProfileInput;
   artefacts?: ProofArtefactInput[];
   bundleId?: string;
@@ -225,10 +226,157 @@ export interface VerifyPackageRequest {
   publicKeyPem: string;
 }
 
+export type TrustLevel = "structural" | "trusted" | "qualified";
+
+export type CheckState = "pass" | "warn" | "fail" | "not_run";
+
+export interface VerificationCheck extends JsonObject {
+  id: string;
+  label: string;
+  state: CheckState;
+  detail?: string;
+}
+
+export interface TimestampVerification extends JsonObject {
+  kind: string;
+  provider?: string;
+  generated_at: string;
+  digest_algorithm: string;
+  message_imprint: string;
+  policy_oid: string;
+  assurance_profile?: string;
+  signer_count: number;
+  certificate_count: number;
+  assurance_profile_verified?: boolean;
+  policy_oid_verified?: boolean;
+  trusted?: boolean;
+  chain_verified?: boolean;
+  certificate_profile_verified?: boolean;
+  revocation_checked?: boolean;
+  ocsp_checked?: boolean;
+  qualified_signer_verified?: boolean;
+  signer_subject?: string;
+  trust_anchor_subject?: string;
+  ocsp_responder_url?: string;
+}
+
+export interface TimestampAssessment extends JsonObject {
+  level: TrustLevel;
+  headline: string;
+  summary: string;
+  next_step: string;
+  checks: VerificationCheck[];
+}
+
+export type ReceiptLiveCheckMode = "off" | "best_effort" | "required";
+
+export interface ReceiptLiveVerification extends JsonObject {
+  mode: ReceiptLiveCheckMode;
+  state: CheckState;
+  checked_at: string;
+  summary: string;
+  current_tree_size?: number;
+  current_root_hash?: string;
+  entry_retrieved?: boolean;
+  consistency_verified?: boolean;
+}
+
+export interface ReceiptVerification extends JsonObject {
+  kind: string;
+  provider?: string;
+  log_url: string;
+  entry_uuid: string;
+  leaf_hash: string;
+  log_id: string;
+  log_index: number;
+  integrated_time: string;
+  tree_size: number;
+  root_hash: string;
+  inclusion_proof_hashes: number;
+  inclusion_proof_verified: boolean;
+  signed_entry_timestamp_present: boolean;
+  signed_entry_timestamp_verified?: boolean;
+  log_id_verified?: boolean;
+  trusted?: boolean;
+  timestamp_generated_at: string;
+  live_verification?: ReceiptLiveVerification;
+}
+
+export interface ReceiptAssessment extends JsonObject {
+  level: TrustLevel;
+  headline: string;
+  summary: string;
+  next_step: string;
+  checks: VerificationCheck[];
+  live_check?: ReceiptLiveVerification;
+}
+
+export interface VerifyTimestampRequest extends JsonObject {
+  bundleId?: string;
+  bundleRoot?: string;
+  timestamp?: JsonObject;
+}
+
+export interface VerifyTimestampResponse extends JsonObject {
+  valid: boolean;
+  message: string;
+  verification?: TimestampVerification;
+  assessment: TimestampAssessment;
+}
+
+export interface VerifyReceiptRequest extends JsonObject {
+  bundleId?: string;
+  bundleRoot?: string;
+  receipt?: JsonObject;
+  liveCheckMode?: ReceiptLiveCheckMode;
+}
+
+export interface VerifyReceiptResponse extends JsonObject {
+  valid: boolean;
+  message: string;
+  verification?: ReceiptVerification;
+  assessment: ReceiptAssessment;
+}
+
+export type CompletenessProfile = "annex_iv_governance_v1" | "gpai_provider_v1";
+
+export type CompletenessStatus = "pass" | "warn" | "fail";
+
+export interface CompletenessRuleResult extends JsonObject {
+  rule_id: string;
+  item_type: string;
+  obligation_ref: string;
+  status: CompletenessStatus;
+  present_count: number;
+  complete_count: number;
+  evaluated_item_indices?: number[];
+  missing_fields?: string[];
+  summary: string;
+}
+
+export interface CompletenessReport extends JsonObject {
+  profile: CompletenessProfile;
+  status: CompletenessStatus;
+  bundle_id: string;
+  system_id?: string;
+  pass_count: number;
+  warn_count: number;
+  fail_count: number;
+  rules: CompletenessRuleResult[];
+}
+
+export interface EvaluateCompletenessRequest extends JsonObject {
+  profile: CompletenessProfile;
+  bundle?: string | ProofBundle;
+  bundleId?: string;
+  packId?: string;
+}
+
 export type PackBundleFormat = "full" | "disclosure";
 
 export interface CreatePackRequest {
   packType: string;
+  bundleIds?: string[];
   systemId?: string;
   from?: string;
   to?: string;
@@ -254,6 +402,7 @@ export interface PackBundleEntry extends JsonObject {
   disclosed_artefact_names?: string[];
   disclosed_artefact_bytes_included?: boolean;
   obligation_refs?: string[];
+  completeness_status?: CompletenessStatus;
   matched_rules: string[];
 }
 
@@ -266,6 +415,13 @@ export interface PackSummaryResponse extends JsonObject {
   to?: string;
   bundle_format: PackBundleFormat;
   disclosure_policy?: string;
+  completeness_profile?: CompletenessProfile;
+  completeness_status?: CompletenessStatus;
+  pack_completeness_profile?: CompletenessProfile;
+  pack_completeness_status?: CompletenessStatus;
+  pack_completeness_pass_count?: number;
+  pack_completeness_warn_count?: number;
+  pack_completeness_fail_count?: number;
   bundle_count: number;
   bundle_ids: string[];
 }
@@ -280,8 +436,26 @@ export interface PackManifest extends JsonObject {
   to?: string;
   bundle_format: PackBundleFormat;
   disclosure_policy?: string;
+  completeness_profile?: CompletenessProfile;
+  completeness_pass_count?: number;
+  completeness_warn_count?: number;
+  completeness_fail_count?: number;
+  pack_completeness_profile?: CompletenessProfile;
+  pack_completeness_status?: CompletenessStatus;
+  pack_completeness_pass_count?: number;
+  pack_completeness_warn_count?: number;
+  pack_completeness_fail_count?: number;
   bundle_ids: string[];
   bundles: PackBundleEntry[];
+}
+
+export interface PackReadinessSummary extends JsonObject {
+  source: "pack_scoped" | "bundle_aggregate";
+  profile?: CompletenessProfile;
+  status?: CompletenessStatus;
+  passCount?: number;
+  warnCount?: number;
+  failCount?: number;
 }
 
 export interface DisclosurePolicyConfig extends JsonObject {
@@ -419,8 +593,19 @@ export interface VaultConfigResponse extends JsonObject {
       key_id?: string;
     };
   };
-  timestamp: JsonObject;
-  transparency: JsonObject;
+  timestamp: JsonObject & {
+    enabled?: boolean;
+    provider?: string;
+    url?: string;
+    assurance?: string;
+  };
+  transparency: JsonObject & {
+    enabled?: boolean;
+    provider?: string;
+    url?: string;
+    scitt_format?: string;
+    log_public_key_pem?: string;
+  };
   disclosure: DisclosureConfig;
   auth: JsonObject & {
     enabled: boolean;
@@ -466,7 +651,9 @@ export interface LocalCreateBundleRequest extends CreateBundleRequest {
 }
 
 export interface BundleCreateClient {
-  createBundle(request: CreateBundleRequest | LocalCreateBundleRequest): Promise<CreateBundleResponse>;
+  createBundle(
+    request: CreateBundleRequest | LocalCreateBundleRequest,
+  ): Promise<CreateBundleResponse>;
 }
 
 export interface LlmInteractionRequestOptions {
@@ -498,6 +685,12 @@ export interface LlmInteractionRequestOptions {
   artefacts?: ProofArtefactInput[];
 }
 
+/**
+ * Recommended Annex IV minimum: `riskId`, `severity`, `status`,
+ * `riskDescription`, `likelihood`, `affectedGroups`, `mitigationMeasures`,
+ * `residualRiskLevel`, `riskOwner`, and `testResultsSummary`.
+ * Treat `metadata` as disclosure-sensitive.
+ */
 export interface RiskAssessmentRequestOptions extends LifecycleCaptureOptions {
   riskId: string;
   severity: string;
@@ -515,6 +708,14 @@ export interface RiskAssessmentRequestOptions extends LifecycleCaptureOptions {
   record?: JsonValue | JsonObject;
 }
 
+/**
+ * Recommended Annex IV minimum: `decision`, `datasetRef` or `datasetName`,
+ * `sourceDescription`, `collectionPeriod`, `preprocessingOperations`,
+ * `biasDetectionMethodology`, `biasMetrics`, `mitigationActions`, `dataGaps`,
+ * `personalDataCategories`, and `safeguards`.
+ * Treat `metadata`, `personalDataCategories`, and `safeguards` as
+ * disclosure-sensitive.
+ */
 export interface DataGovernanceRequestOptions extends LifecycleCaptureOptions {
   decision: string;
   datasetRef?: string;
@@ -534,6 +735,13 @@ export interface DataGovernanceRequestOptions extends LifecycleCaptureOptions {
   record?: JsonValue | JsonObject;
 }
 
+/**
+ * Recommended Annex IV minimum: `documentRef`, `annexIvSections`,
+ * `systemDescriptionSummary`, `modelDescriptionSummary`,
+ * `capabilitiesAndLimitations`, `designChoicesSummary`,
+ * `evaluationMetricsSummary`, `humanOversightDesignSummary`, and
+ * `postMarketMonitoringPlanRef`.
+ */
 export interface TechnicalDocRequestOptions extends LifecycleCaptureOptions {
   documentRef: string;
   section?: string;
@@ -553,6 +761,13 @@ export interface TechnicalDocRequestOptions extends LifecycleCaptureOptions {
   descriptor?: JsonValue | JsonObject;
 }
 
+/**
+ * Recommended Annex IV minimum: `documentRef`, `versionTag`,
+ * `providerIdentity`, `intendedPurpose`, `systemCapabilities`,
+ * `accuracyMetrics`, `foreseeableRisks`, `humanOversightGuidance`, and
+ * `logManagementGuidance`.
+ * Treat `metadata` as disclosure-sensitive.
+ */
 export interface InstructionsForUseRequestOptions extends LifecycleCaptureOptions {
   documentRef: string;
   versionTag?: string;
@@ -687,6 +902,11 @@ export interface RetrievalRequestOptions extends LifecycleCaptureOptions {
   executionEnd?: string;
 }
 
+/**
+ * Recommended Annex IV minimum: `action`, `reviewer`, `actorRole`,
+ * `anomalyDetected`, `overrideAction`, `automationBiasDetected`,
+ * `stopTriggered`, and `stopReason`. Supporting notes remain an artefact.
+ */
 export interface HumanOversightRequestOptions extends LifecycleCaptureOptions {
   action: string;
   reviewer?: string;
@@ -884,11 +1104,14 @@ export interface ProofLayerCaptureOptions {
 
 export interface GenericProofLayerOptions<
   TParams extends JsonObject = JsonObject,
-  TResult extends JsonObject = JsonObject
+  TResult extends JsonObject = JsonObject,
 > extends ProviderCaptureOptions {
   provider: string;
   model?: string | ((params: TParams, result: TResult) => string);
-  buildTrace?: (params: TParams, result: TResult) => JsonValue | JsonObject | undefined;
+  buildTrace?: (
+    params: TParams,
+    result: TResult,
+  ) => JsonValue | JsonObject | undefined;
 }
 
 export interface ProofLayerResult {

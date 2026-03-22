@@ -33,6 +33,7 @@ SCHEMA_FILES = (
     "evidence_bundle.schema.json",
     "redacted_bundle.schema.json",
     "evidence_pack.schema.json",
+    "completeness_report.schema.json",
     "schema_manifest.json",
 )
 
@@ -73,6 +74,10 @@ def read_core_source(repo_root: Path) -> str:
 
 def read_vault_source(repo_root: Path) -> str:
     return read_text(repo_root / "crates" / "vault" / "src" / "main.rs")
+
+
+def read_completeness_source(repo_root: Path) -> str:
+    return read_text(repo_root / "crates" / "core" / "src" / "completeness" / "mod.rs")
 
 
 def parse_const(source: str, name: str) -> str:
@@ -155,8 +160,29 @@ def parse_evidence_variants(source: str) -> list[tuple[str, str]]:
 
 def parse_pack_types(source: str) -> list[str]:
     block = extract_block(source, "fn normalize_pack_type")
-    pack_types = sorted(set(re.findall(r"\"([a-z0-9_]+)\" =>", block)))
+    match_body = extract_block(block, "match normalized.as_str()")
+    pack_types: list[str] = []
+    seen: set[str] = set()
+    for match in re.finditer(r'(?m)(?:(?<=^)|(?<=\|))\s*"([a-z0-9_]+)"', match_body):
+        value = match.group(1)
+        if value not in seen:
+            pack_types.append(value)
+            seen.add(value)
     return pack_types
+
+
+def parse_completeness_profiles(source: str) -> list[str]:
+    block = extract_block(source, "pub fn as_str")
+    profiles: list[str] = []
+    seen: set[str] = set()
+    for match in re.finditer(r'=> "([a-z0-9_]+)"', block):
+        value = match.group(1)
+        if value not in seen:
+            profiles.append(value)
+            seen.add(value)
+    if not profiles:
+        raise RuntimeError("no completeness profiles found in completeness/mod.rs")
+    return profiles
 
 
 def unwrap_option(rust_type: str) -> tuple[bool, str]:
@@ -253,6 +279,81 @@ def build_shared_defs() -> dict[str, object]:
                     "type": "array",
                     "items": {"$ref": "#/$defs/metricSummary"},
                 },
+            },
+        },
+    }
+
+
+def build_transparency_receipt_defs(defs_prefix: str = "#/$defs/") -> dict[str, object]:
+    return {
+        "transparencyReceiptBody": {
+            "oneOf": [
+                {"$ref": f"{defs_prefix}rekorStoredReceiptBody"},
+                {"$ref": f"{defs_prefix}scittLegacyStoredReceiptBody"},
+                {"$ref": f"{defs_prefix}scittCoseStoredReceiptBody"},
+            ]
+        },
+        "rekorStoredReceiptBody": {
+            "type": "object",
+            "additionalProperties": False,
+            "required": ["log_url", "entry_uuid", "log_entry"],
+            "properties": {
+                "log_url": {"type": "string", "minLength": 1},
+                "entry_uuid": {"type": "string", "minLength": 1},
+                "log_entry": True,
+            },
+        },
+        "scittLegacyStoredReceiptBody": {
+            "type": "object",
+            "additionalProperties": False,
+            "required": [
+                "service_url",
+                "entry_id",
+                "service_id",
+                "registered_at",
+                "statement_b64",
+                "statement_hash",
+                "receipt_b64",
+            ],
+            "properties": {
+                "body_format": {
+                    "type": "string",
+                    "const": "proof-layer-json-v1",
+                },
+                "service_url": {"type": "string", "minLength": 1},
+                "entry_id": {"type": "string", "minLength": 1},
+                "service_id": {"type": "string", "minLength": 1},
+                "registered_at": {"type": "string", "format": "date-time"},
+                "statement_b64": {"$ref": f"{defs_prefix}base64String"},
+                "statement_hash": {"$ref": f"{defs_prefix}sha256Digest"},
+                "receipt_b64": {"$ref": f"{defs_prefix}base64String"},
+            },
+        },
+        "scittCoseStoredReceiptBody": {
+            "type": "object",
+            "additionalProperties": False,
+            "required": [
+                "body_format",
+                "service_url",
+                "entry_id",
+                "service_id",
+                "registered_at",
+                "statement_hash",
+                "statement_cose_b64",
+                "receipt_cbor_b64",
+            ],
+            "properties": {
+                "body_format": {
+                    "type": "string",
+                    "const": "ietf-scitt-cose-ccf-v1",
+                },
+                "service_url": {"type": "string", "minLength": 1},
+                "entry_id": {"type": "string", "minLength": 1},
+                "service_id": {"type": "string", "minLength": 1},
+                "registered_at": {"type": "string", "format": "date-time"},
+                "statement_hash": {"$ref": f"{defs_prefix}sha256Digest"},
+                "statement_cose_b64": {"$ref": f"{defs_prefix}base64String"},
+                "receipt_cbor_b64": {"$ref": f"{defs_prefix}base64String"},
             },
         },
     }
@@ -494,12 +595,16 @@ def build_bundle_schema(
                 "properties": {
                     "kind": {"type": "string", "minLength": 1},
                     "provider": {"type": "string", "minLength": 1},
-                    "body": True,
+                    "body": {"$ref": "#/$defs/transparencyReceiptBody"},
                 },
             },
         },
         "$defs": {
             "sha256Digest": {"type": "string", "pattern": SHA256_PATTERN},
+            "base64String": {
+                "type": "string",
+                "minLength": 1,
+            },
             "artefactRef": {
                 "type": "object",
                 "additionalProperties": False,
@@ -511,6 +616,7 @@ def build_bundle_schema(
                     "content_type": {"type": "string", "minLength": 1},
                 },
             },
+            **build_transparency_receipt_defs(),
         },
     }
 
@@ -605,7 +711,7 @@ def build_redacted_bundle_schema(
                 "properties": {
                     "kind": {"type": "string", "minLength": 1},
                     "provider": {"type": "string", "minLength": 1},
-                    "body": True,
+                    "body": {"$ref": "#/$defs/transparencyReceiptBody"},
                 },
             },
             "total_items": {"type": "integer", "minimum": 0},
@@ -641,6 +747,10 @@ def build_redacted_bundle_schema(
         },
         "$defs": {
             "sha256Digest": {"type": "string", "pattern": SHA256_PATTERN},
+            "base64String": {
+                "type": "string",
+                "minLength": 1,
+            },
             "artefactRef": {
                 "type": "object",
                 "additionalProperties": False,
@@ -652,6 +762,7 @@ def build_redacted_bundle_schema(
                     "content_type": {"type": "string", "minLength": 1},
                 },
             },
+            **build_transparency_receipt_defs(),
             "proofStep": {
                 "type": "object",
                 "additionalProperties": False,
@@ -705,7 +816,10 @@ def build_redacted_bundle_schema(
     }
 
 
-def build_evidence_pack_schema(pack_types: list[str]) -> dict[str, object]:
+def build_evidence_pack_schema(
+    pack_types: list[str],
+    completeness_profiles: list[str],
+) -> dict[str, object]:
     properties: dict[str, object] = {
         "pack_id": {"type": "string", "minLength": 1},
         "pack_type": {
@@ -716,6 +830,22 @@ def build_evidence_pack_schema(pack_types: list[str]) -> dict[str, object]:
         "generated_at": {"type": "string", "format": "date-time"},
         "bundle_format": {"type": "string", "enum": ["full", "disclosure"]},
         "disclosure_policy": {"type": "string", "minLength": 1},
+        "completeness_profile": {"type": "string", "enum": completeness_profiles},
+        "completeness_status": {
+            "type": "string",
+            "enum": ["pass", "warn", "fail"],
+        },
+        "completeness_pass_count": {"type": "integer", "minimum": 0},
+        "completeness_warn_count": {"type": "integer", "minimum": 0},
+        "completeness_fail_count": {"type": "integer", "minimum": 0},
+        "pack_completeness_profile": {"type": "string", "enum": completeness_profiles},
+        "pack_completeness_status": {
+            "type": "string",
+            "enum": ["pass", "warn", "fail"],
+        },
+        "pack_completeness_pass_count": {"type": "integer", "minimum": 0},
+        "pack_completeness_warn_count": {"type": "integer", "minimum": 0},
+        "pack_completeness_fail_count": {"type": "integer", "minimum": 0},
         "system_id": {"type": "string", "minLength": 1},
         "from": {"type": "string", "format": "date-time"},
         "to": {"type": "string", "format": "date-time"},
@@ -780,6 +910,10 @@ def build_evidence_pack_schema(pack_types: list[str]) -> dict[str, object]:
                         "type": "array",
                         "items": {"type": "string", "minLength": 1},
                     },
+                    "completeness_status": {
+                        "type": "string",
+                        "enum": ["pass", "warn", "fail"],
+                    },
                     "matched_rules": {
                         "type": "array",
                         "items": {"type": "string", "minLength": 1},
@@ -807,6 +941,69 @@ def build_evidence_pack_schema(pack_types: list[str]) -> dict[str, object]:
             "bundles",
         ],
         "properties": properties,
+    }
+
+
+def build_completeness_report_schema(completeness_profiles: list[str]) -> dict[str, object]:
+    return {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "$id": "https://proof-layer.dev/schemas/completeness_report.schema.json",
+        "title": "Completeness Report",
+        "description": "Advisory structural readiness report for machine-assessed governance completeness profiles.",
+        "type": "object",
+        "additionalProperties": False,
+        "required": [
+            "profile",
+            "status",
+            "bundle_id",
+            "pass_count",
+            "warn_count",
+            "fail_count",
+            "rules",
+        ],
+        "properties": {
+            "profile": {"type": "string", "enum": completeness_profiles},
+            "status": {"type": "string", "enum": ["pass", "warn", "fail"]},
+            "bundle_id": {"type": "string", "minLength": 1},
+            "system_id": {"type": "string", "minLength": 1},
+            "pass_count": {"type": "integer", "minimum": 0},
+            "warn_count": {"type": "integer", "minimum": 0},
+            "fail_count": {"type": "integer", "minimum": 0},
+            "rules": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": [
+                        "rule_id",
+                        "item_type",
+                        "obligation_ref",
+                        "status",
+                        "present_count",
+                        "complete_count",
+                        "summary",
+                    ],
+                    "properties": {
+                        "rule_id": {"type": "string", "minLength": 1},
+                        "item_type": {"type": "string", "minLength": 1},
+                        "obligation_ref": {"type": "string", "minLength": 1},
+                        "status": {"type": "string", "enum": ["pass", "warn", "fail"]},
+                        "present_count": {"type": "integer", "minimum": 0},
+                        "complete_count": {"type": "integer", "minimum": 0},
+                        "evaluated_item_indices": {
+                            "type": "array",
+                            "items": {"type": "integer", "minimum": 0},
+                        },
+                        "missing_fields": {
+                            "type": "array",
+                            "items": {"type": "string", "minLength": 1},
+                        },
+                        "summary": {"type": "string", "minLength": 1},
+                    },
+                },
+            },
+        },
     }
 
 
@@ -846,6 +1043,10 @@ def build_schema_manifest(
             "evidence_bundle": "schemas/evidence_bundle.schema.json",
             "redacted_bundle": "schemas/redacted_bundle.schema.json",
             "evidence_pack": "schemas/evidence_pack.schema.json",
+            "completeness_report": "schemas/completeness_report.schema.json",
+            "verification_assessment": "schemas/verification_assessment.schema.json",
+            "verify_timestamp_response": "schemas/verify_timestamp_response.schema.json",
+            "verify_receipt_response": "schemas/verify_receipt_response.schema.json",
         },
     }
 
@@ -862,11 +1063,13 @@ def build_wrapper_schema() -> dict[str, object]:
 
 def build_expected_schema_files(repo_root: Path) -> dict[Path, str]:
     core_source = read_core_source(repo_root)
+    completeness_source = read_completeness_source(repo_root)
     vault_source = read_vault_source(repo_root)
     structs = parse_struct_fields(core_source)
     roles = parse_actor_roles(core_source)
     variants = parse_evidence_variants(core_source)
     pack_types = parse_pack_types(vault_source)
+    completeness_profiles = parse_completeness_profiles(completeness_source)
 
     release_version = read_workspace_version(repo_root)
     bundle_version = parse_const(core_source, "BUNDLE_VERSION")
@@ -909,7 +1112,13 @@ def build_expected_schema_files(repo_root: Path) -> dict[Path, str]:
             signature_algorithm=signature_algorithm,
             signature_format=signature_format,
         ),
-        schema_dir / "evidence_pack.schema.json": build_evidence_pack_schema(pack_types),
+        schema_dir / "evidence_pack.schema.json": build_evidence_pack_schema(
+            pack_types,
+            completeness_profiles,
+        ),
+        schema_dir / "completeness_report.schema.json": build_completeness_report_schema(
+            completeness_profiles
+        ),
         schema_dir / "schema_manifest.json": build_schema_manifest(
             release_version=release_version,
             bundle_version=bundle_version,

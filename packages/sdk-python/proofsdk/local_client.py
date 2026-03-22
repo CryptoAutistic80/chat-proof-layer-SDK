@@ -4,7 +4,13 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any, Callable
 
-from proofsdk.native import build_bundle, redact_bundle, verify_bundle, verify_redacted_bundle
+from proofsdk.native import (
+    build_bundle,
+    evaluate_completeness,
+    redact_bundle,
+    verify_bundle,
+    verify_redacted_bundle,
+)
 
 
 def _default_bundle_id() -> str:
@@ -65,6 +71,41 @@ class LocalProofLayerClient:
         public_key_pem: str,
     ) -> dict[str, Any]:
         return verify_bundle(bundle=bundle, artefacts=artefacts, public_key_pem=public_key_pem)
+
+    def verify_timestamp(
+        self,
+        *,
+        bundle_id: str | None = None,
+        bundle_root: str | None = None,
+        timestamp: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        raise ValueError("verify_timestamp is not supported for local mode")
+
+    def verify_receipt(
+        self,
+        *,
+        bundle_id: str | None = None,
+        bundle_root: str | None = None,
+        receipt: dict[str, Any] | None = None,
+        live_check_mode: str | None = None,
+    ) -> dict[str, Any]:
+        raise ValueError("verify_receipt is not supported for local mode")
+
+    def evaluate_completeness(
+        self,
+        *,
+        bundle: dict[str, Any] | None = None,
+        bundle_id: str | None = None,
+        pack_id: str | None = None,
+        profile: str,
+    ) -> dict[str, Any]:
+        if pack_id is not None:
+            raise ValueError("pack_id is not supported for local completeness evaluation")
+        if bundle_id is not None:
+            raise ValueError("bundle_id is not supported for local completeness evaluation")
+        if bundle is None:
+            raise ValueError("bundle is required for local completeness evaluation")
+        return evaluate_completeness(bundle=bundle, profile=profile)
 
     def disclose_bundle(
         self,

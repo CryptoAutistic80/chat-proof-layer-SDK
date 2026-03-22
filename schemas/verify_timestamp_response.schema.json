@@ -1,0 +1,115 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://proof-layer.dev/schemas/verify_timestamp_response.schema.json",
+  "title": "Verify Timestamp Response",
+  "description": "Timestamp verification response with low-level verification fields and a plain-English assessment.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "valid",
+    "message",
+    "assessment"
+  ],
+  "properties": {
+    "valid": {
+      "type": "boolean"
+    },
+    "message": {
+      "type": "string",
+      "minLength": 1
+    },
+    "verification": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "generated_at",
+        "digest_algorithm",
+        "message_imprint",
+        "policy_oid",
+        "signer_count",
+        "certificate_count"
+      ],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "minLength": 1
+        },
+        "provider": {
+          "type": "string",
+          "minLength": 1
+        },
+        "generated_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "digest_algorithm": {
+          "type": "string",
+          "minLength": 1
+        },
+        "message_imprint": {
+          "type": "string",
+          "minLength": 1
+        },
+        "policy_oid": {
+          "type": "string",
+          "minLength": 1
+        },
+        "assurance_profile": {
+          "type": "string",
+          "enum": [
+            "standard",
+            "qualified"
+          ]
+        },
+        "signer_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "certificate_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "assurance_profile_verified": {
+          "type": "boolean"
+        },
+        "policy_oid_verified": {
+          "type": "boolean"
+        },
+        "trusted": {
+          "type": "boolean"
+        },
+        "chain_verified": {
+          "type": "boolean"
+        },
+        "certificate_profile_verified": {
+          "type": "boolean"
+        },
+        "revocation_checked": {
+          "type": "boolean"
+        },
+        "ocsp_checked": {
+          "type": "boolean"
+        },
+        "qualified_signer_verified": {
+          "type": "boolean"
+        },
+        "signer_subject": {
+          "type": "string",
+          "minLength": 1
+        },
+        "trust_anchor_subject": {
+          "type": "string",
+          "minLength": 1
+        },
+        "ocsp_responder_url": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "assessment": {
+      "$ref": "./verification_assessment.schema.json#/$defs/timestampAssessment"
+    }
+  }
+}

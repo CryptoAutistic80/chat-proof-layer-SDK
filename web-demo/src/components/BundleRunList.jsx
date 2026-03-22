@@ -10,6 +10,40 @@ function statusTone(valid, pendingValue) {
   return pendingValue;
 }
 
+function badgeForIntegrity(bundleRun) {
+  return {
+    label: "Integrity",
+    detail: bundleRun.verifyResponse?.valid ? "Verified" : "Needs attention",
+    tone: statusTone(bundleRun.verifyResponse?.valid, "muted"),
+  };
+}
+
+function badgeForOptionalCheck(label, verification) {
+  if (verification?.valid === true) {
+    return { label, detail: "Attached", tone: "good" };
+  }
+  if (verification?.valid === false) {
+    return { label, detail: "Failed", tone: "warn" };
+  }
+  return { label, detail: "Not added", tone: "muted" };
+}
+
+function badgeForTransparency(bundleRun) {
+  if (bundleRun.receiptVerification?.valid === true) {
+    return { label: "Transparency", detail: "Attached", tone: "good" };
+  }
+  if (bundleRun.receiptVerification?.valid === false) {
+    return { label: "Transparency", detail: "Failed", tone: "warn" };
+  }
+  if (
+    bundleRun.transparencyRequested &&
+    bundleRun.timestampVerification?.valid === false
+  ) {
+    return { label: "Transparency", detail: "Skipped", tone: "muted" };
+  }
+  return { label: "Transparency", detail: "Not added", tone: "muted" };
+}
+
 export function BundleRunList({ bundleRuns }) {
   return (
     <section className="panel">
@@ -28,32 +62,25 @@ export function BundleRunList({ bundleRuns }) {
                 <strong>{bundleRun.label}</strong>
                 <span>{bundleRun.bundleId}</span>
               </div>
-              <span className={`status-pill is-${bundleRun.bundleRole === "primary" ? "accent" : "muted"}`}>
+              <span
+                className={`bundle-role-pill is-${bundleRun.bundleRole === "primary" ? "accent" : "muted"}`}
+              >
                 {bundleRun.bundleRole}
               </span>
             </div>
             <p>{bundleRun.summary}</p>
             <div className="bundle-run-meta">
               <span>{bundleRun.itemTypes.join(" + ")}</span>
-              <span className={`status-pill is-${statusTone(bundleRun.verifyResponse?.valid, "muted")}`}>
-                integrity
-              </span>
-              <span
-                className={`status-pill is-${statusTone(
-                  bundleRun.timestampVerification?.valid,
-                  "muted"
-                )}`}
-              >
-                timestamp
-              </span>
-              <span
-                className={`status-pill is-${statusTone(
-                  bundleRun.receiptVerification?.valid,
-                  "muted"
-                )}`}
-              >
-                transparency
-              </span>
+              {[
+                badgeForIntegrity(bundleRun),
+                badgeForOptionalCheck("Timestamp", bundleRun.timestampVerification),
+                badgeForTransparency(bundleRun),
+              ].map((badge) => (
+                <span key={badge.label} className={`bundle-check is-${badge.tone}`}>
+                  <strong>{badge.label}</strong>
+                  <span>{badge.detail}</span>
+                </span>
+              ))}
             </div>
           </article>
         ))}

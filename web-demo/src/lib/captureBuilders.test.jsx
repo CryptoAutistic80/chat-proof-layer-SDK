@@ -31,7 +31,7 @@ describe("buildCaptureEnvelope", () => {
     ).toBe(true);
   });
 
-  test("adds derived technical documentation for the annex iv preset", async () => {
+  test("adds derived Annex IV governance evidence for the annex iv preset", async () => {
     const envelope = await buildCaptureEnvelope({
       preset: getPreset("annex_iv_filing"),
       providerResult: {
@@ -51,11 +51,22 @@ describe("buildCaptureEnvelope", () => {
       maxTokens: 256
     });
 
-    expect(
-      envelope.createPayload.capture.items.some((item) => item.type === "technical_doc")
-    ).toBe(true);
+    expect(envelope.createPayload.capture.items.map((item) => item.type)).toEqual([
+      "llm_interaction",
+      "technical_doc",
+      "risk_assessment",
+      "data_governance",
+      "instructions_for_use",
+      "human_oversight",
+      "qms_record",
+      "standards_alignment",
+      "post_market_monitoring"
+    ]);
     expect(
       envelope.createPayload.artefacts.some((artefact) => artefact.name === "annex_iv_summary.md")
+    ).toBe(true);
+    expect(
+      envelope.createPayload.artefacts.some((artefact) => artefact.name === "risk_assessment.json")
     ).toBe(true);
   });
 });

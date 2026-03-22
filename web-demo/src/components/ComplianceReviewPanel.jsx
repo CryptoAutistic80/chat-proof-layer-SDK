@@ -1,5 +1,31 @@
 import React from "react";
 
+function ReadinessSection({ title, readiness }) {
+  return (
+    <>
+      <h4>{title}</h4>
+      <p>
+        <strong>{readiness.profile ?? "No readiness profile attached"}</strong>
+      </p>
+      <p>{readiness.summary}</p>
+      <p>
+        {readiness.passCount} pass · {readiness.warnCount} warn ·{" "}
+        {readiness.failCount} fail
+      </p>
+      {readiness.topMissingFields.length > 0 ? (
+        <>
+          <h4>Top missing fields</h4>
+          <ul className="review-list compact">
+            {readiness.topMissingFields.map((entry) => (
+              <li key={entry}>{entry}</li>
+            ))}
+          </ul>
+        </>
+      ) : null}
+    </>
+  );
+}
+
 export function ComplianceReviewPanel({ review }) {
   return (
     <section className="panel">
@@ -36,15 +62,25 @@ export function ComplianceReviewPanel({ review }) {
         </section>
 
         <section className="review-card">
+          <ReadinessSection
+            title="Workflow readiness check"
+            readiness={review.readiness}
+          />
+          {review.packReadiness ? (
+            <ReadinessSection
+              title="Exported pack readiness"
+              readiness={review.packReadiness}
+            />
+          ) : null}
           <h4>Share or export status</h4>
           <p>
             <strong>{review.supportsPack.packType}</strong>
           </p>
           <p>{review.supportsPack.bundleCount} record(s) are in the current run.</p>
           <p>{review.supportsPack.exportState}</p>
-          <h4>Still missing for a fuller review</h4>
+          <h4>Common next evidence</h4>
           <ul className="review-list compact">
-            {review.missingEvidence.map((entry) => (
+            {review.commonNextEvidence.map((entry) => (
               <li key={entry}>{entry}</li>
             ))}
           </ul>

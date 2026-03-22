@@ -61,6 +61,17 @@
     "incident_report"
   ],
   "pack_types": [
+    "annex_iv",
+    "annex_xi",
+    "annex_xii",
+    "runtime_logs",
+    "risk_mgmt",
+    "ai_literacy",
+    "fundamental_rights",
+    "provider_governance",
+    "post_market_monitoring",
+    "systemic_risk",
+    "incident_response",
     "conformity"
   ],
   "schema_files": {
@@ -68,6 +79,10 @@
     "evidence_item": "schemas/evidence_item.schema.json",
     "evidence_bundle": "schemas/evidence_bundle.schema.json",
     "redacted_bundle": "schemas/redacted_bundle.schema.json",
-    "evidence_pack": "schemas/evidence_pack.schema.json"
+    "evidence_pack": "schemas/evidence_pack.schema.json",
+    "completeness_report": "schemas/completeness_report.schema.json",
+    "verification_assessment": "schemas/verification_assessment.schema.json",
+    "verify_timestamp_response": "schemas/verify_timestamp_response.schema.json",
+    "verify_receipt_response": "schemas/verify_receipt_response.schema.json"
   }
 }

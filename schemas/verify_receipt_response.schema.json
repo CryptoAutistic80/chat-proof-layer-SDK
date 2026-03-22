@@ -1,0 +1,112 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://proof-layer.dev/schemas/verify_receipt_response.schema.json",
+  "title": "Verify Receipt Response",
+  "description": "Transparency receipt verification response with low-level verification fields, optional live-check data, and a plain-English assessment.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "valid",
+    "message",
+    "assessment"
+  ],
+  "properties": {
+    "valid": {
+      "type": "boolean"
+    },
+    "message": {
+      "type": "string",
+      "minLength": 1
+    },
+    "verification": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "log_url",
+        "entry_uuid",
+        "leaf_hash",
+        "log_id",
+        "log_index",
+        "integrated_time",
+        "tree_size",
+        "root_hash",
+        "inclusion_proof_hashes",
+        "inclusion_proof_verified",
+        "signed_entry_timestamp_present",
+        "timestamp_generated_at"
+      ],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "minLength": 1
+        },
+        "provider": {
+          "type": "string",
+          "minLength": 1
+        },
+        "log_url": {
+          "type": "string",
+          "minLength": 1
+        },
+        "entry_uuid": {
+          "type": "string",
+          "minLength": 1
+        },
+        "leaf_hash": {
+          "type": "string",
+          "minLength": 1
+        },
+        "log_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "log_index": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "integrated_time": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "tree_size": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "root_hash": {
+          "type": "string",
+          "minLength": 1
+        },
+        "inclusion_proof_hashes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "inclusion_proof_verified": {
+          "type": "boolean"
+        },
+        "signed_entry_timestamp_present": {
+          "type": "boolean"
+        },
+        "signed_entry_timestamp_verified": {
+          "type": "boolean"
+        },
+        "log_id_verified": {
+          "type": "boolean"
+        },
+        "trusted": {
+          "type": "boolean"
+        },
+        "timestamp_generated_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "live_verification": {
+          "$ref": "./verification_assessment.schema.json#/$defs/receiptLiveVerification"
+        }
+      }
+    },
+    "assessment": {
+      "$ref": "./verification_assessment.schema.json#/$defs/receiptAssessment"
+    }
+  }
+}

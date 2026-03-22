@@ -29,9 +29,19 @@ describe("sdkPlaygroundScenarios", () => {
     expect(nextDraft.serviceUrl).toBe("http://vault.example.test");
     expect(nextDraft.apiKey).toBe("secret");
     expect(nextDraft.providerApiKey).toBe("provider-secret");
-    expect(nextDraft.systemId).toBe("support-assistant");
+    expect(nextDraft.systemId).toBe("hiring-assistant");
     expect(nextDraft.templateProfile).toBe("annex_iv_redacted");
     expect(nextDraft.playgroundHydrated).toBe(true);
+  });
+
+  test("infers Annex IV pack selection from governance evidence items", () => {
+    const packType = inferPackTypeFromItems([
+      { type: "technical_doc" },
+      { type: "risk_assessment" },
+      { type: "post_market_monitoring" }
+    ]);
+
+    expect(packType).toBe("annex_iv");
   });
 
   test("infers Annex XI pack selection from GPAI evidence items", () => {

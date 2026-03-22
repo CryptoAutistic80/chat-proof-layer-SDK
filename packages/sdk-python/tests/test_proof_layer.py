@@ -6,6 +6,120 @@ from proofsdk import ProofLayer
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 GOLDEN_DIR = REPO_ROOT / "fixtures" / "golden"
+ANNEX_IV_DIR = GOLDEN_DIR / "annex_iv_governance"
+GPAI_DIR = GOLDEN_DIR / "gpai_provider"
+
+
+def annex_iv_bundle() -> dict[str, object]:
+    return {
+        "bundle_version": "1.0",
+        "bundle_id": "B-annex-iv",
+        "created_at": "2026-03-21T00:00:00Z",
+        "actor": {
+            "issuer": "proof-layer-test",
+            "app_id": "python-sdk",
+            "env": "test",
+            "signing_key_id": "kid-dev-01",
+            "role": "provider",
+        },
+        "subject": {"system_id": "hiring-assistant"},
+        "context": {},
+        "items": [
+            {
+                "type": "technical_doc",
+                "data": json.loads((ANNEX_IV_DIR / "technical_doc.json").read_text(encoding="utf-8")),
+            },
+            {
+                "type": "risk_assessment",
+                "data": json.loads((ANNEX_IV_DIR / "risk_assessment.json").read_text(encoding="utf-8")),
+            },
+            {
+                "type": "data_governance",
+                "data": json.loads((ANNEX_IV_DIR / "data_governance.json").read_text(encoding="utf-8")),
+            },
+            {
+                "type": "instructions_for_use",
+                "data": json.loads((ANNEX_IV_DIR / "instructions_for_use.json").read_text(encoding="utf-8")),
+            },
+            {
+                "type": "human_oversight",
+                "data": json.loads((ANNEX_IV_DIR / "human_oversight.json").read_text(encoding="utf-8")),
+            },
+        ],
+        "artefacts": [],
+        "policy": {"redactions": [], "encryption": {"enabled": False}},
+        "integrity": {
+            "canonicalization": "RFC8785-JCS",
+            "hash": "SHA-256",
+            "header_digest": "sha256:" + "a" * 64,
+            "bundle_root_algorithm": "pl-merkle-sha256-v4",
+            "bundle_root": "sha256:" + "b" * 64,
+            "signature": {
+                "format": "JWS",
+                "alg": "EdDSA",
+                "kid": "kid-dev-01",
+                "value": "sig",
+            },
+        },
+    }
+
+
+def gpai_provider_bundle() -> dict[str, object]:
+    return {
+        "bundle_version": "1.0",
+        "bundle_id": "B-gpai-provider",
+        "created_at": "2026-03-21T00:00:00Z",
+        "actor": {
+            "issuer": "proof-layer-test",
+            "app_id": "python-sdk",
+            "env": "test",
+            "signing_key_id": "kid-dev-01",
+            "role": "provider",
+        },
+        "subject": {"system_id": "foundation-model-alpha"},
+        "context": {},
+        "items": [
+            {
+                "type": "technical_doc",
+                "data": json.loads((GPAI_DIR / "technical_doc.json").read_text(encoding="utf-8")),
+            },
+            {
+                "type": "model_evaluation",
+                "data": json.loads((GPAI_DIR / "model_evaluation.json").read_text(encoding="utf-8")),
+            },
+            {
+                "type": "training_provenance",
+                "data": json.loads((GPAI_DIR / "training_provenance.json").read_text(encoding="utf-8")),
+            },
+            {
+                "type": "compute_metrics",
+                "data": json.loads((GPAI_DIR / "compute_metrics.json").read_text(encoding="utf-8")),
+            },
+            {
+                "type": "copyright_policy",
+                "data": json.loads((GPAI_DIR / "copyright_policy.json").read_text(encoding="utf-8")),
+            },
+            {
+                "type": "training_summary",
+                "data": json.loads((GPAI_DIR / "training_summary.json").read_text(encoding="utf-8")),
+            },
+        ],
+        "artefacts": [],
+        "policy": {"redactions": [], "encryption": {"enabled": False}},
+        "integrity": {
+            "canonicalization": "RFC8785-JCS",
+            "hash": "SHA-256",
+            "header_digest": "sha256:" + "a" * 64,
+            "bundle_root_algorithm": "pl-merkle-sha256-v4",
+            "bundle_root": "sha256:" + "b" * 64,
+            "signature": {
+                "format": "JWS",
+                "alg": "EdDSA",
+                "kid": "kid-dev-01",
+                "value": "sig",
+            },
+        },
+    }
 
 
 class TestProofLayer(unittest.TestCase):
@@ -105,6 +219,52 @@ class TestProofLayer(unittest.TestCase):
             ["/output_commitment"],
         )
 
+    def test_local_mode_can_evaluate_completeness(self):
+        signing_key_pem = (GOLDEN_DIR / "signing_key.txt").read_text(encoding="utf-8")
+        proof_layer = ProofLayer(
+            signing_key_pem=signing_key_pem,
+            key_id="kid-dev-01",
+        )
+
+        report = proof_layer.evaluate_completeness(
+            bundle=annex_iv_bundle(),
+            profile="annex_iv_governance_v1",
+        )
+
+        self.assertEqual(report["status"], "pass")
+        self.assertEqual(report["pass_count"], 5)
+
+    def test_local_mode_can_evaluate_gpai_provider_completeness(self):
+        signing_key_pem = (GOLDEN_DIR / "signing_key.txt").read_text(encoding="utf-8")
+        proof_layer = ProofLayer(
+            signing_key_pem=signing_key_pem,
+            key_id="kid-dev-01",
+        )
+
+        report = proof_layer.evaluate_completeness(
+            bundle=gpai_provider_bundle(),
+            profile="gpai_provider_v1",
+        )
+
+        self.assertEqual(report["status"], "pass")
+        self.assertEqual(report["pass_count"], 6)
+
+    def test_local_mode_rejects_pack_completeness_evaluation(self):
+        signing_key_pem = (GOLDEN_DIR / "signing_key.txt").read_text(encoding="utf-8")
+        proof_layer = ProofLayer(
+            signing_key_pem=signing_key_pem,
+            key_id="kid-dev-01",
+        )
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "pack_id is not supported for local completeness evaluation",
+        ):
+            proof_layer.evaluate_completeness(
+                pack_id="P1",
+                profile="gpai_provider_v1",
+            )
+
     def test_vault_mode_can_update_disclosure_config(self):
         captured = {}
 
@@ -137,6 +297,198 @@ class TestProofLayer(unittest.TestCase):
         self.assertEqual(captured["method"], "PUT")
         self.assertEqual(captured["path"], "/v1/config/disclosure")
         self.assertEqual(result["policies"][0]["name"], "regulator_minimum")
+
+    def test_vault_mode_can_verify_timestamp(self):
+        captured = {}
+
+        def request_fn(method, path, headers, body):
+            captured["method"] = method
+            captured["path"] = path
+            captured["headers"] = headers
+            captured["body"] = body
+            return {
+                "valid": True,
+                "message": "VALID: Timestamp trust confirmed",
+                "verification": {
+                    "kind": "rfc3161",
+                    "provider": "test-tsa",
+                    "generated_at": "2026-03-22T12:00:00Z",
+                    "digest_algorithm": "sha256",
+                    "message_imprint": "sha256:" + "a" * 64,
+                    "policy_oid": "1.2.3.4",
+                    "trusted": True,
+                    "chain_verified": True,
+                    "signer_count": 1,
+                    "certificate_count": 2,
+                },
+                "assessment": {
+                    "level": "trusted",
+                    "headline": "Timestamp trust confirmed",
+                    "summary": "The timestamp token matches this proof and chains to a trusted signer.",
+                    "next_step": "Keep the trust files with the proof so another person can repeat the same check.",
+                    "checks": [],
+                },
+            }
+
+        proof_layer = ProofLayer(
+            vault_url="http://127.0.0.1:8080",
+            request_fn=request_fn,
+        )
+
+        result = proof_layer.verify_timestamp(bundle_id="B1")
+
+        self.assertEqual(captured["method"], "POST")
+        self.assertEqual(captured["path"], "/v1/verify/timestamp")
+        self.assertEqual(
+            json.loads(captured["body"].decode("utf-8")),
+            {"bundle_id": "B1"},
+        )
+        self.assertEqual(result["assessment"]["headline"], "Timestamp trust confirmed")
+
+    def test_vault_mode_can_verify_receipt(self):
+        captured = {}
+
+        def request_fn(method, path, headers, body):
+            captured["method"] = method
+            captured["path"] = path
+            captured["headers"] = headers
+            captured["body"] = body
+            return {
+                "valid": True,
+                "message": "VALID: Transparency proof confirmed",
+                "verification": {
+                    "kind": "rekor_rfc3161",
+                    "provider": "rekor",
+                    "log_url": "https://rekor.example.test",
+                    "entry_uuid": "a" * 64,
+                    "leaf_hash": "a" * 64,
+                    "log_id": "log-1",
+                    "log_index": 9,
+                    "integrated_time": "2026-03-22T12:00:00Z",
+                    "tree_size": 10,
+                    "root_hash": "b" * 64,
+                    "inclusion_proof_hashes": 2,
+                    "inclusion_proof_verified": True,
+                    "signed_entry_timestamp_present": True,
+                    "signed_entry_timestamp_verified": True,
+                    "log_id_verified": True,
+                    "trusted": True,
+                    "timestamp_generated_at": "2026-03-22T11:59:00Z",
+                    "live_verification": {
+                        "mode": "best_effort",
+                        "state": "pass",
+                        "checked_at": "2026-03-22T12:01:00Z",
+                        "summary": "The live log still includes this entry.",
+                    },
+                },
+                "assessment": {
+                    "level": "trusted",
+                    "headline": "Transparency proof confirmed",
+                    "summary": "The receipt matches this proof and the log or service key was trusted. The log was also checked live.",
+                    "next_step": "Keep the trusted log key with the proof so another person can repeat the same check.",
+                    "checks": [],
+                    "live_check": {
+                        "mode": "best_effort",
+                        "state": "pass",
+                        "checked_at": "2026-03-22T12:01:00Z",
+                        "summary": "The live log still includes this entry.",
+                    },
+                },
+            }
+
+        proof_layer = ProofLayer(
+            vault_url="http://127.0.0.1:8080",
+            request_fn=request_fn,
+        )
+
+        result = proof_layer.verify_receipt(
+            bundle_id="B1",
+            live_check_mode="best_effort",
+        )
+
+        self.assertEqual(captured["method"], "POST")
+        self.assertEqual(captured["path"], "/v1/verify/receipt")
+        self.assertEqual(
+            json.loads(captured["body"].decode("utf-8")),
+            {
+                "bundle_id": "B1",
+                "live_check_mode": "best_effort",
+            },
+        )
+        self.assertEqual(result["assessment"]["live_check"]["state"], "pass")
+
+    def test_vault_mode_can_evaluate_completeness(self):
+        captured = {}
+
+        def request_fn(method, path, headers, body):
+            captured["method"] = method
+            captured["path"] = path
+            captured["headers"] = headers
+            captured["body"] = body
+            return {
+                "profile": "gpai_provider_v1",
+                "status": "warn",
+                "bundle_id": "B1",
+                "system_id": "foundation-model-alpha",
+                "pass_count": 5,
+                "warn_count": 1,
+                "fail_count": 0,
+                "rules": [],
+            }
+
+        proof_layer = ProofLayer(
+            vault_url="http://127.0.0.1:8080",
+            request_fn=request_fn,
+        )
+
+        result = proof_layer.evaluate_completeness(
+            bundle_id="B1",
+            profile="gpai_provider_v1",
+        )
+
+        self.assertEqual(captured["method"], "POST")
+        self.assertEqual(captured["path"], "/v1/completeness/evaluate")
+        self.assertEqual(result["status"], "warn")
+
+    def test_vault_mode_can_evaluate_pack_completeness(self):
+        captured = {}
+
+        def request_fn(method, path, headers, body):
+            captured["method"] = method
+            captured["path"] = path
+            captured["headers"] = headers
+            captured["body"] = body
+            return {
+                "profile": "gpai_provider_v1",
+                "status": "pass",
+                "bundle_id": "P1",
+                "system_id": "foundation-model-alpha",
+                "pass_count": 6,
+                "warn_count": 0,
+                "fail_count": 0,
+                "rules": [],
+            }
+
+        proof_layer = ProofLayer(
+            vault_url="http://127.0.0.1:8080",
+            request_fn=request_fn,
+        )
+
+        result = proof_layer.evaluate_completeness(
+            pack_id="P1",
+            profile="gpai_provider_v1",
+        )
+
+        self.assertEqual(captured["method"], "POST")
+        self.assertEqual(captured["path"], "/v1/completeness/evaluate")
+        self.assertEqual(
+            json.loads(captured["body"].decode("utf-8")),
+            {
+                "pack_id": "P1",
+                "profile": "gpai_provider_v1",
+            },
+        )
+        self.assertEqual(result["status"], "pass")
 
     def test_vault_mode_can_list_disclosure_templates(self):
         captured = {}
@@ -240,6 +592,40 @@ class TestProofLayer(unittest.TestCase):
         self.assertEqual(captured["method"], "POST")
         self.assertEqual(captured["path"], "/v1/packs")
         self.assertEqual(result["disclosure_policy"], "runtime_template_pack")
+
+    def test_vault_mode_can_create_pack_with_bundle_ids(self):
+        captured = {}
+
+        def request_fn(method, path, headers, body):
+            captured["method"] = method
+            captured["path"] = path
+            captured["headers"] = headers
+            captured["body"] = body
+            return {
+                "pack_id": "P-bundles",
+                "bundle_ids": ["B1", "B2"],
+            }
+
+        proof_layer = ProofLayer(
+            vault_url="http://127.0.0.1:8080",
+            request_fn=request_fn,
+        )
+
+        result = proof_layer.create_pack(
+            pack_type="annex_iv",
+            bundle_ids=["B1", "B2"],
+        )
+
+        self.assertEqual(captured["method"], "POST")
+        self.assertEqual(captured["path"], "/v1/packs")
+        self.assertEqual(result["pack_id"], "P-bundles")
+        self.assertEqual(
+            json.loads(captured["body"].decode("utf-8")),
+            {
+                "pack_type": "annex_iv",
+                "bundle_ids": ["B1", "B2"],
+            },
+        )
 
     def test_vault_mode_can_preview_disclosure(self):
         captured = {}
@@ -349,6 +735,42 @@ class TestProofLayer(unittest.TestCase):
         self.assertEqual(result["bundle"]["items"][0]["type"], "instructions_for_use")
         self.assertEqual(result["bundle"]["subject"]["system_id"], "system-governance-42")
         self.assertTrue(result["bundle"]["items"][0]["data"]["commitment"].startswith("sha256:"))
+
+    def test_proof_layer_reuses_shared_compliance_profile_for_annex_iv_governance(self):
+        signing_key_pem = (GOLDEN_DIR / "signing_key.txt").read_text(encoding="utf-8")
+        proof_layer = ProofLayer(
+            signing_key_pem=signing_key_pem,
+            key_id="kid-dev-01",
+            system_id="hiring-assistant",
+            role="provider",
+            compliance_profile={
+                "intended_use": "Recruiter support for first-pass candidate review",
+                "prohibited_practice_screening": "screened_no_prohibited_use",
+                "risk_tier": "high_risk",
+                "high_risk_domain": "employment",
+                "deployment_context": "eu_market_placement",
+            },
+        )
+
+        risk = proof_layer.capture_risk_assessment(
+            risk_id="risk-42",
+            severity="high",
+            status="mitigated",
+            risk_description="Potential unfair ranking of borderline candidates.",
+        )
+        data_governance = proof_layer.capture_data_governance(
+            decision="approved_with_restrictions",
+            dataset_ref="dataset://hiring-assistant/training-v3",
+            dataset_name="hiring-assistant-training",
+        )
+
+        self.assertEqual(risk["bundle"]["compliance_profile"]["high_risk_domain"], "employment")
+        self.assertEqual(
+            data_governance["bundle"]["compliance_profile"]["prohibited_practice_screening"],
+            "screened_no_prohibited_use",
+        )
+        self.assertEqual(risk["bundle"]["subject"]["system_id"], "hiring-assistant")
+        self.assertEqual(data_governance["bundle"]["subject"]["system_id"], "hiring-assistant")
 
     def test_capture_retrieval_seals_retrieval_evidence(self):
         signing_key_pem = (GOLDEN_DIR / "signing_key.txt").read_text(encoding="utf-8")

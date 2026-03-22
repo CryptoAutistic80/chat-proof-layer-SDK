@@ -3,8 +3,8 @@
 TypeScript SDK for creating Proof Layer evidence bundles around model calls.
 Integrity-sensitive helpers are backed by the local Rust NAPI module in `crates/napi`, while the package surface stays TypeScript-first.
 
-The SDK now has typed builders and `ProofLayer` convenience methods for every evidence item currently implemented in Rust core: `llm_interaction`, `tool_call`, `retrieval`, `human_oversight`, `policy_decision`, `risk_assessment`, `data_governance`, `technical_doc`, `instructions_for_use`, `qms_record`, `fundamental_rights_assessment`, `standards_alignment`, `post_market_monitoring`, `corrective_action`, `authority_notification`, `authority_submission`, `reporting_deadline`, `regulator_correspondence`, `model_evaluation`, `adversarial_test`, `training_provenance`, `downstream_documentation`, `copyright_policy`, `training_summary`, `literacy_attestation`, `incident_report`, `conformity_assessment`, `declaration`, and `registration`.
-The GPAI helpers default `model_evaluation`, `adversarial_test`, and `training_provenance` captures to the vault's `gpai_documentation` retention class.
+The SDK now has typed builders and `ProofLayer` convenience methods for every evidence item currently implemented in Rust core: `llm_interaction`, `tool_call`, `retrieval`, `human_oversight`, `policy_decision`, `risk_assessment`, `data_governance`, `technical_doc`, `instructions_for_use`, `qms_record`, `fundamental_rights_assessment`, `standards_alignment`, `post_market_monitoring`, `corrective_action`, `authority_notification`, `authority_submission`, `reporting_deadline`, `regulator_correspondence`, `model_evaluation`, `adversarial_test`, `training_provenance`, `compute_metrics`, `downstream_documentation`, `copyright_policy`, `training_summary`, `literacy_attestation`, `incident_report`, `conformity_assessment`, `declaration`, and `registration`.
+The GPAI helpers default `model_evaluation`, `adversarial_test`, `training_provenance`, and `compute_metrics` captures to the vault's `gpai_documentation` retention class.
 
 ## Install
 
@@ -44,6 +44,7 @@ import {
   createDisclosurePolicyTemplate,
   createLlmInteractionRequest,
   hashSha256,
+  selectPackReadiness,
   verifyBundle
 } from "@proof-layer/sdk";
 import { withProofLayer } from "@proof-layer/sdk/providers/openai";
@@ -103,6 +104,26 @@ const locallySealed = await localClient.createBundle({
   artefacts: [{ name: "prompt.json", contentType: "application/json", data: Buffer.from("{}") }]
 });
 
+const readiness = await proofLayer.evaluateCompleteness({
+  bundle: locallySealed.bundle,
+  profile: "annex_iv_governance_v1"
+});
+
+const gpaiReadiness = await proofLayer.evaluateCompleteness({
+  // fullGpaiProviderBundle should contain the full structured GPAI provider evidence set.
+  bundle: fullGpaiProviderBundle,
+  profile: "gpai_provider_v1"
+});
+
+const timestampCheck = await proofClient.verifyTimestamp({
+  bundleId: "BUNDLE_ID"
+});
+
+const receiptCheck = await proofClient.verifyReceipt({
+  bundleId: "BUNDLE_ID",
+  liveCheckMode: "best_effort"
+});
+
 const summary = verifyBundle({
   bundle: locallySealed.bundle,
   artefacts: [{ name: "prompt.json", data: Buffer.from("{}") }],
@@ -110,6 +131,10 @@ const summary = verifyBundle({
 });
 
 console.log(summary.artefact_count);
+console.log(readiness.status);
+console.log(gpaiReadiness.status);
+console.log(timestampCheck.assessment.headline, timestampCheck.assessment.level);
+console.log(receiptCheck.assessment.summary, receiptCheck.assessment.live_check?.state);
 console.log(proofClient.baseUrl);
 
 const redacted = await proofLayer.disclose({
@@ -174,6 +199,16 @@ const templatePreview = await proofClient.previewDisclosure({
   }
 });
 const archive = await proofClient.downloadPackExport(pack.pack_id);
+const vaultReadiness = await proofClient.evaluateCompleteness({
+  bundleId: "BUNDLE_ID",
+  profile: "annex_iv_governance_v1"
+});
+
+const annexXiPackReadiness = await proofClient.evaluateCompleteness({
+  packId: "PACK_ID",
+  profile: "gpai_provider_v1"
+});
+const packReadiness = selectPackReadiness(pack);
 
 const generic = withGenericProofLayer(
   async (params) => ({ id: "generic-1", model: params.model, output_text: "ok" }),
@@ -201,4 +236,25 @@ console.log(redactedSummary.disclosed_item_count, archive.length);
 console.log(preview.disclosed_item_types);
 console.log(templatePack.pack_id, templatePreview.disclosedItemTypes);
 console.log(templateCatalog.templates[0].profile, renderedTemplate.policy.name);
+console.log(annexXiPackReadiness.status);
+console.log(packReadiness?.source, packReadiness?.status);
+console.log(vaultReadiness.status);
 ```
+
+Vault pack responses preserve the legacy per-bundle `completeness_*` fields and add `pack_completeness_*` when a pack has synthesized pack-level readiness support.
+Use `selectPackReadiness(packSummaryOrManifest)` when you want one helper that prefers the true pack-scoped signal (`source === "pack_scoped"`) and falls back to the legacy bundle aggregate signal (`source === "bundle_aggregate"`).
+
+Vault verification responses now also include a plain-English `assessment` block.
+Use `verifyTimestamp(...)` and `verifyReceipt(...)` when you want both the low-level crypto result and a short human-readable trust summary.
+For receipts, `liveCheckMode: "best_effort"` adds an opt-in live Rekor freshness check without turning temporary network problems into a hard failure.
+
+For `annex_iv`, the pack-scoped pass count is currently `5` because `annex_iv_governance_v1` evaluates five rule families even though the pack curates eight governance evidence families.
+
+For the full provider-side Annex IV governance walkthrough, build the SDK and run:
+
+```bash
+npm --prefix sdks/typescript build
+node examples/typescript-compliance/run.mjs
+```
+
+That example captures the checked governance set, previews `annex_iv_redacted`, and exports both full and disclosure-format `annex_iv` packs.

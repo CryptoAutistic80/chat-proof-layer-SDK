@@ -21,6 +21,54 @@ cargo run -p proofctl -- create \
 cargo run -p proofctl -- verify --in ./bundle.pkg --key ./keys/verify.pub
 ```
 
+If you have a full high-risk governance bundle and want the advisory readiness view:
+
+```bash
+cargo run -p proofctl -- assess \
+  --in ./annex-iv-bundle.pkg \
+  --profile annex_iv_governance_v1
+```
+
+If you have a full GPAI provider bundle and want the matching advisory readiness view:
+
+```bash
+cargo run -p proofctl -- assess \
+  --in ./gpai-provider-bundle.pkg \
+  --profile gpai_provider_v1
+```
+
+If you later export an `annex_iv` or `annex_xi` pack from the vault, the pack summary and manifest will keep the legacy per-bundle `completeness_*` fields and, where supported, add `pack_completeness_*` fields for the synthesized pack-level readiness result.
+
+For `annex_iv`, the pack-scoped pass count is currently `5` because `annex_iv_governance_v1` evaluates five rule families even though the pack curates eight governance evidence families.
+
+If you want the plain-English timestamp and transparency trust result from the CLI, run verify with the assurance checks turned on:
+
+```bash
+cargo run -p proofctl -- verify \
+  --in ./bundle.pkg \
+  --key ./keys/verify.pub \
+  --check-timestamp \
+  --check-receipt \
+  --receipt-live-check best_effort
+```
+
+`best_effort` asks the vault or CLI to try a live Rekor check without turning a temporary network problem into a hard failure. Leave it off if you want a fully offline check.
+
+If you are anchoring to a SCITT service, the newer outside-friendly receipt format is now the normal choice:
+
+```bash
+cargo run -p proofctl -- create \
+  --input ./fixtures/golden/capture.json \
+  --artefact prompt.json=./fixtures/golden/prompt.json \
+  --artefact response.json=./fixtures/golden/response.json \
+  --key ./keys/signing.pem \
+  --out ./bundle-scitt.pkg \
+  --timestamp-url http://timestamp.digicert.com \
+  --transparency-provider scitt \
+  --transparency-log https://scitt.example.test/entries \
+  --scitt-format cose_ccf
+```
+
 If you want the bundle to carry your actor role and system-classification context from day one, create it with the compliance flags instead of adding that data later:
 
 ```bash
@@ -81,6 +129,13 @@ cargo run -p proofctl -- pack \
   --system-id system-123 \
   --out ./provider-governance.pack
 
+# Annex IV high-risk governance pack
+cargo run -p proofctl -- pack \
+  --type annex-iv \
+  --vault-url http://127.0.0.1:8080 \
+  --system-id hiring-assistant \
+  --out ./annex-iv.pack
+
 # Deployer-side FRIA / fundamental rights pack
 cargo run -p proofctl -- pack \
   --type fundamental-rights \
@@ -104,6 +159,7 @@ node examples/typescript-compliance/run.mjs
 node examples/typescript-monitoring/run.mjs
 
 python3 packages/sdk-python/scripts/build_native.py
+python3 examples/python-annex-iv/run.py
 python3 examples/python-compliance/run.py
 python3 examples/python-incident-response/run.py
 ```
@@ -130,7 +186,7 @@ http://127.0.0.1:5173/playground
 http://127.0.0.1:5173/docs
 ```
 
-`web-demo` is demo-only collateral for walkthroughs and API exercises; it is not the production compliance surface.
+`web-demo` is demo-only collateral for walkthroughs and API exercises; it is not the production compliance surface. When connected to a local vault it now also shows an Annex IV-oriented readiness check for supported workflows.
 
 If the site is already open, click `Refresh vault` after starting `proof-service` so the verifier and capability panels pick up the current vault state.
 

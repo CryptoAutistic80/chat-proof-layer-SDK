@@ -115,15 +115,34 @@ class TestDisclosurePolicyBuilders(unittest.TestCase):
                 "data_governance",
                 "instructions_for_use",
                 "human_oversight",
+                "qms_record",
+                "standards_alignment",
+                "post_market_monitoring",
+                "corrective_action",
             ],
+        )
+        self.assertTrue(policy["include_artefact_metadata"])
+        self.assertFalse(policy["include_artefact_bytes"])
+        self.assertEqual(
+            policy["redacted_fields_by_item_type"]["risk_assessment"],
+            ["/metadata"],
         )
         self.assertEqual(
             policy["redacted_fields_by_item_type"]["data_governance"],
-            ["/bias_metrics", "/personal_data_categories", "/safeguards"],
+            ["/metadata", "/personal_data_categories", "/safeguards"],
         )
         self.assertEqual(
             policy["redacted_fields_by_item_type"]["instructions_for_use"],
-            ["/accuracy_metrics", "/compute_requirements", "/log_management_guidance"],
+            ["/metadata"],
+        )
+        self.assertEqual(policy["redacted_fields_by_item_type"]["qms_record"], ["/metadata"])
+        self.assertEqual(
+            policy["redacted_fields_by_item_type"]["standards_alignment"],
+            ["/metadata"],
+        )
+        self.assertEqual(
+            policy["redacted_fields_by_item_type"]["post_market_monitoring"],
+            ["/metadata"],
         )
 
 

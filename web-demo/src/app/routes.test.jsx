@@ -48,6 +48,16 @@ const mocks = vi.hoisted(() => {
     };
   }
 
+  function packCompletenessProfileForType(packType) {
+    if (packType === "annex_iv") {
+      return "annex_iv_governance_v1";
+    }
+    if (packType === "annex_xi") {
+      return "gpai_provider_v1";
+    }
+    return null;
+  }
+
   return {
     state,
     reset,
@@ -180,18 +190,66 @@ const mocks = vi.hoisted(() => {
       disclosed_item_indices: [0],
       disclosed_artefact_names: ["response.json"]
     })),
-    createPack: vi.fn(async (_serviceUrl, _apiKey, payload) => ({
-      pack_id: `pack-${payload.pack_type}`,
-      bundle_count: state.bundles.size
-    })),
-    fetchPackManifest: vi.fn(async (_serviceUrl, _apiKey, packId) => ({
-      pack_id: packId,
-      pack_type: packId.replace("pack-", ""),
-      bundles: Array.from(state.bundles.entries()).map(([bundleId, payload]) => ({
-        bundle_id: bundleId,
-        item_types: payload.capture.items.map((item) => item.type)
-      }))
-    })),
+    evaluateCompleteness: vi.fn(async (_serviceUrl, _apiKey, payload) => {
+      if (payload.pack_id) {
+        return {
+          profile: payload.profile,
+          status: "pass",
+          bundle_id: payload.pack_id,
+          pass_count: payload.profile === "annex_iv_governance_v1" ? 5 : 6,
+          warn_count: 0,
+          fail_count: 0,
+          rules: []
+        };
+      }
+      return {
+        profile: payload.profile,
+        status: "fail",
+        bundle_id: payload.bundle_id ?? payload.bundle?.bundle_id ?? "inline-bundle",
+        pass_count: 0,
+        warn_count: 0,
+        fail_count: payload.profile === "annex_iv_governance_v1" ? 5 : 6,
+        rules: [
+          {
+            status: "fail",
+            missing_fields: ["summary"]
+          }
+        ]
+      };
+    }),
+    createPack: vi.fn(async (_serviceUrl, _apiKey, payload) => {
+      const packType = payload.pack_type;
+      const packCompletenessProfile = packCompletenessProfileForType(packType);
+      return {
+        pack_id: `pack-${packType}`,
+        pack_type: packType,
+        bundle_count: payload.bundle_ids?.length ?? state.bundles.size,
+        pack_completeness_profile: packCompletenessProfile ?? undefined,
+        pack_completeness_status: packCompletenessProfile ? "pass" : undefined,
+        pack_completeness_pass_count:
+          packType === "annex_iv" ? 5 : packType === "annex_xi" ? 6 : undefined,
+        pack_completeness_warn_count: packCompletenessProfile ? 0 : undefined,
+        pack_completeness_fail_count: packCompletenessProfile ? 0 : undefined
+      };
+    }),
+    fetchPackManifest: vi.fn(async (_serviceUrl, _apiKey, packId) => {
+      const packType = packId.replace("pack-", "");
+      const packCompletenessProfile = packCompletenessProfileForType(packType);
+      return {
+        pack_id: packId,
+        pack_type: packType,
+        pack_completeness_profile: packCompletenessProfile ?? undefined,
+        pack_completeness_status: packCompletenessProfile ? "pass" : undefined,
+        pack_completeness_pass_count:
+          packType === "annex_iv" ? 5 : packType === "annex_xi" ? 6 : undefined,
+        pack_completeness_warn_count: packCompletenessProfile ? 0 : undefined,
+        pack_completeness_fail_count: packCompletenessProfile ? 0 : undefined,
+        bundles: Array.from(state.bundles.entries()).map(([bundleId, payload]) => ({
+          bundle_id: bundleId,
+          item_types: payload.capture.items.map((item) => item.type)
+        }))
+      };
+    }),
     downloadPackExport: vi.fn(async () => ({
       buffer: new TextEncoder().encode("pack-bytes").buffer,
       contentType: "application/gzip"
@@ -199,7 +257,7 @@ const mocks = vi.hoisted(() => {
     fetchSystemSummary: vi.fn(async (_serviceUrl, _apiKey, systemId) => ({
       system_id: systemId,
       bundle_count: state.bundles.size,
-      pack_types: ["provider_governance"]
+      pack_types: ["annex_iv"]
     })),
     listBundles: vi.fn(async () => ({
       items: Array.from(state.bundles.keys()).map((bundleId) => ({
@@ -221,6 +279,7 @@ vi.mock("../lib/vaultApi", async () => {
     fetchBundleArtefact: mocks.fetchBundleArtefact,
     verifyBundle: mocks.verifyBundle,
     previewDisclosure: mocks.previewDisclosure,
+    evaluateCompleteness: mocks.evaluateCompleteness,
     createPack: mocks.createPack,
     fetchPackManifest: mocks.fetchPackManifest,
     downloadPackExport: mocks.downloadPackExport,
@@ -342,6 +401,59 @@ describe("AppRoutes", () => {
 
     await user.click(screen.getByRole("tab", { name: "Open in record explorer" }));
     expect(await screen.findByRole("link", { name: "Open record explorer" })).toBeTruthy();
+  });
+
+  test("annex iv scenarios surface exported pack readiness after export", async () => {
+    const user = userEvent.setup();
+    renderApp(["/playground"]);
+
+    await screen.findByRole("heading", {
+      level: 1,
+      name: "See how Proof Layer fits into common AI workflows"
+    });
+
+    await user.click(screen.getByRole("button", { name: /Annex IV governance pack/i }));
+    await user.click(screen.getByRole("button", { name: "Run example" }));
+
+    expect(
+      await screen.findByRole("heading", { level: 2, name: "What was recorded" })
+    ).toBeTruthy();
+
+    await user.click(screen.getByRole("tab", { name: "Why this helps with compliance" }));
+
+    expect(await screen.findByText("Workflow readiness check")).toBeTruthy();
+    expect(screen.getByText("Exported pack readiness")).toBeTruthy();
+    expect(
+      screen.getByText(
+        "The structured governance fields for this Annex IV exported pack meet the current advisory minimum."
+      )
+    ).toBeTruthy();
+    expect(screen.getByText("5 pass · 0 warn · 0 fail")).toBeTruthy();
+    expect(mocks.evaluateCompleteness).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.any(String),
+      expect.objectContaining({
+        pack_id: "pack-annex_iv",
+        profile: "annex_iv_governance_v1"
+      })
+    );
+    expect(mocks.createPack).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.any(String),
+      expect.objectContaining({
+        pack_type: "annex_iv",
+        bundle_ids: expect.arrayContaining([
+          "bundle-1",
+          "bundle-2",
+          "bundle-3",
+          "bundle-4",
+          "bundle-5",
+          "bundle-6",
+          "bundle-7",
+          "bundle-8"
+        ])
+      })
+    );
   });
 
   test("records explorer loads a bundle and honors the selected view", async () => {

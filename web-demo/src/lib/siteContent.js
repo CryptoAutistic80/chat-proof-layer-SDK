@@ -76,9 +76,9 @@ export const COMMON_WORKFLOWS = [
   },
   {
     slug: "support-rules",
-    title: "Support assistant with governance file",
+    title: "Annex IV governance pack",
     body:
-      "Capture the AI run plus structured data governance, operator instructions, and quality sign-off around that workflow."
+      "Capture the provider-side technical, risk, governance, oversight, and monitoring evidence needed for an Annex IV style review."
   },
   {
     slug: "foundation-model-thresholds",

@@ -3,10 +3,11 @@ use chrono::{DateTime, Utc};
 use napi::{Error, Result, bindgen_prelude::Buffer};
 use napi_derive::napi;
 use proof_layer_core::{
-    ArtefactInput, BundleBuildInput, CaptureEvent, LegacyCaptureInput, ProofBundle, RedactedBundle,
-    build_bundle, canonicalize_json_strict, compute_commitment, decode_private_key_pem,
-    decode_public_key_pem, redact_bundle, redact_bundle_with_field_redactions, sha256_prefixed,
-    sign_bundle_root, validate_bundle_integrity_fields, verify_bundle_root, verify_redacted_bundle,
+    ArtefactInput, BundleBuildInput, CaptureEvent, CompletenessProfile, LegacyCaptureInput,
+    ProofBundle, RedactedBundle, build_bundle, canonicalize_json_strict, compute_commitment,
+    decode_private_key_pem, decode_public_key_pem, evaluate_completeness, redact_bundle,
+    redact_bundle_with_field_redactions, sha256_prefixed, sign_bundle_root,
+    validate_bundle_integrity_fields, verify_bundle_root, verify_redacted_bundle,
 };
 use serde::Deserialize;
 use std::collections::BTreeMap;
@@ -27,6 +28,10 @@ struct BuildArtefact {
 
 fn napi_error(message: impl Into<String>) -> Error {
     Error::from_reason(message.into())
+}
+
+fn parse_profile(profile: &str) -> Result<CompletenessProfile> {
+    profile.parse().map_err(napi_error)
 }
 
 #[napi(js_name = "canonicalizeJson")]
@@ -161,6 +166,14 @@ pub fn verify_redacted_bundle_native(
         "disclosed_artefact_count": summary.disclosed_artefact_count,
     }))
     .map_err(|err| napi_error(err.to_string()))
+}
+
+#[napi(js_name = "evaluateCompleteness")]
+pub fn evaluate_completeness_native(bundle_json: String, profile: String) -> Result<String> {
+    let bundle: ProofBundle =
+        serde_json::from_str(&bundle_json).map_err(|err| napi_error(err.to_string()))?;
+    let report = evaluate_completeness(&bundle, parse_profile(&profile)?);
+    serde_json::to_string(&report).map_err(|err| napi_error(err.to_string()))
 }
 
 #[napi(js_name = "buildBundle")]

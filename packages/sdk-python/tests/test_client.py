@@ -68,6 +68,206 @@ class TestProofLayerClient(unittest.TestCase):
             },
         )
 
+    def test_create_pack_serializes_bundle_ids(self):
+        captured = {}
+
+        def request_fn(method, path, headers, body):
+            captured["method"] = method
+            captured["path"] = path
+            captured["headers"] = headers
+            captured["body"] = body
+            return {
+                "pack_id": "P-bundles",
+                "bundle_format": "full",
+                "bundle_ids": ["B1", "B2"],
+            }
+
+        client = ProofLayerClient(base_url="http://127.0.0.1:8080", request_fn=request_fn)
+        out = client.create_pack(
+            pack_type="annex_iv",
+            bundle_ids=["B1", "B2"],
+        )
+
+        self.assertEqual(out["pack_id"], "P-bundles")
+        payload = json.loads(captured["body"].decode("utf-8"))
+        self.assertEqual(
+            payload,
+            {
+                "pack_type": "annex_iv",
+                "bundle_ids": ["B1", "B2"],
+            },
+        )
+
+    def test_create_pack_rejects_bundle_ids_with_system_filters(self):
+        client = ProofLayerClient(
+            base_url="http://127.0.0.1:8080",
+            request_fn=lambda *_args: {"ok": True},
+        )
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "bundle_ids cannot be combined with system_id, from_date, or to_date",
+        ):
+            client.create_pack(
+                pack_type="annex_iv",
+                bundle_ids=["B1"],
+                system_id="system-123",
+            )
+
+    def test_evaluate_completeness_posts_bundle_id(self):
+        captured = {}
+
+        def request_fn(method, path, headers, body):
+            captured["method"] = method
+            captured["path"] = path
+            captured["headers"] = headers
+            captured["body"] = body
+            return {
+                "profile": "gpai_provider_v1",
+                "status": "pass",
+                "bundle_id": "B1",
+                "system_id": "foundation-model-alpha",
+                "pass_count": 6,
+                "warn_count": 0,
+                "fail_count": 0,
+                "rules": [],
+            }
+
+        client = ProofLayerClient(base_url="http://127.0.0.1:8080", request_fn=request_fn)
+        out = client.evaluate_completeness(
+            bundle_id="B1",
+            profile="gpai_provider_v1",
+        )
+
+        self.assertEqual(captured["method"], "POST")
+        self.assertEqual(captured["path"], "/v1/completeness/evaluate")
+        self.assertEqual(
+            json.loads(captured["body"].decode("utf-8")),
+            {
+                "bundle_id": "B1",
+                "profile": "gpai_provider_v1",
+            },
+        )
+        self.assertEqual(out["status"], "pass")
+
+    def test_verify_timestamp_posts_bundle_id(self):
+        captured = {}
+
+        def request_fn(method, path, headers, body):
+            captured["method"] = method
+            captured["path"] = path
+            captured["headers"] = headers
+            captured["body"] = body
+            return {
+                "valid": True,
+                "message": "VALID: Timestamp token is valid",
+                "assessment": {
+                    "level": "structural",
+                    "headline": "Timestamp token is valid",
+                    "summary": "The timestamp token matches this proof.",
+                    "next_step": "Add trust files if you need stronger proof.",
+                    "checks": [],
+                },
+            }
+
+        client = ProofLayerClient(base_url="http://127.0.0.1:8080", request_fn=request_fn)
+        out = client.verify_timestamp(bundle_id="B1")
+
+        self.assertEqual(captured["path"], "/v1/verify/timestamp")
+        self.assertEqual(
+            json.loads(captured["body"].decode("utf-8")),
+            {"bundle_id": "B1"},
+        )
+        self.assertEqual(out["assessment"]["headline"], "Timestamp token is valid")
+
+    def test_verify_receipt_posts_bundle_id_and_live_mode(self):
+        captured = {}
+
+        def request_fn(method, path, headers, body):
+            captured["method"] = method
+            captured["path"] = path
+            captured["headers"] = headers
+            captured["body"] = body
+            return {
+                "valid": True,
+                "message": "VALID: Transparency proof confirmed",
+                "assessment": {
+                    "level": "trusted",
+                    "headline": "Transparency proof confirmed",
+                    "summary": "The receipt matches this proof.",
+                    "next_step": "Keep the trusted key with the proof.",
+                    "checks": [],
+                    "live_check": {
+                        "mode": "best_effort",
+                        "state": "pass",
+                        "checked_at": "2026-03-06T12:10:00Z",
+                        "summary": "Live log confirmation passed.",
+                    },
+                },
+            }
+
+        client = ProofLayerClient(base_url="http://127.0.0.1:8080", request_fn=request_fn)
+        out = client.verify_receipt(bundle_id="B1", live_check_mode="best_effort")
+
+        self.assertEqual(captured["path"], "/v1/verify/receipt")
+        self.assertEqual(
+            json.loads(captured["body"].decode("utf-8")),
+            {"bundle_id": "B1", "live_check_mode": "best_effort"},
+        )
+        self.assertEqual(out["assessment"]["live_check"]["state"], "pass")
+
+    def test_evaluate_completeness_posts_pack_id(self):
+        captured = {}
+
+        def request_fn(method, path, headers, body):
+            captured["method"] = method
+            captured["path"] = path
+            captured["headers"] = headers
+            captured["body"] = body
+            return {
+                "profile": "gpai_provider_v1",
+                "status": "pass",
+                "bundle_id": "P1",
+                "system_id": "foundation-model-alpha",
+                "pass_count": 6,
+                "warn_count": 0,
+                "fail_count": 0,
+                "rules": [],
+            }
+
+        client = ProofLayerClient(base_url="http://127.0.0.1:8080", request_fn=request_fn)
+        out = client.evaluate_completeness(
+            pack_id="P1",
+            profile="gpai_provider_v1",
+        )
+
+        self.assertEqual(captured["method"], "POST")
+        self.assertEqual(captured["path"], "/v1/completeness/evaluate")
+        self.assertEqual(
+            json.loads(captured["body"].decode("utf-8")),
+            {
+                "pack_id": "P1",
+                "profile": "gpai_provider_v1",
+            },
+        )
+        self.assertEqual(out["status"], "pass")
+
+    def test_evaluate_completeness_rejects_invalid_selector_combinations(self):
+        client = ProofLayerClient(
+            base_url="http://127.0.0.1:8080",
+            request_fn=lambda *_args: {"ok": True},
+        )
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "provide exactly one of bundle_id, bundle, or pack_id",
+        ):
+            client.evaluate_completeness(
+                bundle_id="B1",
+                pack_id="P1",
+                profile="gpai_provider_v1",
+            )
+
     def test_create_pack_serializes_inline_disclosure_template(self):
         captured = {}
 
@@ -101,8 +301,6 @@ class TestProofLayerClient(unittest.TestCase):
             {
                 "pack_type": "runtime_logs",
                 "system_id": "system-456",
-                "from": None,
-                "to": None,
                 "bundle_format": "disclosure",
                 "disclosure_template": {
                     "profile": "runtime_minimum",

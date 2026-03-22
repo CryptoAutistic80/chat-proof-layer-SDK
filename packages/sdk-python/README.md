@@ -2,8 +2,8 @@
 
 Python SDK for creating Proof Layer evidence bundles around model calls and lifecycle events.
 Integrity-sensitive helpers are backed by the local Rust PyO3 module in `crates/pyo3`.
-The shared builder/facade surface now covers all evidence item types currently implemented in Rust core, including `llm_interaction`, `tool_call`, `retrieval`, `human_oversight`, `policy_decision`, `risk_assessment`, `data_governance`, `technical_doc`, `instructions_for_use`, `qms_record`, `fundamental_rights_assessment`, `standards_alignment`, `post_market_monitoring`, `corrective_action`, `authority_notification`, `authority_submission`, `reporting_deadline`, `regulator_correspondence`, `model_evaluation`, `adversarial_test`, `training_provenance`, `downstream_documentation`, `copyright_policy`, `training_summary`, `literacy_attestation`, `incident_report`, `conformity_assessment`, `declaration`, and `registration`.
-The GPAI helpers default `model_evaluation`, `adversarial_test`, and `training_provenance` captures to the vault's `gpai_documentation` retention class.
+The shared builder/facade surface now covers all evidence item types currently implemented in Rust core, including `llm_interaction`, `tool_call`, `retrieval`, `human_oversight`, `policy_decision`, `risk_assessment`, `data_governance`, `technical_doc`, `instructions_for_use`, `qms_record`, `fundamental_rights_assessment`, `standards_alignment`, `post_market_monitoring`, `corrective_action`, `authority_notification`, `authority_submission`, `reporting_deadline`, `regulator_correspondence`, `model_evaluation`, `adversarial_test`, `training_provenance`, `compute_metrics`, `downstream_documentation`, `copyright_policy`, `training_summary`, `literacy_attestation`, `incident_report`, `conformity_assessment`, `declaration`, and `registration`.
+The GPAI helpers default `model_evaluation`, `adversarial_test`, `training_provenance`, and `compute_metrics` captures to the vault's `gpai_documentation` retention class.
 
 ## Install
 
@@ -39,6 +39,7 @@ from proofsdk import (
     build_bundle,
     create_disclosure_policy_template,
     hash_sha256,
+    select_pack_readiness,
     verify_bundle,
 )
 from proofsdk.client import ProofLayerClient
@@ -104,6 +105,23 @@ locally_sealed = local_client.create_bundle(
     [{"name": "prompt.json", "content_type": "application/json", "data": b"{}"}],
 )
 
+readiness = proof_layer.evaluate_completeness(
+    bundle=locally_sealed["bundle"],
+    profile="annex_iv_governance_v1",
+)
+
+gpai_readiness = proof_layer.evaluate_completeness(
+    # full_gpai_provider_bundle should contain the full structured GPAI provider evidence set.
+    bundle=full_gpai_provider_bundle,
+    profile="gpai_provider_v1",
+)
+
+timestamp_check = proof_client.verify_timestamp(bundle_id="BUNDLE_ID")
+receipt_check = proof_client.verify_receipt(
+    bundle_id="BUNDLE_ID",
+    live_check_mode="best_effort",
+)
+
 summary = verify_bundle(
     bundle=locally_sealed["bundle"],
     artefacts=[{"name": "prompt.json", "data": b"{}"}],
@@ -111,6 +129,13 @@ summary = verify_bundle(
 )
 
 print(summary["artefact_count"])
+print(readiness["status"])
+print(gpai_readiness["status"])
+print(timestamp_check["assessment"]["headline"], timestamp_check["assessment"]["level"])
+print(
+    receipt_check["assessment"]["summary"],
+    receipt_check["assessment"].get("live_check", {}).get("state"),
+)
 
 redacted = proof_layer.disclose(
     bundle=locally_sealed["bundle"],
@@ -175,6 +200,15 @@ template_preview = proof_client.preview_disclosure(
     },
 )
 archive = proof_client.download_pack_export(pack["pack_id"])
+vault_readiness = proof_client.evaluate_completeness(
+    bundle_id="BUNDLE_ID",
+    profile="annex_iv_governance_v1",
+)
+annex_xi_pack_readiness = proof_client.evaluate_completeness(
+    pack_id="PACK_ID",
+    profile="gpai_provider_v1",
+)
+pack_readiness = select_pack_readiness(pack)
 
 risk_bundle = proof_layer.capture_risk_assessment(
     risk_id="risk-42",
@@ -188,4 +222,25 @@ print(redacted_summary["disclosed_item_count"], len(archive))
 print(preview["disclosed_item_types"])
 print(template_pack["pack_id"], template_preview["disclosed_item_types"])
 print(template_catalog["templates"][0]["profile"], rendered_template["policy"]["name"])
+print(annex_xi_pack_readiness["status"])
+print(pack_readiness["source"], pack_readiness["status"])
+print(vault_readiness["status"])
 ```
+
+Vault pack responses preserve the legacy per-bundle `completeness_*` fields and add `pack_completeness_*` when a pack has synthesized pack-level readiness support.
+Use `select_pack_readiness(pack_summary_or_manifest)` when you want one helper that prefers the true pack-scoped signal (`source == "pack_scoped"`) and falls back to the legacy bundle aggregate signal (`source == "bundle_aggregate"`).
+
+Vault verification responses now also include a plain-English `assessment` block.
+Use `verify_timestamp(...)` and `verify_receipt(...)` when you want both the low-level crypto result and a short human-readable trust summary.
+For receipts, `live_check_mode="best_effort"` adds an opt-in live Rekor freshness check without turning temporary network problems into a hard failure.
+
+For `annex_iv`, the pack-scoped pass count is currently `5` because `annex_iv_governance_v1` evaluates five rule families even though the pack curates eight governance evidence families.
+
+For the full provider-side Annex IV governance walkthrough, build the native module and run:
+
+```bash
+python3 packages/sdk-python/scripts/build_native.py
+python3 examples/python-annex-iv/run.py
+```
+
+That example captures the checked governance set, previews `annex_iv_redacted`, and exports both full and disclosure-format `annex_iv` packs.

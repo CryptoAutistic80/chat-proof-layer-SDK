@@ -1,4 +1,5 @@
 import React from "react";
+import { AssuranceOptionToggles } from "./AssuranceOptionToggles";
 import { modelOptionsFor } from "../lib/presets";
 
 function renderField(field, draft, onChange) {
@@ -161,22 +162,11 @@ export function ScenarioParameterForm({
       </p>
 
       <div className="scenario-form-footer">
-        <div className="toggle-row">
-          <button
-            type="button"
-            className={`toggle-pill ${draft.attachTimestamp ? "is-active" : ""}`}
-            onClick={() => onChange("attachTimestamp", !draft.attachTimestamp)}
-          >
-            Timestamp
-          </button>
-          <button
-            type="button"
-            className={`toggle-pill ${draft.attachTransparency ? "is-active" : ""}`}
-            onClick={() => onChange("attachTransparency", !draft.attachTransparency)}
-          >
-            Transparency
-          </button>
-        </div>
+        <AssuranceOptionToggles
+          attachTimestamp={draft.attachTimestamp}
+          attachTransparency={draft.attachTransparency}
+          onChange={onChange}
+        />
 
         <div className="button-row">
           <button type="button" className="primary-cta" onClick={onRun} disabled={isRunning}>

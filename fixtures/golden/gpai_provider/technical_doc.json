@@ -1,0 +1,14 @@
+{
+  "document_ref": "annex-xi/foundation-model-alpha/system-card",
+  "section": "model_overview",
+  "commitment": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+  "annex_iv_sections": [],
+  "system_description_summary": "General-purpose model serving text and workflow assistance across provider-controlled APIs.",
+  "model_description_summary": null,
+  "capabilities_and_limitations": "Supports multilingual drafting and summarization with known limits around hallucination and context-window truncation.",
+  "design_choices_summary": "Provider-side policy filtering, evaluation gates, and staged release controls are applied before deployment.",
+  "evaluation_metrics_summary": "Provider benchmarks track instruction following, toxicity, multilingual quality, and subgroup performance before release.",
+  "human_oversight_design_summary": null,
+  "post_market_monitoring_plan_ref": null,
+  "simplified_tech_doc": false
+}

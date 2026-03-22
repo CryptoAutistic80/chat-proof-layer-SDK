@@ -39,9 +39,10 @@ export function WhatYouCanSharePage() {
             <h2>How this proof record leaves the system</h2>
           </div>
         </div>
-        <div className="status-stack two-up">
+        <div className="status-stack">
           <StatusExplainCard status={summary.disclosureStatus} />
           <StatusExplainCard status={summary.exportStatus} />
+          <StatusExplainCard status={summary.completenessStatus} />
         </div>
       </section>
 

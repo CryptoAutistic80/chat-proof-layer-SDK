@@ -1,0 +1,31 @@
+{
+  "document_ref": "docs://hiring-assistant/operator-handbook",
+  "version": "2026.03",
+  "section": "human-review-required",
+  "provider_identity": "Proof Layer Hiring Systems Ltd.",
+  "intended_purpose": "Recruiter support for first-pass candidate review",
+  "system_capabilities": [
+    "candidate_summary",
+    "borderline_case_flagging"
+  ],
+  "accuracy_metrics": [
+    {
+      "name": "review_precision",
+      "value": "0.91",
+      "unit": "ratio"
+    }
+  ],
+  "foreseeable_risks": ["automation bias"],
+  "explainability_capabilities": [],
+  "human_oversight_guidance": [
+    "Review every negative or borderline recommendation."
+  ],
+  "compute_requirements": ["4 vCPU", "8GB RAM"],
+  "service_lifetime": "12 months",
+  "log_management_guidance": [
+    "Retain runtime logs for post-market monitoring."
+  ],
+  "metadata": {
+    "distribution": "internal_only"
+  }
+}

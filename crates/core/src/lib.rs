@@ -1,6 +1,8 @@
+pub mod assurance;
 pub mod backup;
 pub mod build;
 pub mod canon;
+pub mod completeness;
 pub mod disclosure;
 pub mod hash;
 pub mod merkle;
@@ -29,6 +31,11 @@ pub mod canonicalize {
     pub use crate::canon::*;
 }
 
+pub use assurance::{
+    CheckState, ReceiptAssessment, ReceiptLiveCheckMode, ReceiptLiveVerification,
+    TimestampAssessment, TrustLevel, VerificationCheck, assess_receipt_error,
+    assess_receipt_verification, assess_timestamp_error, assess_timestamp_verification,
+};
 pub use backup::{
     BackupCryptoError, EncryptedVaultBackupEnvelope, VAULT_BACKUP_ENCRYPTION_ALGORITHM,
     VAULT_BACKUP_ENCRYPTION_KEY_LENGTH, VAULT_BACKUP_ENVELOPE_FORMAT,
@@ -43,6 +50,10 @@ pub use bundle::{
     TransparencyReceipt, VerificationSummary, validate_bundle_integrity_fields,
 };
 pub use canon::{CanonError, canonicalize_json_strict, canonicalize_value, parse_json_strict};
+pub use completeness::{
+    CompletenessProfile, CompletenessReport, CompletenessRuleResult, CompletenessStatus,
+    evaluate_completeness,
+};
 pub use disclosure::{
     DisclosedArtefact, DisclosedItem, DisclosureError, FieldRedactedItem, RedactedBundle,
     RedactedVerificationSummary, redact_bundle, redact_bundle_with_field_redactions,
@@ -75,8 +86,10 @@ pub use timestamp::{
 pub use transparency::{
     REKOR_RFC3161_API_VERSION, REKOR_RFC3161_ENTRY_KIND, REKOR_TRANSPARENCY_KIND,
     ReceiptVerification, RekorTransparencyProvider, SCITT_STATEMENT_PROFILE,
-    SCITT_TRANSPARENCY_KIND, SIGSTORE_REKOR_URL, ScittTransparencyProvider, TransparencyEntry,
-    TransparencyError, TransparencyProvider, TransparencyTrustPolicy, anchor_bundle,
-    validate_transparency_trust_policy, verify_receipt, verify_receipt_with_policy,
+    SCITT_TRANSPARENCY_KIND, SIGSTORE_REKOR_URL, ScittFormat, ScittStatementSigner,
+    ScittTransparencyProvider, TransparencyEntry, TransparencyError, TransparencyProvider,
+    TransparencyTrustPolicy, anchor_bundle, validate_transparency_trust_policy, verify_receipt,
+    verify_receipt_with_live_check, verify_receipt_with_policy,
+    verify_receipt_with_policy_and_live_check, verify_rekor_receipt_live,
 };
 pub use verify::{VerifyBundleRootError, verify_bundle_root};

@@ -51,12 +51,12 @@ _ALL_ITEM_TYPES = [
 ]
 
 _ANNEX_IV_DEFAULT_REDACTIONS = {
-    "data_governance": ["/bias_metrics", "/personal_data_categories", "/safeguards"],
-    "instructions_for_use": [
-        "/accuracy_metrics",
-        "/compute_requirements",
-        "/log_management_guidance",
-    ],
+    "risk_assessment": ["/metadata"],
+    "data_governance": ["/metadata", "/personal_data_categories", "/safeguards"],
+    "instructions_for_use": ["/metadata"],
+    "qms_record": ["/metadata"],
+    "standards_alignment": ["/metadata"],
+    "post_market_monitoring": ["/metadata"],
 }
 
 _INCIDENT_SUMMARY_DEFAULT_REDACTIONS = {
@@ -158,12 +158,16 @@ _TEMPLATE_BASES: dict[str, dict[str, Any]] = {
                 "data_governance",
                 "instructions_for_use",
                 "human_oversight",
+                "qms_record",
+                "standards_alignment",
+                "post_market_monitoring",
+                "corrective_action",
             ],
             "excluded_item_types": [],
             "allowed_obligation_refs": [],
             "excluded_obligation_refs": [],
             "include_artefact_metadata": True,
-            "include_artefact_bytes": True,
+            "include_artefact_bytes": False,
             "artefact_names": [],
             "redacted_fields_by_item_type": _ANNEX_IV_DEFAULT_REDACTIONS,
         },

@@ -1,3 +1,4 @@
+import json
 import unittest
 
 from proofsdk import (
@@ -24,6 +25,9 @@ from proofsdk import (
 
 
 class TestEvidenceBuilders(unittest.TestCase):
+    def decode_json_artefact(self, artefact):
+        return json.loads(bytes(artefact["data"]).decode("utf-8"))
+
     def test_llm_interaction_request_uses_v1_shape(self):
         request = create_llm_interaction_request(
             key_id="kid-dev-01",
@@ -78,6 +82,45 @@ class TestEvidenceBuilders(unittest.TestCase):
         self.assertTrue(request["capture"]["items"][0]["data"]["commitment"].startswith("sha256:"))
         self.assertEqual(request["artefacts"][0]["name"], "instructions_for_use.bin")
 
+    def test_instructions_for_use_request_emits_full_default_governance_artefact(self):
+        request = create_instructions_for_use_request(
+            key_id="kid-dev-01",
+            system_id="system-governance-2",
+            document_ref="docs://ifu/hiring-assistant",
+            version_tag="2026.03",
+            provider_identity="Proof Layer Hiring Systems Ltd.",
+            intended_purpose="Recruiter support for first-pass candidate review",
+            system_capabilities=["candidate_summary", "borderline_case_flagging"],
+            accuracy_metrics=[{"name": "review_precision", "value": "0.91", "unit": "ratio"}],
+            foreseeable_risks=["automation bias"],
+            human_oversight_guidance=["Review all adverse outputs before decisions."],
+            log_management_guidance=["Retain logs for post-market monitoring."],
+            metadata={"owner": "product-compliance"},
+        )
+
+        self.assertEqual(request["artefacts"][0]["name"], "instructions_for_use.json")
+        self.assertEqual(
+            self.decode_json_artefact(request["artefacts"][0]),
+            {
+                "document_ref": "docs://ifu/hiring-assistant",
+                "version": "2026.03",
+                "section": None,
+                "provider_identity": "Proof Layer Hiring Systems Ltd.",
+                "intended_purpose": "Recruiter support for first-pass candidate review",
+                "system_capabilities": ["candidate_summary", "borderline_case_flagging"],
+                "accuracy_metrics": [
+                    {"name": "review_precision", "value": "0.91", "unit": "ratio"}
+                ],
+                "foreseeable_risks": ["automation bias"],
+                "explainability_capabilities": [],
+                "human_oversight_guidance": ["Review all adverse outputs before decisions."],
+                "compute_requirements": [],
+                "service_lifetime": None,
+                "log_management_guidance": ["Retain logs for post-market monitoring."],
+                "metadata": {"owner": "product-compliance"},
+            },
+        )
+
     def test_risk_assessment_request_emits_default_artefact(self):
         request = create_risk_assessment_request(
             key_id="kid-dev-01",
@@ -100,6 +143,25 @@ class TestEvidenceBuilders(unittest.TestCase):
         self.assertTrue(request["capture"]["items"][0]["data"]["vulnerable_groups_considered"])
         self.assertEqual(request["capture"]["policy"]["retention_class"], "provider_documentation_days")
         self.assertEqual(request["artefacts"][0]["name"], "risk_assessment.json")
+        self.assertEqual(
+            self.decode_json_artefact(request["artefacts"][0]),
+            {
+                "risk_id": "risk-123",
+                "severity": "high",
+                "status": "open",
+                "summary": "hallucination path under review",
+                "risk_description": None,
+                "likelihood": "medium",
+                "affected_groups": [],
+                "mitigation_measures": [],
+                "residual_risk_level": "low",
+                "risk_owner": None,
+                "vulnerable_groups_considered": True,
+                "test_results_summary": None,
+                "metadata": {"owner": "risk-team"},
+                "record": {"controls": ["approval", "monitoring"]},
+            },
+        )
 
     def test_data_governance_request_emits_dataset_ref(self):
         request = create_data_governance_request(
@@ -122,6 +184,27 @@ class TestEvidenceBuilders(unittest.TestCase):
             request["capture"]["items"][0]["data"]["personal_data_categories"],
             ["support_tickets"],
         )
+        self.assertEqual(
+            self.decode_json_artefact(request["artefacts"][0]),
+            {
+                "decision": "approved_with_restrictions",
+                "dataset_ref": "dataset://curated/training-v2",
+                "dataset_name": "curated-training",
+                "dataset_version": None,
+                "source_description": None,
+                "collection_period": None,
+                "geographical_scope": [],
+                "preprocessing_operations": [],
+                "bias_detection_methodology": None,
+                "bias_metrics": [],
+                "mitigation_actions": [],
+                "data_gaps": [],
+                "personal_data_categories": ["support_tickets"],
+                "safeguards": [],
+                "metadata": {"reviewer": "privacy"},
+                "record": None,
+            },
+        )
 
     def test_technical_doc_request_hashes_inline_document(self):
         request = create_technical_doc_request(
@@ -136,6 +219,42 @@ class TestEvidenceBuilders(unittest.TestCase):
         self.assertEqual(request["capture"]["items"][0]["type"], "technical_doc")
         self.assertTrue(request["capture"]["items"][0]["data"]["commitment"].startswith("sha256:"))
         self.assertEqual(request["artefacts"][0]["name"], "system-card.txt")
+
+    def test_technical_doc_request_emits_descriptive_default_governance_artefact(self):
+        request = create_technical_doc_request(
+            key_id="kid-dev-01",
+            system_id="system-doc-2",
+            document_ref="annex-iv/system-card",
+            annex_iv_sections=["section_2", "section_3"],
+            system_description_summary="Ranks candidates for recruiter review.",
+            model_description_summary="Fine-tuned ranking model.",
+            capabilities_and_limitations="Advisory only for first-pass screening.",
+            design_choices_summary="Human review is required before employment decisions.",
+            evaluation_metrics_summary="Precision and subgroup parity are reviewed monthly.",
+            human_oversight_design_summary="Recruiters must review every adverse or borderline case.",
+            post_market_monitoring_plan_ref="pmm://hiring-assistant/2026.03",
+        )
+
+        self.assertEqual(request["artefacts"][0]["name"], "technical_doc.json")
+        self.assertEqual(
+            self.decode_json_artefact(request["artefacts"][0]),
+            {
+                "document_ref": "annex-iv/system-card",
+                "section": None,
+                "descriptor": None,
+                "annex_iv_sections": ["section_2", "section_3"],
+                "system_description_summary": "Ranks candidates for recruiter review.",
+                "model_description_summary": "Fine-tuned ranking model.",
+                "capabilities_and_limitations": "Advisory only for first-pass screening.",
+                "design_choices_summary": "Human review is required before employment decisions.",
+                "evaluation_metrics_summary": "Precision and subgroup parity are reviewed monthly.",
+                "human_oversight_design_summary": (
+                    "Recruiters must review every adverse or borderline case."
+                ),
+                "post_market_monitoring_plan_ref": "pmm://hiring-assistant/2026.03",
+                "simplified_tech_doc": None,
+            },
+        )
 
     def test_tool_call_request_hashes_input_output(self):
         request = create_tool_call_request(
@@ -200,6 +319,22 @@ class TestEvidenceBuilders(unittest.TestCase):
         self.assertEqual(request["capture"]["items"][0]["data"]["actor_role"], "human_reviewer")
         self.assertTrue(request["capture"]["items"][0]["data"]["stop_triggered"])
         self.assertTrue(request["capture"]["items"][0]["data"]["notes_commitment"].startswith("sha256:"))
+        self.assertEqual(
+            self.decode_json_artefact(request["artefacts"][0]),
+            {
+                "action": "approved_after_review",
+                "reviewer": "ops-lead",
+                "actor_role": "human_reviewer",
+                "anomaly_detected": None,
+                "override_action": None,
+                "interpretation_guidance_followed": None,
+                "automation_bias_detected": None,
+                "two_person_verification": None,
+                "stop_triggered": True,
+                "stop_reason": "manual kill switch",
+            },
+        )
+        self.assertEqual(request["artefacts"][1]["name"], "oversight_notes.txt")
 
     def test_policy_decision_request_hashes_rationale(self):
         request = create_policy_decision_request(

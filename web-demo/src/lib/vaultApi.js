@@ -150,10 +150,24 @@ export async function attachTimestamp(serviceUrl, apiKey, bundleId) {
   );
 }
 
-export async function verifyTimestamp(serviceUrl, apiKey, bundleId) {
+function normalizeVerifyTimestampPayload(input) {
+  if (typeof input === "string") {
+    return { bundle_id: input };
+  }
+  if (!input || typeof input !== "object") {
+    return {};
+  }
+  return {
+    bundle_id: input.bundleId ?? input.bundle_id,
+    bundle_root: input.bundleRoot ?? input.bundle_root,
+    timestamp: input.timestamp,
+  };
+}
+
+export async function verifyTimestamp(serviceUrl, apiKey, bundleIdOrRequest) {
   return requestJson(serviceUrl, apiKey, "/v1/verify/timestamp", {
     method: "POST",
-    body: JSON.stringify({ bundle_id: bundleId })
+    body: JSON.stringify(normalizeVerifyTimestampPayload(bundleIdOrRequest))
   });
 }
 
@@ -169,15 +183,37 @@ export async function anchorBundle(serviceUrl, apiKey, bundleId) {
   );
 }
 
-export async function verifyReceipt(serviceUrl, apiKey, bundleId) {
+function normalizeVerifyReceiptPayload(input) {
+  if (typeof input === "string") {
+    return { bundle_id: input };
+  }
+  if (!input || typeof input !== "object") {
+    return {};
+  }
+  return {
+    bundle_id: input.bundleId ?? input.bundle_id,
+    bundle_root: input.bundleRoot ?? input.bundle_root,
+    receipt: input.receipt,
+    live_check_mode: input.liveCheckMode ?? input.live_check_mode,
+  };
+}
+
+export async function verifyReceipt(serviceUrl, apiKey, bundleIdOrRequest) {
   return requestJson(serviceUrl, apiKey, "/v1/verify/receipt", {
     method: "POST",
-    body: JSON.stringify({ bundle_id: bundleId })
+    body: JSON.stringify(normalizeVerifyReceiptPayload(bundleIdOrRequest))
   });
 }
 
 export async function previewDisclosure(serviceUrl, apiKey, payload) {
   return requestJson(serviceUrl, apiKey, "/v1/disclosure/preview", {
+    method: "POST",
+    body: JSON.stringify(payload)
+  });
+}
+
+export async function evaluateCompleteness(serviceUrl, apiKey, payload) {
+  return requestJson(serviceUrl, apiKey, "/v1/completeness/evaluate", {
     method: "POST",
     body: JSON.stringify(payload)
   });

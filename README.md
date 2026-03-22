@@ -22,6 +22,7 @@ Current implemented surface:
 
 - Rust core for canonicalization, hashing, signing, verification, timestamping, transparency, disclosure, and backup-envelope crypto.
 - `proofctl` CLI for local keygen, create, verify, inspect, disclose, plus optional vault query/export/backup/restore flows.
+- Advisory readiness/completeness evaluation for full governance bundles via `proofctl assess`, the vault API, and the SDK facades.
 - `proof-service` optional self-hosted vault with SQLite storage, filesystem blobs, TLS, bearer auth, single-tenant enforcement, retention, legal holds, audit log, metrics, backup, restore layout export, and pack assembly.
 - TypeScript SDK in `sdks/typescript`, packaged as `@proof-layer/sdk`.
 - Python SDK in `packages/sdk-python`, packaged as `proof-layer-sdk-python`.
@@ -31,7 +32,7 @@ Important current limits:
 
 - PostgreSQL and S3 are parsed in config but not implemented.
 - Full EU trusted-list / archival eIDAS trust evaluation is not implemented yet.
-- SCITT is a bounded draft-aligned implementation, not full COSE/CCF interoperability.
+- SCITT now defaults to a COSE/CCF-friendly receipt format and still reads the legacy JSON format, but broader ecosystem interoperability and trust-list work are still incomplete.
 - Multitenancy is bounded single-tenant enforcement today, not a full multi-org isolation model.
 
 ## Why This Exists
@@ -86,6 +87,7 @@ Evidence currently implemented in core and SDKs includes:
 - `model_evaluation`
 - `adversarial_test`
 - `training_provenance`
+- `compute_metrics`
 - `downstream_documentation`
 - `copyright_policy`
 - `training_summary`
@@ -145,6 +147,16 @@ cargo run -p proofctl -- disclose \
 
 # Verify the redacted package
 cargo run -p proofctl -- verify --in ./bundle.disclosure.pkg --key ./keys/verify.pub
+
+# Assess Annex IV governance readiness for a full bundle
+cargo run -p proofctl -- assess \
+  --in ./annex-iv-bundle.pkg \
+  --profile annex_iv_governance_v1
+
+# Assess GPAI provider completeness for a full bundle
+cargo run -p proofctl -- assess \
+  --in ./gpai-provider-bundle.pkg \
+  --profile gpai_provider_v1
 ```
 
 Notes:
@@ -152,6 +164,7 @@ Notes:
 - `proofctl create` accepts both the legacy PoC capture shape and the current v1.0 `CaptureEvent` shape.
 - Migration overrides are available, for example `--system-id`, `--retention-class`, `--evidence-type`, `--role`, and the `--intended-use` / `--risk-tier` compliance flags.
 - Deterministic fixture inputs live under `fixtures/golden/`.
+- Checked completeness fixtures now include both `fixtures/golden/annex_iv_governance/` and `fixtures/golden/gpai_provider/`.
 
 Example with an SDK-first compliance profile stamped at create time:
 
@@ -191,6 +204,20 @@ cargo run -p proofctl -- create \
   --transparency-public-key ./rekor.pub
 ```
 
+If you are anchoring to a SCITT service instead of Rekor, switch the provider and pick the new default-friendly format explicitly:
+
+```bash
+cargo run -p proofctl -- create \
+  --input ./capture.json \
+  --key ./keys/signing.pem \
+  --out ./bundle.pkg \
+  --timestamp-url http://timestamp.digicert.com \
+  --transparency-provider scitt \
+  --transparency-log https://scitt.example.test/entries \
+  --scitt-format cose_ccf \
+  --transparency-public-key ./scitt-service.pub
+```
+
 Verify with assurance checks:
 
 ```bash
@@ -205,6 +232,7 @@ cargo run -p proofctl -- verify \
   --timestamp-qualified-signer ./tsa-signer.pem \
   --timestamp-policy-oid 1.2.3.4 \
   --check-receipt \
+  --receipt-live-check best_effort \
   --transparency-public-key ./rekor.pub
 ```
 
@@ -228,6 +256,20 @@ That starts the vault on `http://127.0.0.1:8080` and the demo site on `http://12
 The compose stack mounts `./vault.toml`, `./keys`, and `./storage`, and sets `PROOF_SIGNING_KEY_PATH=/app/keys/signing.pem`, so the vault exposes the matching public verify key from `./keys/verify.pub` through `/v1/config`.
 
 The service auto-loads `./vault.toml` when present. Environment variables still override file settings.
+
+The vault also exposes `POST /v1/completeness/evaluate` for advisory readiness checks against stored full bundles, inline full bundles, or stored packs with pack-scoped completeness support. The TypeScript and Python SDK facades mirror that as `evaluateCompleteness(...)` and `evaluate_completeness(...)`.
+
+For pack responses, the legacy `completeness_*` fields remain the per-bundle aggregate view. New `pack_completeness_*` fields carry the true synthesized pack-level readiness result where supported for `annex_iv` and `annex_xi`.
+Pack summaries and manifests may now include `pack_completeness_profile`, `pack_completeness_status`, `pack_completeness_pass_count`, `pack_completeness_warn_count`, and `pack_completeness_fail_count`.
+
+For `annex_iv`, the current pack-scoped pass count is `5`, not `8`, because `annex_iv_governance_v1` currently evaluates five rule families even though the pack curates eight governance evidence families.
+
+```json
+{
+  "profile": "gpai_provider_v1",
+  "pack_id": "01JPACKEXAMPLE1234567890ABCD"
+}
+```
 
 ### 5. Query, Export, And Backup Through The CLI
 
@@ -253,6 +295,13 @@ cargo run -p proofctl -- pack \
   --vault-url http://127.0.0.1:8080 \
   --system-id system-123 \
   --out ./provider-governance.pack
+
+# Export an Annex IV high-risk governance pack
+cargo run -p proofctl -- pack \
+  --type annex-iv \
+  --vault-url http://127.0.0.1:8080 \
+  --system-id hiring-assistant \
+  --out ./annex-iv.pack
 
 # Export a deployer-side FRIA / fundamental rights pack
 cargo run -p proofctl -- pack \
@@ -296,6 +345,18 @@ cargo run -p proofctl -- vault restore \
   --in ./vault-backup.tar.gz \
   --out-dir ./restored-vault
 ```
+
+### 6. High-Risk Governance Workflow
+
+The repo now includes a checked Annex IV acceptance scenario under `fixtures/golden/annex_iv_governance/` plus end-to-end SDK examples for a provider-side employment screening system.
+
+The intended flow is:
+
+1. capture governance bundles for `technical_doc`, `risk_assessment`, `data_governance`, `instructions_for_use`, `human_oversight`, `qms_record`, `standards_alignment`, and `post_market_monitoring`
+2. create an `annex_iv` full pack
+3. preview the `annex_iv_redacted` disclosure policy
+4. create an `annex_iv` disclosure pack
+5. verify the exported package members
 
 ## Vault Service
 
@@ -359,6 +420,7 @@ Operational behavior:
 - `proofctl` picks up the bearer token from `PROOF_SERVICE_API_KEY`.
 - `/healthz`, `/readyz`, and `/metrics` stay open for infrastructure checks and scraping.
 - When `organization_id` is configured, the vault runs in bounded single-tenant mode and rejects bundle writes scoped to a different org.
+- When `transparency.provider = "scitt"`, `transparency.scitt_format` may be `legacy_json` or `cose_ccf`; new receipts should use `cose_ccf`.
 
 ### Main Endpoints
 
@@ -397,6 +459,7 @@ Disclosure and packs:
 - `POST /v1/disclosure/preview`
 - `GET /v1/disclosure/templates`
 - `POST /v1/disclosure/templates/render`
+- `POST /v1/completeness/evaluate`
 - `POST /v1/packs`
 - `GET /v1/packs/{pack_id}`
 - `GET /v1/packs/{pack_id}/manifest`
@@ -406,6 +469,15 @@ System rollups:
 
 - `GET /v1/systems`
 - `GET /v1/systems/{system_id}/summary`
+
+`POST /v1/verify/timestamp` and `POST /v1/verify/receipt` now return both the low-level cryptographic result and a plain-English `assessment` block.
+For receipt verification, `live_check_mode` can be `off`, `best_effort`, or `required`.
+
+Plain-English trust levels:
+
+- `structural`: the timestamp or receipt matches the proof, but stronger trust was not proven.
+- `trusted`: the matching proof also chained to a trusted signer or trusted log/service key.
+- `qualified`: the stronger qualified timestamp path passed too.
 
 ### Example API Payloads
 
@@ -563,12 +635,13 @@ Examples:
 - `npm --prefix sdks/typescript build && node examples/typescript-compliance/run.mjs`
 - `npm --prefix sdks/typescript build && node examples/typescript-monitoring/run.mjs`
 - `node examples/typescript/run.mjs`
+- `python3 packages/sdk-python/scripts/build_native.py && python3 examples/python-annex-iv/run.py`
 - `python3 packages/sdk-python/scripts/build_native.py && python3 examples/python-compliance/run.py`
 - `python3 packages/sdk-python/scripts/build_native.py && python3 examples/python-incident-response/run.py`
 - `python3 examples/python-basic/run.py`
 - `python3 examples/agent-simulated/run.py`
 
-The compliance examples assume `proof-service` is running locally or `PROOF_SERVICE_URL` points at a reachable vault.
+The Annex IV and other compliance examples assume `proof-service` is running locally or `PROOF_SERVICE_URL` points at a reachable vault.
 
 Optional demo frontend:
 
@@ -584,6 +657,7 @@ The demo frontend can connect to a local `proof-service` instance. It is there t
 - integrated docs under `/docs/*`
 - a guided demo for scenario walkthroughs
 - an advanced playground for deeper workflow control
+- an Annex IV-oriented readiness check card backed by the completeness API
 
 When connected to a running vault, the interactive workflow can:
 
@@ -621,12 +695,15 @@ JSON schemas:
 - `schemas/capture_event.schema.json`
 - `schemas/evidence_item.schema.json`
 - `schemas/evidence_pack.schema.json`
+- `schemas/verification_assessment.schema.json`
+- `schemas/verify_timestamp_response.schema.json`
+- `schemas/verify_receipt_response.schema.json`
 - `schemas/schema_manifest.json`
 
 ## Current Caveats
 
 - Full offline verification works with a full or disclosure package plus the public key.
 - RFC 3161 verification supports trust anchors, CRLs, live OCSP, policy OIDs, and TSA signer allowlists, but full EU trusted-list ingestion and archival OCSP evidence handling are still future work.
-- Rekor verification checks receipt structure, entry binding, inclusion proof, and signed-entry-timestamp signature when a trusted public key is configured.
-- The current SCITT path is intentionally bounded and draft-aligned.
+- Rekor verification checks receipt structure, entry binding, inclusion proof, signed-entry-timestamp signature, and optional live log consistency / freshness when requested.
+- SCITT now writes the COSE/CCF-style receipt body by default and keeps legacy JSON read compatibility, but broader interop and trust-list work are still future work.
 - SQLite is the production-default path in this repo today; PostgreSQL and S3 are future expansion paths, not current backends.

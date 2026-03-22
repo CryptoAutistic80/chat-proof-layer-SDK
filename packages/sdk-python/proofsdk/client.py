@@ -61,10 +61,87 @@ class ProofLayerClient:
         }
         return self._request_fn("POST", "/v1/verify", self._headers_json(), json.dumps(payload).encode("utf-8"))
 
+    def verify_timestamp(
+        self,
+        *,
+        bundle_id: str | None = None,
+        bundle_root: str | None = None,
+        timestamp: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        selection_count = sum(1 for value in (bundle_id, bundle_root or timestamp) if value is not None)
+        if selection_count != 1:
+            raise ValueError("provide exactly one of bundle_id or bundle_root/timestamp")
+        if (bundle_root is None) != (timestamp is None):
+            raise ValueError("bundle_root and timestamp must be provided together")
+        payload: dict[str, Any]
+        if bundle_id is not None:
+            payload = {"bundle_id": bundle_id}
+        else:
+            payload = {"bundle_root": bundle_root, "timestamp": timestamp}
+        return self._request_fn(
+            "POST",
+            "/v1/verify/timestamp",
+            self._headers_json(),
+            json.dumps(payload).encode("utf-8"),
+        )
+
+    def verify_receipt(
+        self,
+        *,
+        bundle_id: str | None = None,
+        bundle_root: str | None = None,
+        receipt: dict[str, Any] | None = None,
+        live_check_mode: str | None = None,
+    ) -> dict[str, Any]:
+        selection_count = sum(1 for value in (bundle_id, bundle_root or receipt) if value is not None)
+        if selection_count != 1:
+            raise ValueError("provide exactly one of bundle_id or bundle_root/receipt")
+        if (bundle_root is None) != (receipt is None):
+            raise ValueError("bundle_root and receipt must be provided together")
+        payload: dict[str, Any]
+        if bundle_id is not None:
+            payload = {"bundle_id": bundle_id}
+        else:
+            payload = {"bundle_root": bundle_root, "receipt": receipt}
+        if live_check_mode is not None:
+            payload["live_check_mode"] = live_check_mode
+        return self._request_fn(
+            "POST",
+            "/v1/verify/receipt",
+            self._headers_json(),
+            json.dumps(payload).encode("utf-8"),
+        )
+
+    def evaluate_completeness(
+        self,
+        *,
+        profile: str,
+        bundle: dict[str, Any] | None = None,
+        bundle_id: str | None = None,
+        pack_id: str | None = None,
+    ) -> dict[str, Any]:
+        selection_count = sum(1 for value in (bundle, bundle_id, pack_id) if value is not None)
+        if selection_count != 1:
+            raise ValueError("provide exactly one of bundle_id, bundle, or pack_id")
+        payload: dict[str, Any] = {"profile": profile}
+        if bundle is not None:
+            payload["bundle"] = bundle
+        if bundle_id is not None:
+            payload["bundle_id"] = bundle_id
+        if pack_id is not None:
+            payload["pack_id"] = pack_id
+        return self._request_fn(
+            "POST",
+            "/v1/completeness/evaluate",
+            self._headers_json(),
+            json.dumps(payload).encode("utf-8"),
+        )
+
     def create_pack(
         self,
         *,
         pack_type: str,
+        bundle_ids: list[str] | None = None,
         system_id: str | None = None,
         from_date: str | None = None,
         to_date: str | None = None,
@@ -72,14 +149,19 @@ class ProofLayerClient:
         disclosure_policy: str | None = None,
         disclosure_template: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
+        if bundle_ids and (system_id is not None or from_date is not None or to_date is not None):
+            raise ValueError("bundle_ids cannot be combined with system_id, from_date, or to_date")
         if disclosure_policy is not None and disclosure_template is not None:
             raise ValueError("provide either disclosure_policy or disclosure_template, not both")
-        payload: dict[str, Any] = {
-            "pack_type": pack_type,
-            "system_id": system_id,
-            "from": from_date,
-            "to": to_date,
-        }
+        payload: dict[str, Any] = {"pack_type": pack_type}
+        if bundle_ids:
+            payload["bundle_ids"] = bundle_ids
+        if system_id is not None:
+            payload["system_id"] = system_id
+        if from_date is not None:
+            payload["from"] = from_date
+        if to_date is not None:
+            payload["to"] = to_date
         if bundle_format is not None:
             payload["bundle_format"] = bundle_format
         if disclosure_policy is not None:

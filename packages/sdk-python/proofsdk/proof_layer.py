@@ -106,6 +106,55 @@ class ProofLayer:
     ) -> dict[str, Any]:
         return self.client.verify_bundle(bundle, artefacts, public_key_pem)
 
+    def verify_timestamp(
+        self,
+        *,
+        bundle_id: str | None = None,
+        bundle_root: str | None = None,
+        timestamp: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        if hasattr(self.client, "verify_timestamp"):
+            return self.client.verify_timestamp(
+                bundle_id=bundle_id,
+                bundle_root=bundle_root,
+                timestamp=timestamp,
+            )
+        raise ValueError("underlying client does not support verify_timestamp")
+
+    def verify_receipt(
+        self,
+        *,
+        bundle_id: str | None = None,
+        bundle_root: str | None = None,
+        receipt: dict[str, Any] | None = None,
+        live_check_mode: str | None = None,
+    ) -> dict[str, Any]:
+        if hasattr(self.client, "verify_receipt"):
+            return self.client.verify_receipt(
+                bundle_id=bundle_id,
+                bundle_root=bundle_root,
+                receipt=receipt,
+                live_check_mode=live_check_mode,
+            )
+        raise ValueError("underlying client does not support verify_receipt")
+
+    def evaluate_completeness(
+        self,
+        *,
+        profile: str,
+        bundle: dict[str, Any] | None = None,
+        bundle_id: str | None = None,
+        pack_id: str | None = None,
+    ) -> dict[str, Any]:
+        if hasattr(self.client, "evaluate_completeness"):
+            return self.client.evaluate_completeness(
+                profile=profile,
+                bundle=bundle,
+                bundle_id=bundle_id,
+                pack_id=pack_id,
+            )
+        raise ValueError("underlying client does not support evaluate_completeness")
+
     def disclose(
         self,
         *,
@@ -137,6 +186,7 @@ class ProofLayer:
         self,
         *,
         pack_type: str,
+        bundle_ids: list[str] | None = None,
         system_id: str | None = None,
         from_date: str | None = None,
         to_date: str | None = None,
@@ -147,6 +197,7 @@ class ProofLayer:
         if hasattr(self.client, "create_pack"):
             return self.client.create_pack(
                 pack_type=pack_type,
+                bundle_ids=bundle_ids,
                 system_id=system_id,
                 from_date=from_date,
                 to_date=to_date,

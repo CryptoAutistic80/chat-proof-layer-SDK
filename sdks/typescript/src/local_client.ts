@@ -1,12 +1,24 @@
 import { randomUUID } from "node:crypto";
-import { buildBundle, redactBundle, verifyBundle, verifyRedactedBundle } from "./native.js";
+import {
+  buildBundle,
+  evaluateCompleteness as evaluateCompletenessNative,
+  redactBundle,
+  verifyBundle,
+  verifyRedactedBundle
+} from "./native.js";
 import type {
+  CompletenessReport,
   CreateBundleResponse,
+  EvaluateCompletenessRequest,
   LocalBuildOptions,
   LocalClientOptions,
   LocalCreateBundleRequest,
   RedactBundleRequest,
   RedactedBundle,
+  VerifyReceiptRequest,
+  VerifyReceiptResponse,
+  VerifyTimestampRequest,
+  VerifyTimestampResponse,
   VerifyBundleRequest,
   VerifyBundleSummary,
   VerifyRedactedBundleRequest,
@@ -76,6 +88,18 @@ export class LocalProofLayerClient {
     return verifyBundle({ bundle, artefacts, publicKeyPem });
   }
 
+  async verifyTimestamp(
+    _request: VerifyTimestampRequest
+  ): Promise<VerifyTimestampResponse> {
+    throw new Error("verifyTimestamp is not supported for local mode");
+  }
+
+  async verifyReceipt(
+    _request: VerifyReceiptRequest
+  ): Promise<VerifyReceiptResponse> {
+    throw new Error("verifyReceipt is not supported for local mode");
+  }
+
   async discloseBundle(request: RedactBundleRequest): Promise<RedactedBundle> {
     return redactBundle(request);
   }
@@ -86,5 +110,11 @@ export class LocalProofLayerClient {
     publicKeyPem
   }: VerifyRedactedBundleRequest): Promise<VerifyRedactedBundleSummary> {
     return verifyRedactedBundle({ bundle, artefacts, publicKeyPem });
+  }
+
+  async evaluateCompleteness(
+    request: EvaluateCompletenessRequest
+  ): Promise<CompletenessReport> {
+    return evaluateCompletenessNative(request);
   }
 }

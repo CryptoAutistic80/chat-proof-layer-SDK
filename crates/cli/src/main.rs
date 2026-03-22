@@ -5,17 +5,21 @@ use clap::{Args, Parser, Subcommand, ValueEnum};
 use ed25519_dalek::SigningKey;
 use flate2::{Compression, read::GzDecoder, write::GzEncoder};
 use proof_layer_core::{
-    ActorRole, ArtefactInput, CaptureEvent, CaptureInput, DisclosureError, EvidenceItem,
-    LEGACY_BUNDLE_ROOT_ALGORITHM, ProofBundle, ReceiptVerification, RedactedBundle,
-    RekorTransparencyProvider, Rfc3161HttpTimestampProvider, SCITT_TRANSPARENCY_KIND,
-    ScittTransparencyProvider, TimestampAssuranceProfile, TimestampProvider, TimestampToken,
-    TimestampTrustPolicy, TransparencyProvider, TransparencyReceipt, TransparencyTrustPolicy,
-    anchor_bundle as anchor_bundle_receipt, build_bundle, build_inclusion_proof,
+    ActorRole, ArtefactInput, CaptureEvent, CaptureInput, CompletenessProfile, CompletenessReport,
+    CompletenessStatus, DisclosureError, EvidenceItem, LEGACY_BUNDLE_ROOT_ALGORITHM, ProofBundle,
+    ReceiptAssessment, ReceiptLiveCheckMode, ReceiptVerification, RedactedBundle,
+    RekorTransparencyProvider, Rfc3161HttpTimestampProvider, SCITT_TRANSPARENCY_KIND, ScittFormat,
+    ScittStatementSigner, ScittTransparencyProvider, TimestampAssessment,
+    TimestampAssuranceProfile, TimestampProvider, TimestampToken, TimestampTrustPolicy,
+    TransparencyProvider, TransparencyReceipt, TransparencyTrustPolicy,
+    anchor_bundle as anchor_bundle_receipt, assess_receipt_error, assess_receipt_verification,
+    assess_timestamp_error, assess_timestamp_verification, build_bundle, build_inclusion_proof,
     capture_input_v01_to_event, decode_backup_encryption_key, decode_private_key_pem,
     decode_public_key_pem, decrypt_backup_archive, encode_private_key_pem, encode_public_key_pem,
-    redact_bundle, redact_bundle_with_field_redactions, sha256_prefixed, timestamp_digest,
-    validate_bundle_integrity_fields, validate_timestamp_trust_policy, verify_receipt,
-    verify_receipt_with_policy, verify_redacted_bundle, verify_timestamp,
+    evaluate_completeness, redact_bundle, redact_bundle_with_field_redactions, sha256_prefixed,
+    timestamp_digest, validate_bundle_integrity_fields, validate_timestamp_trust_policy,
+    verify_receipt, verify_receipt_with_live_check, verify_receipt_with_policy,
+    verify_receipt_with_policy_and_live_check, verify_redacted_bundle, verify_timestamp,
     verify_timestamp_with_policy,
 };
 use reqwest::{
@@ -57,6 +61,8 @@ enum Commands {
     Create(Box<CreateArgs>),
     /// Verify a proof bundle package offline.
     Verify(Box<VerifyArgs>),
+    /// Assess advisory completeness for a full bundle package.
+    Assess(Box<AssessArgs>),
     /// Produce a redacted disclosure package with Merkle proofs for selected items.
     Disclose(Box<DiscloseArgs>),
     /// Print key fields from a proof bundle package.
@@ -148,6 +154,8 @@ struct CreateArgs {
     transparency_log: Option<String>,
     #[arg(long = "transparency-provider", default_value = "rekor")]
     transparency_provider: TransparencyProviderArg,
+    #[arg(long = "scitt-format", default_value = "cose_ccf")]
+    scitt_format: ScittFormatArg,
     #[arg(long = "timestamp-trust-anchor")]
     timestamp_trust_anchor: Vec<PathBuf>,
     #[arg(long = "timestamp-crl")]
@@ -176,6 +184,8 @@ struct VerifyArgs {
     check_timestamp: bool,
     #[arg(long)]
     check_receipt: bool,
+    #[arg(long = "receipt-live-check", default_value = "off")]
+    receipt_live_check: ReceiptLiveCheckArg,
     #[arg(long = "timestamp-trust-anchor")]
     timestamp_trust_anchor: Vec<PathBuf>,
     #[arg(long = "timestamp-crl")]
@@ -190,6 +200,16 @@ struct VerifyArgs {
     timestamp_assurance: Option<TimestampAssuranceArg>,
     #[arg(long = "transparency-public-key")]
     transparency_public_key: Option<PathBuf>,
+}
+
+#[derive(Args)]
+struct AssessArgs {
+    #[arg(long = "in")]
+    input: PathBuf,
+    #[arg(long)]
+    profile: CompletenessProfileArg,
+    #[arg(long, default_value = "human")]
+    format: OutputFormat,
 }
 
 #[derive(Args)]
@@ -362,6 +382,23 @@ enum OutputFormat {
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, ValueEnum)]
+enum CompletenessProfileArg {
+    #[value(name = "annex_iv_governance_v1")]
+    AnnexIvGovernanceV1,
+    #[value(name = "gpai_provider_v1")]
+    GpaiProviderV1,
+}
+
+impl CompletenessProfileArg {
+    fn as_core(self) -> CompletenessProfile {
+        match self {
+            Self::AnnexIvGovernanceV1 => CompletenessProfile::AnnexIvGovernanceV1,
+            Self::GpaiProviderV1 => CompletenessProfile::GpaiProviderV1,
+        }
+    }
+}
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq, ValueEnum)]
 #[value(rename_all = "snake_case")]
 enum EvidenceTypeArg {
     LlmInteraction,
@@ -482,6 +519,21 @@ enum TransparencyProviderArg {
     Scitt,
 }
 
+#[derive(Copy, Clone, Debug, Eq, PartialEq, ValueEnum)]
+#[value(rename_all = "snake_case")]
+enum ScittFormatArg {
+    LegacyJson,
+    CoseCcf,
+}
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq, ValueEnum)]
+#[value(rename_all = "snake_case")]
+enum ReceiptLiveCheckArg {
+    Off,
+    BestEffort,
+    Required,
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 struct Manifest {
     files: Vec<ManifestEntry>,
@@ -523,8 +575,8 @@ struct VerifyReport {
     message: String,
     artefacts_verified: usize,
     assurance_level: AssuranceLevel,
-    timestamp: OptionalCheckReport,
-    receipt: OptionalCheckReport,
+    timestamp: TimestampCheckReport,
+    receipt: ReceiptCheckReport,
 }
 
 #[derive(Debug, Deserialize)]
@@ -575,6 +627,7 @@ struct CreateCommandInput<'a> {
     timestamp_url: Option<&'a str>,
     transparency_log: Option<&'a str>,
     transparency_provider: TransparencyProviderArg,
+    scitt_format: ScittFormatArg,
     timestamp_trust_anchor_paths: &'a [PathBuf],
     timestamp_crl_paths: &'a [PathBuf],
     timestamp_ocsp_urls: &'a [String],
@@ -590,6 +643,7 @@ struct VerifyCommandInput<'a> {
     format: OutputFormat,
     check_timestamp: bool,
     check_receipt: bool,
+    receipt_live_check: ReceiptLiveCheckArg,
     timestamp_trust_anchor_paths: &'a [PathBuf],
     timestamp_crl_paths: &'a [PathBuf],
     timestamp_ocsp_urls: &'a [String],
@@ -597,6 +651,12 @@ struct VerifyCommandInput<'a> {
     timestamp_policy_oids: &'a [String],
     timestamp_assurance: Option<TimestampAssuranceArg>,
     transparency_public_key_path: Option<&'a Path>,
+}
+
+struct AssessCommandInput<'a> {
+    input_path: &'a Path,
+    profile: CompletenessProfileArg,
+    format: OutputFormat,
 }
 
 struct VaultQueryCommandInput<'a> {
@@ -642,6 +702,22 @@ enum OptionalCheckState {
 struct OptionalCheckReport {
     state: OptionalCheckState,
     message: String,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+struct TimestampCheckReport {
+    state: OptionalCheckState,
+    message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    assessment: Option<TimestampAssessment>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+struct ReceiptCheckReport {
+    state: OptionalCheckState,
+    message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    assessment: Option<ReceiptAssessment>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
@@ -1576,6 +1652,7 @@ fn main() -> Result<()> {
             timestamp_url: args.timestamp_url.as_deref(),
             transparency_log: args.transparency_log.as_deref(),
             transparency_provider: args.transparency_provider,
+            scitt_format: args.scitt_format,
             timestamp_trust_anchor_paths: &args.timestamp_trust_anchor,
             timestamp_crl_paths: &args.timestamp_crl,
             timestamp_ocsp_urls: &args.timestamp_ocsp_url,
@@ -1590,6 +1667,7 @@ fn main() -> Result<()> {
             format: args.format,
             check_timestamp: args.check_timestamp,
             check_receipt: args.check_receipt,
+            receipt_live_check: args.receipt_live_check,
             timestamp_trust_anchor_paths: &args.timestamp_trust_anchor,
             timestamp_crl_paths: &args.timestamp_crl,
             timestamp_ocsp_urls: &args.timestamp_ocsp_url,
@@ -1597,6 +1675,11 @@ fn main() -> Result<()> {
             timestamp_policy_oids: &args.timestamp_policy_oid,
             timestamp_assurance: args.timestamp_assurance,
             transparency_public_key_path: args.transparency_public_key.as_deref(),
+        }),
+        Commands::Assess(args) => cmd_assess(AssessCommandInput {
+            input_path: &args.input,
+            profile: args.profile,
+            format: args.format,
         }),
         Commands::Disclose(args) => cmd_disclose(
             &args.input,
@@ -1903,7 +1986,15 @@ fn cmd_create(args: CreateCommandInput<'_>) -> Result<()> {
                 attach_receipt_to_bundle(&mut bundle, &provider, transparency_trust_policy.as_ref())
             }
             TransparencyProviderArg::Scitt => {
-                let provider = ScittTransparencyProvider::new(transparency_log.to_string());
+                let provider = ScittTransparencyProvider::with_statement_signer(
+                    transparency_log.to_string(),
+                    SCITT_TRANSPARENCY_KIND,
+                    map_scitt_format(args.scitt_format),
+                    ScittStatementSigner {
+                        signing_key: std::sync::Arc::new(signing_key.clone()),
+                        key_id: args.signing_kid.to_string(),
+                    },
+                );
                 attach_receipt_to_bundle(&mut bundle, &provider, transparency_trust_policy.as_ref())
             }
         }?;
@@ -1992,6 +2083,7 @@ fn cmd_verify(args: VerifyCommandInput<'_>) -> Result<()> {
             args.check_receipt,
             timestamp_trust_policy.as_ref(),
             transparency_trust_policy.as_ref(),
+            map_receipt_live_check_mode(args.receipt_live_check),
         )?,
         DISCLOSURE_PACKAGE_FORMAT => verify_disclosure_package(
             &package.files,
@@ -2000,6 +2092,7 @@ fn cmd_verify(args: VerifyCommandInput<'_>) -> Result<()> {
             args.check_receipt,
             timestamp_trust_policy.as_ref(),
             transparency_trust_policy.as_ref(),
+            map_receipt_live_check_mode(args.receipt_live_check),
         )?,
         other => bail!("unsupported package format {other}"),
     };
@@ -2025,6 +2118,40 @@ fn cmd_verify(args: VerifyCommandInput<'_>) -> Result<()> {
     }
 }
 
+fn cmd_assess(args: AssessCommandInput<'_>) -> Result<()> {
+    let max_payload_bytes = max_payload_bytes()?;
+    let package_size = fs::metadata(args.input_path)
+        .with_context(|| format!("failed to stat {}", args.input_path.display()))?
+        .len() as usize;
+    if package_size > max_payload_bytes {
+        bail!(
+            "package size {} bytes exceeds max {} bytes",
+            package_size,
+            max_payload_bytes
+        );
+    }
+
+    let package = read_package(args.input_path)?;
+    if package.format != BUNDLE_PACKAGE_FORMAT {
+        if package.format == DISCLOSURE_PACKAGE_FORMAT {
+            bail!(
+                "completeness assessment requires a full bundle package, not a disclosure package"
+            );
+        }
+        bail!(
+            "completeness assessment requires a full bundle package, got {}",
+            package.format
+        );
+    }
+
+    let bundle = parse_bundle_file(&package.files)?;
+    let report = evaluate_completeness(&bundle, args.profile.as_core());
+
+    print!("{}", render_completeness_report(&report, args.format)?);
+
+    Ok(())
+}
+
 fn verify_full_package(
     files: &BTreeMap<String, Vec<u8>>,
     verifying_key: &ed25519_dalek::VerifyingKey,
@@ -2032,6 +2159,7 @@ fn verify_full_package(
     check_receipt: bool,
     timestamp_trust_policy: Option<&TimestampTrustPolicy>,
     transparency_trust_policy: Option<&TransparencyTrustPolicy>,
+    receipt_live_check: ReceiptLiveCheckMode,
 ) -> Result<VerifyReport> {
     let bundle = parse_bundle_file(files)?;
     validate_bundle_integrity_fields(&bundle)?;
@@ -2070,12 +2198,23 @@ fn verify_full_package(
         }
     };
 
-    let timestamp = evaluate_timestamp_check(&bundle, check_timestamp, timestamp_trust_policy);
+    let timestamp = build_timestamp_check_report(
+        &bundle.integrity.bundle_root,
+        bundle.timestamp.as_ref(),
+        check_timestamp,
+        timestamp_trust_policy,
+    );
     if check_timestamp && timestamp.state != OptionalCheckState::Valid {
         failures.push(timestamp.message.clone());
     }
 
-    let receipt = evaluate_receipt_check(&bundle, check_receipt, transparency_trust_policy);
+    let receipt = build_receipt_check_report(
+        &bundle.integrity.bundle_root,
+        bundle.receipt.as_ref(),
+        check_receipt,
+        transparency_trust_policy,
+        receipt_live_check,
+    );
     if check_receipt && receipt.state != OptionalCheckState::Valid {
         failures.push(receipt.message.clone());
     }
@@ -2108,6 +2247,7 @@ fn verify_disclosure_package(
     check_receipt: bool,
     timestamp_trust_policy: Option<&TimestampTrustPolicy>,
     transparency_trust_policy: Option<&TransparencyTrustPolicy>,
+    receipt_live_check: ReceiptLiveCheckMode,
 ) -> Result<VerifyReport> {
     let bundle = parse_redacted_bundle_file(files)?;
     let manifest_ok = verify_manifest(files)?;
@@ -2130,7 +2270,7 @@ fn verify_disclosure_package(
         }
     };
 
-    let timestamp = evaluate_timestamp_check_from_parts(
+    let timestamp = build_timestamp_check_report(
         &bundle.integrity.bundle_root,
         bundle.timestamp.as_ref(),
         check_timestamp,
@@ -2140,11 +2280,12 @@ fn verify_disclosure_package(
         failures.push(timestamp.message.clone());
     }
 
-    let receipt = evaluate_receipt_check_from_parts(
+    let receipt = build_receipt_check_report(
         &bundle.integrity.bundle_root,
         bundle.receipt.as_ref(),
         check_receipt,
         transparency_trust_policy,
+        receipt_live_check,
     );
     if check_receipt && receipt.state != OptionalCheckState::Valid {
         failures.push(receipt.message.clone());
@@ -3582,6 +3723,21 @@ fn map_timestamp_assurance_profile(assurance: TimestampAssuranceArg) -> Timestam
     }
 }
 
+fn map_scitt_format(format: ScittFormatArg) -> ScittFormat {
+    match format {
+        ScittFormatArg::LegacyJson => ScittFormat::LegacyJson,
+        ScittFormatArg::CoseCcf => ScittFormat::CoseCcf,
+    }
+}
+
+fn map_receipt_live_check_mode(mode: ReceiptLiveCheckArg) -> ReceiptLiveCheckMode {
+    match mode {
+        ReceiptLiveCheckArg::Off => ReceiptLiveCheckMode::Off,
+        ReceiptLiveCheckArg::BestEffort => ReceiptLiveCheckMode::BestEffort,
+        ReceiptLiveCheckArg::Required => ReceiptLiveCheckMode::Required,
+    }
+}
+
 fn load_transparency_trust_policy(
     public_key_path: Option<&Path>,
     timestamp_policy: Option<&TimestampTrustPolicy>,
@@ -3660,6 +3816,62 @@ fn evaluate_timestamp_check_from_parts(
             state: OptionalCheckState::Invalid,
             message: format!("RFC 3161 timestamp verification failed: {err}"),
         },
+    }
+}
+
+fn build_timestamp_check_report(
+    bundle_root: &str,
+    timestamp: Option<&TimestampToken>,
+    requested: bool,
+    trust_policy: Option<&TimestampTrustPolicy>,
+) -> TimestampCheckReport {
+    if !requested {
+        let report =
+            evaluate_timestamp_check_from_parts(bundle_root, timestamp, requested, trust_policy);
+        return TimestampCheckReport {
+            state: report.state,
+            message: report.message,
+            assessment: None,
+        };
+    }
+
+    let Some(timestamp) = timestamp else {
+        let report =
+            evaluate_timestamp_check_from_parts(bundle_root, None, requested, trust_policy);
+        return TimestampCheckReport {
+            state: report.state,
+            message: report.message,
+            assessment: None,
+        };
+    };
+
+    let verification = match trust_policy {
+        Some(policy) if !policy.is_empty() => {
+            verify_timestamp_with_policy(timestamp, bundle_root, policy)
+        }
+        _ => verify_timestamp(timestamp, bundle_root),
+    };
+
+    match verification {
+        Ok(verification) => {
+            let assessment = assess_timestamp_verification(&verification, trust_policy);
+            TimestampCheckReport {
+                state: OptionalCheckState::Valid,
+                message: format!("{} {}", assessment.headline, assessment.summary),
+                assessment: Some(assessment),
+            }
+        }
+        Err(err) => {
+            let assessment = assess_timestamp_error(&err, trust_policy);
+            TimestampCheckReport {
+                state: OptionalCheckState::Invalid,
+                message: format!(
+                    "RFC 3161 timestamp verification failed: {}",
+                    assessment.summary
+                ),
+                assessment: Some(assessment),
+            }
+        }
     }
 }
 
@@ -3745,6 +3957,81 @@ fn evaluate_receipt_check_from_parts(
             state: OptionalCheckState::Invalid,
             message: format!("transparency receipt verification failed: {err}"),
         },
+    }
+}
+
+fn build_receipt_check_report(
+    bundle_root: &str,
+    receipt: Option<&TransparencyReceipt>,
+    requested: bool,
+    trust_policy: Option<&TransparencyTrustPolicy>,
+    live_check_mode: ReceiptLiveCheckMode,
+) -> ReceiptCheckReport {
+    if !requested {
+        let report =
+            evaluate_receipt_check_from_parts(bundle_root, receipt, requested, trust_policy);
+        return ReceiptCheckReport {
+            state: report.state,
+            message: report.message,
+            assessment: None,
+        };
+    }
+
+    let Some(receipt) = receipt else {
+        let report = evaluate_receipt_check_from_parts(bundle_root, None, requested, trust_policy);
+        return ReceiptCheckReport {
+            state: report.state,
+            message: report.message,
+            assessment: None,
+        };
+    };
+
+    let verification = match trust_policy {
+        Some(policy) if !policy.is_empty() && live_check_mode == ReceiptLiveCheckMode::Off => {
+            verify_receipt_with_policy(receipt, bundle_root, policy)
+        }
+        Some(policy) if !policy.is_empty() => {
+            verify_receipt_with_policy_and_live_check(receipt, bundle_root, policy, live_check_mode)
+        }
+        _ if live_check_mode == ReceiptLiveCheckMode::Off => verify_receipt(receipt, bundle_root),
+        _ => verify_receipt_with_live_check(receipt, bundle_root, live_check_mode),
+    };
+
+    match verification {
+        Ok(verification) => {
+            let assessment = assess_receipt_verification(&verification, trust_policy);
+            ReceiptCheckReport {
+                state: OptionalCheckState::Valid,
+                message: format!("{} {}", assessment.headline, assessment.summary),
+                assessment: Some(assessment),
+            }
+        }
+        Err(err) => {
+            let assessment = assess_receipt_error(
+                &err,
+                trust_policy,
+                (live_check_mode != ReceiptLiveCheckMode::Off).then_some(
+                    proof_layer_core::ReceiptLiveVerification {
+                        mode: live_check_mode,
+                        state: proof_layer_core::CheckState::Fail,
+                        checked_at: Utc::now().to_rfc3339(),
+                        summary: err.to_string(),
+                        current_tree_size: None,
+                        current_root_hash: None,
+                        entry_retrieved: None,
+                        consistency_verified: None,
+                    },
+                ),
+            );
+            ReceiptCheckReport {
+                state: OptionalCheckState::Invalid,
+                message: format!(
+                    "transparency receipt verification failed: {}",
+                    assessment.summary
+                ),
+                assessment: Some(assessment),
+            }
+        }
     }
 }
 
@@ -4024,17 +4311,138 @@ fn print_human_verify_report(report: &VerifyReport) {
         optional_check_marker(&report.timestamp.state),
         report.timestamp.message
     );
+    if let Some(assessment) = report.timestamp.assessment.as_ref() {
+        println!("    Verdict: {}", assessment.headline);
+        println!("    Summary: {}", assessment.summary);
+        print_verification_checks(&assessment.checks);
+    }
     println!(
         "[{}] Transparency receipt — {}",
         optional_check_marker(&report.receipt.state),
         report.receipt.message
     );
+    if let Some(assessment) = report.receipt.assessment.as_ref() {
+        println!("    Verdict: {}", assessment.headline);
+        println!("    Summary: {}", assessment.summary);
+        print_verification_checks(&assessment.checks);
+        if let Some(live_check) = assessment.live_check.as_ref() {
+            println!(
+                "    Live check: {} ({})",
+                live_check.summary,
+                check_state_label(live_check.state)
+            );
+        }
+    }
     println!(
         "Assurance level: {}",
         assurance_level_label(report.assurance_level)
     );
     println!();
     println!("Verification result: {}", report.message);
+}
+
+fn print_verification_checks(checks: &[proof_layer_core::VerificationCheck]) {
+    for check in checks {
+        println!(
+            "      [{}] {}{}",
+            check_state_marker(check.state),
+            check.label,
+            check
+                .detail
+                .as_deref()
+                .map(|detail| format!(" — {detail}"))
+                .unwrap_or_default()
+        );
+    }
+}
+
+fn check_state_marker(state: proof_layer_core::CheckState) -> &'static str {
+    match state {
+        proof_layer_core::CheckState::Pass => "✓",
+        proof_layer_core::CheckState::Warn => "!",
+        proof_layer_core::CheckState::Fail => "✗",
+        proof_layer_core::CheckState::NotRun => "-",
+    }
+}
+
+fn check_state_label(state: proof_layer_core::CheckState) -> &'static str {
+    match state {
+        proof_layer_core::CheckState::Pass => "pass",
+        proof_layer_core::CheckState::Warn => "warn",
+        proof_layer_core::CheckState::Fail => "fail",
+        proof_layer_core::CheckState::NotRun => "not run",
+    }
+}
+
+fn render_completeness_report(report: &CompletenessReport, format: OutputFormat) -> Result<String> {
+    match format {
+        OutputFormat::Human => Ok(render_human_completeness_report(report)),
+        OutputFormat::Json => Ok(format!("{}\n", serde_json::to_string_pretty(report)?)),
+    }
+}
+
+fn render_human_completeness_report(report: &CompletenessReport) -> String {
+    use std::fmt::Write as _;
+
+    let mut output = String::new();
+    writeln!(&mut output, "Profile: {}", report.profile.as_str()).unwrap();
+    writeln!(
+        &mut output,
+        "Overall status: {}",
+        completeness_status_label(report.status)
+    )
+    .unwrap();
+    writeln!(&mut output, "Bundle ID: {}", report.bundle_id).unwrap();
+    if let Some(system_id) = report.system_id.as_deref() {
+        writeln!(&mut output, "System ID: {system_id}").unwrap();
+    }
+    writeln!(
+        &mut output,
+        "Rule counts: {} pass, {} warn, {} fail",
+        report.pass_count, report.warn_count, report.fail_count
+    )
+    .unwrap();
+    output.push('\n');
+    for rule in &report.rules {
+        let missing_fields = if rule.missing_fields.is_empty() {
+            "none".to_string()
+        } else {
+            rule.missing_fields.join(", ")
+        };
+        writeln!(
+            &mut output,
+            "[{}] {} — present {}, complete {}, missing fields: {}",
+            completeness_status_marker(rule.status),
+            rule.item_type,
+            rule.present_count,
+            rule.complete_count,
+            missing_fields
+        )
+        .unwrap();
+    }
+    output.push('\n');
+    writeln!(
+        &mut output,
+        "Readiness assessment is advisory only and separate from cryptographic verification."
+    )
+    .unwrap();
+    output
+}
+
+fn completeness_status_marker(status: CompletenessStatus) -> &'static str {
+    match status {
+        CompletenessStatus::Pass => "✓",
+        CompletenessStatus::Warn => "!",
+        CompletenessStatus::Fail => "✗",
+    }
+}
+
+fn completeness_status_label(status: CompletenessStatus) -> &'static str {
+    match status {
+        CompletenessStatus::Pass => "pass",
+        CompletenessStatus::Warn => "warn",
+        CompletenessStatus::Fail => "fail",
+    }
 }
 
 fn optional_check_marker(state: &OptionalCheckState) -> &'static str {
@@ -4541,6 +4949,352 @@ mod tests {
         .unwrap()
     }
 
+    fn sample_annex_iv_bundle() -> ProofBundle {
+        let signing_key = SigningKey::from_bytes(&[7_u8; 32]);
+        let mut event = sample_event();
+        event.subject.system_id = Some("hiring-assistant".to_string());
+        event.items = vec![
+            EvidenceItem::RiskAssessment(proof_layer_core::schema::RiskAssessmentEvidence {
+                risk_id: "risk-001".to_string(),
+                severity: "high".to_string(),
+                status: "mitigated".to_string(),
+                summary: Some("Bias and over-reliance risk reviewed.".to_string()),
+                risk_description: Some(
+                    "Potential unfair ranking of borderline candidates.".to_string(),
+                ),
+                likelihood: Some("medium".to_string()),
+                affected_groups: vec!["job_applicants".to_string()],
+                mitigation_measures: vec![
+                    "mandatory human review".to_string(),
+                    "monthly subgroup parity review".to_string(),
+                ],
+                residual_risk_level: Some("low".to_string()),
+                risk_owner: Some("quality-team".to_string()),
+                vulnerable_groups_considered: Some(true),
+                test_results_summary: Some(
+                    "No blocking disparity found in March review.".to_string(),
+                ),
+                metadata: json!({}),
+            }),
+            EvidenceItem::DataGovernance(proof_layer_core::schema::DataGovernanceEvidence {
+                decision: "approved".to_string(),
+                dataset_ref: Some("dataset://candidates/2026-03".to_string()),
+                dataset_name: None,
+                dataset_version: Some("2026.03".to_string()),
+                source_description: Some(
+                    "EU recruitment applicant and hiring outcome corpus.".to_string(),
+                ),
+                collection_period: Some(proof_layer_core::schema::DateRange {
+                    start: Some("2025-01-01".to_string()),
+                    end: Some("2025-12-31".to_string()),
+                }),
+                geographical_scope: vec!["EU".to_string()],
+                preprocessing_operations: vec![
+                    "deduplication".to_string(),
+                    "feature scaling".to_string(),
+                ],
+                bias_detection_methodology: Some(
+                    "Subgroup parity review across protected attributes.".to_string(),
+                ),
+                bias_metrics: vec![proof_layer_core::schema::MetricSummary {
+                    name: "selection_rate_ratio".to_string(),
+                    value: "0.96".to_string(),
+                    unit: Some("ratio".to_string()),
+                    methodology: Some("Measured on March validation set.".to_string()),
+                }],
+                mitigation_actions: vec!["rebalance training sample".to_string()],
+                data_gaps: vec!["low historical volume for niche roles".to_string()],
+                personal_data_categories: vec![
+                    "employment_history".to_string(),
+                    "education".to_string(),
+                ],
+                safeguards: vec![
+                    "role-based access".to_string(),
+                    "retention caps".to_string(),
+                ],
+                metadata: json!({}),
+            }),
+            EvidenceItem::TechnicalDoc(proof_layer_core::schema::TechnicalDocEvidence {
+                document_ref: "annex-iv/system-card".to_string(),
+                section: Some("system_overview".to_string()),
+                commitment: Some(
+                    "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                        .to_string(),
+                ),
+                annex_iv_sections: vec!["section_2".to_string(), "section_3".to_string()],
+                system_description_summary: Some(
+                    "Ranks candidates for recruiter review.".to_string(),
+                ),
+                model_description_summary: Some("Fine-tuned ranking model.".to_string()),
+                capabilities_and_limitations: Some(
+                    "Advisory only for first-pass screening.".to_string(),
+                ),
+                design_choices_summary: Some(
+                    "Human review is required before employment decisions.".to_string(),
+                ),
+                evaluation_metrics_summary: Some(
+                    "Precision and subgroup parity are reviewed monthly.".to_string(),
+                ),
+                human_oversight_design_summary: Some(
+                    "Recruiters must review every adverse or borderline case.".to_string(),
+                ),
+                post_market_monitoring_plan_ref: Some("pmm://hiring-assistant/2026.03".to_string()),
+                simplified_tech_doc: None,
+            }),
+            EvidenceItem::InstructionsForUse(
+                proof_layer_core::schema::InstructionsForUseEvidence {
+                    document_ref: "ifu://hiring-assistant/2026.03".to_string(),
+                    version: Some("2026.03".to_string()),
+                    section: Some("operator_guidance".to_string()),
+                    commitment: Some(
+                        "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+                            .to_string(),
+                    ),
+                    provider_identity: Some("Proof Layer Labs".to_string()),
+                    intended_purpose: Some(
+                        "Assist recruiters with first-pass candidate screening.".to_string(),
+                    ),
+                    system_capabilities: vec![
+                        "candidate ranking".to_string(),
+                        "confidence banding".to_string(),
+                    ],
+                    accuracy_metrics: vec![proof_layer_core::schema::MetricSummary {
+                        name: "precision_at_10".to_string(),
+                        value: "0.87".to_string(),
+                        unit: Some("ratio".to_string()),
+                        methodology: Some("Measured on validation cohort.".to_string()),
+                    }],
+                    foreseeable_risks: vec!["automation bias".to_string()],
+                    explainability_capabilities: vec!["reason codes".to_string()],
+                    human_oversight_guidance: vec![
+                        "review all adverse recommendations".to_string(),
+                    ],
+                    compute_requirements: vec!["cpu-only inference".to_string()],
+                    service_lifetime: Some("12 months".to_string()),
+                    log_management_guidance: vec!["retain audit logs for 12 months".to_string()],
+                    metadata: json!({}),
+                },
+            ),
+            EvidenceItem::HumanOversight(proof_layer_core::schema::HumanOversightEvidence {
+                action: "manual_review".to_string(),
+                reviewer: Some("reviewer-123".to_string()),
+                notes_commitment: Some(
+                    "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+                        .to_string(),
+                ),
+                actor_role: Some("recruiter".to_string()),
+                anomaly_detected: Some(false),
+                override_action: Some("none".to_string()),
+                interpretation_guidance_followed: Some(true),
+                automation_bias_detected: Some(false),
+                two_person_verification: Some(false),
+                stop_triggered: Some(false),
+                stop_reason: Some(
+                    "No emergency stop was required for this review path.".to_string(),
+                ),
+            }),
+        ];
+
+        build_bundle(
+            event,
+            &[ArtefactInput {
+                name: "annex_iv_overview.json".to_string(),
+                content_type: "application/json".to_string(),
+                bytes: br#"{"profile":"annex_iv_governance_v1"}"#.to_vec(),
+            }],
+            &signing_key,
+            "kid-dev-01",
+            "01JPGG4QFZZ0X0P3N2JDMQ6K3V",
+            parse_created_at(Some("2026-03-02T00:00:00Z")).unwrap(),
+        )
+        .unwrap()
+    }
+
+    fn sample_gpai_provider_bundle() -> ProofBundle {
+        let signing_key = SigningKey::from_bytes(&[7_u8; 32]);
+        let mut event = sample_event();
+        event.subject.system_id = Some("foundation-model-alpha".to_string());
+        event.subject.model_id = Some("foundation-model-alpha-v5".to_string());
+        event.subject.version = Some("2026.03".to_string());
+        event.compliance_profile = Some(ComplianceProfile {
+            intended_use: Some("General-purpose text and workflow assistance".to_string()),
+            prohibited_practice_screening: Some("screened_no_prohibited_use".to_string()),
+            risk_tier: Some("gpai".to_string()),
+            high_risk_domain: None,
+            gpai_status: Some("provider".to_string()),
+            systemic_risk: Some(true),
+            fria_required: None,
+            deployment_context: Some("eu_market_placement".to_string()),
+            metadata: json!({
+                "owner": "foundation-governance",
+            }),
+        });
+        event.items = vec![
+            EvidenceItem::TechnicalDoc(proof_layer_core::schema::TechnicalDocEvidence {
+                document_ref: "annex-xi/foundation-model-alpha/system-card".to_string(),
+                section: Some("model_overview".to_string()),
+                commitment: Some(
+                    "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+                        .to_string(),
+                ),
+                annex_iv_sections: Vec::new(),
+                system_description_summary: Some(
+                    "General-purpose provider-controlled model service.".to_string(),
+                ),
+                model_description_summary: None,
+                capabilities_and_limitations: Some(
+                    "Useful for drafting and summarization with known hallucination limits."
+                        .to_string(),
+                ),
+                design_choices_summary: Some(
+                    "Provider policy filters and release gates apply before deployment."
+                        .to_string(),
+                ),
+                evaluation_metrics_summary: Some(
+                    "Provider benchmarks cover multilingual quality, safety, and subgroup performance."
+                        .to_string(),
+                ),
+                human_oversight_design_summary: None,
+                post_market_monitoring_plan_ref: None,
+                simplified_tech_doc: Some(false),
+            }),
+            EvidenceItem::ModelEvaluation(proof_layer_core::schema::ModelEvaluationEvidence {
+                evaluation_id: "eval-foundation-alpha-v5".to_string(),
+                benchmark: "provider-release-suite-2026q1".to_string(),
+                status: "passed".to_string(),
+                summary: Some(
+                    "Release benchmark suite met provider thresholds.".to_string(),
+                ),
+                report_commitment: Some(
+                    "sha256:2222222222222222222222222222222222222222222222222222222222222222"
+                        .to_string(),
+                ),
+                metrics_summary: vec![proof_layer_core::schema::MetricSummary {
+                    name: "instruction_following".to_string(),
+                    value: "0.93".to_string(),
+                    unit: Some("ratio".to_string()),
+                    methodology: Some("Provider release suite average.".to_string()),
+                }],
+                group_performance: Vec::new(),
+                evaluation_methodology: Some(
+                    "Held-out multilingual and safety benchmark suites.".to_string(),
+                ),
+                metadata: json!({}),
+            }),
+            EvidenceItem::TrainingProvenance(
+                proof_layer_core::schema::TrainingProvenanceEvidence {
+                    dataset_ref: "dataset://foundation-model-alpha/pretrain-v5".to_string(),
+                    stage: "pretraining".to_string(),
+                    lineage_ref: None,
+                    record_commitment: Some(
+                        "sha256:3333333333333333333333333333333333333333333333333333333333333333"
+                            .to_string(),
+                    ),
+                    compute_metrics_ref: Some("compute-foundation-alpha-v5".to_string()),
+                    training_dataset_summary: Some(
+                        "Curated multilingual web, code, and licensed reference corpora."
+                            .to_string(),
+                    ),
+                    consortium_context: Some("Single-provider training program".to_string()),
+                    metadata: json!({}),
+                },
+            ),
+            EvidenceItem::ComputeMetrics(proof_layer_core::schema::ComputeMetricsEvidence {
+                compute_id: "compute-foundation-alpha-v5".to_string(),
+                training_flops_estimate: "1.2e25".to_string(),
+                threshold_basis_ref: "art51_systemic_risk_threshold".to_string(),
+                threshold_value: "1e25".to_string(),
+                threshold_status: "above_threshold".to_string(),
+                estimation_methodology: Some(
+                    "Cluster scheduler logs and accelerator utilization rollup.".to_string(),
+                ),
+                measured_at: Some("2026-03-10T12:00:00Z".to_string()),
+                compute_resources_summary: vec![proof_layer_core::schema::MetricSummary {
+                    name: "gpu_hours".to_string(),
+                    value: "42000".to_string(),
+                    unit: Some("hours".to_string()),
+                    methodology: Some("Provider training cluster accounting.".to_string()),
+                }],
+                consortium_context: Some("Single-provider training program".to_string()),
+                metadata: json!({}),
+            }),
+            EvidenceItem::CopyrightPolicy(proof_layer_core::schema::CopyrightPolicyEvidence {
+                policy_ref: "copyright://foundation-model-alpha/policy-v2".to_string(),
+                status: "published".to_string(),
+                jurisdiction: Some("eu".to_string()),
+                commitment: Some(
+                    "sha256:4444444444444444444444444444444444444444444444444444444444444444"
+                        .to_string(),
+                ),
+                metadata: json!({}),
+            }),
+            EvidenceItem::TrainingSummary(proof_layer_core::schema::TrainingSummaryEvidence {
+                summary_ref: "summary://foundation-model-alpha/training-v5".to_string(),
+                status: "published".to_string(),
+                audience: Some("public".to_string()),
+                commitment: Some(
+                    "sha256:5555555555555555555555555555555555555555555555555555555555555555"
+                        .to_string(),
+                ),
+                metadata: json!({}),
+            }),
+        ];
+
+        build_bundle(
+            event,
+            &[ArtefactInput {
+                name: "gpai_provider_overview.json".to_string(),
+                content_type: "application/json".to_string(),
+                bytes: br#"{"profile":"gpai_provider_v1"}"#.to_vec(),
+            }],
+            &signing_key,
+            "kid-dev-01",
+            "01JQ0JP7DPC7GRQYTF6MAVVXQJ",
+            parse_created_at(Some("2026-03-21T00:00:00Z")).unwrap(),
+        )
+        .unwrap()
+    }
+
+    fn bundle_package_files(
+        bundle: &ProofBundle,
+        artefact_name: &str,
+        artefact_bytes: &[u8],
+    ) -> BTreeMap<String, Vec<u8>> {
+        let mut package_files = BTreeMap::<String, Vec<u8>>::new();
+        package_files.insert(
+            "proof_bundle.json".to_string(),
+            serde_json::to_vec_pretty(bundle).unwrap(),
+        );
+        package_files.insert(
+            "proof_bundle.canonical.json".to_string(),
+            bundle.canonical_header_bytes().unwrap(),
+        );
+        package_files.insert(
+            "proof_bundle.sig".to_string(),
+            bundle.integrity.signature.value.as_bytes().to_vec(),
+        );
+        package_files.insert(
+            format!("artefacts/{artefact_name}"),
+            artefact_bytes.to_vec(),
+        );
+
+        let manifest = Manifest {
+            files: package_files
+                .iter()
+                .map(|(name, bytes)| ManifestEntry {
+                    name: name.clone(),
+                    digest: sha256_prefixed(bytes),
+                    size: bytes.len() as u64,
+                })
+                .collect(),
+        };
+        package_files.insert(
+            "manifest.json".to_string(),
+            serde_json::to_vec_pretty(&manifest).unwrap(),
+        );
+        package_files
+    }
+
     struct StaticTimestampProvider {
         token: TimestampToken,
     }
@@ -4975,6 +5729,52 @@ mod tests {
             } => {
                 assert_eq!(bundle_format, PackBundleFormatArg::Disclosure);
                 assert_eq!(disclosure_policy.as_deref(), Some("annex_iv_redacted"));
+            }
+            _ => panic!("unexpected command parsed"),
+        }
+    }
+
+    #[test]
+    fn assess_command_accepts_annex_iv_profile_arg() {
+        let cli = Cli::try_parse_from([
+            "proofctl",
+            "assess",
+            "--in",
+            "./bundle.pkg",
+            "--profile",
+            "annex_iv_governance_v1",
+            "--format",
+            "json",
+        ])
+        .unwrap();
+
+        match cli.command {
+            Commands::Assess(args) => {
+                assert_eq!(args.input, PathBuf::from("./bundle.pkg"));
+                assert_eq!(args.profile, CompletenessProfileArg::AnnexIvGovernanceV1);
+                assert_eq!(args.format, OutputFormat::Json);
+            }
+            _ => panic!("unexpected command parsed"),
+        }
+    }
+
+    #[test]
+    fn assess_command_accepts_gpai_provider_profile_arg() {
+        let cli = Cli::try_parse_from([
+            "proofctl",
+            "assess",
+            "--in",
+            "./bundle.pkg",
+            "--profile",
+            "gpai_provider_v1",
+        ])
+        .unwrap();
+
+        match cli.command {
+            Commands::Assess(args) => {
+                assert_eq!(args.input, PathBuf::from("./bundle.pkg"));
+                assert_eq!(args.profile, CompletenessProfileArg::GpaiProviderV1);
+                assert_eq!(args.format, OutputFormat::Human);
             }
             _ => panic!("unexpected command parsed"),
         }
@@ -5762,9 +6562,16 @@ mod tests {
 
         let signing_key = SigningKey::from_bytes(&[7_u8; 32]);
         let verifying_key = signing_key.verifying_key();
-        let report =
-            verify_disclosure_package(&package.files, &verifying_key, false, false, None, None)
-                .unwrap();
+        let report = verify_disclosure_package(
+            &package.files,
+            &verifying_key,
+            false,
+            false,
+            None,
+            None,
+            ReceiptLiveCheckMode::Off,
+        )
+        .unwrap();
         assert_eq!(report.package_kind, "disclosure");
         assert_eq!(report.disclosure_proof_ok, Some(true));
         assert!(report.canonicalization_ok);
@@ -5773,6 +6580,119 @@ mod tests {
         assert_eq!(report.message, "VALID");
 
         fs::remove_dir_all(&tmp_dir).unwrap();
+    }
+
+    #[test]
+    fn render_human_completeness_report_lists_rule_results() {
+        let bundle = sample_annex_iv_bundle();
+        let report = evaluate_completeness(&bundle, CompletenessProfile::AnnexIvGovernanceV1);
+        let rendered = render_human_completeness_report(&report);
+
+        assert!(rendered.contains("Profile: annex_iv_governance_v1"));
+        assert!(rendered.contains("Overall status: pass"));
+        assert!(rendered.contains("[✓] risk_assessment"));
+        assert!(rendered.contains("[✓] data_governance"));
+        assert!(rendered.contains("Readiness assessment is advisory only"));
+    }
+
+    #[test]
+    fn render_human_gpai_completeness_report_lists_rule_results() {
+        let bundle = sample_gpai_provider_bundle();
+        let report = evaluate_completeness(&bundle, CompletenessProfile::GpaiProviderV1);
+        let rendered = render_human_completeness_report(&report);
+
+        assert!(rendered.contains("Profile: gpai_provider_v1"));
+        assert!(rendered.contains("Overall status: pass"));
+        assert!(rendered.contains("[✓] technical_doc"));
+        assert!(rendered.contains("[✓] compute_metrics"));
+    }
+
+    #[test]
+    fn render_completeness_report_json_serializes_report() {
+        let bundle = sample_annex_iv_bundle();
+        let report = evaluate_completeness(&bundle, CompletenessProfile::AnnexIvGovernanceV1);
+        let rendered = render_completeness_report(&report, OutputFormat::Json).unwrap();
+        let decoded: CompletenessReport = serde_json::from_str(&rendered).unwrap();
+
+        assert_eq!(decoded.profile, CompletenessProfile::AnnexIvGovernanceV1);
+        assert_eq!(decoded.status, CompletenessStatus::Pass);
+    }
+
+    #[test]
+    fn assess_command_accepts_full_bundle_package() {
+        let bundle = sample_annex_iv_bundle();
+        let package_files = bundle_package_files(
+            &bundle,
+            "annex_iv_overview.json",
+            br#"{"profile":"annex_iv"}"#,
+        );
+        let tmp_dir = std::env::temp_dir().join(format!("proofctl-assess-test-{}", Ulid::new()));
+        fs::create_dir_all(&tmp_dir).unwrap();
+        let bundle_path = tmp_dir.join("bundle.pkg");
+
+        write_bundle_package(&bundle_path, &package_files).unwrap();
+
+        let result = cmd_assess(AssessCommandInput {
+            input_path: &bundle_path,
+            profile: CompletenessProfileArg::AnnexIvGovernanceV1,
+            format: OutputFormat::Json,
+        });
+
+        fs::remove_dir_all(&tmp_dir).unwrap();
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn assess_command_accepts_full_gpai_bundle_package() {
+        let bundle = sample_gpai_provider_bundle();
+        let package_files = bundle_package_files(
+            &bundle,
+            "gpai_provider_overview.json",
+            br#"{"profile":"gpai"}"#,
+        );
+        let tmp_dir =
+            std::env::temp_dir().join(format!("proofctl-assess-gpai-test-{}", Ulid::new()));
+        fs::create_dir_all(&tmp_dir).unwrap();
+        let bundle_path = tmp_dir.join("bundle.pkg");
+
+        write_bundle_package(&bundle_path, &package_files).unwrap();
+
+        let result = cmd_assess(AssessCommandInput {
+            input_path: &bundle_path,
+            profile: CompletenessProfileArg::GpaiProviderV1,
+            format: OutputFormat::Json,
+        });
+
+        fs::remove_dir_all(&tmp_dir).unwrap();
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn assess_command_rejects_disclosure_package() {
+        let bundle = sample_bundle();
+        let artefact_bytes = br#"{"hello":"world"}"#.to_vec();
+        let package_files = bundle_package_files(&bundle, "prompt.json", &artefact_bytes);
+        let tmp_dir =
+            std::env::temp_dir().join(format!("proofctl-assess-disclosure-{}", Ulid::new()));
+        fs::create_dir_all(&tmp_dir).unwrap();
+        let bundle_path = tmp_dir.join("bundle.pkg");
+        let disclosure_path = tmp_dir.join("bundle.disclosure.pkg");
+
+        write_bundle_package(&bundle_path, &package_files).unwrap();
+        cmd_disclose(&bundle_path, "0", None, &[], &disclosure_path).unwrap();
+
+        let err = cmd_assess(AssessCommandInput {
+            input_path: &disclosure_path,
+            profile: CompletenessProfileArg::AnnexIvGovernanceV1,
+            format: OutputFormat::Json,
+        })
+        .unwrap_err();
+
+        fs::remove_dir_all(&tmp_dir).unwrap();
+        assert!(
+            err.to_string()
+                .contains("completeness assessment requires a full bundle package")
+        );
     }
 
     #[test]
@@ -5834,9 +6754,16 @@ mod tests {
 
         let signing_key = SigningKey::from_bytes(&[7_u8; 32]);
         let verifying_key = signing_key.verifying_key();
-        let report =
-            verify_disclosure_package(&package.files, &verifying_key, false, false, None, None)
-                .unwrap();
+        let report = verify_disclosure_package(
+            &package.files,
+            &verifying_key,
+            false,
+            false,
+            None,
+            None,
+            ReceiptLiveCheckMode::Off,
+        )
+        .unwrap();
         assert_eq!(report.package_kind, "disclosure");
         assert!(report.manifest_ok);
         assert!(report.signature_ok);

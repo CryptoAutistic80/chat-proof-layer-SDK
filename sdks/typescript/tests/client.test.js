@@ -7,15 +7,24 @@ test("createBundle posts normalized payload", async () => {
   const fetchImpl = async (url, init) => {
     captured = { url, init };
     return new Response(
-      JSON.stringify({ bundle_id: "B1", bundle_root: "sha256:abc", signature: "sig" }),
-      { status: 201, headers: { "content-type": "application/json" } }
+      JSON.stringify({
+        bundle_id: "B1",
+        bundle_root: "sha256:abc",
+        signature: "sig",
+      }),
+      { status: 201, headers: { "content-type": "application/json" } },
     );
   };
 
-  const client = new ProofLayerClient({ baseUrl: "http://127.0.0.1:8080", fetchImpl });
+  const client = new ProofLayerClient({
+    baseUrl: "http://127.0.0.1:8080",
+    fetchImpl,
+  });
   const result = await client.createBundle({
     capture: { foo: "bar" },
-    artefacts: [{ name: "prompt.json", contentType: "application/json", data: "{\"x\":1}" }]
+    artefacts: [
+      { name: "prompt.json", contentType: "application/json", data: '{"x":1}' },
+    ],
   });
 
   assert.equal(result.bundle_id, "B1");
@@ -24,6 +33,201 @@ test("createBundle posts normalized payload", async () => {
   assert.equal(body.artefacts[0].name, "prompt.json");
   assert.equal(body.artefacts[0].content_type, "application/json");
   assert.ok(typeof body.artefacts[0].data_base64 === "string");
+});
+
+test("verifyTimestamp posts bundleId to the vault", async () => {
+  let captured;
+  const fetchImpl = async (url, init) => {
+    captured = { url, init };
+    return new Response(
+      JSON.stringify({
+        valid: true,
+        message: "VALID: Timestamp token is valid",
+        verification: {
+          kind: "rfc3161",
+          generated_at: "2026-03-06T12:00:00Z",
+          digest_algorithm: "sha256",
+          message_imprint: "sha256:abc",
+          policy_oid: "1.2.3.4",
+          signer_count: 1,
+          certificate_count: 1,
+        },
+        assessment: {
+          level: "structural",
+          headline: "Timestamp token is valid",
+          summary: "The timestamp token matches this proof.",
+          next_step: "Add trust files if you need stronger proof.",
+          checks: [],
+        },
+      }),
+      { status: 200, headers: { "content-type": "application/json" } },
+    );
+  };
+
+  const client = new ProofLayerClient({
+    baseUrl: "http://127.0.0.1:8080",
+    fetchImpl,
+  });
+  const result = await client.verifyTimestamp({ bundleId: "B1" });
+
+  assert.equal(captured.url, "http://127.0.0.1:8080/v1/verify/timestamp");
+  assert.deepEqual(JSON.parse(captured.init.body), { bundle_id: "B1" });
+  assert.equal(result.assessment.headline, "Timestamp token is valid");
+});
+
+test("verifyReceipt posts bundleId and live check mode to the vault", async () => {
+  let captured;
+  const fetchImpl = async (url, init) => {
+    captured = { url, init };
+    return new Response(
+      JSON.stringify({
+        valid: true,
+        message: "VALID: Transparency proof confirmed",
+        verification: {
+          kind: "rekor",
+          log_url: "https://rekor.example.test",
+          entry_uuid: "entry-1",
+          leaf_hash: "hash-1",
+          log_id: "log-1",
+          log_index: 1,
+          integrated_time: "2026-03-06T12:00:00Z",
+          tree_size: 1,
+          root_hash: "root-1",
+          inclusion_proof_hashes: 0,
+          inclusion_proof_verified: true,
+          signed_entry_timestamp_present: true,
+          timestamp_generated_at: "2026-03-06T11:00:00Z",
+          live_verification: {
+            mode: "best_effort",
+            state: "pass",
+            checked_at: "2026-03-06T12:10:00Z",
+            summary: "Live log confirmation passed.",
+          },
+        },
+        assessment: {
+          level: "trusted",
+          headline: "Transparency proof confirmed",
+          summary: "The receipt matches this proof.",
+          next_step: "Keep the trusted key with the proof.",
+          checks: [],
+          live_check: {
+            mode: "best_effort",
+            state: "pass",
+            checked_at: "2026-03-06T12:10:00Z",
+            summary: "Live log confirmation passed.",
+          },
+        },
+      }),
+      { status: 200, headers: { "content-type": "application/json" } },
+    );
+  };
+
+  const client = new ProofLayerClient({
+    baseUrl: "http://127.0.0.1:8080",
+    fetchImpl,
+  });
+  const result = await client.verifyReceipt({
+    bundleId: "B1",
+    liveCheckMode: "best_effort",
+  });
+
+  assert.equal(captured.url, "http://127.0.0.1:8080/v1/verify/receipt");
+  assert.deepEqual(JSON.parse(captured.init.body), {
+    bundle_id: "B1",
+    live_check_mode: "best_effort",
+  });
+  assert.equal(result.assessment.live_check?.state, "pass");
+});
+
+test("evaluateCompleteness posts bundleId to the vault", async () => {
+  let captured;
+  const fetchImpl = async (url, init) => {
+    captured = { url, init };
+    return new Response(
+      JSON.stringify({
+        profile: "gpai_provider_v1",
+        status: "pass",
+        bundle_id: "B1",
+        system_id: "foundation-model-alpha",
+        pass_count: 6,
+        warn_count: 0,
+        fail_count: 0,
+        rules: [],
+      }),
+      { status: 200, headers: { "content-type": "application/json" } },
+    );
+  };
+
+  const client = new ProofLayerClient({
+    baseUrl: "http://127.0.0.1:8080",
+    fetchImpl,
+  });
+  const result = await client.evaluateCompleteness({
+    bundleId: "B1",
+    profile: "gpai_provider_v1",
+  });
+
+  assert.equal(captured.url, "http://127.0.0.1:8080/v1/completeness/evaluate");
+  assert.deepEqual(JSON.parse(captured.init.body), {
+    bundle_id: "B1",
+    profile: "gpai_provider_v1",
+  });
+  assert.equal(result.status, "pass");
+});
+
+test("evaluateCompleteness posts packId to the vault", async () => {
+  let captured;
+  const fetchImpl = async (url, init) => {
+    captured = { url, init };
+    return new Response(
+      JSON.stringify({
+        profile: "gpai_provider_v1",
+        status: "pass",
+        bundle_id: "P1",
+        system_id: "foundation-model-alpha",
+        pass_count: 6,
+        warn_count: 0,
+        fail_count: 0,
+        rules: [],
+      }),
+      { status: 200, headers: { "content-type": "application/json" } },
+    );
+  };
+
+  const client = new ProofLayerClient({
+    baseUrl: "http://127.0.0.1:8080",
+    fetchImpl,
+  });
+  const result = await client.evaluateCompleteness({
+    packId: "P1",
+    profile: "gpai_provider_v1",
+  });
+
+  assert.equal(captured.url, "http://127.0.0.1:8080/v1/completeness/evaluate");
+  assert.deepEqual(JSON.parse(captured.init.body), {
+    pack_id: "P1",
+    profile: "gpai_provider_v1",
+  });
+  assert.equal(result.status, "pass");
+});
+
+test("evaluateCompleteness rejects invalid selector combinations", async () => {
+  const client = new ProofLayerClient({
+    baseUrl: "http://127.0.0.1:8080",
+    fetchImpl: async () => {
+      throw new Error("fetch should not be called");
+    },
+  });
+
+  await assert.rejects(
+    () =>
+      client.evaluateCompleteness({
+        bundleId: "B1",
+        packId: "P1",
+        profile: "gpai_provider_v1",
+      }),
+    /provide exactly one of bundle_id, bundle, or pack_id/,
+  );
 });
 
 test("createPack posts vault pack filters including disclosure bundle_format", async () => {
@@ -38,20 +242,23 @@ test("createPack posts vault pack filters including disclosure bundle_format", a
         bundle_format: "disclosure",
         disclosure_policy: "annex_iv_redacted",
         bundle_count: 1,
-        bundle_ids: ["B1"]
+        bundle_ids: ["B1"],
       }),
-      { status: 201, headers: { "content-type": "application/json" } }
+      { status: 201, headers: { "content-type": "application/json" } },
     );
   };
 
-  const client = new ProofLayerClient({ baseUrl: "http://127.0.0.1:8080", fetchImpl });
+  const client = new ProofLayerClient({
+    baseUrl: "http://127.0.0.1:8080",
+    fetchImpl,
+  });
   const result = await client.createPack({
     packType: "annex_iv",
     systemId: "system-123",
     from: "2026-03-01",
     to: "2026-03-08",
     bundleFormat: "disclosure",
-    disclosurePolicy: "annex_iv_redacted"
+    disclosurePolicy: "annex_iv_redacted",
   });
 
   assert.equal(result.pack_id, "P1");
@@ -63,8 +270,60 @@ test("createPack posts vault pack filters including disclosure bundle_format", a
     from: "2026-03-01",
     to: "2026-03-08",
     bundle_format: "disclosure",
-    disclosure_policy: "annex_iv_redacted"
+    disclosure_policy: "annex_iv_redacted",
   });
+});
+
+test("createPack can target explicit bundleIds", async () => {
+  let captured;
+  const fetchImpl = async (url, init) => {
+    captured = { url, init };
+    return new Response(
+      JSON.stringify({
+        pack_id: "P-bundles",
+        pack_type: "annex_iv",
+        created_at: "2026-03-22T12:00:00Z",
+        bundle_format: "full",
+        bundle_count: 2,
+        bundle_ids: ["B1", "B2"],
+      }),
+      { status: 201, headers: { "content-type": "application/json" } },
+    );
+  };
+
+  const client = new ProofLayerClient({
+    baseUrl: "http://127.0.0.1:8080",
+    fetchImpl,
+  });
+  const result = await client.createPack({
+    packType: "annex_iv",
+    bundleIds: ["B1", "B2"],
+  });
+
+  assert.equal(result.pack_id, "P-bundles");
+  assert.deepEqual(JSON.parse(captured.init.body), {
+    pack_type: "annex_iv",
+    bundle_ids: ["B1", "B2"],
+  });
+});
+
+test("createPack rejects bundleIds mixed with other bundle selectors", async () => {
+  const client = new ProofLayerClient({
+    baseUrl: "http://127.0.0.1:8080",
+    fetchImpl: async () => {
+      throw new Error("fetch should not be called");
+    },
+  });
+
+  await assert.rejects(
+    () =>
+      client.createPack({
+        packType: "annex_iv",
+        bundleIds: ["B1"],
+        systemId: "system-123",
+      }),
+    /bundleIds cannot be combined with systemId, from, or to/,
+  );
 });
 
 test("createPack can post an inline disclosure template request", async () => {
@@ -79,13 +338,16 @@ test("createPack can post an inline disclosure template request", async () => {
         bundle_format: "disclosure",
         disclosure_policy: "runtime_template_pack",
         bundle_count: 1,
-        bundle_ids: ["B2"]
+        bundle_ids: ["B2"],
       }),
-      { status: 201, headers: { "content-type": "application/json" } }
+      { status: 201, headers: { "content-type": "application/json" } },
     );
   };
 
-  const client = new ProofLayerClient({ baseUrl: "http://127.0.0.1:8080", fetchImpl });
+  const client = new ProofLayerClient({
+    baseUrl: "http://127.0.0.1:8080",
+    fetchImpl,
+  });
   const result = await client.createPack({
     packType: "runtime_logs",
     systemId: "system-456",
@@ -93,8 +355,8 @@ test("createPack can post an inline disclosure template request", async () => {
     disclosureTemplate: {
       profile: "runtime_minimum",
       name: "runtime_template_pack",
-      redactionGroups: ["metadata"]
-    }
+      redactionGroups: ["metadata"],
+    },
   });
 
   assert.equal(result.disclosure_policy, "runtime_template_pack");
@@ -105,8 +367,8 @@ test("createPack can post an inline disclosure template request", async () => {
     disclosure_template: {
       profile: "runtime_minimum",
       name: "runtime_template_pack",
-      redaction_groups: ["metadata"]
-    }
+      redaction_groups: ["metadata"],
+    },
   });
 });
 
@@ -115,10 +377,13 @@ test("downloadPackExport returns raw archive bytes", async () => {
   const fetchImpl = async () =>
     new Response(payload, {
       status: 200,
-      headers: { "content-type": "application/gzip" }
+      headers: { "content-type": "application/gzip" },
     });
 
-  const client = new ProofLayerClient({ baseUrl: "http://127.0.0.1:8080", fetchImpl });
+  const client = new ProofLayerClient({
+    baseUrl: "http://127.0.0.1:8080",
+    fetchImpl,
+  });
   const bytes = await client.downloadPackExport("P1");
 
   assert.deepEqual(Array.from(bytes), [1, 2, 3, 4]);
@@ -131,8 +396,16 @@ test("getDisclosureConfig returns disclosure policies from vault config", async 
         service: { addr: "127.0.0.1:8080", max_payload_bytes: 10485760 },
         signing: { key_id: "kid-dev-01", algorithm: "ed25519-jws" },
         storage: { metadata_backend: "sqlite", blob_backend: "fs" },
-        retention: { grace_period_days: 30, scan_interval_hours: 24, policies: [] },
-        timestamp: { enabled: false, provider: "rfc3161", url: "https://tsa.example.test" },
+        retention: {
+          grace_period_days: 30,
+          scan_interval_hours: 24,
+          policies: [],
+        },
+        timestamp: {
+          enabled: false,
+          provider: "rfc3161",
+          url: "https://tsa.example.test",
+        },
         transparency: { enabled: false, provider: "rekor" },
         disclosure: {
           policies: [
@@ -140,16 +413,19 @@ test("getDisclosureConfig returns disclosure policies from vault config", async 
               name: "annex_iv_redacted",
               include_artefact_metadata: true,
               include_artefact_bytes: true,
-              artefact_names: ["doc.json"]
-            }
-          ]
+              artefact_names: ["doc.json"],
+            },
+          ],
         },
-        audit: { enabled: true }
+        audit: { enabled: true },
       }),
-      { status: 200, headers: { "content-type": "application/json" } }
+      { status: 200, headers: { "content-type": "application/json" } },
     );
 
-  const client = new ProofLayerClient({ baseUrl: "http://127.0.0.1:8080", fetchImpl });
+  const client = new ProofLayerClient({
+    baseUrl: "http://127.0.0.1:8080",
+    fetchImpl,
+  });
   const disclosure = await client.getDisclosureConfig();
 
   assert.equal(disclosure.policies[0].name, "annex_iv_redacted");
@@ -166,28 +442,35 @@ test("getDisclosureTemplates fetches the vault template catalog", async () => {
           {
             profile: "runtime_minimum",
             description: "Runtime disclosure template",
-            default_redaction_groups: ["commitments", "parameters", "operational_metrics"],
+            default_redaction_groups: [
+              "commitments",
+              "parameters",
+              "operational_metrics",
+            ],
             policy: {
               name: "runtime_minimum",
               allowed_item_types: ["llm_interaction"],
               redacted_fields_by_item_type: {
-                llm_interaction: ["/parameters"]
-              }
-            }
-          }
+                llm_interaction: ["/parameters"],
+              },
+            },
+          },
         ],
         redaction_groups: [
           {
             name: "commitments",
-            description: "Hide digest fields."
-          }
-        ]
+            description: "Hide digest fields.",
+          },
+        ],
       }),
-      { status: 200, headers: { "content-type": "application/json" } }
+      { status: 200, headers: { "content-type": "application/json" } },
     );
   };
 
-  const client = new ProofLayerClient({ baseUrl: "http://127.0.0.1:8080", fetchImpl });
+  const client = new ProofLayerClient({
+    baseUrl: "http://127.0.0.1:8080",
+    fetchImpl,
+  });
   const catalog = await client.getDisclosureTemplates();
 
   assert.equal(captured.url, "http://127.0.0.1:8080/v1/disclosure/templates");
@@ -207,39 +490,45 @@ test("renderDisclosureTemplate posts template options to the vault", async () =>
           "commitments",
           "metadata",
           "parameters",
-          "operational_metrics"
+          "operational_metrics",
         ],
         policy: {
           name: "privacy_review_custom",
           allowed_item_types: ["llm_interaction"],
           redacted_fields_by_item_type: {
-            risk_assessment: ["/metadata/internal_notes"]
-          }
-        }
+            risk_assessment: ["/metadata/internal_notes"],
+          },
+        },
       }),
-      { status: 200, headers: { "content-type": "application/json" } }
+      { status: 200, headers: { "content-type": "application/json" } },
     );
   };
 
-  const client = new ProofLayerClient({ baseUrl: "http://127.0.0.1:8080", fetchImpl });
+  const client = new ProofLayerClient({
+    baseUrl: "http://127.0.0.1:8080",
+    fetchImpl,
+  });
   const rendered = await client.renderDisclosureTemplate({
     profile: "privacy_review",
     name: "privacy_review_custom",
     redactionGroups: ["metadata"],
     redactedFieldsByItemType: {
-      risk_assessment: ["/metadata/internal_notes"]
-    }
+      risk_assessment: ["/metadata/internal_notes"],
+    },
   });
 
-  assert.equal(captured.url, "http://127.0.0.1:8080/v1/disclosure/templates/render");
+  assert.equal(
+    captured.url,
+    "http://127.0.0.1:8080/v1/disclosure/templates/render",
+  );
   assert.equal(captured.init.method, "POST");
   assert.deepEqual(JSON.parse(captured.init.body), {
     profile: "privacy_review",
     name: "privacy_review_custom",
     redaction_groups: ["metadata"],
     redacted_fields_by_item_type: {
-      risk_assessment: ["/metadata/internal_notes"]
-    }
+      risk_assessment: ["/metadata/internal_notes"],
+    },
   });
   assert.equal(rendered.policy.name, "privacy_review_custom");
 });
@@ -250,11 +539,14 @@ test("updateDisclosureConfig issues PUT with policy payload", async () => {
     captured = { url, init };
     return new Response(init.body, {
       status: 200,
-      headers: { "content-type": "application/json" }
+      headers: { "content-type": "application/json" },
     });
   };
 
-  const client = new ProofLayerClient({ baseUrl: "http://127.0.0.1:8080", fetchImpl });
+  const client = new ProofLayerClient({
+    baseUrl: "http://127.0.0.1:8080",
+    fetchImpl,
+  });
   const result = await client.updateDisclosureConfig({
     policies: [
       {
@@ -262,9 +554,9 @@ test("updateDisclosureConfig issues PUT with policy payload", async () => {
         allowed_item_types: ["incident_report"],
         include_artefact_metadata: true,
         include_artefact_bytes: false,
-        artefact_names: ["incident.json"]
-      }
-    ]
+        artefact_names: ["incident.json"],
+      },
+    ],
   });
 
   assert.equal(captured.url, "http://127.0.0.1:8080/v1/config/disclosure");
@@ -288,13 +580,16 @@ test("previewDisclosure posts named or inline disclosure policy selection", asyn
         disclosed_item_obligation_refs: ["art9"],
         disclosed_artefact_indices: [],
         disclosed_artefact_names: [],
-        disclosed_artefact_bytes_included: false
+        disclosed_artefact_bytes_included: false,
       }),
-      { status: 200, headers: { "content-type": "application/json" } }
+      { status: 200, headers: { "content-type": "application/json" } },
     );
   };
 
-  const client = new ProofLayerClient({ baseUrl: "http://127.0.0.1:8080", fetchImpl });
+  const client = new ProofLayerClient({
+    baseUrl: "http://127.0.0.1:8080",
+    fetchImpl,
+  });
   const result = await client.previewDisclosure({
     bundleId: "B1",
     packType: "annex_iv",
@@ -302,8 +597,8 @@ test("previewDisclosure posts named or inline disclosure policy selection", asyn
       name: "risk_only",
       allowed_obligation_refs: ["art9"],
       include_artefact_metadata: false,
-      include_artefact_bytes: false
-    }
+      include_artefact_bytes: false,
+    },
   });
 
   assert.equal(captured.url, "http://127.0.0.1:8080/v1/disclosure/preview");
@@ -316,8 +611,8 @@ test("previewDisclosure posts named or inline disclosure policy selection", asyn
       name: "risk_only",
       allowed_obligation_refs: ["art9"],
       include_artefact_metadata: false,
-      include_artefact_bytes: false
-    }
+      include_artefact_bytes: false,
+    },
   });
   assert.deepEqual(result.disclosed_item_indices, [1]);
 });
@@ -336,25 +631,28 @@ test("previewDisclosure can post an inline disclosure template selection", async
         disclosed_item_types: ["llm_interaction"],
         disclosed_item_obligation_refs: ["art12_19_26"],
         disclosed_item_field_redactions: {
-          "0": ["/parameters"]
+          0: ["/parameters"],
         },
         disclosed_artefact_indices: [],
         disclosed_artefact_names: [],
-        disclosed_artefact_bytes_included: false
+        disclosed_artefact_bytes_included: false,
       }),
-      { status: 200, headers: { "content-type": "application/json" } }
+      { status: 200, headers: { "content-type": "application/json" } },
     );
   };
 
-  const client = new ProofLayerClient({ baseUrl: "http://127.0.0.1:8080", fetchImpl });
+  const client = new ProofLayerClient({
+    baseUrl: "http://127.0.0.1:8080",
+    fetchImpl,
+  });
   const result = await client.previewDisclosure({
     bundleId: "B2",
     packType: "runtime_logs",
     disclosureTemplate: {
       profile: "privacy_review",
       name: "privacy_review_internal",
-      redactionGroups: ["metadata"]
-    }
+      redactionGroups: ["metadata"],
+    },
   });
 
   assert.equal(captured.url, "http://127.0.0.1:8080/v1/disclosure/preview");
@@ -364,8 +662,10 @@ test("previewDisclosure can post an inline disclosure template selection", async
     disclosure_template: {
       profile: "privacy_review",
       name: "privacy_review_internal",
-      redaction_groups: ["metadata"]
-    }
+      redaction_groups: ["metadata"],
+    },
   });
-  assert.deepEqual(result.disclosed_item_field_redactions, { "0": ["/parameters"] });
+  assert.deepEqual(result.disclosed_item_field_redactions, {
+    0: ["/parameters"],
+  });
 });

@@ -1,0 +1,38 @@
+{
+  "evaluation_id": "eval-foundation-alpha-v5",
+  "benchmark": "provider-release-suite-2026q1",
+  "status": "passed",
+  "summary": "Release benchmark suite met provider thresholds for multilingual quality, safety, and subgroup parity.",
+  "report_commitment": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+  "metrics_summary": [
+    {
+      "name": "instruction_following",
+      "value": "0.93",
+      "unit": "ratio",
+      "methodology": "Provider release suite average."
+    },
+    {
+      "name": "toxicity_refusal",
+      "value": "0.98",
+      "unit": "ratio",
+      "methodology": "Safety eval refusal rate."
+    }
+  ],
+  "group_performance": [
+    {
+      "group": "eu_languages",
+      "metrics": [
+        {
+          "name": "quality_score",
+          "value": "0.91",
+          "unit": "ratio",
+          "methodology": "Held-out multilingual review set."
+        }
+      ]
+    }
+  ],
+  "evaluation_methodology": "Held-out multilingual and safety benchmark suites reviewed by provider evaluation governance.",
+  "metadata": {
+    "owner": "provider-evals"
+  }
+}

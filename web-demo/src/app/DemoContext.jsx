@@ -93,6 +93,38 @@ function packCompletenessProfile(packSummary, packManifest) {
   );
 }
 
+function trustTone(level) {
+  return level === "trusted" || level === "qualified" ? "good" : "accent";
+}
+
+function timestampActivityTone(verification) {
+  if (!verification?.valid) {
+    return "warn";
+  }
+  return verification?.assessment ? trustTone(verification.assessment.level) : "good";
+}
+
+function receiptActivityTone(verification) {
+  if (!verification?.valid) {
+    return "warn";
+  }
+  const liveState = verification?.assessment?.live_check?.state;
+  if (liveState === "fail") {
+    return "warn";
+  }
+  if (liveState === "warn") {
+    return "accent";
+  }
+  return verification?.assessment ? trustTone(verification.assessment.level) : "good";
+}
+
+function assuranceActivityMessage(verification, fallback) {
+  if (verification?.assessment?.summary) {
+    return verification.assessment.summary;
+  }
+  return verification?.message ?? fallback;
+}
+
 function createInitialDraft() {
   const preset = getPreset("investor_summary");
   const scenario = initialPlaygroundScenario();
@@ -995,13 +1027,15 @@ export function DemoProvider({ children }) {
             createMeta.bundle_id,
           );
           appendActivity(
-            timestampVerification.valid
-              ? "Timestamp checked"
-              : "Timestamp warning",
-            timestampVerification.valid
-              ? "Verified: the timestamp token matches the current bundle root."
-              : timestampVerification.message,
-            timestampVerification.valid ? "good" : "warn",
+            timestampVerification?.assessment?.headline ??
+              (timestampVerification.valid
+                ? "Timestamp checked"
+                : "Timestamp warning"),
+            assuranceActivityMessage(
+              timestampVerification,
+              "The timestamp token matches the current bundle root.",
+            ),
+            timestampActivityTone(timestampVerification),
           );
         } catch (error) {
           timestampVerification = {
@@ -1041,11 +1075,13 @@ export function DemoProvider({ children }) {
             createMeta.bundle_id,
           );
           appendActivity(
-            receiptVerification.valid ? "Receipt checked" : "Receipt warning",
-            receiptVerification.valid
-              ? "Verified: the transparency receipt matches the current bundle."
-              : receiptVerification.message,
-            receiptVerification.valid ? "good" : "warn",
+            receiptVerification?.assessment?.headline ??
+              (receiptVerification.valid ? "Receipt checked" : "Receipt warning"),
+            assuranceActivityMessage(
+              receiptVerification,
+              "The transparency receipt matches the current bundle.",
+            ),
+            receiptActivityTone(receiptVerification),
           );
         } catch (error) {
           receiptVerification = {

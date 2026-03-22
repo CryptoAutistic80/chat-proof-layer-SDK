@@ -104,6 +104,72 @@ class TestProofLayerClient(unittest.TestCase):
         )
         self.assertEqual(out["status"], "pass")
 
+    def test_verify_timestamp_posts_bundle_id(self):
+        captured = {}
+
+        def request_fn(method, path, headers, body):
+            captured["method"] = method
+            captured["path"] = path
+            captured["headers"] = headers
+            captured["body"] = body
+            return {
+                "valid": True,
+                "message": "VALID: Timestamp token is valid",
+                "assessment": {
+                    "level": "structural",
+                    "headline": "Timestamp token is valid",
+                    "summary": "The timestamp token matches this proof.",
+                    "next_step": "Add trust files if you need stronger proof.",
+                    "checks": [],
+                },
+            }
+
+        client = ProofLayerClient(base_url="http://127.0.0.1:8080", request_fn=request_fn)
+        out = client.verify_timestamp(bundle_id="B1")
+
+        self.assertEqual(captured["path"], "/v1/verify/timestamp")
+        self.assertEqual(
+            json.loads(captured["body"].decode("utf-8")),
+            {"bundle_id": "B1"},
+        )
+        self.assertEqual(out["assessment"]["headline"], "Timestamp token is valid")
+
+    def test_verify_receipt_posts_bundle_id_and_live_mode(self):
+        captured = {}
+
+        def request_fn(method, path, headers, body):
+            captured["method"] = method
+            captured["path"] = path
+            captured["headers"] = headers
+            captured["body"] = body
+            return {
+                "valid": True,
+                "message": "VALID: Transparency proof confirmed",
+                "assessment": {
+                    "level": "trusted",
+                    "headline": "Transparency proof confirmed",
+                    "summary": "The receipt matches this proof.",
+                    "next_step": "Keep the trusted key with the proof.",
+                    "checks": [],
+                    "live_check": {
+                        "mode": "best_effort",
+                        "state": "pass",
+                        "checked_at": "2026-03-06T12:10:00Z",
+                        "summary": "Live log confirmation passed.",
+                    },
+                },
+            }
+
+        client = ProofLayerClient(base_url="http://127.0.0.1:8080", request_fn=request_fn)
+        out = client.verify_receipt(bundle_id="B1", live_check_mode="best_effort")
+
+        self.assertEqual(captured["path"], "/v1/verify/receipt")
+        self.assertEqual(
+            json.loads(captured["body"].decode("utf-8")),
+            {"bundle_id": "B1", "live_check_mode": "best_effort"},
+        )
+        self.assertEqual(out["assessment"]["live_check"]["state"], "pass")
+
     def test_evaluate_completeness_posts_pack_id(self):
         captured = {}
 

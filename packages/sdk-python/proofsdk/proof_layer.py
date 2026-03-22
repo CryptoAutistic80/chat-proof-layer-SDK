@@ -106,6 +106,38 @@ class ProofLayer:
     ) -> dict[str, Any]:
         return self.client.verify_bundle(bundle, artefacts, public_key_pem)
 
+    def verify_timestamp(
+        self,
+        *,
+        bundle_id: str | None = None,
+        bundle_root: str | None = None,
+        timestamp: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        if hasattr(self.client, "verify_timestamp"):
+            return self.client.verify_timestamp(
+                bundle_id=bundle_id,
+                bundle_root=bundle_root,
+                timestamp=timestamp,
+            )
+        raise ValueError("underlying client does not support verify_timestamp")
+
+    def verify_receipt(
+        self,
+        *,
+        bundle_id: str | None = None,
+        bundle_root: str | None = None,
+        receipt: dict[str, Any] | None = None,
+        live_check_mode: str | None = None,
+    ) -> dict[str, Any]:
+        if hasattr(self.client, "verify_receipt"):
+            return self.client.verify_receipt(
+                bundle_id=bundle_id,
+                bundle_root=bundle_root,
+                receipt=receipt,
+                live_check_mode=live_check_mode,
+            )
+        raise ValueError("underlying client does not support verify_receipt")
+
     def evaluate_completeness(
         self,
         *,

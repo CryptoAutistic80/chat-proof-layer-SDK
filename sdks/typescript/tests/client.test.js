@@ -35,6 +35,110 @@ test("createBundle posts normalized payload", async () => {
   assert.ok(typeof body.artefacts[0].data_base64 === "string");
 });
 
+test("verifyTimestamp posts bundleId to the vault", async () => {
+  let captured;
+  const fetchImpl = async (url, init) => {
+    captured = { url, init };
+    return new Response(
+      JSON.stringify({
+        valid: true,
+        message: "VALID: Timestamp token is valid",
+        verification: {
+          kind: "rfc3161",
+          generated_at: "2026-03-06T12:00:00Z",
+          digest_algorithm: "sha256",
+          message_imprint: "sha256:abc",
+          policy_oid: "1.2.3.4",
+          signer_count: 1,
+          certificate_count: 1,
+        },
+        assessment: {
+          level: "structural",
+          headline: "Timestamp token is valid",
+          summary: "The timestamp token matches this proof.",
+          next_step: "Add trust files if you need stronger proof.",
+          checks: [],
+        },
+      }),
+      { status: 200, headers: { "content-type": "application/json" } },
+    );
+  };
+
+  const client = new ProofLayerClient({
+    baseUrl: "http://127.0.0.1:8080",
+    fetchImpl,
+  });
+  const result = await client.verifyTimestamp({ bundleId: "B1" });
+
+  assert.equal(captured.url, "http://127.0.0.1:8080/v1/verify/timestamp");
+  assert.deepEqual(JSON.parse(captured.init.body), { bundle_id: "B1" });
+  assert.equal(result.assessment.headline, "Timestamp token is valid");
+});
+
+test("verifyReceipt posts bundleId and live check mode to the vault", async () => {
+  let captured;
+  const fetchImpl = async (url, init) => {
+    captured = { url, init };
+    return new Response(
+      JSON.stringify({
+        valid: true,
+        message: "VALID: Transparency proof confirmed",
+        verification: {
+          kind: "rekor",
+          log_url: "https://rekor.example.test",
+          entry_uuid: "entry-1",
+          leaf_hash: "hash-1",
+          log_id: "log-1",
+          log_index: 1,
+          integrated_time: "2026-03-06T12:00:00Z",
+          tree_size: 1,
+          root_hash: "root-1",
+          inclusion_proof_hashes: 0,
+          inclusion_proof_verified: true,
+          signed_entry_timestamp_present: true,
+          timestamp_generated_at: "2026-03-06T11:00:00Z",
+          live_verification: {
+            mode: "best_effort",
+            state: "pass",
+            checked_at: "2026-03-06T12:10:00Z",
+            summary: "Live log confirmation passed.",
+          },
+        },
+        assessment: {
+          level: "trusted",
+          headline: "Transparency proof confirmed",
+          summary: "The receipt matches this proof.",
+          next_step: "Keep the trusted key with the proof.",
+          checks: [],
+          live_check: {
+            mode: "best_effort",
+            state: "pass",
+            checked_at: "2026-03-06T12:10:00Z",
+            summary: "Live log confirmation passed.",
+          },
+        },
+      }),
+      { status: 200, headers: { "content-type": "application/json" } },
+    );
+  };
+
+  const client = new ProofLayerClient({
+    baseUrl: "http://127.0.0.1:8080",
+    fetchImpl,
+  });
+  const result = await client.verifyReceipt({
+    bundleId: "B1",
+    liveCheckMode: "best_effort",
+  });
+
+  assert.equal(captured.url, "http://127.0.0.1:8080/v1/verify/receipt");
+  assert.deepEqual(JSON.parse(captured.init.body), {
+    bundle_id: "B1",
+    live_check_mode: "best_effort",
+  });
+  assert.equal(result.assessment.live_check?.state, "pass");
+});
+
 test("evaluateCompleteness posts bundleId to the vault", async () => {
   let captured;
   const fetchImpl = async (url, init) => {

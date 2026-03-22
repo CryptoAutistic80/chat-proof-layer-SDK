@@ -303,6 +303,89 @@ test("ProofLayer local mode can evaluate gpai provider completeness", async () =
   assert.equal(report.pass_count, 6);
 });
 
+test("ProofLayer vault mode can verify timestamp", async () => {
+  let captured;
+  const proofLayer = new ProofLayer({
+    vaultUrl: "http://127.0.0.1:8080",
+    fetchImpl: async (url, init) => {
+      captured = { url, init };
+      return new Response(
+        JSON.stringify({
+          valid: true,
+          message: "VALID: Timestamp token is valid",
+          assessment: {
+            level: "structural",
+            headline: "Timestamp token is valid",
+            summary: "The timestamp token matches this proof.",
+            next_step: "Add trust files if you need stronger proof.",
+            checks: [],
+          },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    },
+  });
+
+  const result = await proofLayer.verifyTimestamp({ bundleId: "B1" });
+
+  assert.equal(captured.url, "http://127.0.0.1:8080/v1/verify/timestamp");
+  assert.equal(result.assessment.level, "structural");
+});
+
+test("ProofLayer vault mode can verify receipt with live check mode", async () => {
+  let captured;
+  const proofLayer = new ProofLayer({
+    vaultUrl: "http://127.0.0.1:8080",
+    fetchImpl: async (url, init) => {
+      captured = { url, init };
+      return new Response(
+        JSON.stringify({
+          valid: true,
+          message: "VALID: Transparency proof confirmed",
+          assessment: {
+            level: "trusted",
+            headline: "Transparency proof confirmed",
+            summary: "The receipt matches this proof.",
+            next_step: "Keep the trusted key with the proof.",
+            checks: [],
+            live_check: {
+              mode: "required",
+              state: "pass",
+              checked_at: "2026-03-06T12:10:00Z",
+              summary: "Live log confirmation passed.",
+            },
+          },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    },
+  });
+
+  const result = await proofLayer.verifyReceipt({
+    bundleId: "B1",
+    liveCheckMode: "required",
+  });
+
+  assert.equal(captured.url, "http://127.0.0.1:8080/v1/verify/receipt");
+  assert.equal(result.assessment.live_check?.mode, "required");
+});
+
+test("ProofLayer local mode rejects timestamp verification", async () => {
+  const signingKeyPem = await readFile(
+    path.join(goldenDir, "signing_key.txt"),
+    "utf8",
+  );
+  const proofLayer = new ProofLayer({
+    signingKeyPem,
+    keyId: "kid-dev-01",
+  });
+
+  await assert.rejects(
+    proofLayer.verifyTimestamp({ bundleId: "B1" }),
+    /verifyTimestamp is not supported for local mode/,
+  );
+});
+
 test("ProofLayer vault mode can update disclosure config", async () => {
   let captured;
   const proofLayer = new ProofLayer({

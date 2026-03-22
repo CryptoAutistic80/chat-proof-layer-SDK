@@ -144,7 +144,9 @@
           "type": "string",
           "minLength": 1
         },
-        "body": true
+        "body": {
+          "$ref": "#/$defs/transparencyReceiptBody"
+        }
       }
     },
     "total_items": {
@@ -214,6 +216,10 @@
       "type": "string",
       "pattern": "^sha256:[0-9a-f]{64}$"
     },
+    "base64String": {
+      "type": "string",
+      "minLength": 1
+    },
     "artefactRef": {
       "type": "object",
       "additionalProperties": false,
@@ -238,6 +244,128 @@
         "content_type": {
           "type": "string",
           "minLength": 1
+        }
+      }
+    },
+    "transparencyReceiptBody": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/rekorStoredReceiptBody"
+        },
+        {
+          "$ref": "#/$defs/scittLegacyStoredReceiptBody"
+        },
+        {
+          "$ref": "#/$defs/scittCoseStoredReceiptBody"
+        }
+      ]
+    },
+    "rekorStoredReceiptBody": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "log_url",
+        "entry_uuid",
+        "log_entry"
+      ],
+      "properties": {
+        "log_url": {
+          "type": "string",
+          "minLength": 1
+        },
+        "entry_uuid": {
+          "type": "string",
+          "minLength": 1
+        },
+        "log_entry": true
+      }
+    },
+    "scittLegacyStoredReceiptBody": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "service_url",
+        "entry_id",
+        "service_id",
+        "registered_at",
+        "statement_b64",
+        "statement_hash",
+        "receipt_b64"
+      ],
+      "properties": {
+        "body_format": {
+          "type": "string",
+          "const": "proof-layer-json-v1"
+        },
+        "service_url": {
+          "type": "string",
+          "minLength": 1
+        },
+        "entry_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "service_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "registered_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "statement_b64": {
+          "$ref": "#/$defs/base64String"
+        },
+        "statement_hash": {
+          "$ref": "#/$defs/sha256Digest"
+        },
+        "receipt_b64": {
+          "$ref": "#/$defs/base64String"
+        }
+      }
+    },
+    "scittCoseStoredReceiptBody": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "body_format",
+        "service_url",
+        "entry_id",
+        "service_id",
+        "registered_at",
+        "statement_hash",
+        "statement_cose_b64",
+        "receipt_cbor_b64"
+      ],
+      "properties": {
+        "body_format": {
+          "type": "string",
+          "const": "ietf-scitt-cose-ccf-v1"
+        },
+        "service_url": {
+          "type": "string",
+          "minLength": 1
+        },
+        "entry_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "service_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "registered_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "statement_hash": {
+          "$ref": "#/$defs/sha256Digest"
+        },
+        "statement_cose_b64": {
+          "$ref": "#/$defs/base64String"
+        },
+        "receipt_cbor_b64": {
+          "$ref": "#/$defs/base64String"
         }
       }
     },

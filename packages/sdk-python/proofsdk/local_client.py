@@ -72,6 +72,25 @@ class LocalProofLayerClient:
     ) -> dict[str, Any]:
         return verify_bundle(bundle=bundle, artefacts=artefacts, public_key_pem=public_key_pem)
 
+    def verify_timestamp(
+        self,
+        *,
+        bundle_id: str | None = None,
+        bundle_root: str | None = None,
+        timestamp: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        raise ValueError("verify_timestamp is not supported for local mode")
+
+    def verify_receipt(
+        self,
+        *,
+        bundle_id: str | None = None,
+        bundle_root: str | None = None,
+        receipt: dict[str, Any] | None = None,
+        live_check_mode: str | None = None,
+    ) -> dict[str, Any]:
+        raise ValueError("verify_receipt is not supported for local mode")
+
     def evaluate_completeness(
         self,
         *,

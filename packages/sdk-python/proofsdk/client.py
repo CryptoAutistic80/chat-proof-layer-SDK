@@ -61,6 +61,57 @@ class ProofLayerClient:
         }
         return self._request_fn("POST", "/v1/verify", self._headers_json(), json.dumps(payload).encode("utf-8"))
 
+    def verify_timestamp(
+        self,
+        *,
+        bundle_id: str | None = None,
+        bundle_root: str | None = None,
+        timestamp: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        selection_count = sum(1 for value in (bundle_id, bundle_root or timestamp) if value is not None)
+        if selection_count != 1:
+            raise ValueError("provide exactly one of bundle_id or bundle_root/timestamp")
+        if (bundle_root is None) != (timestamp is None):
+            raise ValueError("bundle_root and timestamp must be provided together")
+        payload: dict[str, Any]
+        if bundle_id is not None:
+            payload = {"bundle_id": bundle_id}
+        else:
+            payload = {"bundle_root": bundle_root, "timestamp": timestamp}
+        return self._request_fn(
+            "POST",
+            "/v1/verify/timestamp",
+            self._headers_json(),
+            json.dumps(payload).encode("utf-8"),
+        )
+
+    def verify_receipt(
+        self,
+        *,
+        bundle_id: str | None = None,
+        bundle_root: str | None = None,
+        receipt: dict[str, Any] | None = None,
+        live_check_mode: str | None = None,
+    ) -> dict[str, Any]:
+        selection_count = sum(1 for value in (bundle_id, bundle_root or receipt) if value is not None)
+        if selection_count != 1:
+            raise ValueError("provide exactly one of bundle_id or bundle_root/receipt")
+        if (bundle_root is None) != (receipt is None):
+            raise ValueError("bundle_root and receipt must be provided together")
+        payload: dict[str, Any]
+        if bundle_id is not None:
+            payload = {"bundle_id": bundle_id}
+        else:
+            payload = {"bundle_root": bundle_root, "receipt": receipt}
+        if live_check_mode is not None:
+            payload["live_check_mode"] = live_check_mode
+        return self._request_fn(
+            "POST",
+            "/v1/verify/receipt",
+            self._headers_json(),
+            json.dumps(payload).encode("utf-8"),
+        )
+
     def evaluate_completeness(
         self,
         *,

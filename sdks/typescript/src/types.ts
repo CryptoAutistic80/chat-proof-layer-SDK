@@ -226,6 +226,118 @@ export interface VerifyPackageRequest {
   publicKeyPem: string;
 }
 
+export type TrustLevel = "structural" | "trusted" | "qualified";
+
+export type CheckState = "pass" | "warn" | "fail" | "not_run";
+
+export interface VerificationCheck extends JsonObject {
+  id: string;
+  label: string;
+  state: CheckState;
+  detail?: string;
+}
+
+export interface TimestampVerification extends JsonObject {
+  kind: string;
+  provider?: string;
+  generated_at: string;
+  digest_algorithm: string;
+  message_imprint: string;
+  policy_oid: string;
+  assurance_profile?: string;
+  signer_count: number;
+  certificate_count: number;
+  assurance_profile_verified?: boolean;
+  policy_oid_verified?: boolean;
+  trusted?: boolean;
+  chain_verified?: boolean;
+  certificate_profile_verified?: boolean;
+  revocation_checked?: boolean;
+  ocsp_checked?: boolean;
+  qualified_signer_verified?: boolean;
+  signer_subject?: string;
+  trust_anchor_subject?: string;
+  ocsp_responder_url?: string;
+}
+
+export interface TimestampAssessment extends JsonObject {
+  level: TrustLevel;
+  headline: string;
+  summary: string;
+  next_step: string;
+  checks: VerificationCheck[];
+}
+
+export type ReceiptLiveCheckMode = "off" | "best_effort" | "required";
+
+export interface ReceiptLiveVerification extends JsonObject {
+  mode: ReceiptLiveCheckMode;
+  state: CheckState;
+  checked_at: string;
+  summary: string;
+  current_tree_size?: number;
+  current_root_hash?: string;
+  entry_retrieved?: boolean;
+  consistency_verified?: boolean;
+}
+
+export interface ReceiptVerification extends JsonObject {
+  kind: string;
+  provider?: string;
+  log_url: string;
+  entry_uuid: string;
+  leaf_hash: string;
+  log_id: string;
+  log_index: number;
+  integrated_time: string;
+  tree_size: number;
+  root_hash: string;
+  inclusion_proof_hashes: number;
+  inclusion_proof_verified: boolean;
+  signed_entry_timestamp_present: boolean;
+  signed_entry_timestamp_verified?: boolean;
+  log_id_verified?: boolean;
+  trusted?: boolean;
+  timestamp_generated_at: string;
+  live_verification?: ReceiptLiveVerification;
+}
+
+export interface ReceiptAssessment extends JsonObject {
+  level: TrustLevel;
+  headline: string;
+  summary: string;
+  next_step: string;
+  checks: VerificationCheck[];
+  live_check?: ReceiptLiveVerification;
+}
+
+export interface VerifyTimestampRequest extends JsonObject {
+  bundleId?: string;
+  bundleRoot?: string;
+  timestamp?: JsonObject;
+}
+
+export interface VerifyTimestampResponse extends JsonObject {
+  valid: boolean;
+  message: string;
+  verification?: TimestampVerification;
+  assessment: TimestampAssessment;
+}
+
+export interface VerifyReceiptRequest extends JsonObject {
+  bundleId?: string;
+  bundleRoot?: string;
+  receipt?: JsonObject;
+  liveCheckMode?: ReceiptLiveCheckMode;
+}
+
+export interface VerifyReceiptResponse extends JsonObject {
+  valid: boolean;
+  message: string;
+  verification?: ReceiptVerification;
+  assessment: ReceiptAssessment;
+}
+
 export type CompletenessProfile = "annex_iv_governance_v1" | "gpai_provider_v1";
 
 export type CompletenessStatus = "pass" | "warn" | "fail";
@@ -480,8 +592,19 @@ export interface VaultConfigResponse extends JsonObject {
       key_id?: string;
     };
   };
-  timestamp: JsonObject;
-  transparency: JsonObject;
+  timestamp: JsonObject & {
+    enabled?: boolean;
+    provider?: string;
+    url?: string;
+    assurance?: string;
+  };
+  transparency: JsonObject & {
+    enabled?: boolean;
+    provider?: string;
+    url?: string;
+    scitt_format?: string;
+    log_public_key_pem?: string;
+  };
   disclosure: DisclosureConfig;
   auth: JsonObject & {
     enabled: boolean;

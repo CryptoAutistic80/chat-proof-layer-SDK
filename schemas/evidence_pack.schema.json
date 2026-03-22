@@ -22,6 +22,15 @@
       "type": "string",
       "minLength": 1,
       "enum": [
+        "annex_iv",
+        "annex_xi",
+        "runtime_logs",
+        "ai_literacy",
+        "fundamental_rights",
+        "provider_governance",
+        "post_market_monitoring",
+        "systemic_risk",
+        "incident_response",
         "conformity"
       ]
     },
@@ -47,7 +56,16 @@
     "completeness_profile": {
       "type": "string",
       "enum": [
-        "annex_iv_governance_v1"
+        "annex_iv_governance_v1",
+        "gpai_provider_v1"
+      ]
+    },
+    "completeness_status": {
+      "type": "string",
+      "enum": [
+        "pass",
+        "warn",
+        "fail"
       ]
     },
     "completeness_pass_count": {
@@ -59,6 +77,33 @@
       "minimum": 0
     },
     "completeness_fail_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "pack_completeness_profile": {
+      "type": "string",
+      "enum": [
+        "annex_iv_governance_v1",
+        "gpai_provider_v1"
+      ]
+    },
+    "pack_completeness_status": {
+      "type": "string",
+      "enum": [
+        "pass",
+        "warn",
+        "fail"
+      ]
+    },
+    "pack_completeness_pass_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "pack_completeness_warn_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "pack_completeness_fail_count": {
       "type": "integer",
       "minimum": 0
     },

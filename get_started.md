@@ -41,6 +41,34 @@ If you later export an `annex_iv` or `annex_xi` pack from the vault, the pack su
 
 For `annex_iv`, the pack-scoped pass count is currently `5` because `annex_iv_governance_v1` evaluates five rule families even though the pack curates eight governance evidence families.
 
+If you want the plain-English timestamp and transparency trust result from the CLI, run verify with the assurance checks turned on:
+
+```bash
+cargo run -p proofctl -- verify \
+  --in ./bundle.pkg \
+  --key ./keys/verify.pub \
+  --check-timestamp \
+  --check-receipt \
+  --receipt-live-check best_effort
+```
+
+`best_effort` asks the vault or CLI to try a live Rekor check without turning a temporary network problem into a hard failure. Leave it off if you want a fully offline check.
+
+If you are anchoring to a SCITT service, the newer outside-friendly receipt format is now the normal choice:
+
+```bash
+cargo run -p proofctl -- create \
+  --input ./fixtures/golden/capture.json \
+  --artefact prompt.json=./fixtures/golden/prompt.json \
+  --artefact response.json=./fixtures/golden/response.json \
+  --key ./keys/signing.pem \
+  --out ./bundle-scitt.pkg \
+  --timestamp-url http://timestamp.digicert.com \
+  --transparency-provider scitt \
+  --transparency-log https://scitt.example.test/entries \
+  --scitt-format cose_ccf
+```
+
 If you want the bundle to carry your actor role and system-classification context from day one, create it with the compliance flags instead of adding that data later:
 
 ```bash

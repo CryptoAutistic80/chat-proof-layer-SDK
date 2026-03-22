@@ -1,21 +1,17 @@
 import React from "react";
-
-function statusTone(valid, configured = true) {
-  if (!configured) {
-    return "muted";
-  }
-  if (valid === true) {
-    return "good";
-  }
-  if (valid === false) {
-    return "warn";
-  }
-  return "muted";
-}
+import { buildRunNarrativeSummary } from "../lib/narrative";
 
 export function AssuranceStatusCard({ run, vaultConfig }) {
-  const timestampConfigured = Boolean(vaultConfig?.timestamp?.enabled);
-  const receiptConfigured = Boolean(vaultConfig?.transparency?.enabled);
+  const summary = buildRunNarrativeSummary(run, vaultConfig);
+  const cards = [
+    { key: "integrity", label: "Integrity check", status: summary.integrityStatus },
+    { key: "timestamp", label: "Timestamp status", status: summary.timestampStatus },
+    {
+      key: "transparency",
+      label: "Transparency status",
+      status: summary.transparencyStatus,
+    },
+  ];
 
   return (
     <section className="panel">
@@ -26,44 +22,14 @@ export function AssuranceStatusCard({ run, vaultConfig }) {
         </div>
       </div>
       <div className="status-stack">
-        <article className={`status-card is-${statusTone(run?.verifyResponse?.valid, true)}`}>
-          <strong>Integrity check</strong>
-          <p>
-            {run?.verifyResponse?.valid
-              ? "Verified: this proof record and its captured materials match the connected signer."
-              : run?.verifyResponse?.message || "Verification will run after the bundle is sealed."}
-          </p>
-        </article>
-        <article
-          className={`status-card is-${statusTone(
-            run?.timestampVerification?.valid,
-            timestampConfigured
-          )}`}
-        >
-          <strong>Timestamp status</strong>
-          <p>
-            {timestampConfigured
-              ? run?.timestampVerification?.valid
-                ? "Verified: the timestamp token matches the current bundle root."
-                : run?.timestampVerification?.message || "Requested, but not yet attached."
-              : "Not configured on this vault."}
-          </p>
-        </article>
-        <article
-          className={`status-card is-${statusTone(
-            run?.receiptVerification?.valid,
-            receiptConfigured
-          )}`}
-        >
-          <strong>Transparency status</strong>
-          <p>
-            {receiptConfigured
-              ? run?.receiptVerification?.valid
-                ? "Verified: the transparency receipt matches the current bundle."
-                : run?.receiptVerification?.message || "Requested, but not yet attached."
-              : "Not configured on this vault."}
-          </p>
-        </article>
+        {cards.map((card) => (
+          <article key={card.key} className={`status-card is-${card.status.tone}`}>
+            <strong>{card.label}</strong>
+            <p>
+              <strong>{card.status.title}.</strong> {card.status.summary}
+            </p>
+          </article>
+        ))}
       </div>
     </section>
   );

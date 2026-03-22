@@ -116,6 +116,12 @@ gpai_readiness = proof_layer.evaluate_completeness(
     profile="gpai_provider_v1",
 )
 
+timestamp_check = proof_client.verify_timestamp(bundle_id="BUNDLE_ID")
+receipt_check = proof_client.verify_receipt(
+    bundle_id="BUNDLE_ID",
+    live_check_mode="best_effort",
+)
+
 summary = verify_bundle(
     bundle=locally_sealed["bundle"],
     artefacts=[{"name": "prompt.json", "data": b"{}"}],
@@ -125,6 +131,11 @@ summary = verify_bundle(
 print(summary["artefact_count"])
 print(readiness["status"])
 print(gpai_readiness["status"])
+print(timestamp_check["assessment"]["headline"], timestamp_check["assessment"]["level"])
+print(
+    receipt_check["assessment"]["summary"],
+    receipt_check["assessment"].get("live_check", {}).get("state"),
+)
 
 redacted = proof_layer.disclose(
     bundle=locally_sealed["bundle"],
@@ -218,6 +229,10 @@ print(vault_readiness["status"])
 
 Vault pack responses preserve the legacy per-bundle `completeness_*` fields and add `pack_completeness_*` when a pack has synthesized pack-level readiness support.
 Use `select_pack_readiness(pack_summary_or_manifest)` when you want one helper that prefers the true pack-scoped signal (`source == "pack_scoped"`) and falls back to the legacy bundle aggregate signal (`source == "bundle_aggregate"`).
+
+Vault verification responses now also include a plain-English `assessment` block.
+Use `verify_timestamp(...)` and `verify_receipt(...)` when you want both the low-level crypto result and a short human-readable trust summary.
+For receipts, `live_check_mode="best_effort"` adds an opt-in live Rekor freshness check without turning temporary network problems into a hard failure.
 
 For `annex_iv`, the pack-scoped pass count is currently `5` because `annex_iv_governance_v1` evaluates five rule families even though the pack curates eight governance evidence families.
 

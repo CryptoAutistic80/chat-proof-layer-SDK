@@ -5,18 +5,23 @@ use clap::{Args, Parser, Subcommand, ValueEnum};
 use ed25519_dalek::SigningKey;
 use flate2::{Compression, read::GzDecoder, write::GzEncoder};
 use proof_layer_core::{
-    ActorRole, ArtefactInput, CaptureEvent, CaptureInput, CompletenessProfile, CompletenessReport,
-    CompletenessStatus, DisclosureError, EvidenceItem, LEGACY_BUNDLE_ROOT_ALGORITHM, ProofBundle,
-    ReceiptVerification, RedactedBundle, RekorTransparencyProvider, Rfc3161HttpTimestampProvider,
-    SCITT_TRANSPARENCY_KIND, ScittTransparencyProvider, TimestampAssuranceProfile,
-    TimestampProvider, TimestampToken, TimestampTrustPolicy, TransparencyProvider,
-    TransparencyReceipt, TransparencyTrustPolicy, anchor_bundle as anchor_bundle_receipt,
+    ActorRole, ArtefactInput, CaptureEvent, CaptureInput, CompletenessProfile,
+    CompletenessReport, CompletenessStatus, DisclosureError, EvidenceItem,
+    LEGACY_BUNDLE_ROOT_ALGORITHM, ProofBundle, ReceiptAssessment, ReceiptLiveCheckMode,
+    ReceiptVerification, RedactedBundle, RekorTransparencyProvider,
+    Rfc3161HttpTimestampProvider, SCITT_TRANSPARENCY_KIND, ScittFormat,
+    ScittStatementSigner, ScittTransparencyProvider, TimestampAssessment,
+    TimestampAssuranceProfile, TimestampProvider, TimestampToken, TimestampTrustPolicy,
+    TransparencyProvider, TransparencyReceipt, TransparencyTrustPolicy,
+    anchor_bundle as anchor_bundle_receipt, assess_receipt_error,
+    assess_receipt_verification, assess_timestamp_error, assess_timestamp_verification,
     build_bundle, build_inclusion_proof, capture_input_v01_to_event, decode_backup_encryption_key,
     decode_private_key_pem, decode_public_key_pem, decrypt_backup_archive, encode_private_key_pem,
     encode_public_key_pem, evaluate_completeness, redact_bundle,
     redact_bundle_with_field_redactions, sha256_prefixed, timestamp_digest,
     validate_bundle_integrity_fields, validate_timestamp_trust_policy, verify_receipt,
-    verify_receipt_with_policy, verify_redacted_bundle, verify_timestamp,
+    verify_receipt_with_live_check, verify_receipt_with_policy,
+    verify_receipt_with_policy_and_live_check, verify_redacted_bundle, verify_timestamp,
     verify_timestamp_with_policy,
 };
 use reqwest::{
@@ -151,6 +156,8 @@ struct CreateArgs {
     transparency_log: Option<String>,
     #[arg(long = "transparency-provider", default_value = "rekor")]
     transparency_provider: TransparencyProviderArg,
+    #[arg(long = "scitt-format", default_value = "cose_ccf")]
+    scitt_format: ScittFormatArg,
     #[arg(long = "timestamp-trust-anchor")]
     timestamp_trust_anchor: Vec<PathBuf>,
     #[arg(long = "timestamp-crl")]
@@ -179,6 +186,8 @@ struct VerifyArgs {
     check_timestamp: bool,
     #[arg(long)]
     check_receipt: bool,
+    #[arg(long = "receipt-live-check", default_value = "off")]
+    receipt_live_check: ReceiptLiveCheckArg,
     #[arg(long = "timestamp-trust-anchor")]
     timestamp_trust_anchor: Vec<PathBuf>,
     #[arg(long = "timestamp-crl")]
@@ -512,6 +521,21 @@ enum TransparencyProviderArg {
     Scitt,
 }
 
+#[derive(Copy, Clone, Debug, Eq, PartialEq, ValueEnum)]
+#[value(rename_all = "snake_case")]
+enum ScittFormatArg {
+    LegacyJson,
+    CoseCcf,
+}
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq, ValueEnum)]
+#[value(rename_all = "snake_case")]
+enum ReceiptLiveCheckArg {
+    Off,
+    BestEffort,
+    Required,
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 struct Manifest {
     files: Vec<ManifestEntry>,
@@ -553,8 +577,8 @@ struct VerifyReport {
     message: String,
     artefacts_verified: usize,
     assurance_level: AssuranceLevel,
-    timestamp: OptionalCheckReport,
-    receipt: OptionalCheckReport,
+    timestamp: TimestampCheckReport,
+    receipt: ReceiptCheckReport,
 }
 
 #[derive(Debug, Deserialize)]
@@ -605,6 +629,7 @@ struct CreateCommandInput<'a> {
     timestamp_url: Option<&'a str>,
     transparency_log: Option<&'a str>,
     transparency_provider: TransparencyProviderArg,
+    scitt_format: ScittFormatArg,
     timestamp_trust_anchor_paths: &'a [PathBuf],
     timestamp_crl_paths: &'a [PathBuf],
     timestamp_ocsp_urls: &'a [String],
@@ -620,6 +645,7 @@ struct VerifyCommandInput<'a> {
     format: OutputFormat,
     check_timestamp: bool,
     check_receipt: bool,
+    receipt_live_check: ReceiptLiveCheckArg,
     timestamp_trust_anchor_paths: &'a [PathBuf],
     timestamp_crl_paths: &'a [PathBuf],
     timestamp_ocsp_urls: &'a [String],
@@ -678,6 +704,22 @@ enum OptionalCheckState {
 struct OptionalCheckReport {
     state: OptionalCheckState,
     message: String,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+struct TimestampCheckReport {
+    state: OptionalCheckState,
+    message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    assessment: Option<TimestampAssessment>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+struct ReceiptCheckReport {
+    state: OptionalCheckState,
+    message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    assessment: Option<ReceiptAssessment>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
@@ -1612,6 +1654,7 @@ fn main() -> Result<()> {
             timestamp_url: args.timestamp_url.as_deref(),
             transparency_log: args.transparency_log.as_deref(),
             transparency_provider: args.transparency_provider,
+            scitt_format: args.scitt_format,
             timestamp_trust_anchor_paths: &args.timestamp_trust_anchor,
             timestamp_crl_paths: &args.timestamp_crl,
             timestamp_ocsp_urls: &args.timestamp_ocsp_url,
@@ -1626,6 +1669,7 @@ fn main() -> Result<()> {
             format: args.format,
             check_timestamp: args.check_timestamp,
             check_receipt: args.check_receipt,
+            receipt_live_check: args.receipt_live_check,
             timestamp_trust_anchor_paths: &args.timestamp_trust_anchor,
             timestamp_crl_paths: &args.timestamp_crl,
             timestamp_ocsp_urls: &args.timestamp_ocsp_url,
@@ -1944,7 +1988,15 @@ fn cmd_create(args: CreateCommandInput<'_>) -> Result<()> {
                 attach_receipt_to_bundle(&mut bundle, &provider, transparency_trust_policy.as_ref())
             }
             TransparencyProviderArg::Scitt => {
-                let provider = ScittTransparencyProvider::new(transparency_log.to_string());
+                let provider = ScittTransparencyProvider::with_statement_signer(
+                    transparency_log.to_string(),
+                    SCITT_TRANSPARENCY_KIND,
+                    map_scitt_format(args.scitt_format),
+                    ScittStatementSigner {
+                        signing_key: std::sync::Arc::new(signing_key.clone()),
+                        key_id: args.signing_kid.to_string(),
+                    },
+                );
                 attach_receipt_to_bundle(&mut bundle, &provider, transparency_trust_policy.as_ref())
             }
         }?;
@@ -2033,6 +2085,7 @@ fn cmd_verify(args: VerifyCommandInput<'_>) -> Result<()> {
             args.check_receipt,
             timestamp_trust_policy.as_ref(),
             transparency_trust_policy.as_ref(),
+            map_receipt_live_check_mode(args.receipt_live_check),
         )?,
         DISCLOSURE_PACKAGE_FORMAT => verify_disclosure_package(
             &package.files,
@@ -2041,6 +2094,7 @@ fn cmd_verify(args: VerifyCommandInput<'_>) -> Result<()> {
             args.check_receipt,
             timestamp_trust_policy.as_ref(),
             transparency_trust_policy.as_ref(),
+            map_receipt_live_check_mode(args.receipt_live_check),
         )?,
         other => bail!("unsupported package format {other}"),
     };
@@ -2107,6 +2161,7 @@ fn verify_full_package(
     check_receipt: bool,
     timestamp_trust_policy: Option<&TimestampTrustPolicy>,
     transparency_trust_policy: Option<&TransparencyTrustPolicy>,
+    receipt_live_check: ReceiptLiveCheckMode,
 ) -> Result<VerifyReport> {
     let bundle = parse_bundle_file(files)?;
     validate_bundle_integrity_fields(&bundle)?;
@@ -2145,12 +2200,23 @@ fn verify_full_package(
         }
     };
 
-    let timestamp = evaluate_timestamp_check(&bundle, check_timestamp, timestamp_trust_policy);
+    let timestamp = build_timestamp_check_report(
+        &bundle.integrity.bundle_root,
+        bundle.timestamp.as_ref(),
+        check_timestamp,
+        timestamp_trust_policy,
+    );
     if check_timestamp && timestamp.state != OptionalCheckState::Valid {
         failures.push(timestamp.message.clone());
     }
 
-    let receipt = evaluate_receipt_check(&bundle, check_receipt, transparency_trust_policy);
+    let receipt = build_receipt_check_report(
+        &bundle.integrity.bundle_root,
+        bundle.receipt.as_ref(),
+        check_receipt,
+        transparency_trust_policy,
+        receipt_live_check,
+    );
     if check_receipt && receipt.state != OptionalCheckState::Valid {
         failures.push(receipt.message.clone());
     }
@@ -2183,6 +2249,7 @@ fn verify_disclosure_package(
     check_receipt: bool,
     timestamp_trust_policy: Option<&TimestampTrustPolicy>,
     transparency_trust_policy: Option<&TransparencyTrustPolicy>,
+    receipt_live_check: ReceiptLiveCheckMode,
 ) -> Result<VerifyReport> {
     let bundle = parse_redacted_bundle_file(files)?;
     let manifest_ok = verify_manifest(files)?;
@@ -2205,7 +2272,7 @@ fn verify_disclosure_package(
         }
     };
 
-    let timestamp = evaluate_timestamp_check_from_parts(
+    let timestamp = build_timestamp_check_report(
         &bundle.integrity.bundle_root,
         bundle.timestamp.as_ref(),
         check_timestamp,
@@ -2215,11 +2282,12 @@ fn verify_disclosure_package(
         failures.push(timestamp.message.clone());
     }
 
-    let receipt = evaluate_receipt_check_from_parts(
+    let receipt = build_receipt_check_report(
         &bundle.integrity.bundle_root,
         bundle.receipt.as_ref(),
         check_receipt,
         transparency_trust_policy,
+        receipt_live_check,
     );
     if check_receipt && receipt.state != OptionalCheckState::Valid {
         failures.push(receipt.message.clone());
@@ -3657,6 +3725,21 @@ fn map_timestamp_assurance_profile(assurance: TimestampAssuranceArg) -> Timestam
     }
 }
 
+fn map_scitt_format(format: ScittFormatArg) -> ScittFormat {
+    match format {
+        ScittFormatArg::LegacyJson => ScittFormat::LegacyJson,
+        ScittFormatArg::CoseCcf => ScittFormat::CoseCcf,
+    }
+}
+
+fn map_receipt_live_check_mode(mode: ReceiptLiveCheckArg) -> ReceiptLiveCheckMode {
+    match mode {
+        ReceiptLiveCheckArg::Off => ReceiptLiveCheckMode::Off,
+        ReceiptLiveCheckArg::BestEffort => ReceiptLiveCheckMode::BestEffort,
+        ReceiptLiveCheckArg::Required => ReceiptLiveCheckMode::Required,
+    }
+}
+
 fn load_transparency_trust_policy(
     public_key_path: Option<&Path>,
     timestamp_policy: Option<&TimestampTrustPolicy>,
@@ -3735,6 +3818,57 @@ fn evaluate_timestamp_check_from_parts(
             state: OptionalCheckState::Invalid,
             message: format!("RFC 3161 timestamp verification failed: {err}"),
         },
+    }
+}
+
+fn build_timestamp_check_report(
+    bundle_root: &str,
+    timestamp: Option<&TimestampToken>,
+    requested: bool,
+    trust_policy: Option<&TimestampTrustPolicy>,
+) -> TimestampCheckReport {
+    if !requested {
+        let report =
+            evaluate_timestamp_check_from_parts(bundle_root, timestamp, requested, trust_policy);
+        return TimestampCheckReport {
+            state: report.state,
+            message: report.message,
+            assessment: None,
+        };
+    }
+
+    let Some(timestamp) = timestamp else {
+        let report =
+            evaluate_timestamp_check_from_parts(bundle_root, None, requested, trust_policy);
+        return TimestampCheckReport {
+            state: report.state,
+            message: report.message,
+            assessment: None,
+        };
+    };
+
+    let verification = match trust_policy {
+        Some(policy) if !policy.is_empty() => verify_timestamp_with_policy(timestamp, bundle_root, policy),
+        _ => verify_timestamp(timestamp, bundle_root),
+    };
+
+    match verification {
+        Ok(verification) => {
+            let assessment = assess_timestamp_verification(&verification, trust_policy);
+            TimestampCheckReport {
+                state: OptionalCheckState::Valid,
+                message: format!("{} {}", assessment.headline, assessment.summary),
+                assessment: Some(assessment),
+            }
+        }
+        Err(err) => {
+            let assessment = assess_timestamp_error(&err, trust_policy);
+            TimestampCheckReport {
+                state: OptionalCheckState::Invalid,
+                message: format!("RFC 3161 timestamp verification failed: {}", assessment.summary),
+                assessment: Some(assessment),
+            }
+        }
     }
 }
 
@@ -3820,6 +3954,79 @@ fn evaluate_receipt_check_from_parts(
             state: OptionalCheckState::Invalid,
             message: format!("transparency receipt verification failed: {err}"),
         },
+    }
+}
+
+fn build_receipt_check_report(
+    bundle_root: &str,
+    receipt: Option<&TransparencyReceipt>,
+    requested: bool,
+    trust_policy: Option<&TransparencyTrustPolicy>,
+    live_check_mode: ReceiptLiveCheckMode,
+) -> ReceiptCheckReport {
+    if !requested {
+        let report =
+            evaluate_receipt_check_from_parts(bundle_root, receipt, requested, trust_policy);
+        return ReceiptCheckReport {
+            state: report.state,
+            message: report.message,
+            assessment: None,
+        };
+    }
+
+    let Some(receipt) = receipt else {
+        let report =
+            evaluate_receipt_check_from_parts(bundle_root, None, requested, trust_policy);
+        return ReceiptCheckReport {
+            state: report.state,
+            message: report.message,
+            assessment: None,
+        };
+    };
+
+    let verification = match trust_policy {
+        Some(policy) if !policy.is_empty() && live_check_mode == ReceiptLiveCheckMode::Off => {
+            verify_receipt_with_policy(receipt, bundle_root, policy)
+        }
+        Some(policy) if !policy.is_empty() => {
+            verify_receipt_with_policy_and_live_check(receipt, bundle_root, policy, live_check_mode)
+        }
+        _ if live_check_mode == ReceiptLiveCheckMode::Off => verify_receipt(receipt, bundle_root),
+        _ => verify_receipt_with_live_check(receipt, bundle_root, live_check_mode),
+    };
+
+    match verification {
+        Ok(verification) => {
+            let assessment = assess_receipt_verification(&verification, trust_policy);
+            ReceiptCheckReport {
+                state: OptionalCheckState::Valid,
+                message: format!("{} {}", assessment.headline, assessment.summary),
+                assessment: Some(assessment),
+            }
+        }
+        Err(err) => {
+            let assessment = assess_receipt_error(
+                &err,
+                trust_policy,
+                (live_check_mode != ReceiptLiveCheckMode::Off).then_some(
+                    proof_layer_core::ReceiptLiveVerification {
+                        mode: live_check_mode,
+                        state: proof_layer_core::CheckState::Fail,
+                        checked_at: Utc::now().to_rfc3339(),
+                        summary: err.to_string(),
+                        current_tree_size: None,
+                        current_root_hash: None,
+                        entry_retrieved: None,
+                        consistency_verified: None,
+                    },
+                ),
+            );
+            ReceiptCheckReport {
+                state: OptionalCheckState::Invalid,
+                message: format!("transparency receipt verification failed: {}", assessment.summary),
+                assessment: Some(assessment),
+            }
+        }
     }
 }
 
@@ -4099,17 +4306,66 @@ fn print_human_verify_report(report: &VerifyReport) {
         optional_check_marker(&report.timestamp.state),
         report.timestamp.message
     );
+    if let Some(assessment) = report.timestamp.assessment.as_ref() {
+        println!("    Verdict: {}", assessment.headline);
+        println!("    Summary: {}", assessment.summary);
+        print_verification_checks(&assessment.checks);
+    }
     println!(
         "[{}] Transparency receipt — {}",
         optional_check_marker(&report.receipt.state),
         report.receipt.message
     );
+    if let Some(assessment) = report.receipt.assessment.as_ref() {
+        println!("    Verdict: {}", assessment.headline);
+        println!("    Summary: {}", assessment.summary);
+        print_verification_checks(&assessment.checks);
+        if let Some(live_check) = assessment.live_check.as_ref() {
+            println!(
+                "    Live check: {} ({})",
+                live_check.summary,
+                check_state_label(live_check.state)
+            );
+        }
+    }
     println!(
         "Assurance level: {}",
         assurance_level_label(report.assurance_level)
     );
     println!();
     println!("Verification result: {}", report.message);
+}
+
+fn print_verification_checks(checks: &[proof_layer_core::VerificationCheck]) {
+    for check in checks {
+        println!(
+            "      [{}] {}{}",
+            check_state_marker(check.state),
+            check.label,
+            check.detail
+                .as_deref()
+                .map(|detail| format!(" — {detail}"))
+                .unwrap_or_default()
+        );
+    }
+}
+
+fn check_state_marker(state: proof_layer_core::CheckState) -> &'static str {
+    match state {
+        proof_layer_core::CheckState::Pass => "✓",
+        proof_layer_core::CheckState::Warn => "!",
+        proof_layer_core::CheckState::Fail => "✗",
+        proof_layer_core::CheckState::NotRun => "-",
+    }
+}
+
+fn check_state_label(state: proof_layer_core::CheckState) -> &'static str {
+    match state {
+        proof_layer_core::CheckState::Pass => "pass",
+        proof_layer_core::CheckState::Warn => "warn",
+        proof_layer_core::CheckState::Fail => "fail",
+        proof_layer_core::CheckState::NotRun => "not run",
+    }
 }
 
 fn render_completeness_report(report: &CompletenessReport, format: OutputFormat) -> Result<String> {
@@ -6301,7 +6557,15 @@ mod tests {
         let signing_key = SigningKey::from_bytes(&[7_u8; 32]);
         let verifying_key = signing_key.verifying_key();
         let report =
-            verify_disclosure_package(&package.files, &verifying_key, false, false, None, None)
+            verify_disclosure_package(
+                &package.files,
+                &verifying_key,
+                false,
+                false,
+                None,
+                None,
+                ReceiptLiveCheckMode::Off,
+            )
                 .unwrap();
         assert_eq!(report.package_kind, "disclosure");
         assert_eq!(report.disclosure_proof_ok, Some(true));
@@ -6486,7 +6750,15 @@ mod tests {
         let signing_key = SigningKey::from_bytes(&[7_u8; 32]);
         let verifying_key = signing_key.verifying_key();
         let report =
-            verify_disclosure_package(&package.files, &verifying_key, false, false, None, None)
+            verify_disclosure_package(
+                &package.files,
+                &verifying_key,
+                false,
+                false,
+                None,
+                None,
+                ReceiptLiveCheckMode::Off,
+            )
                 .unwrap();
         assert_eq!(report.package_kind, "disclosure");
         assert!(report.manifest_ok);

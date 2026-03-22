@@ -1,0 +1,170 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://proof-layer.dev/schemas/verification_assessment.schema.json",
+  "title": "Verification Assessment",
+  "description": "Shared plain-English trust-reporting objects returned by timestamp and receipt verification.",
+  "$defs": {
+    "trustLevel": {
+      "type": "string",
+      "enum": [
+        "structural",
+        "trusted",
+        "qualified"
+      ]
+    },
+    "checkState": {
+      "type": "string",
+      "enum": [
+        "pass",
+        "warn",
+        "fail",
+        "not_run"
+      ]
+    },
+    "verificationCheck": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "label",
+        "state"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "label": {
+          "type": "string",
+          "minLength": 1
+        },
+        "state": {
+          "$ref": "#/$defs/checkState"
+        },
+        "detail": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "receiptLiveCheckMode": {
+      "type": "string",
+      "enum": [
+        "off",
+        "best_effort",
+        "required"
+      ]
+    },
+    "receiptLiveVerification": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mode",
+        "state",
+        "checked_at",
+        "summary"
+      ],
+      "properties": {
+        "mode": {
+          "$ref": "#/$defs/receiptLiveCheckMode"
+        },
+        "state": {
+          "$ref": "#/$defs/checkState"
+        },
+        "checked_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "summary": {
+          "type": "string",
+          "minLength": 1
+        },
+        "current_tree_size": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "current_root_hash": {
+          "type": "string",
+          "minLength": 1
+        },
+        "entry_retrieved": {
+          "type": "boolean"
+        },
+        "consistency_verified": {
+          "type": "boolean"
+        }
+      }
+    },
+    "timestampAssessment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "level",
+        "headline",
+        "summary",
+        "next_step",
+        "checks"
+      ],
+      "properties": {
+        "level": {
+          "$ref": "#/$defs/trustLevel"
+        },
+        "headline": {
+          "type": "string",
+          "minLength": 1
+        },
+        "summary": {
+          "type": "string",
+          "minLength": 1
+        },
+        "next_step": {
+          "type": "string",
+          "minLength": 1
+        },
+        "checks": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/verificationCheck"
+          }
+        }
+      }
+    },
+    "receiptAssessment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "level",
+        "headline",
+        "summary",
+        "next_step",
+        "checks"
+      ],
+      "properties": {
+        "level": {
+          "$ref": "#/$defs/trustLevel"
+        },
+        "headline": {
+          "type": "string",
+          "minLength": 1
+        },
+        "summary": {
+          "type": "string",
+          "minLength": 1
+        },
+        "next_step": {
+          "type": "string",
+          "minLength": 1
+        },
+        "checks": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/verificationCheck"
+          }
+        },
+        "live_check": {
+          "$ref": "#/$defs/receiptLiveVerification"
+        }
+      }
+    }
+  }
+}

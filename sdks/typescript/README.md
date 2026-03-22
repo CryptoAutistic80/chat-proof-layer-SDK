@@ -115,6 +115,15 @@ const gpaiReadiness = await proofLayer.evaluateCompleteness({
   profile: "gpai_provider_v1"
 });
 
+const timestampCheck = await proofClient.verifyTimestamp({
+  bundleId: "BUNDLE_ID"
+});
+
+const receiptCheck = await proofClient.verifyReceipt({
+  bundleId: "BUNDLE_ID",
+  liveCheckMode: "best_effort"
+});
+
 const summary = verifyBundle({
   bundle: locallySealed.bundle,
   artefacts: [{ name: "prompt.json", data: Buffer.from("{}") }],
@@ -124,6 +133,8 @@ const summary = verifyBundle({
 console.log(summary.artefact_count);
 console.log(readiness.status);
 console.log(gpaiReadiness.status);
+console.log(timestampCheck.assessment.headline, timestampCheck.assessment.level);
+console.log(receiptCheck.assessment.summary, receiptCheck.assessment.live_check?.state);
 console.log(proofClient.baseUrl);
 
 const redacted = await proofLayer.disclose({
@@ -232,6 +243,10 @@ console.log(vaultReadiness.status);
 
 Vault pack responses preserve the legacy per-bundle `completeness_*` fields and add `pack_completeness_*` when a pack has synthesized pack-level readiness support.
 Use `selectPackReadiness(packSummaryOrManifest)` when you want one helper that prefers the true pack-scoped signal (`source === "pack_scoped"`) and falls back to the legacy bundle aggregate signal (`source === "bundle_aggregate"`).
+
+Vault verification responses now also include a plain-English `assessment` block.
+Use `verifyTimestamp(...)` and `verifyReceipt(...)` when you want both the low-level crypto result and a short human-readable trust summary.
+For receipts, `liveCheckMode: "best_effort"` adds an opt-in live Rekor freshness check without turning temporary network problems into a hard failure.
 
 For `annex_iv`, the pack-scoped pass count is currently `5` because `annex_iv_governance_v1` evaluates five rule families even though the pack curates eight governance evidence families.
 

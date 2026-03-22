@@ -32,6 +32,7 @@ ulid.workspace = true
 
 [dev-dependencies]
 bcder.workspace = true
+ciborium.workspace = true
 cryptographic-message-syntax.workspace = true
 p256.workspace = true
 sha2.workspace = true

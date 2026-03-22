@@ -46,6 +46,53 @@ function integrityStatus(run) {
   };
 }
 
+function toneForTrustLevel(level) {
+  if (level === "trusted" || level === "qualified") {
+    return "good";
+  }
+  if (level === "structural") {
+    return "accent";
+  }
+  return "warn";
+}
+
+function timestampAssessmentStatus(verification) {
+  const assessment = verification?.assessment;
+  if (!assessment) {
+    return null;
+  }
+  return {
+    tone: verification?.valid ? toneForTrustLevel(assessment.level) : "warn",
+    title: assessment.headline,
+    summary: assessment.summary,
+  };
+}
+
+function receiptAssessmentTone(assessment, valid) {
+  if (!valid) {
+    return "warn";
+  }
+  if (assessment?.live_check?.state === "fail") {
+    return "warn";
+  }
+  if (assessment?.live_check?.state === "warn") {
+    return "accent";
+  }
+  return toneForTrustLevel(assessment?.level);
+}
+
+function transparencyAssessmentStatus(verification) {
+  const assessment = verification?.assessment;
+  if (!assessment) {
+    return null;
+  }
+  return {
+    tone: receiptAssessmentTone(assessment, verification?.valid),
+    title: assessment.headline,
+    summary: assessment.summary,
+  };
+}
+
 function timestampStatus(run, vaultConfig) {
   if (!vaultConfig?.timestamp?.enabled) {
     return {
@@ -53,6 +100,10 @@ function timestampStatus(run, vaultConfig) {
       title: "Timestamp not configured",
       summary: "Not configured on this vault.",
     };
+  }
+  const assessed = timestampAssessmentStatus(run?.timestampVerification);
+  if (assessed) {
+    return assessed;
   }
   if (run?.timestampVerification?.valid) {
     return {
@@ -82,6 +133,10 @@ function transparencyStatus(run, vaultConfig) {
       title: "Transparency not configured",
       summary: "Not configured on this vault.",
     };
+  }
+  const assessed = transparencyAssessmentStatus(run?.receiptVerification);
+  if (assessed) {
+    return assessed;
   }
   if (run?.receiptVerification?.valid) {
     return {

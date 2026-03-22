@@ -1,3 +1,13 @@
+## March 22, 2026
+
+Completed:
+
+- Added a shared assurance-reporting layer in Rust core with plain-English trust levels, stable check IDs, and additive `assessment` payloads for timestamp and receipt verification.
+- Updated vault `POST /v1/verify/timestamp` and `POST /v1/verify/receipt` to return those assessments, plus additive receipt `live_check_mode` support with `off`, `best_effort`, and `required`.
+- Added opt-in Rekor live-log consistency and freshness verification against the current tree head and entry body.
+- Upgraded the SCITT path so new receipts default to the newer COSE/CCF-style body format while keeping legacy JSON receipt verification compatibility.
+- Extended the CLI, TypeScript SDK, Python SDK, docs, demo wording, and schema set to surface the new trust/reporting model consistently.
+
 ## March 6, 2026
 
 Completed:
@@ -358,10 +368,10 @@ Still outstanding from `plan.md`:
 - SQLite pilots now have matched backup export, optional backup encryption, scheduled local backup rotation, and offline restore/import flows, but there is still no live in-place restore endpoint or remote backup targets.
 - TypeScript and Python now both have native FFI bridges, local sealing paths, higher-level `ProofLayer` facades, a local artifact build path for npm tarballs and platform-tagged wheels, and CI-backed multi-platform GitHub artifact builds, but there is still no automated publish step to npm or PyPI.
 - TypeScript and Python SDKs now expose local redacted-bundle helpers (`disclose` / `verifyRedactedBundle` in TypeScript, `disclose` / `verify_redacted_bundle` in Python), including top-level field redaction for local v3 bundles and nested JSON-pointer path redaction for local v4 bundles, plus vault pack helpers for `bundle_format = "full" | "disclosure"` with `disclosure_policy` or inline `disclosure_template`, vault disclosure-config read/update helpers, and disclosure-preview helpers.
-- Catalog breadth is now strong, and the first Annex IV minimum-field contract is machine-assessed; the remaining gap is broader completeness-profile coverage, alongside the harder later-phase items like deeper trust policy work, fuller SCITT interoperability, alternative storage backends, and automated npm/PyPI/prebuilt release publishing hardening.
+- Catalog breadth is now strong, and the first Annex IV minimum-field contract is machine-assessed; the remaining gap is broader completeness-profile coverage, alongside harder later-phase items like deeper trust-list/evidence-preservation work, alternative storage backends, and automated npm/PyPI/prebuilt release publishing hardening.
 - RFC 3161 verification now supports signer-chain validation against configured PEM trust anchors, optional `TSTInfo.policy` OID enforcement, CRL-based revocation checking, optional live OCSP checks, qualified TSA signer allowlist matching, and operational `qualified` profile gating, but full eIDAS-qualified trust-list evaluation and archival OCSP evidence handling are still outstanding.
-- Rekor verification now supports SET signature validation and `logID` binding against a configured PEM log public key; live-log consistency checks beyond the stored inclusion proof remain future work.
-- The current SCITT path is intentionally bounded: it verifies a draft-aligned canonical JSON statement/receipt contract, not a full interoperable COSE/CCF profile.
+- Rekor verification now supports SET signature validation, `logID` binding against a configured PEM log public key, and opt-in live-log consistency / freshness checks; broader production hardening and provider expansion remain future work.
+- The SCITT path now writes a COSE/CCF-style receipt body by default and keeps legacy JSON verification compatibility, but broader interop and trust-list work are still future work.
 
 ## March 21, 2026
 

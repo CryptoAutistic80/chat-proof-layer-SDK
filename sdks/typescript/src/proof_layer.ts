@@ -76,6 +76,10 @@ import type {
   RedactedBundle,
   RegulatorCorrespondenceRequestOptions,
   RegistrationRequestOptions,
+  VerifyReceiptRequest,
+  VerifyReceiptResponse,
+  VerifyTimestampRequest,
+  VerifyTimestampResponse,
   ReportingDeadlineRequestOptions,
   RetrievalRequestOptions,
   RiskAssessmentRequestOptions,
@@ -175,6 +179,36 @@ export class ProofLayer implements BundleCreateClient {
       return (this.client as LocalProofLayerClient | ProofLayerClient).verifyBundle(request);
     }
     throw new Error("underlying client does not support verifyBundle");
+  }
+
+  async verifyTimestamp(
+    request: VerifyTimestampRequest
+  ): Promise<VerifyTimestampResponse> {
+    if (
+      "verifyTimestamp" in this.client &&
+      typeof (this.client as LocalProofLayerClient | ProofLayerClient).verifyTimestamp ===
+        "function"
+    ) {
+      return (
+        this.client as LocalProofLayerClient | ProofLayerClient
+      ).verifyTimestamp(request);
+    }
+    throw new Error("underlying client does not support verifyTimestamp");
+  }
+
+  async verifyReceipt(
+    request: VerifyReceiptRequest
+  ): Promise<VerifyReceiptResponse> {
+    if (
+      "verifyReceipt" in this.client &&
+      typeof (this.client as LocalProofLayerClient | ProofLayerClient).verifyReceipt ===
+        "function"
+    ) {
+      return (
+        this.client as LocalProofLayerClient | ProofLayerClient
+      ).verifyReceipt(request);
+    }
+    throw new Error("underlying client does not support verifyReceipt");
   }
 
   async evaluateCompleteness(

@@ -36,7 +36,7 @@ retention_count = 7
 # key_id = "backup-key-01"
 
 [timestamp]
-enabled = false
+enabled = true
 provider = "rfc3161"
 url = "http://timestamp.digicert.com"
 # assurance = "qualified"
@@ -47,9 +47,9 @@ url = "http://timestamp.digicert.com"
 # policy_oids = ["1.2.3.4"]
 
 [transparency]
-enabled = false
-provider = "none"
-# rekor_url = "https://rekor.sigstore.dev"
+enabled = true
+provider = "rekor"
+rekor_url = "https://rekor.sigstore.dev"
 # url = "https://scitt.example.test/entries"
 # log_public_key_path = "./trust/rekor.pub"
 

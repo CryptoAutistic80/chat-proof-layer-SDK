@@ -15,6 +15,10 @@ import type {
   LocalCreateBundleRequest,
   RedactBundleRequest,
   RedactedBundle,
+  VerifyReceiptRequest,
+  VerifyReceiptResponse,
+  VerifyTimestampRequest,
+  VerifyTimestampResponse,
   VerifyBundleRequest,
   VerifyBundleSummary,
   VerifyRedactedBundleRequest,
@@ -82,6 +86,18 @@ export class LocalProofLayerClient {
     publicKeyPem
   }: VerifyBundleRequest): Promise<VerifyBundleSummary> {
     return verifyBundle({ bundle, artefacts, publicKeyPem });
+  }
+
+  async verifyTimestamp(
+    _request: VerifyTimestampRequest
+  ): Promise<VerifyTimestampResponse> {
+    throw new Error("verifyTimestamp is not supported for local mode");
+  }
+
+  async verifyReceipt(
+    _request: VerifyReceiptRequest
+  ): Promise<VerifyReceiptResponse> {
+    throw new Error("verifyReceipt is not supported for local mode");
   }
 
   async discloseBundle(request: RedactBundleRequest): Promise<RedactedBundle> {

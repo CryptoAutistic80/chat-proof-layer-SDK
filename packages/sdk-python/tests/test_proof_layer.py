@@ -298,6 +298,125 @@ class TestProofLayer(unittest.TestCase):
         self.assertEqual(captured["path"], "/v1/config/disclosure")
         self.assertEqual(result["policies"][0]["name"], "regulator_minimum")
 
+    def test_vault_mode_can_verify_timestamp(self):
+        captured = {}
+
+        def request_fn(method, path, headers, body):
+            captured["method"] = method
+            captured["path"] = path
+            captured["headers"] = headers
+            captured["body"] = body
+            return {
+                "valid": True,
+                "message": "VALID: Timestamp trust confirmed",
+                "verification": {
+                    "kind": "rfc3161",
+                    "provider": "test-tsa",
+                    "generated_at": "2026-03-22T12:00:00Z",
+                    "digest_algorithm": "sha256",
+                    "message_imprint": "sha256:" + "a" * 64,
+                    "policy_oid": "1.2.3.4",
+                    "trusted": True,
+                    "chain_verified": True,
+                    "signer_count": 1,
+                    "certificate_count": 2,
+                },
+                "assessment": {
+                    "level": "trusted",
+                    "headline": "Timestamp trust confirmed",
+                    "summary": "The timestamp token matches this proof and chains to a trusted signer.",
+                    "next_step": "Keep the trust files with the proof so another person can repeat the same check.",
+                    "checks": [],
+                },
+            }
+
+        proof_layer = ProofLayer(
+            vault_url="http://127.0.0.1:8080",
+            request_fn=request_fn,
+        )
+
+        result = proof_layer.verify_timestamp(bundle_id="B1")
+
+        self.assertEqual(captured["method"], "POST")
+        self.assertEqual(captured["path"], "/v1/verify/timestamp")
+        self.assertEqual(
+            json.loads(captured["body"].decode("utf-8")),
+            {"bundle_id": "B1"},
+        )
+        self.assertEqual(result["assessment"]["headline"], "Timestamp trust confirmed")
+
+    def test_vault_mode_can_verify_receipt(self):
+        captured = {}
+
+        def request_fn(method, path, headers, body):
+            captured["method"] = method
+            captured["path"] = path
+            captured["headers"] = headers
+            captured["body"] = body
+            return {
+                "valid": True,
+                "message": "VALID: Transparency proof confirmed",
+                "verification": {
+                    "kind": "rekor_rfc3161",
+                    "provider": "rekor",
+                    "log_url": "https://rekor.example.test",
+                    "entry_uuid": "a" * 64,
+                    "leaf_hash": "a" * 64,
+                    "log_id": "log-1",
+                    "log_index": 9,
+                    "integrated_time": "2026-03-22T12:00:00Z",
+                    "tree_size": 10,
+                    "root_hash": "b" * 64,
+                    "inclusion_proof_hashes": 2,
+                    "inclusion_proof_verified": True,
+                    "signed_entry_timestamp_present": True,
+                    "signed_entry_timestamp_verified": True,
+                    "log_id_verified": True,
+                    "trusted": True,
+                    "timestamp_generated_at": "2026-03-22T11:59:00Z",
+                    "live_verification": {
+                        "mode": "best_effort",
+                        "state": "pass",
+                        "checked_at": "2026-03-22T12:01:00Z",
+                        "summary": "The live log still includes this entry.",
+                    },
+                },
+                "assessment": {
+                    "level": "trusted",
+                    "headline": "Transparency proof confirmed",
+                    "summary": "The receipt matches this proof and the log or service key was trusted. The log was also checked live.",
+                    "next_step": "Keep the trusted log key with the proof so another person can repeat the same check.",
+                    "checks": [],
+                    "live_check": {
+                        "mode": "best_effort",
+                        "state": "pass",
+                        "checked_at": "2026-03-22T12:01:00Z",
+                        "summary": "The live log still includes this entry.",
+                    },
+                },
+            }
+
+        proof_layer = ProofLayer(
+            vault_url="http://127.0.0.1:8080",
+            request_fn=request_fn,
+        )
+
+        result = proof_layer.verify_receipt(
+            bundle_id="B1",
+            live_check_mode="best_effort",
+        )
+
+        self.assertEqual(captured["method"], "POST")
+        self.assertEqual(captured["path"], "/v1/verify/receipt")
+        self.assertEqual(
+            json.loads(captured["body"].decode("utf-8")),
+            {
+                "bundle_id": "B1",
+                "live_check_mode": "best_effort",
+            },
+        )
+        self.assertEqual(result["assessment"]["live_check"]["state"], "pass")
+
     def test_vault_mode_can_evaluate_completeness(self):
         captured = {}
 

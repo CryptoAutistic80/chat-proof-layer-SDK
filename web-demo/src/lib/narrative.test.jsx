@@ -27,4 +27,58 @@ describe("buildRunNarrativeSummary", () => {
       "required GPAI provider area(s)",
     );
   });
+
+  test("uses timestamp and transparency assessment wording when available", () => {
+    const summary = buildRunNarrativeSummary(
+      {
+        presetKey: "investor_summary",
+        timestampVerification: {
+          valid: true,
+          assessment: {
+            level: "qualified",
+            headline: "Qualified timestamp trust confirmed",
+            summary:
+              "The timestamp token matches this proof and passed the stronger trust checks you asked for.",
+            next_step:
+              "Keep the trust files with the proof so another person can repeat the same check.",
+            checks: [],
+          },
+        },
+        receiptVerification: {
+          valid: true,
+          assessment: {
+            level: "structural",
+            headline: "Transparency receipt is valid",
+            summary:
+              "The stored receipt matches this proof, but stronger trust checks were not proven. The log was also checked live.",
+            next_step:
+              "Add the trusted log key if you want to show who issued the receipt.",
+            checks: [],
+            live_check: {
+              mode: "best_effort",
+              state: "pass",
+              checked_at: "2026-03-22T12:00:00Z",
+              summary: "The live log still includes this entry.",
+            },
+          },
+        },
+      },
+      {
+        timestamp: { enabled: true },
+        transparency: { enabled: true },
+      },
+    );
+
+    expect(summary.timestampStatus.title).toBe(
+      "Qualified timestamp trust confirmed",
+    );
+    expect(summary.timestampStatus.tone).toBe("good");
+    expect(summary.transparencyStatus.title).toBe(
+      "Transparency receipt is valid",
+    );
+    expect(summary.transparencyStatus.tone).toBe("accent");
+    expect(summary.transparencyStatus.summary).toContain(
+      "checked live",
+    );
+  });
 });

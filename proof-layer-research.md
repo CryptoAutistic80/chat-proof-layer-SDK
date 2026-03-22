@@ -2,7 +2,7 @@
 
 ## Implementation status note
 
-As of March 21, 2026, the repo now has a concrete Annex IV governance acceptance slice on top of the broader platform: checked governance fixtures, SDK builder guidance, vault `annex_iv` curation hardening, a narrower `annex_iv_redacted` disclosure default, end-to-end TypeScript/Python examples for a provider-side employment-screening scenario, and an advisory `annex_iv_governance_v1` readiness/completeness contract across Rust core, CLI, vault, SDKs, and `web-demo`. The main remaining work is now broader profile coverage and release hardening rather than Annex IV minimum-field enforcement or inventing another subsystem.
+As of March 22, 2026, the repo now has a concrete Annex IV governance acceptance slice on top of the broader platform, plus the next trust-and-transparency hardening slice: checked governance fixtures, SDK builder guidance, vault `annex_iv` curation hardening, a narrower `annex_iv_redacted` disclosure default, end-to-end TypeScript/Python examples for a provider-side employment-screening scenario, an advisory `annex_iv_governance_v1` readiness/completeness contract across Rust core, CLI, vault, SDKs, and `web-demo`, a plain-English trust-reporting layer for timestamp and receipt verification, opt-in Rekor live-log confirmation, and a newer COSE/CCF-style SCITT receipt format with legacy-read compatibility. The main remaining work is now broader profile coverage, deeper trust-list/evidence-preservation work, and release hardening rather than Annex IV minimum-field enforcement or inventing another subsystem.
 
 ## Scope and design principles
 
@@ -128,7 +128,7 @@ RFC 3161 provides the interoperable baseline for timestamping bundle hashes, whi
 
 ### Transparency anchoring
 
-Transparency anchoring remains a useful optional layer to resist repudiation at ecosystem scale. The clean architecture is a pluggable receipt-provider interface in the Rust core so customers can choose signature plus timestamp only, Sigstore-style log anchoring, or SCITT-compatible services. This should remain optional rather than a prerequisite for basic adoption.
+Transparency anchoring remains a useful optional layer to resist repudiation at ecosystem scale. The clean architecture is a pluggable receipt-provider interface in the Rust core so customers can choose signature plus timestamp only, Sigstore-style log anchoring, or SCITT-compatible services. This should remain optional rather than a prerequisite for basic adoption. In practice, the best operator model is offline verification by default, with optional live Rekor freshness checks when a team wants a stronger current-state signal, and a SCITT path that uses an outside-friendlier COSE/CCF-style receipt format while keeping older receipts readable.
 
 ### Selective disclosure and confidentiality
 

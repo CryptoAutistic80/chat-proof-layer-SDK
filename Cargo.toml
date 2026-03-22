@@ -20,9 +20,11 @@ axum = "0.8.8"
 axum-server = { version = "0.8.0", features = ["tls-rustls"] }
 base64ct = { version = "1.8.0", features = ["alloc"] }
 bcder = "0.7.6"
+ciborium = "0.2.2"
 chacha20poly1305 = "0.10.1"
 chrono = { version = "0.4.42", features = ["clock", "serde"] }
 clap = { version = "4.5.60", features = ["derive"] }
+coset = "0.4.2"
 cryptographic-message-syntax = "0.28.0"
 ed25519-dalek = { version = "2.2.0", features = ["rand_core"] }
 flate2 = "1.1.9"
@@ -40,6 +42,8 @@ serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.145"
 serde_json_canonicalizer = "0.3.2"
 sha2 = "0.10.9"
+sigstore-merkle = "0.6.4"
+sigstore-types = "0.6.4"
 sqlx = { version = "0.8.6", features = ["runtime-tokio-rustls", "sqlite", "macros"] }
 thiserror = "2.0.17"
 tar = "0.4.44"

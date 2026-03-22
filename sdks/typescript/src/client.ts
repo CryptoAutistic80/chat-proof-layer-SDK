@@ -18,6 +18,10 @@ import type {
   JsonObject,
   PackManifest,
   PackSummaryResponse,
+  VerifyReceiptRequest,
+  VerifyReceiptResponse,
+  VerifyTimestampRequest,
+  VerifyTimestampResponse,
   VaultConfigResponse,
   VerifyBundleRequest,
   VerifyBundleSummary,
@@ -93,6 +97,52 @@ export class ProofLayerClient {
       public_key_pem: publicKeyPem
     };
     return this.#post("/v1/verify", payload);
+  }
+
+  async verifyTimestamp({
+    bundleId,
+    bundleRoot,
+    timestamp
+  }: VerifyTimestampRequest): Promise<VerifyTimestampResponse> {
+    const selectionCount =
+      Number(Boolean(bundleId)) + Number(Boolean(bundleRoot || timestamp));
+    if (selectionCount !== 1) {
+      throw new Error("provide exactly one of bundleId or bundleRoot/timestamp");
+    }
+    if ((bundleRoot && !timestamp) || (!bundleRoot && timestamp)) {
+      throw new Error("bundleRoot and timestamp must be provided together");
+    }
+    const payload = bundleId
+      ? { bundle_id: bundleId }
+      : { bundle_root: bundleRoot, timestamp };
+    return this.#post("/v1/verify/timestamp", payload);
+  }
+
+  async verifyReceipt({
+    bundleId,
+    bundleRoot,
+    receipt,
+    liveCheckMode
+  }: VerifyReceiptRequest): Promise<VerifyReceiptResponse> {
+    const selectionCount =
+      Number(Boolean(bundleId)) + Number(Boolean(bundleRoot || receipt));
+    if (selectionCount !== 1) {
+      throw new Error("provide exactly one of bundleId or bundleRoot/receipt");
+    }
+    if ((bundleRoot && !receipt) || (!bundleRoot && receipt)) {
+      throw new Error("bundleRoot and receipt must be provided together");
+    }
+    const payload = bundleId
+      ? {
+          bundle_id: bundleId,
+          ...(liveCheckMode ? { live_check_mode: liveCheckMode } : {})
+        }
+      : {
+          bundle_root: bundleRoot,
+          receipt,
+          ...(liveCheckMode ? { live_check_mode: liveCheckMode } : {})
+        };
+    return this.#post("/v1/verify/receipt", payload);
   }
 
   async evaluateCompleteness({

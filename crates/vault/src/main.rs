@@ -14,18 +14,23 @@ use chrono::Utc;
 use ed25519_dalek::SigningKey;
 use flate2::{Compression, read::GzDecoder, write::GzEncoder};
 use proof_layer_core::{
-    ArtefactInput, BuildBundleError, CaptureEvent, CaptureInput, CompletenessProfile,
-    CompletenessReport, CompletenessStatus, EvidenceContext, EvidenceItem, Integrity, Policy,
-    ProofBundle, ReceiptVerification, RedactedBundle, RekorTransparencyProvider,
-    Rfc3161HttpTimestampProvider, ScittTransparencyProvider, TimestampAssuranceProfile,
-    TimestampToken, TimestampTrustPolicy, TimestampVerification, TransparencyReceipt,
-    TransparencyTrustPolicy, VAULT_BACKUP_ENCRYPTION_ALGORITHM,
+    ArtefactInput, BuildBundleError, CaptureEvent, CaptureInput, CheckState,
+    CompletenessProfile, CompletenessReport, CompletenessStatus, EvidenceContext, EvidenceItem,
+    Integrity, Policy, ProofBundle, ReceiptAssessment, ReceiptLiveCheckMode,
+    ReceiptVerification, RedactedBundle, RekorTransparencyProvider,
+    Rfc3161HttpTimestampProvider, ScittFormat, ScittStatementSigner,
+    ScittTransparencyProvider, TimestampAssessment, TimestampAssuranceProfile, TimestampToken,
+    TimestampTrustPolicy, TimestampVerification, TransparencyReceipt, TransparencyTrustPolicy,
+    VAULT_BACKUP_ENCRYPTION_ALGORITHM,
+    assess_receipt_error, assess_receipt_verification, assess_timestamp_error,
+    assess_timestamp_verification,
     anchor_bundle as anchor_bundle_receipt, build_bundle, canonicalize_value,
     decode_backup_encryption_key, decode_private_key_pem, decode_public_key_pem,
     encode_public_key_pem, encrypt_backup_archive, evaluate_completeness, redact_bundle,
     redact_bundle_with_field_redactions, sha256_prefixed, timestamp_digest,
     validate_bundle_integrity_fields, validate_timestamp_trust_policy,
-    validate_transparency_trust_policy, verify_receipt, verify_receipt_with_policy,
+    validate_transparency_trust_policy, verify_receipt, verify_receipt_with_live_check,
+    verify_receipt_with_policy, verify_receipt_with_policy_and_live_check,
     verify_redacted_bundle, verify_timestamp, verify_timestamp_with_policy,
 };
 use reqwest::Client;
@@ -264,6 +269,7 @@ struct VaultTransparencyFileConfig {
     provider: Option<String>,
     url: Option<String>,
     rekor_url: Option<String>,
+    scitt_format: Option<String>,
     log_public_key_pem: Option<String>,
     log_public_key_path: Option<String>,
 }
@@ -470,10 +476,14 @@ enum VerifyTimestampRequest {
 enum VerifyReceiptRequest {
     BundleId {
         bundle_id: String,
+        #[serde(default)]
+        live_check_mode: ReceiptLiveCheckMode,
     },
     Direct {
         bundle_root: String,
         receipt: TransparencyReceipt,
+        #[serde(default)]
+        live_check_mode: ReceiptLiveCheckMode,
     },
 }
 
@@ -483,6 +493,7 @@ struct VerifyTimestampResponse {
     message: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     verification: Option<TimestampVerification>,
+    assessment: TimestampAssessment,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -491,6 +502,7 @@ struct VerifyReceiptResponse {
     message: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     verification: Option<ReceiptVerification>,
+    assessment: ReceiptAssessment,
 }
 
 #[derive(Debug, Deserialize)]
@@ -839,6 +851,8 @@ struct TransparencyConfig {
     provider: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    scitt_format: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     log_public_key_pem: Option<String>,
 }
@@ -1886,6 +1900,8 @@ fn resolve_transparency_file_config(
     if let Some(url) = file_config.url.or(file_config.rekor_url) {
         config.url = Some(url);
     }
+    config.scitt_format = normalize_optional_string(file_config.scitt_format)
+        .map(|value| value.to_ascii_lowercase());
     config.log_public_key_pem = normalize_optional_string(file_config.log_public_key_pem);
     if let Some(path) = file_config.log_public_key_path {
         config.log_public_key_pem = Some(read_config_text_file(
@@ -3409,6 +3425,7 @@ async fn update_transparency_config(
             "enabled": config.enabled,
             "provider": &config.provider,
             "url": &config.url,
+            "scitt_format": &config.scitt_format,
             "has_log_public_key": config.log_public_key_pem.is_some(),
         }),
     )
@@ -3904,9 +3921,20 @@ async fn anchor_bundle(
                 ))
             })?;
             let provider_label = config.provider.clone();
+            let scitt_format = parse_scitt_format(config.scitt_format.as_deref());
             let bundle_for_submission = bundle.clone();
+            let signing_key = state.signing_key.clone();
+            let signing_kid = state.signing_kid.clone();
             tokio::task::spawn_blocking(move || {
-                let provider = ScittTransparencyProvider::with_label(url, provider_label);
+                let provider = ScittTransparencyProvider::with_statement_signer(
+                    url,
+                    provider_label,
+                    scitt_format,
+                    ScittStatementSigner {
+                        signing_key,
+                        key_id: signing_kid,
+                    },
+                );
                 anchor_bundle_receipt(&bundle_for_submission, &provider)
             })
             .await
@@ -4470,24 +4498,25 @@ async fn verify_timestamp_token(
         Some(policy) => verify_timestamp_with_policy(&timestamp, &bundle_root, policy),
         None => verify_timestamp(&timestamp, &bundle_root),
     } {
-        Ok(verification) => VerifyTimestampResponse {
+        Ok(verification) => {
+            let assessment =
+                assess_timestamp_verification(&verification, timestamp_policy.as_ref());
+            VerifyTimestampResponse {
             valid: true,
-            message: format!(
-                "VALID: RFC 3161 token {} at {}",
-                if verification.trusted {
-                    "trusted"
-                } else {
-                    "verified"
-                },
-                verification.generated_at
-            ),
+            message: format!("VALID: {} {}", assessment.headline, assessment.summary),
             verification: Some(verification),
-        },
-        Err(err) => VerifyTimestampResponse {
+            assessment,
+        }
+        }
+        Err(err) => {
+            let assessment = assess_timestamp_error(&err, timestamp_policy.as_ref());
+            VerifyTimestampResponse {
             valid: false,
-            message: format!("INVALID: {err}"),
+            message: format!("INVALID: {}", assessment.summary),
             verification: None,
-        },
+            assessment,
+        }
+        }
     };
     append_audit_log(
         &state.db,
@@ -4511,7 +4540,8 @@ async fn verify_transparency_receipt(
     actor: Option<Extension<AuthenticatedActor>>,
     Json(request): Json<VerifyReceiptRequest>,
 ) -> Result<impl IntoResponse, ApiError> {
-    let (bundle_id, bundle_root, receipt) = resolve_receipt_verification_target(&state.db, request)
+    let (bundle_id, bundle_root, receipt, live_check_mode) =
+        resolve_receipt_verification_target(&state.db, request)
         .await
         .map_err(ApiError::bad_request_anyhow)?;
     let timestamp_config = load_timestamp_config(&state.db)
@@ -4523,27 +4553,49 @@ async fn verify_transparency_receipt(
     let transparency_policy = transparency_trust_policy(&transparency_config, &timestamp_config);
 
     let response = match match transparency_policy.as_ref() {
-        Some(policy) => verify_receipt_with_policy(&receipt, &bundle_root, policy),
-        None => verify_receipt(&receipt, &bundle_root),
+        Some(policy) if live_check_mode == ReceiptLiveCheckMode::Off => {
+            verify_receipt_with_policy(&receipt, &bundle_root, policy)
+        }
+        Some(policy) => {
+            verify_receipt_with_policy_and_live_check(&receipt, &bundle_root, policy, live_check_mode)
+        }
+        None if live_check_mode == ReceiptLiveCheckMode::Off => verify_receipt(&receipt, &bundle_root),
+        None => verify_receipt_with_live_check(&receipt, &bundle_root, live_check_mode),
     } {
-        Ok(verification) => VerifyReceiptResponse {
+        Ok(verification) => {
+            let assessment =
+                assess_receipt_verification(&verification, transparency_policy.as_ref());
+            VerifyReceiptResponse {
             valid: true,
-            message: format!(
-                "VALID: transparency receipt {} at {}",
-                if verification.trusted {
-                    "trusted"
-                } else {
-                    "verified"
-                },
-                verification.integrated_time
-            ),
+            message: format!("VALID: {} {}", assessment.headline, assessment.summary),
             verification: Some(verification),
-        },
-        Err(err) => VerifyReceiptResponse {
+            assessment,
+        }
+        }
+        Err(err) => {
+            let live_check = if live_check_mode == ReceiptLiveCheckMode::Off {
+                None
+            } else {
+                Some(proof_layer_core::ReceiptLiveVerification {
+                    mode: live_check_mode,
+                    state: CheckState::Fail,
+                    checked_at: Utc::now().to_rfc3339(),
+                    summary: err.to_string(),
+                    current_tree_size: None,
+                    current_root_hash: None,
+                    entry_retrieved: None,
+                    consistency_verified: None,
+                })
+            };
+            let assessment =
+                assess_receipt_error(&err, transparency_policy.as_ref(), live_check);
+            VerifyReceiptResponse {
             valid: false,
-            message: format!("INVALID: {err}"),
+            message: format!("INVALID: {}", assessment.summary),
             verification: None,
-        },
+            assessment,
+        }
+        }
     };
     append_audit_log(
         &state.db,
@@ -4554,6 +4606,7 @@ async fn verify_transparency_receipt(
         serde_json::json!({
             "valid": response.valid,
             "message": response.message.clone(),
+            "live_check_mode": live_check_mode,
         }),
     )
     .await
@@ -4752,21 +4805,25 @@ async fn resolve_timestamp_verification_target(
 async fn resolve_receipt_verification_target(
     db: &SqlitePool,
     request: VerifyReceiptRequest,
-) -> Result<(Option<String>, String, TransparencyReceipt)> {
+) -> Result<(Option<String>, String, TransparencyReceipt, ReceiptLiveCheckMode)> {
     match request {
-        VerifyReceiptRequest::BundleId { bundle_id } => {
+        VerifyReceiptRequest::BundleId {
+            bundle_id,
+            live_check_mode,
+        } => {
             let bundle = load_active_bundle(db, &bundle_id)
                 .await?
                 .ok_or_else(|| anyhow::anyhow!("bundle not found"))?;
             let receipt = bundle
                 .receipt
                 .ok_or_else(|| anyhow::anyhow!("bundle has no transparency receipt"))?;
-            Ok((Some(bundle_id), bundle.integrity.bundle_root, receipt))
+            Ok((Some(bundle_id), bundle.integrity.bundle_root, receipt, live_check_mode))
         }
         VerifyReceiptRequest::Direct {
             bundle_root,
             receipt,
-        } => Ok((None, bundle_root, receipt)),
+            live_check_mode,
+        } => Ok((None, bundle_root, receipt, live_check_mode)),
     }
 }
 
@@ -6242,6 +6299,13 @@ fn parse_timestamp_assurance_profile(value: Option<&str>) -> Option<TimestampAss
     }
 }
 
+fn parse_scitt_format(value: Option<&str>) -> ScittFormat {
+    match value.map(str::trim).filter(|value| !value.is_empty()) {
+        Some("legacy_json") => ScittFormat::LegacyJson,
+        _ => ScittFormat::CoseCcf,
+    }
+}
+
 fn transparency_trust_policy(
     transparency: &TransparencyConfig,
     timestamp: &TimestampConfig,
@@ -7049,6 +7113,8 @@ fn validate_timestamp_config(mut config: TimestampConfig) -> Result<TimestampCon
 fn validate_transparency_config(mut config: TransparencyConfig) -> Result<TransparencyConfig> {
     config.provider = config.provider.trim().to_ascii_lowercase();
     config.url = normalize_optional_string(config.url);
+    config.scitt_format =
+        normalize_optional_string(config.scitt_format).map(|value| value.to_ascii_lowercase());
     config.log_public_key_pem = normalize_optional_string(config.log_public_key_pem);
 
     match config.provider.as_str() {
@@ -7059,15 +7125,33 @@ fn validate_transparency_config(mut config: TransparencyConfig) -> Result<Transp
             if config.url.is_some() {
                 bail!("transparency url must be omitted when provider is none");
             }
+            if config.scitt_format.is_some() {
+                bail!("transparency scitt_format must be omitted when provider is none");
+            }
             if config.log_public_key_pem.is_some() {
                 bail!("transparency log public key must be omitted when provider is none");
             }
         }
-        "rekor" | "scitt" => {
+        "rekor" => {
             let url = config.url.as_deref().ok_or_else(|| {
                 anyhow::anyhow!("transparency url is required when provider is configured")
             })?;
             validate_http_url(url, "transparency url")?;
+            if config.scitt_format.is_some() {
+                bail!("transparency scitt_format is only valid when provider is scitt");
+            }
+        }
+        "scitt" => {
+            let url = config.url.as_deref().ok_or_else(|| {
+                anyhow::anyhow!("transparency url is required when provider is configured")
+            })?;
+            validate_http_url(url, "transparency url")?;
+            if let Some(format) = config.scitt_format.as_deref()
+                && format != "legacy_json"
+                && format != "cose_ccf"
+            {
+                bail!("transparency scitt_format must be legacy_json or cose_ccf");
+            }
         }
         _ => bail!("transparency provider must be one of none, rekor, or scitt"),
     }
@@ -7765,6 +7849,7 @@ fn default_transparency_config() -> TransparencyConfig {
         enabled: false,
         provider: DEFAULT_TRANSPARENCY_PROVIDER.to_string(),
         url: None,
+        scitt_format: None,
         log_public_key_pem: None,
     }
 }
@@ -10975,6 +11060,7 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
                 provider: Some("rekor".to_string()),
                 url: None,
                 rekor_url: Some("https://rekor.example.test".to_string()),
+                scitt_format: None,
                 log_public_key_pem: None,
                 log_public_key_path: None,
             }),
@@ -12873,6 +12959,7 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
                 enabled: true,
                 provider: "rekor".to_string(),
                 url: Some("https://rekor.example.test".to_string()),
+                scitt_format: None,
                 log_public_key_pem: None,
             }),
             config_path: Some(state.storage_dir.join("vault.toml")),
@@ -13235,6 +13322,7 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
                 enabled: true,
                 provider: "rekor".to_string(),
                 url: Some("https://rekor.example.test".to_string()),
+                scitt_format: None,
                 log_public_key_pem: None,
             },
         )
@@ -13266,6 +13354,20 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
     #[tokio::test]
     async fn anchor_bundle_endpoint_supports_scitt_provider() {
         use std::{net::TcpListener, thread};
+
+        #[derive(Serialize)]
+        struct ScittCoseReceiptPayload<'a> {
+            entry_id: &'a str,
+            service_id: &'a str,
+            registered_at: &'a str,
+            statement_hash: &'a str,
+        }
+
+        #[derive(Serialize)]
+        struct ScittCoseReceiptEnvelope<'a> {
+            payload: ScittCoseReceiptPayload<'a>,
+            signature_der_b64: String,
+        }
 
         let state = test_state(DEFAULT_MAX_PAYLOAD_BYTES).await;
         let db = state.db.clone();
@@ -13308,20 +13410,39 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
             let mut body = vec![0_u8; content_length];
             reader.read_exact(&mut body).unwrap();
             let payload: serde_json::Value = serde_json::from_slice(&body).unwrap();
+            assert!(payload["statement_cose_b64"].is_string());
             let statement_hash = payload["statement_hash"].as_str().unwrap();
-            let response_payload = canonicalize_value(&serde_json::json!({
-                "entryId": "entry-scitt-001",
-                "registeredAt": "2026-03-06T13:15:00Z",
-                "serviceId": service_id,
-                "statementHash": statement_hash,
-            }))
-            .unwrap();
+            let response_payload = {
+                let payload = ScittCoseReceiptPayload {
+                    entry_id: "entry-scitt-001",
+                    service_id: &service_id,
+                    registered_at: "2026-03-06T13:15:00Z",
+                    statement_hash,
+                };
+                let mut bytes = Vec::new();
+                ciborium::into_writer(&payload, &mut bytes).unwrap();
+                bytes
+            };
             let signature: Signature = signing_key.sign(&response_payload);
+            let mut receipt_cbor = Vec::new();
+            ciborium::into_writer(
+                &ScittCoseReceiptEnvelope {
+                    payload: ScittCoseReceiptPayload {
+                        entry_id: "entry-scitt-001",
+                        service_id: &service_id,
+                        registered_at: "2026-03-06T13:15:00Z",
+                        statement_hash,
+                    },
+                    signature_der_b64: Base64::encode_string(signature.to_der().as_bytes()),
+                },
+                &mut receipt_cbor,
+            )
+            .unwrap();
             let response_body = serde_json::json!({
                 "entry_id": "entry-scitt-001",
                 "service_id": service_id,
                 "registered_at": "2026-03-06T13:15:00Z",
-                "receipt_b64": Base64::encode_string(signature.to_der().as_bytes()),
+                "receipt_cbor_b64": Base64::encode_string(&receipt_cbor),
             })
             .to_string();
 
@@ -13341,6 +13462,7 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
                 enabled: true,
                 provider: "scitt".to_string(),
                 url: Some(format!("http://{addr}/entries")),
+                scitt_format: None,
                 log_public_key_pem: Some(public_key_pem),
             },
         )
@@ -13561,6 +13683,7 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
             .body(Body::from(
                 serde_json::to_vec(&VerifyReceiptRequest::BundleId {
                     bundle_id: created.bundle_id.clone(),
+                    live_check_mode: ReceiptLiveCheckMode::Off,
                 })
                 .unwrap(),
             ))
@@ -13906,6 +14029,7 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
                     enabled: true,
                     provider: "none".to_string(),
                     url: None,
+                    scitt_format: None,
                     log_public_key_pem: None,
                 })
                 .unwrap(),
@@ -13923,6 +14047,7 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
                     enabled: true,
                     provider: "Rekor".to_string(),
                     url: Some("https://rekor.example.test".to_string()),
+                    scitt_format: None,
                     log_public_key_pem: None,
                 })
                 .unwrap(),
@@ -13940,6 +14065,7 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
                 enabled: true,
                 provider: "rekor".to_string(),
                 url: Some("https://rekor.example.test".to_string()),
+                scitt_format: None,
                 log_public_key_pem: None,
             }
         );

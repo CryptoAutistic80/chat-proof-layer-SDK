@@ -32,7 +32,7 @@ Important current limits:
 
 - PostgreSQL and S3 are parsed in config but not implemented.
 - Full EU trusted-list / archival eIDAS trust evaluation is not implemented yet.
-- SCITT is a bounded draft-aligned implementation, not full COSE/CCF interoperability.
+- SCITT now defaults to a COSE/CCF-friendly receipt format and still reads the legacy JSON format, but broader ecosystem interoperability and trust-list work are still incomplete.
 - Multitenancy is bounded single-tenant enforcement today, not a full multi-org isolation model.
 
 ## Why This Exists
@@ -204,6 +204,20 @@ cargo run -p proofctl -- create \
   --transparency-public-key ./rekor.pub
 ```
 
+If you are anchoring to a SCITT service instead of Rekor, switch the provider and pick the new default-friendly format explicitly:
+
+```bash
+cargo run -p proofctl -- create \
+  --input ./capture.json \
+  --key ./keys/signing.pem \
+  --out ./bundle.pkg \
+  --timestamp-url http://timestamp.digicert.com \
+  --transparency-provider scitt \
+  --transparency-log https://scitt.example.test/entries \
+  --scitt-format cose_ccf \
+  --transparency-public-key ./scitt-service.pub
+```
+
 Verify with assurance checks:
 
 ```bash
@@ -218,6 +232,7 @@ cargo run -p proofctl -- verify \
   --timestamp-qualified-signer ./tsa-signer.pem \
   --timestamp-policy-oid 1.2.3.4 \
   --check-receipt \
+  --receipt-live-check best_effort \
   --transparency-public-key ./rekor.pub
 ```
 
@@ -405,6 +420,7 @@ Operational behavior:
 - `proofctl` picks up the bearer token from `PROOF_SERVICE_API_KEY`.
 - `/healthz`, `/readyz`, and `/metrics` stay open for infrastructure checks and scraping.
 - When `organization_id` is configured, the vault runs in bounded single-tenant mode and rejects bundle writes scoped to a different org.
+- When `transparency.provider = "scitt"`, `transparency.scitt_format` may be `legacy_json` or `cose_ccf`; new receipts should use `cose_ccf`.
 
 ### Main Endpoints
 
@@ -453,6 +469,15 @@ System rollups:
 
 - `GET /v1/systems`
 - `GET /v1/systems/{system_id}/summary`
+
+`POST /v1/verify/timestamp` and `POST /v1/verify/receipt` now return both the low-level cryptographic result and a plain-English `assessment` block.
+For receipt verification, `live_check_mode` can be `off`, `best_effort`, or `required`.
+
+Plain-English trust levels:
+
+- `structural`: the timestamp or receipt matches the proof, but stronger trust was not proven.
+- `trusted`: the matching proof also chained to a trusted signer or trusted log/service key.
+- `qualified`: the stronger qualified timestamp path passed too.
 
 ### Example API Payloads
 
@@ -670,12 +695,15 @@ JSON schemas:
 - `schemas/capture_event.schema.json`
 - `schemas/evidence_item.schema.json`
 - `schemas/evidence_pack.schema.json`
+- `schemas/verification_assessment.schema.json`
+- `schemas/verify_timestamp_response.schema.json`
+- `schemas/verify_receipt_response.schema.json`
 - `schemas/schema_manifest.json`
 
 ## Current Caveats
 
 - Full offline verification works with a full or disclosure package plus the public key.
 - RFC 3161 verification supports trust anchors, CRLs, live OCSP, policy OIDs, and TSA signer allowlists, but full EU trusted-list ingestion and archival OCSP evidence handling are still future work.
-- Rekor verification checks receipt structure, entry binding, inclusion proof, and signed-entry-timestamp signature when a trusted public key is configured.
-- The current SCITT path is intentionally bounded and draft-aligned.
+- Rekor verification checks receipt structure, entry binding, inclusion proof, signed-entry-timestamp signature, and optional live log consistency / freshness when requested.
+- SCITT now writes the COSE/CCF-style receipt body by default and keeps legacy JSON read compatibility, but broader interop and trust-list work are still future work.
 - SQLite is the production-default path in this repo today; PostgreSQL and S3 are future expansion paths, not current backends.

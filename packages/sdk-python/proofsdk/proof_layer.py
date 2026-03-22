@@ -186,6 +186,7 @@ class ProofLayer:
         self,
         *,
         pack_type: str,
+        bundle_ids: list[str] | None = None,
         system_id: str | None = None,
         from_date: str | None = None,
         to_date: str | None = None,
@@ -196,6 +197,7 @@ class ProofLayer:
         if hasattr(self.client, "create_pack"):
             return self.client.create_pack(
                 pack_type=pack_type,
+                bundle_ids=bundle_ids,
                 system_id=system_id,
                 from_date=from_date,
                 to_date=to_date,

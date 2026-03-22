@@ -68,6 +68,52 @@ class TestProofLayerClient(unittest.TestCase):
             },
         )
 
+    def test_create_pack_serializes_bundle_ids(self):
+        captured = {}
+
+        def request_fn(method, path, headers, body):
+            captured["method"] = method
+            captured["path"] = path
+            captured["headers"] = headers
+            captured["body"] = body
+            return {
+                "pack_id": "P-bundles",
+                "bundle_format": "full",
+                "bundle_ids": ["B1", "B2"],
+            }
+
+        client = ProofLayerClient(base_url="http://127.0.0.1:8080", request_fn=request_fn)
+        out = client.create_pack(
+            pack_type="annex_iv",
+            bundle_ids=["B1", "B2"],
+        )
+
+        self.assertEqual(out["pack_id"], "P-bundles")
+        payload = json.loads(captured["body"].decode("utf-8"))
+        self.assertEqual(
+            payload,
+            {
+                "pack_type": "annex_iv",
+                "bundle_ids": ["B1", "B2"],
+            },
+        )
+
+    def test_create_pack_rejects_bundle_ids_with_system_filters(self):
+        client = ProofLayerClient(
+            base_url="http://127.0.0.1:8080",
+            request_fn=lambda *_args: {"ok": True},
+        )
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "bundle_ids cannot be combined with system_id, from_date, or to_date",
+        ):
+            client.create_pack(
+                pack_type="annex_iv",
+                bundle_ids=["B1"],
+                system_id="system-123",
+            )
+
     def test_evaluate_completeness_posts_bundle_id(self):
         captured = {}
 
@@ -255,8 +301,6 @@ class TestProofLayerClient(unittest.TestCase):
             {
                 "pack_type": "runtime_logs",
                 "system_id": "system-456",
-                "from": None,
-                "to": None,
                 "bundle_format": "disclosure",
                 "disclosure_template": {
                     "profile": "runtime_minimum",

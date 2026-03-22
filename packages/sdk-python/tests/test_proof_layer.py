@@ -593,6 +593,40 @@ class TestProofLayer(unittest.TestCase):
         self.assertEqual(captured["path"], "/v1/packs")
         self.assertEqual(result["disclosure_policy"], "runtime_template_pack")
 
+    def test_vault_mode_can_create_pack_with_bundle_ids(self):
+        captured = {}
+
+        def request_fn(method, path, headers, body):
+            captured["method"] = method
+            captured["path"] = path
+            captured["headers"] = headers
+            captured["body"] = body
+            return {
+                "pack_id": "P-bundles",
+                "bundle_ids": ["B1", "B2"],
+            }
+
+        proof_layer = ProofLayer(
+            vault_url="http://127.0.0.1:8080",
+            request_fn=request_fn,
+        )
+
+        result = proof_layer.create_pack(
+            pack_type="annex_iv",
+            bundle_ids=["B1", "B2"],
+        )
+
+        self.assertEqual(captured["method"], "POST")
+        self.assertEqual(captured["path"], "/v1/packs")
+        self.assertEqual(result["pack_id"], "P-bundles")
+        self.assertEqual(
+            json.loads(captured["body"].decode("utf-8")),
+            {
+                "pack_type": "annex_iv",
+                "bundle_ids": ["B1", "B2"],
+            },
+        )
+
     def test_vault_mode_can_preview_disclosure(self):
         captured = {}
 

@@ -223,7 +223,7 @@ const mocks = vi.hoisted(() => {
       return {
         pack_id: `pack-${packType}`,
         pack_type: packType,
-        bundle_count: state.bundles.size,
+        bundle_count: payload.bundle_ids?.length ?? state.bundles.size,
         pack_completeness_profile: packCompletenessProfile ?? undefined,
         pack_completeness_status: packCompletenessProfile ? "pass" : undefined,
         pack_completeness_pass_count:
@@ -435,6 +435,23 @@ describe("AppRoutes", () => {
       expect.objectContaining({
         pack_id: "pack-annex_iv",
         profile: "annex_iv_governance_v1"
+      })
+    );
+    expect(mocks.createPack).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.any(String),
+      expect.objectContaining({
+        pack_type: "annex_iv",
+        bundle_ids: expect.arrayContaining([
+          "bundle-1",
+          "bundle-2",
+          "bundle-3",
+          "bundle-4",
+          "bundle-5",
+          "bundle-6",
+          "bundle-7",
+          "bundle-8"
+        ])
       })
     );
   });

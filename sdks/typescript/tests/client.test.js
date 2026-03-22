@@ -274,6 +274,58 @@ test("createPack posts vault pack filters including disclosure bundle_format", a
   });
 });
 
+test("createPack can target explicit bundleIds", async () => {
+  let captured;
+  const fetchImpl = async (url, init) => {
+    captured = { url, init };
+    return new Response(
+      JSON.stringify({
+        pack_id: "P-bundles",
+        pack_type: "annex_iv",
+        created_at: "2026-03-22T12:00:00Z",
+        bundle_format: "full",
+        bundle_count: 2,
+        bundle_ids: ["B1", "B2"],
+      }),
+      { status: 201, headers: { "content-type": "application/json" } },
+    );
+  };
+
+  const client = new ProofLayerClient({
+    baseUrl: "http://127.0.0.1:8080",
+    fetchImpl,
+  });
+  const result = await client.createPack({
+    packType: "annex_iv",
+    bundleIds: ["B1", "B2"],
+  });
+
+  assert.equal(result.pack_id, "P-bundles");
+  assert.deepEqual(JSON.parse(captured.init.body), {
+    pack_type: "annex_iv",
+    bundle_ids: ["B1", "B2"],
+  });
+});
+
+test("createPack rejects bundleIds mixed with other bundle selectors", async () => {
+  const client = new ProofLayerClient({
+    baseUrl: "http://127.0.0.1:8080",
+    fetchImpl: async () => {
+      throw new Error("fetch should not be called");
+    },
+  });
+
+  await assert.rejects(
+    () =>
+      client.createPack({
+        packType: "annex_iv",
+        bundleIds: ["B1"],
+        systemId: "system-123",
+      }),
+    /bundleIds cannot be combined with systemId, from, or to/,
+  );
+});
+
 test("createPack can post an inline disclosure template request", async () => {
   let captured;
   const fetchImpl = async (url, init) => {

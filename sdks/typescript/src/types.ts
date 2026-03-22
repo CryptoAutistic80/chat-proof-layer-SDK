@@ -376,6 +376,7 @@ export type PackBundleFormat = "full" | "disclosure";
 
 export interface CreatePackRequest {
   packType: string;
+  bundleIds?: string[];
   systemId?: string;
   from?: string;
   to?: string;

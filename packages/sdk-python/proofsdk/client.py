@@ -141,6 +141,7 @@ class ProofLayerClient:
         self,
         *,
         pack_type: str,
+        bundle_ids: list[str] | None = None,
         system_id: str | None = None,
         from_date: str | None = None,
         to_date: str | None = None,
@@ -148,14 +149,19 @@ class ProofLayerClient:
         disclosure_policy: str | None = None,
         disclosure_template: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
+        if bundle_ids and (system_id is not None or from_date is not None or to_date is not None):
+            raise ValueError("bundle_ids cannot be combined with system_id, from_date, or to_date")
         if disclosure_policy is not None and disclosure_template is not None:
             raise ValueError("provide either disclosure_policy or disclosure_template, not both")
-        payload: dict[str, Any] = {
-            "pack_type": pack_type,
-            "system_id": system_id,
-            "from": from_date,
-            "to": to_date,
-        }
+        payload: dict[str, Any] = {"pack_type": pack_type}
+        if bundle_ids:
+            payload["bundle_ids"] = bundle_ids
+        if system_id is not None:
+            payload["system_id"] = system_id
+        if from_date is not None:
+            payload["from"] = from_date
+        if to_date is not None:
+            payload["to"] = to_date
         if bundle_format is not None:
             payload["bundle_format"] = bundle_format
         if disclosure_policy is not None:

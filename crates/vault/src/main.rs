@@ -932,6 +932,8 @@ struct LegalHoldResponse {
 #[derive(Debug, Deserialize, Serialize)]
 struct CreatePackRequest {
     pack_type: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    bundle_ids: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     system_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -4117,11 +4119,15 @@ async fn create_pack(
     let disclosure_policy_name = disclosure_policy.as_ref().map(|policy| policy.name.clone());
     let completeness_profile = bundle_completeness_profile_for_pack(&request.pack_type);
     let pack_completeness_profile = pack_completeness_profile_for_pack(&request.pack_type);
+    let manifest_system_id = request
+        .system_id
+        .clone()
+        .or_else(|| infer_curated_system_id(&curated_rows));
     let pack_completeness_report = pack_completeness_profile.map(|profile| {
         let bundle = build_pack_completeness_bundle(
             &pack_id,
             &created_at,
-            request.system_id.as_deref(),
+            manifest_system_id.as_deref(),
             &curated_rows,
         );
         evaluate_completeness(&bundle, profile)
@@ -4218,7 +4224,7 @@ async fn create_pack(
         pack_type: request.pack_type.clone(),
         curation_profile: PACK_CURATION_PROFILE.to_string(),
         generated_at: created_at.clone(),
-        system_id: request.system_id.clone(),
+        system_id: manifest_system_id,
         from: request.from.clone(),
         to: request.to.clone(),
         bundle_format: request.bundle_format.clone(),
@@ -4958,6 +4964,7 @@ fn extract_artefacts(files: &BTreeMap<String, Vec<u8>>) -> Result<BTreeMap<Strin
 
 fn normalize_create_pack_request(mut request: CreatePackRequest) -> Result<CreatePackRequest> {
     request.pack_type = normalize_pack_type(&request.pack_type)?;
+    request.bundle_ids = normalize_bundle_ids(&request.bundle_ids)?;
     request.system_id = normalize_optional_nonempty("system_id", request.system_id)?;
     request.from = normalize_optional_rfc3339("from", request.from)?;
     request.to = normalize_optional_rfc3339("to", request.to)?;
@@ -4978,6 +4985,11 @@ fn normalize_create_pack_request(mut request: CreatePackRequest) -> Result<Creat
             bail!("from must be <= to");
         }
     }
+    if !request.bundle_ids.is_empty()
+        && (request.system_id.is_some() || request.from.is_some() || request.to.is_some())
+    {
+        bail!("bundle_ids cannot be combined with system_id, from, or to");
+    }
     if request.bundle_format == PACK_BUNDLE_FORMAT_FULL
         && (request.disclosure_policy.is_some() || request.disclosure_template.is_some())
     {
@@ -4988,6 +5000,23 @@ fn normalize_create_pack_request(mut request: CreatePackRequest) -> Result<Creat
     }
 
     Ok(request)
+}
+
+fn normalize_bundle_ids(values: &[String]) -> Result<Vec<String>> {
+    let mut normalized = Vec::with_capacity(values.len());
+    let mut seen = BTreeSet::new();
+
+    for value in values {
+        let trimmed = value.trim();
+        if trimmed.is_empty() {
+            bail!("bundle_ids must not contain empty values");
+        }
+        if seen.insert(trimmed.to_string()) {
+            normalized.push(trimmed.to_string());
+        }
+    }
+
+    Ok(normalized)
 }
 
 fn normalize_disclosure_template_render_request(
@@ -5604,6 +5633,18 @@ fn annex_iv_bundle_priority(item_types: &[String]) -> usize {
         .unwrap_or(ANNEX_IV_ITEM_PRIORITY.len())
 }
 
+fn infer_curated_system_id(curated_rows: &[CuratedPackBundle]) -> Option<String> {
+    let mut system_ids = curated_rows
+        .iter()
+        .filter_map(|curated| curated.row.system_id.as_deref());
+    let first = system_ids.next()?;
+    if system_ids.all(|system_id| system_id == first) {
+        Some(first.to_string())
+    } else {
+        None
+    }
+}
+
 fn apply_disclosure_policy_to_items(
     disclosure_policy: Option<&DisclosurePolicyConfig>,
     bundle: &ProofBundle,
@@ -5827,6 +5868,14 @@ async fn query_pack_source_bundles(
          WHERE deleted_at IS NULL",
     );
 
+    if !request.bundle_ids.is_empty() {
+        builder.push(" AND bundle_id IN (");
+        let mut separated = builder.separated(", ");
+        for bundle_id in &request.bundle_ids {
+            separated.push_bind(bundle_id);
+        }
+        separated.push_unseparated(")");
+    }
     if let Some(system_id) = request.system_id.as_deref() {
         builder.push(" AND system_id = ");
         builder.push_bind(system_id);
@@ -5842,11 +5891,29 @@ async fn query_pack_source_bundles(
 
     builder.push(" ORDER BY created_at ASC, bundle_id ASC");
 
-    builder
+    let rows = builder
         .build_query_as::<PackSourceBundleRow>()
         .fetch_all(db)
         .await
-        .context("failed to fetch bundles for pack assembly")
+        .context("failed to fetch bundles for pack assembly")?;
+
+    if !request.bundle_ids.is_empty() {
+        let found_bundle_ids = rows
+            .iter()
+            .map(|row| row.bundle_id.as_str())
+            .collect::<BTreeSet<_>>();
+        let missing_bundle_ids = request
+            .bundle_ids
+            .iter()
+            .filter(|bundle_id| !found_bundle_ids.contains(bundle_id.as_str()))
+            .cloned()
+            .collect::<Vec<_>>();
+        if !missing_bundle_ids.is_empty() {
+            bail!("unknown bundle_ids: {}", missing_bundle_ids.join(", "));
+        }
+    }
+
+    Ok(rows)
 }
 
 async fn load_pack_artefacts(db: &SqlitePool, bundle_id: &str) -> Result<Vec<PackArtefactBytes>> {
@@ -11306,6 +11373,7 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
             .body(Body::from(
                 serde_json::to_vec(&CreatePackRequest {
                     pack_type: "runtime_logs".to_string(),
+                    bundle_ids: Vec::new(),
                     system_id: None,
                     from: None,
                     to: None,
@@ -14506,6 +14574,7 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
             .body(Body::from(
                 serde_json::to_vec(&CreatePackRequest {
                     pack_type: "runtime_logs".to_string(),
+                    bundle_ids: Vec::new(),
                     system_id: Some("system-privacy-pack".to_string()),
                     from: None,
                     to: None,
@@ -14705,6 +14774,7 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
             .body(Body::from(
                 serde_json::to_vec(&CreatePackRequest {
                     pack_type: "runtime_logs".to_string(),
+                    bundle_ids: Vec::new(),
                     system_id: Some("system-a".to_string()),
                     from: None,
                     to: None,
@@ -14860,6 +14930,7 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
             .body(Body::from(
                 serde_json::to_vec(&CreatePackRequest {
                     pack_type: "runtime_logs".to_string(),
+                    bundle_ids: Vec::new(),
                     system_id: Some("system-a".to_string()),
                     from: None,
                     to: None,
@@ -15025,6 +15096,7 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
             .body(Body::from(
                 serde_json::to_vec(&CreatePackRequest {
                     pack_type: "annex_iv".to_string(),
+                    bundle_ids: Vec::new(),
                     system_id: Some("system-docs".to_string()),
                     from: None,
                     to: None,
@@ -15310,6 +15382,7 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
             .body(Body::from(
                 serde_json::to_vec(&CreatePackRequest {
                     pack_type: "annex_xi".to_string(),
+                    bundle_ids: Vec::new(),
                     system_id: Some("foundation-model-alpha".to_string()),
                     from: None,
                     to: None,
@@ -15369,6 +15442,7 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
             .body(Body::from(
                 serde_json::to_vec(&CreatePackRequest {
                     pack_type: "annex_iv".to_string(),
+                    bundle_ids: Vec::new(),
                     system_id: Some("hiring-assistant".to_string()),
                     from: None,
                     to: None,
@@ -15428,6 +15502,7 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
             .body(Body::from(
                 serde_json::to_vec(&CreatePackRequest {
                     pack_type: "annex_xi".to_string(),
+                    bundle_ids: Vec::new(),
                     system_id: Some("foundation-model-alpha".to_string()),
                     from: None,
                     to: None,
@@ -15484,6 +15559,7 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
             .body(Body::from(
                 serde_json::to_vec(&CreatePackRequest {
                     pack_type: "runtime_logs".to_string(),
+                    bundle_ids: Vec::new(),
                     system_id: Some("hiring-assistant".to_string()),
                     from: None,
                     to: None,
@@ -15541,6 +15617,7 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
             .body(Body::from(
                 serde_json::to_vec(&CreatePackRequest {
                     pack_type: "annex_xi".to_string(),
+                    bundle_ids: Vec::new(),
                     system_id: Some("foundation-model-alpha".to_string()),
                     from: None,
                     to: None,
@@ -15603,6 +15680,7 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
             .body(Body::from(
                 serde_json::to_vec(&CreatePackRequest {
                     pack_type: "annex_iv".to_string(),
+                    bundle_ids: Vec::new(),
                     system_id: Some("hiring-assistant".to_string()),
                     from: None,
                     to: None,
@@ -15658,6 +15736,89 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
     }
 
     #[tokio::test]
+    async fn create_pack_can_target_explicit_bundle_ids_without_sweeping_same_system_history() {
+        let state = test_state(DEFAULT_MAX_PAYLOAD_BYTES).await;
+        let app = build_router(state, DEFAULT_MAX_PAYLOAD_BYTES);
+        let scenario = create_annex_iv_scenario(&app).await;
+        let extra_same_system_bundle = create_annex_iv_governance_bundle(
+            &app,
+            EvidenceItem::RiskAssessment(proof_layer_core::schema::RiskAssessmentEvidence {
+                risk_id: "risk-historical".to_string(),
+                severity: "medium".to_string(),
+                status: "open".to_string(),
+                summary: Some(
+                    "Older same-system risk bundle that should stay out of this export".to_string(),
+                ),
+                risk_description: None,
+                likelihood: None,
+                affected_groups: Vec::new(),
+                mitigation_measures: Vec::new(),
+                residual_risk_level: None,
+                risk_owner: None,
+                vulnerable_groups_considered: None,
+                test_results_summary: None,
+                metadata: serde_json::json!({
+                    "source": "historical-run",
+                }),
+            }),
+            "risk_mgmt",
+            "req-historical-risk",
+            "historical-risk.json",
+            br#"{"risk":"historical"}"#,
+        )
+        .await;
+        let selected_bundle_ids = vec![
+            scenario.technical_doc.bundle_id.clone(),
+            scenario.risk_assessment.bundle_id.clone(),
+            scenario.data_governance.bundle_id.clone(),
+            scenario.instructions_for_use.bundle_id.clone(),
+            scenario.human_oversight.bundle_id.clone(),
+            scenario.qms_record.bundle_id.clone(),
+            scenario.standards_alignment.bundle_id.clone(),
+            scenario.post_market_monitoring.bundle_id.clone(),
+        ];
+
+        let pack_req = Request::builder()
+            .method("POST")
+            .uri("/v1/packs")
+            .header("content-type", "application/json")
+            .body(Body::from(
+                serde_json::to_vec(&CreatePackRequest {
+                    pack_type: "annex_iv".to_string(),
+                    bundle_ids: selected_bundle_ids.clone(),
+                    system_id: None,
+                    from: None,
+                    to: None,
+                    bundle_format: PACK_BUNDLE_FORMAT_FULL.to_string(),
+                    disclosure_policy: None,
+                    disclosure_template: None,
+                })
+                .unwrap(),
+            ))
+            .unwrap();
+        let pack_res = app.clone().oneshot(pack_req).await.unwrap();
+        assert_eq!(pack_res.status(), StatusCode::CREATED);
+        let body = axum::body::to_bytes(pack_res.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let pack: PackSummaryResponse = serde_json::from_slice(&body).unwrap();
+
+        assert_eq!(
+            pack.bundle_ids.iter().cloned().collect::<BTreeSet<_>>(),
+            selected_bundle_ids.into_iter().collect::<BTreeSet<_>>()
+        );
+        assert!(
+            !pack
+                .bundle_ids
+                .contains(&extra_same_system_bundle.bundle_id)
+        );
+        assert_eq!(
+            pack.pack_completeness_status,
+            Some(CompletenessStatus::Pass)
+        );
+    }
+
+    #[tokio::test]
     async fn annex_iv_pack_manifest_records_expected_match_metadata() {
         let state = test_state(DEFAULT_MAX_PAYLOAD_BYTES).await;
         let app = build_router(state, DEFAULT_MAX_PAYLOAD_BYTES);
@@ -15670,6 +15831,7 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
             .body(Body::from(
                 serde_json::to_vec(&CreatePackRequest {
                     pack_type: "annex_iv".to_string(),
+                    bundle_ids: Vec::new(),
                     system_id: Some("hiring-assistant".to_string()),
                     from: None,
                     to: None,
@@ -15811,6 +15973,7 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
             .body(Body::from(
                 serde_json::to_vec(&CreatePackRequest {
                     pack_type: "annex_iv".to_string(),
+                    bundle_ids: Vec::new(),
                     system_id: Some("hiring-assistant".to_string()),
                     from: None,
                     to: None,
@@ -15989,6 +16152,7 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
             .body(Body::from(
                 serde_json::to_vec(&CreatePackRequest {
                     pack_type: "annex_iv".to_string(),
+                    bundle_ids: Vec::new(),
                     system_id: Some("hiring-assistant".to_string()),
                     from: None,
                     to: None,
@@ -16032,6 +16196,7 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
             .body(Body::from(
                 serde_json::to_vec(&CreatePackRequest {
                     pack_type: "annex_iv".to_string(),
+                    bundle_ids: Vec::new(),
                     system_id: Some("hiring-assistant".to_string()),
                     from: None,
                     to: None,
@@ -16111,6 +16276,7 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
             .body(Body::from(
                 serde_json::to_vec(&CreatePackRequest {
                     pack_type: "runtime_logs".to_string(),
+                    bundle_ids: Vec::new(),
                     system_id: Some("system-template-pack".to_string()),
                     from: None,
                     to: None,
@@ -16229,6 +16395,7 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
             .body(Body::from(
                 serde_json::to_vec(&CreatePackRequest {
                     pack_type: "runtime_logs".to_string(),
+                    bundle_ids: Vec::new(),
                     system_id: Some("system-redacted".to_string()),
                     from: None,
                     to: None,
@@ -16426,6 +16593,7 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
             .body(Body::from(
                 serde_json::to_vec(&CreatePackRequest {
                     pack_type: "incident_response".to_string(),
+                    bundle_ids: Vec::new(),
                     system_id: Some("system-incident".to_string()),
                     from: None,
                     to: None,
@@ -16674,6 +16842,7 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
             .body(Body::from(
                 serde_json::to_vec(&CreatePackRequest {
                     pack_type: "post_market_monitoring".to_string(),
+                    bundle_ids: Vec::new(),
                     system_id: Some("system-monitoring".to_string()),
                     from: None,
                     to: None,
@@ -16870,6 +17039,7 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
             .body(Body::from(
                 serde_json::to_vec(&CreatePackRequest {
                     pack_type: "annex_xi".to_string(),
+                    bundle_ids: Vec::new(),
                     system_id: Some("system-z".to_string()),
                     from: None,
                     to: None,
@@ -16971,6 +17141,7 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
             .body(Body::from(
                 serde_json::to_vec(&CreatePackRequest {
                     pack_type: "annex_xi".to_string(),
+                    bundle_ids: Vec::new(),
                     system_id: Some("foundation-model-alpha".to_string()),
                     from: None,
                     to: None,
@@ -17100,6 +17271,7 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
             .body(Body::from(
                 serde_json::to_vec(&CreatePackRequest {
                     pack_type: "annex_xi".to_string(),
+                    bundle_ids: Vec::new(),
                     system_id: Some("foundation-model-alpha".to_string()),
                     from: None,
                     to: None,
@@ -17216,6 +17388,7 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
             .body(Body::from(
                 serde_json::to_vec(&CreatePackRequest {
                     pack_type: "provider_governance".to_string(),
+                    bundle_ids: Vec::new(),
                     system_id: Some("system-governance".to_string()),
                     from: None,
                     to: None,
@@ -17409,6 +17582,7 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
             .body(Body::from(
                 serde_json::to_vec(&CreatePackRequest {
                     pack_type: "fundamental_rights".to_string(),
+                    bundle_ids: Vec::new(),
                     system_id: Some("system-fria".to_string()),
                     from: None,
                     to: None,
@@ -17550,6 +17724,7 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
             .body(Body::from(
                 serde_json::to_vec(&CreatePackRequest {
                     pack_type: "systemic_risk".to_string(),
+                    bundle_ids: Vec::new(),
                     system_id: Some("system-risk".to_string()),
                     from: None,
                     to: None,
@@ -17677,6 +17852,7 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
             .body(Body::from(
                 serde_json::to_vec(&CreatePackRequest {
                     pack_type: "conformity".to_string(),
+                    bundle_ids: Vec::new(),
                     system_id: Some("system-conformity".to_string()),
                     from: None,
                     to: None,

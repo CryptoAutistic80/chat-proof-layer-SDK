@@ -554,11 +554,18 @@ export function DemoProvider({ children }) {
     const packType = Object.prototype.hasOwnProperty.call(options, "packType")
       ? options.packType
       : currentPreset.packType;
+    const bundleIds = Array.isArray(options.bundleIds)
+      ? options.bundleIds.filter((value) => typeof value === "string" && value.trim())
+      : [];
     const requestBody = {
       pack_type: packType,
-      system_id: systemId,
       bundle_format: bundleFormat,
     };
+    if (bundleIds.length > 0) {
+      requestBody.bundle_ids = bundleIds;
+    } else {
+      requestBody.system_id = systemId;
+    }
     if (bundleFormat === "disclosure") {
       requestBody.disclosure_template = buildTemplateRequest(
         templateProfile,
@@ -1138,6 +1145,7 @@ export function DemoProvider({ children }) {
           {
             packType: preset.packType,
             bundleFormat: draft.bundleFormat,
+            bundleIds: [createMeta.bundle_id],
           },
         );
       } else {
@@ -1297,6 +1305,7 @@ export function DemoProvider({ children }) {
               packType: scenario.packType,
               bundleFormat: scenario.bundleFormat,
               templateProfile: scenario.disclosureProfile,
+              bundleIds: bundleRuns.map((bundleRun) => bundleRun.bundleId),
             })
           : {
               packSummary: null,
@@ -1447,6 +1456,7 @@ export function DemoProvider({ children }) {
           packType: currentRun.packType,
           bundleFormat: currentRun.bundleFormat,
           templateProfile: currentRun.disclosureProfile,
+          bundleIds: currentRun.bundleRuns.map((bundleRun) => bundleRun.bundleId),
         },
       );
       setCurrentRun((run) => {

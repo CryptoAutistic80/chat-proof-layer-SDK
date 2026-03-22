@@ -167,6 +167,7 @@ export class ProofLayerClient {
 
   async createPack({
     packType,
+    bundleIds,
     systemId,
     from,
     to,
@@ -174,14 +175,18 @@ export class ProofLayerClient {
     disclosurePolicy,
     disclosureTemplate
   }: CreatePackRequest): Promise<PackSummaryResponse> {
+    if (bundleIds && bundleIds.length > 0 && (systemId || from || to)) {
+      throw new Error("bundleIds cannot be combined with systemId, from, or to");
+    }
     if (disclosurePolicy && disclosureTemplate) {
       throw new Error("provide either disclosurePolicy or disclosureTemplate, not both");
     }
     const payload = {
       pack_type: packType,
-      system_id: systemId,
-      from,
-      to,
+      ...(bundleIds && bundleIds.length > 0 ? { bundle_ids: bundleIds } : {}),
+      ...(systemId ? { system_id: systemId } : {}),
+      ...(from ? { from } : {}),
+      ...(to ? { to } : {}),
       ...(bundleFormat ? { bundle_format: bundleFormat } : {}),
       ...(disclosurePolicy ? { disclosure_policy: disclosurePolicy } : {}),
       ...(disclosureTemplate

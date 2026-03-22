@@ -12,6 +12,7 @@ Deterministic fixture inputs for CLI/service integration and cross-language veri
 - `fundamental_rights/`: Checked source fixtures for FRIA completeness tests.
 - `gpai_provider/`: Checked source fixtures for GPAI provider completeness tests.
 - `post_market_monitoring/`: Checked source fixtures for monitoring completeness tests.
+- `provider_governance/`: Checked source fixtures for provider-governance completeness tests.
 
 ## Generate and verify a bundle
 

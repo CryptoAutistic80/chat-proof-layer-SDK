@@ -12,6 +12,7 @@ const goldenDir = path.join(repoRoot, "fixtures", "golden");
 const annexIvDir = path.join(goldenDir, "annex_iv_governance");
 const gpaiDir = path.join(goldenDir, "gpai_provider");
 const monitoringDir = path.join(goldenDir, "post_market_monitoring");
+const providerGovernanceDir = path.join(goldenDir, "provider_governance");
 
 async function annexIvBundle() {
   const [
@@ -124,6 +125,90 @@ async function gpaiProviderBundle() {
       { type: "compute_metrics", data: JSON.parse(computeMetrics) },
       { type: "copyright_policy", data: JSON.parse(copyrightPolicy) },
       { type: "training_summary", data: JSON.parse(trainingSummary) },
+    ],
+    artefacts: [],
+    policy: {
+      redactions: [],
+      encryption: { enabled: false },
+    },
+    integrity: {
+      canonicalization: "RFC8785-JCS",
+      hash: "SHA-256",
+      header_digest:
+        "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      bundle_root_algorithm: "pl-merkle-sha256-v4",
+      bundle_root:
+        "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      signature: {
+        format: "JWS",
+        alg: "EdDSA",
+        kid: "kid-dev-01",
+        value: "sig",
+      },
+    },
+  };
+}
+
+async function providerGovernanceBundle() {
+  const [
+    riskAssessment,
+    dataGovernance,
+    technicalDoc,
+    instructionsForUse,
+    qmsRecord,
+    standardsAlignment,
+    postMarketMonitoring,
+    correctiveAction,
+  ] = await Promise.all([
+    readFile(path.join(providerGovernanceDir, "risk_assessment.json"), "utf8"),
+    readFile(path.join(providerGovernanceDir, "data_governance.json"), "utf8"),
+    readFile(path.join(providerGovernanceDir, "technical_doc.json"), "utf8"),
+    readFile(
+      path.join(providerGovernanceDir, "instructions_for_use.json"),
+      "utf8",
+    ),
+    readFile(path.join(providerGovernanceDir, "qms_record.json"), "utf8"),
+    readFile(
+      path.join(providerGovernanceDir, "standards_alignment.json"),
+      "utf8",
+    ),
+    readFile(
+      path.join(providerGovernanceDir, "post_market_monitoring.json"),
+      "utf8",
+    ),
+    readFile(
+      path.join(providerGovernanceDir, "corrective_action.json"),
+      "utf8",
+    ),
+  ]);
+
+  return {
+    bundle_version: "1.0",
+    bundle_id: "B-provider-governance",
+    created_at: "2026-03-22T12:00:00Z",
+    actor: {
+      issuer: "proof-layer-test",
+      app_id: "typescript-sdk",
+      env: "test",
+      signing_key_id: "kid-dev-01",
+      role: "provider",
+    },
+    subject: {
+      system_id: "hiring-assistant",
+    },
+    context: {},
+    items: [
+      { type: "technical_doc", data: JSON.parse(technicalDoc) },
+      { type: "risk_assessment", data: JSON.parse(riskAssessment) },
+      { type: "data_governance", data: JSON.parse(dataGovernance) },
+      { type: "instructions_for_use", data: JSON.parse(instructionsForUse) },
+      { type: "qms_record", data: JSON.parse(qmsRecord) },
+      { type: "standards_alignment", data: JSON.parse(standardsAlignment) },
+      {
+        type: "post_market_monitoring",
+        data: JSON.parse(postMarketMonitoring),
+      },
+      { type: "corrective_action", data: JSON.parse(correctiveAction) },
     ],
     artefacts: [],
     policy: {
@@ -383,6 +468,25 @@ test("ProofLayer local mode can evaluate gpai provider completeness", async () =
 
   assert.equal(report.status, "pass");
   assert.equal(report.pass_count, 6);
+});
+
+test("ProofLayer local mode can evaluate provider governance completeness", async () => {
+  const signingKeyPem = await readFile(
+    path.join(goldenDir, "signing_key.txt"),
+    "utf8",
+  );
+  const proofLayer = new ProofLayer({
+    signingKeyPem,
+    keyId: "kid-dev-01",
+  });
+
+  const report = await proofLayer.evaluateCompleteness({
+    bundle: await providerGovernanceBundle(),
+    profile: "provider_governance_v1",
+  });
+
+  assert.equal(report.status, "pass");
+  assert.equal(report.pass_count, 8);
 });
 
 test("ProofLayer local mode can evaluate post-market monitoring completeness", async () => {

@@ -92,6 +92,15 @@ function readinessCopy(profile, status, subject = "workflow") {
     }
     return `The ${subject} is missing at least one required post-market monitoring or authority-reporting area, or it does not yet include a minimally complete version of that record.`;
   }
+  if (profile === "provider_governance_v1") {
+    if (status === "pass") {
+      return `The structured provider-governance fields for this ${subject} meet the current advisory minimum.`;
+    }
+    if (status === "warn") {
+      return `The ${subject} has at least one minimally complete provider-governance record for each required area, but some captured records are thinner than the current advisory minimum.`;
+    }
+    return `The ${subject} is missing at least one required provider-governance area, or it does not yet include a minimally complete version of that record.`;
+  }
   if (status === "pass") {
     return `The structured fields for this ${subject} meet the current advisory minimum.`;
   }

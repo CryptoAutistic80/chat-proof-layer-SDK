@@ -2,6 +2,7 @@
 
 Completed:
 
+- Added a new advisory `provider_governance_v1` completeness profile for provider-side governance workflows, covering `technical_doc`, `risk_assessment`, `data_governance`, `instructions_for_use`, `qms_record`, `standards_alignment`, `post_market_monitoring`, and `corrective_action`.
 - Added a new advisory `post_market_monitoring_v1` completeness profile for monitoring and incident-response workflows, covering `post_market_monitoring`, `incident_report`, `corrective_action`, `authority_notification`, `authority_submission`, and `reporting_deadline`.
 - Expanded `annex_iv_governance_v1` so it now assesses the full eight-family Annex IV governance bundle, adding `qms_record`, `standards_alignment`, and `post_market_monitoring` minimum-field checks.
 - Added a new advisory `fundamental_rights_v1` completeness profile for deployer-side FRIA workflows, covering structured `fundamental_rights_assessment` and linked `human_oversight` evidence.
@@ -397,7 +398,7 @@ Completed:
   `examples/typescript-compliance` now captures the full Annex IV governance workflow and exports both full and disclosure packs,
   and `examples/python-annex-iv` provides the matching Python walkthrough while preserving the older FRIA example separately.
 - Landed advisory Annex IV readiness/completeness evaluation across the stack:
-  Rust core now ships `annex_iv_governance_v1`,
+  Rust core now ships `annex_iv_governance_v1`, `provider_governance_v1`,
   `proofctl` now exposes `assess`,
   the vault now exposes `POST /v1/completeness/evaluate` and attaches completeness summary fields to `annex_iv` pack manifests,
   TypeScript/Python now expose `evaluateCompleteness` / `evaluate_completeness`,

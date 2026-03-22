@@ -110,6 +110,12 @@ readiness = proof_layer.evaluate_completeness(
     profile="annex_iv_governance_v1",
 )
 
+provider_governance_readiness = proof_layer.evaluate_completeness(
+    # full_provider_governance_bundle should contain the provider-side governance evidence set.
+    bundle=full_provider_governance_bundle,
+    profile="provider_governance_v1",
+)
+
 gpai_readiness = proof_layer.evaluate_completeness(
     # full_gpai_provider_bundle should contain the full structured GPAI provider evidence set.
     bundle=full_gpai_provider_bundle,
@@ -219,6 +225,10 @@ annex_xi_pack_readiness = proof_client.evaluate_completeness(
     pack_id="PACK_ID",
     profile="gpai_provider_v1",
 )
+provider_governance_pack_readiness = proof_client.evaluate_completeness(
+    pack_id="PACK_ID",
+    profile="provider_governance_v1",
+)
 fundamental_rights_pack_readiness = proof_client.evaluate_completeness(
     pack_id="PACK_ID",
     profile="fundamental_rights_v1",
@@ -241,7 +251,7 @@ print(redacted_summary["disclosed_item_count"], len(archive))
 print(preview["disclosed_item_types"])
 print(template_pack["pack_id"], template_preview["disclosed_item_types"])
 print(template_catalog["templates"][0]["profile"], rendered_template["policy"]["name"])
-print(annex_xi_pack_readiness["status"])
+print(annex_xi_pack_readiness["status"], provider_governance_pack_readiness["status"])
 print(monitoring_readiness["status"], monitoring_pack_readiness["status"])
 print(pack_readiness["source"], pack_readiness["status"])
 print(vault_readiness["status"])
@@ -255,6 +265,7 @@ Use `verify_timestamp(...)` and `verify_receipt(...)` when you want both the low
 For receipts, `live_check_mode="best_effort"` adds an opt-in live Rekor freshness check without turning temporary network problems into a hard failure.
 
 For `annex_iv`, the pack-scoped pass count is currently `8` because `annex_iv_governance_v1` now evaluates the full governance set curated by the pack.
+For `provider_governance`, the pack-scoped pass count is currently `8` because `provider_governance_v1` evaluates the provider-side governance set curated by that pack, including corrective action follow-up.
 For `post_market_monitoring`, the pack-scoped pass count is currently `6` because `post_market_monitoring_v1` evaluates the required monitoring and authority-reporting rule families.
 
 For the full provider-side Annex IV governance walkthrough, build the native module and run:

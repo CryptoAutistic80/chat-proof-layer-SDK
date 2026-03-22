@@ -9,6 +9,7 @@ GOLDEN_DIR = REPO_ROOT / "fixtures" / "golden"
 ANNEX_IV_DIR = GOLDEN_DIR / "annex_iv_governance"
 GPAI_DIR = GOLDEN_DIR / "gpai_provider"
 POST_MARKET_MONITORING_DIR = GOLDEN_DIR / "post_market_monitoring"
+PROVIDER_GOVERNANCE_DIR = GOLDEN_DIR / "provider_governance"
 
 
 def annex_iv_bundle() -> dict[str, object]:
@@ -221,6 +222,98 @@ def post_market_monitoring_bundle() -> dict[str, object]:
     }
 
 
+def provider_governance_bundle() -> dict[str, object]:
+    return {
+        "bundle_version": "1.0",
+        "bundle_id": "B-provider-governance",
+        "created_at": "2026-03-22T12:00:00Z",
+        "actor": {
+            "issuer": "proof-layer-test",
+            "app_id": "python-sdk",
+            "env": "test",
+            "signing_key_id": "kid-dev-01",
+            "role": "provider",
+        },
+        "subject": {"system_id": "hiring-assistant"},
+        "context": {},
+        "items": [
+            {
+                "type": "technical_doc",
+                "data": json.loads(
+                    (PROVIDER_GOVERNANCE_DIR / "technical_doc.json").read_text(encoding="utf-8")
+                ),
+            },
+            {
+                "type": "risk_assessment",
+                "data": json.loads(
+                    (PROVIDER_GOVERNANCE_DIR / "risk_assessment.json").read_text(encoding="utf-8")
+                ),
+            },
+            {
+                "type": "data_governance",
+                "data": json.loads(
+                    (PROVIDER_GOVERNANCE_DIR / "data_governance.json").read_text(
+                        encoding="utf-8"
+                    )
+                ),
+            },
+            {
+                "type": "instructions_for_use",
+                "data": json.loads(
+                    (PROVIDER_GOVERNANCE_DIR / "instructions_for_use.json").read_text(
+                        encoding="utf-8"
+                    )
+                ),
+            },
+            {
+                "type": "qms_record",
+                "data": json.loads(
+                    (PROVIDER_GOVERNANCE_DIR / "qms_record.json").read_text(encoding="utf-8")
+                ),
+            },
+            {
+                "type": "standards_alignment",
+                "data": json.loads(
+                    (PROVIDER_GOVERNANCE_DIR / "standards_alignment.json").read_text(
+                        encoding="utf-8"
+                    )
+                ),
+            },
+            {
+                "type": "post_market_monitoring",
+                "data": json.loads(
+                    (PROVIDER_GOVERNANCE_DIR / "post_market_monitoring.json").read_text(
+                        encoding="utf-8"
+                    )
+                ),
+            },
+            {
+                "type": "corrective_action",
+                "data": json.loads(
+                    (PROVIDER_GOVERNANCE_DIR / "corrective_action.json").read_text(
+                        encoding="utf-8"
+                    )
+                ),
+            },
+        ],
+        "artefacts": [],
+        "policy": {"redactions": [], "encryption": {"enabled": False}},
+        "integrity": {
+            "canonicalization": "RFC8785-JCS",
+            "hash": "SHA-256",
+            "header_digest": "sha256:" + "a" * 64,
+            "bundle_root_algorithm": "pl-merkle-sha256-v4",
+            "bundle_root": "sha256:" + "b" * 64,
+            "signature": {
+                "format": "JWS",
+                "alg": "EdDSA",
+                "kid": "kid-dev-01",
+                "value": "sig",
+            },
+        },
+    }
+
+
 class TestProofLayer(unittest.TestCase):
     def test_capture_seals_local_llm_interaction_bundle(self):
         signing_key_pem = (GOLDEN_DIR / "signing_key.txt").read_text(encoding="utf-8")
@@ -347,6 +440,21 @@ class TestProofLayer(unittest.TestCase):
 
         self.assertEqual(report["status"], "pass")
         self.assertEqual(report["pass_count"], 6)
+
+    def test_local_mode_can_evaluate_provider_governance_completeness(self):
+        signing_key_pem = (GOLDEN_DIR / "signing_key.txt").read_text(encoding="utf-8")
+        proof_layer = ProofLayer(
+            signing_key_pem=signing_key_pem,
+            key_id="kid-dev-01",
+        )
+
+        report = proof_layer.evaluate_completeness(
+            bundle=provider_governance_bundle(),
+            profile="provider_governance_v1",
+        )
+
+        self.assertEqual(report["status"], "pass")
+        self.assertEqual(report["pass_count"], 8)
 
     def test_local_mode_can_evaluate_post_market_monitoring_completeness(self):
         signing_key_pem = (GOLDEN_DIR / "signing_key.txt").read_text(encoding="utf-8")

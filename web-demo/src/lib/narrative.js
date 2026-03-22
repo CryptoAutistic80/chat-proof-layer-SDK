@@ -266,7 +266,9 @@ function completenessStatus(run) {
           ? "required deployer-side rights area"
           : report.profile === "post_market_monitoring_v1"
             ? "required post-market monitoring area"
-          : "required governance area";
+            : report.profile === "provider_governance_v1"
+              ? "required provider-governance area"
+            : "required governance area";
     return {
       tone: "accent",
       title: "Readiness check has warnings",
@@ -280,6 +282,8 @@ function completenessStatus(run) {
         ? "required deployer-side rights area(s)"
         : report.profile === "post_market_monitoring_v1"
           ? "required post-market monitoring area(s)"
+          : report.profile === "provider_governance_v1"
+            ? "required provider-governance area(s)"
         : "required governance area(s)";
   return {
     tone: "warn",

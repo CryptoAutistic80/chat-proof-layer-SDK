@@ -1,0 +1,8 @@
+{
+  "plan_id": "pmm-42",
+  "status": "active",
+  "summary": "Weekly drift review with escalation thresholds.",
+  "metadata": {
+    "owner": "safety-ops"
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "record_id": "qms-release-approval-42",
+  "process": "release_approval",
+  "status": "approved",
+  "policy_name": "Hiring Assistant Release Governance",
+  "revision": "3.1",
+  "effective_date": "2026-03-01",
+  "scope": "EU provider release control",
+  "audit_results_summary": "Release gate approved after compliance review.",
+  "continuous_improvement_actions": [
+    "monitor subgroup parity monthly"
+  ],
+  "metadata": {
+    "owner": "quality-lead"
+  }
+}

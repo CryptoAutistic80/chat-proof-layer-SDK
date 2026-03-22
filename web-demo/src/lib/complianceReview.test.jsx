@@ -141,6 +141,30 @@ describe("buildComplianceReview", () => {
     expect(review.readiness.summary).toContain("post-market monitoring");
   });
 
+  test("uses provider-governance-specific readiness wording when that profile is attached", () => {
+    const review = buildComplianceReview(
+      getPlaygroundScenario("ts_support_rules"),
+      {
+        completenessReport: {
+          profile: "provider_governance_v1",
+          status: "fail",
+          pass_count: 0,
+          warn_count: 0,
+          fail_count: 2,
+          rules: [
+            {
+              status: "fail",
+              missing_fields: ["record_commitment"],
+            },
+          ],
+        },
+      },
+    );
+
+    expect(review.readiness.profile).toBe("provider_governance_v1");
+    expect(review.readiness.summary).toContain("provider-governance");
+  });
+
   test("leaves exported pack readiness empty when no pack completeness report is attached", () => {
     const review = buildComplianceReview(
       getPlaygroundScenario("ts_support_rules"),

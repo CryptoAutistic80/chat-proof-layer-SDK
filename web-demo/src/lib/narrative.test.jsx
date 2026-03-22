@@ -78,6 +78,31 @@ describe("buildRunNarrativeSummary", () => {
     );
   });
 
+  test("uses provider-governance readiness wording for provider governance flows", () => {
+    const summary = buildRunNarrativeSummary(
+      {
+        presetKey: "investor_summary",
+        scenarioLabel: "Provider governance",
+        bundleId: "bundle-4",
+        bundleRuns: [{ bundleId: "bundle-4" }],
+        completenessProfile: "provider_governance_v1",
+        completenessReport: {
+          profile: "provider_governance_v1",
+          status: "fail",
+          pass_count: 0,
+          warn_count: 0,
+          fail_count: 2,
+          rules: [],
+        },
+      },
+      null,
+    );
+
+    expect(summary.completenessStatus.summary).toContain(
+      "required provider-governance area(s)",
+    );
+  });
+
   test("uses timestamp and transparency assessment wording when available", () => {
     const summary = buildRunNarrativeSummary(
       {

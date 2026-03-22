@@ -216,12 +216,12 @@ Those disclosure policies can now also supply `redacted_fields_by_item_type`, us
 
 This section is normative for the checked-in Annex IV governance fixtures, examples, and pack-acceptance tests. It does not change the bundle contract; it defines the minimum structured detail we expect callers to provide for an audit-ready high-risk governance record.
 
-These minimums are now machine-assessed by the advisory completeness profiles exposed through Rust core, `proofctl assess`, `POST /v1/completeness/evaluate`, the TypeScript/Python SDKs, and the `web-demo` readiness check. Today that includes `annex_iv_governance_v1`, `fundamental_rights_v1`, `gpai_provider_v1`, and `post_market_monitoring_v1`. Integrity and completeness remain separate concerns: verification answers whether the sealed record changed; completeness answers whether the structured governance record is minimally populated for the selected review profile.
+These minimums are now machine-assessed by the advisory completeness profiles exposed through Rust core, `proofctl assess`, `POST /v1/completeness/evaluate`, the TypeScript/Python SDKs, and the `web-demo` readiness check. Today that includes `annex_iv_governance_v1`, `provider_governance_v1`, `fundamental_rights_v1`, `gpai_provider_v1`, and `post_market_monitoring_v1`. Integrity and completeness remain separate concerns: verification answers whether the sealed record changed; completeness answers whether the structured governance record is minimally populated for the selected review profile.
 
 ### `risk_assessment`
 
 - Already schema-supported: `risk_id`, `severity`, `status`, `summary`, `risk_description`, `likelihood`, `affected_groups`, `mitigation_measures`, `residual_risk_level`, `risk_owner`, `vulnerable_groups_considered`, `test_results_summary`, `metadata`
-- Recommended for Annex IV readiness: `risk_id`, `severity`, `status`, `risk_description`, `likelihood`, `affected_groups`, `mitigation_measures`, `residual_risk_level`, `risk_owner`, `test_results_summary`
+- Recommended for Annex IV and provider-governance readiness: `risk_id`, `severity`, `status`, `risk_description`, `likelihood`, `affected_groups`, `mitigation_measures`, `residual_risk_level`, `risk_owner`, `test_results_summary`
 - Typical supporting artefact: `risk_assessment.json`
 - Typical obligation intent: `art9`
 - Disclosure-sensitive paths: `/metadata`
@@ -229,7 +229,7 @@ These minimums are now machine-assessed by the advisory completeness profiles ex
 ### `data_governance`
 
 - Already schema-supported: `decision`, `dataset_ref`, `dataset_name`, `dataset_version`, `source_description`, `collection_period`, `geographical_scope`, `preprocessing_operations`, `bias_detection_methodology`, `bias_metrics`, `mitigation_actions`, `data_gaps`, `personal_data_categories`, `safeguards`, `metadata`
-- Recommended for Annex IV readiness: `decision`, `dataset_ref` or `dataset_name`, `source_description`, `collection_period`, `preprocessing_operations`, `bias_detection_methodology`, `bias_metrics`, `mitigation_actions`, `data_gaps`, `personal_data_categories`, `safeguards`
+- Recommended for Annex IV and provider-governance readiness: `decision`, `dataset_ref` or `dataset_name`, `source_description`, `collection_period`, `preprocessing_operations`, `bias_detection_methodology`, `bias_metrics`, `mitigation_actions`, `data_gaps`, `personal_data_categories`, `safeguards`
 - Typical supporting artefact: `data_governance.json`
 - Typical obligation intent: `art10`
 - Disclosure-sensitive paths: `/metadata`, `/personal_data_categories`, `/safeguards`
@@ -237,7 +237,7 @@ These minimums are now machine-assessed by the advisory completeness profiles ex
 ### `technical_doc`
 
 - Already schema-supported: `document_ref`, `section`, `commitment`, `annex_iv_sections`, `system_description_summary`, `model_description_summary`, `capabilities_and_limitations`, `design_choices_summary`, `evaluation_metrics_summary`, `human_oversight_design_summary`, `post_market_monitoring_plan_ref`, `simplified_tech_doc`
-- Recommended for Annex IV readiness: `document_ref`, `annex_iv_sections`, `system_description_summary`, `model_description_summary`, `capabilities_and_limitations`, `design_choices_summary`, `evaluation_metrics_summary`, `human_oversight_design_summary`, `post_market_monitoring_plan_ref`
+- Recommended for Annex IV and provider-governance readiness: `document_ref`, `annex_iv_sections`, `system_description_summary`, `model_description_summary`, `capabilities_and_limitations`, `design_choices_summary`, `evaluation_metrics_summary`, `human_oversight_design_summary`, `post_market_monitoring_plan_ref`
 - Typical supporting artefact: `technical_doc.json` plus optional binary document attachment
 - Typical obligation intent: `art11_annex_iv`
 - Disclosure-sensitive fields: typically the attached document artefacts rather than the structured item itself
@@ -245,7 +245,7 @@ These minimums are now machine-assessed by the advisory completeness profiles ex
 ### `instructions_for_use`
 
 - Already schema-supported: `document_ref`, `version`, `section`, `commitment`, `provider_identity`, `intended_purpose`, `system_capabilities`, `accuracy_metrics`, `foreseeable_risks`, `explainability_capabilities`, `human_oversight_guidance`, `compute_requirements`, `service_lifetime`, `log_management_guidance`, `metadata`
-- Recommended for Annex IV readiness: `document_ref`, `version`, `provider_identity`, `intended_purpose`, `system_capabilities`, `accuracy_metrics`, `foreseeable_risks`, `human_oversight_guidance`, `log_management_guidance`
+- Recommended for Annex IV and provider-governance readiness: `document_ref`, `version`, `provider_identity`, `intended_purpose`, `system_capabilities`, `accuracy_metrics`, `foreseeable_risks`, `human_oversight_guidance`, `log_management_guidance`
 - Typical supporting artefact: `instructions_for_use.json` plus optional binary document attachment
 - Typical obligation intent: `art13`
 - Disclosure-sensitive paths: `/metadata`
@@ -269,15 +269,15 @@ These minimums are now machine-assessed by the advisory completeness profiles ex
 ### Linked Governance Items
 
 - `qms_record`
-  Recommended for Annex IV readiness: `record_id`, `process`, `status`, `policy_name`, `revision`, `scope`, `audit_results_summary`, `continuous_improvement_actions`
+  Recommended for Annex IV and provider-governance readiness: `record_id`, `process`, `status`, `policy_name`, `revision`, `scope`, `audit_results_summary`, `continuous_improvement_actions`
   Typical obligation intent: `art17`
   Recommended disclosure-sensitive path: `/metadata`
 - `standards_alignment`
-  Recommended for Annex IV readiness: `standard_ref`, `status`, `scope`
+  Recommended for Annex IV and provider-governance readiness: `standard_ref`, `status`, `scope`
   Typical obligation intent: `art40_43`
   Recommended disclosure-sensitive path: `/metadata`
 - `post_market_monitoring`
-  Recommended for Annex IV readiness: `plan_id`, `status`, `summary`
+  Recommended for Annex IV and provider-governance readiness: `plan_id`, `status`, `summary`
   Recommended for `post_market_monitoring_v1` readiness: `plan_id`, `status`, `summary`, `report_commitment`
   Typical obligation intent: `art72`
   Recommended disclosure-sensitive path: `/metadata`
@@ -289,6 +289,7 @@ These minimums are now machine-assessed by the advisory completeness profiles ex
   Typical obligation intent: `art55_73`
   Recommended disclosure-sensitive path: `/metadata`
 - `corrective_action`
+  Recommended for `provider_governance_v1` readiness: `action_id`, `status`, `summary`, `due_at`, `record_commitment`
   Recommended for `post_market_monitoring_v1` readiness: `action_id`, `status`, `summary`, `due_at`, `record_commitment`
   Typical obligation intent: `art20_73`
   Recommended disclosure-sensitive path: `/metadata`

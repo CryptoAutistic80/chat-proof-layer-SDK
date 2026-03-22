@@ -52,6 +52,9 @@ const mocks = vi.hoisted(() => {
     if (packType === "annex_iv") {
       return "annex_iv_governance_v1";
     }
+    if (packType === "provider_governance") {
+      return "provider_governance_v1";
+    }
     if (packType === "fundamental_rights") {
       return "fundamental_rights_v1";
     }
@@ -66,6 +69,9 @@ const mocks = vi.hoisted(() => {
 
   function ruleCountForProfile(profile) {
     if (profile === "annex_iv_governance_v1") {
+      return 8;
+    }
+    if (profile === "provider_governance_v1") {
       return 8;
     }
     if (profile === "fundamental_rights_v1") {

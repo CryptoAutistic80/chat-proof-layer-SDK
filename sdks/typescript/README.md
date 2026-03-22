@@ -109,6 +109,12 @@ const readiness = await proofLayer.evaluateCompleteness({
   profile: "annex_iv_governance_v1"
 });
 
+const providerGovernanceReadiness = await proofLayer.evaluateCompleteness({
+  // fullProviderGovernanceBundle should contain the provider-side governance evidence set.
+  bundle: fullProviderGovernanceBundle,
+  profile: "provider_governance_v1"
+});
+
 const gpaiReadiness = await proofLayer.evaluateCompleteness({
   // fullGpaiProviderBundle should contain the full structured GPAI provider evidence set.
   bundle: fullGpaiProviderBundle,
@@ -219,6 +225,10 @@ const annexXiPackReadiness = await proofClient.evaluateCompleteness({
   packId: "PACK_ID",
   profile: "gpai_provider_v1"
 });
+const providerGovernancePackReadiness = await proofClient.evaluateCompleteness({
+  packId: "PACK_ID",
+  profile: "provider_governance_v1"
+});
 const fundamentalRightsPackReadiness = await proofClient.evaluateCompleteness({
   packId: "PACK_ID",
   profile: "fundamental_rights_v1"
@@ -255,7 +265,7 @@ console.log(redactedSummary.disclosed_item_count, archive.length);
 console.log(preview.disclosed_item_types);
 console.log(templatePack.pack_id, templatePreview.disclosedItemTypes);
 console.log(templateCatalog.templates[0].profile, renderedTemplate.policy.name);
-console.log(annexXiPackReadiness.status);
+console.log(annexXiPackReadiness.status, providerGovernancePackReadiness.status);
 console.log(monitoringReadiness.status, monitoringPackReadiness.status);
 console.log(packReadiness?.source, packReadiness?.status);
 console.log(vaultReadiness.status);
@@ -269,6 +279,7 @@ Use `verifyTimestamp(...)` and `verifyReceipt(...)` when you want both the low-l
 For receipts, `liveCheckMode: "best_effort"` adds an opt-in live Rekor freshness check without turning temporary network problems into a hard failure.
 
 For `annex_iv`, the pack-scoped pass count is currently `8` because `annex_iv_governance_v1` now evaluates the full governance set curated by the pack.
+For `provider_governance`, the pack-scoped pass count is currently `8` because `provider_governance_v1` evaluates the provider-side governance set curated by that pack, including corrective action follow-up.
 For `post_market_monitoring`, the pack-scoped pass count is currently `6` because `post_market_monitoring_v1` evaluates the required monitoring and authority-reporting rule families.
 
 For the full provider-side Annex IV governance walkthrough, build the SDK and run:

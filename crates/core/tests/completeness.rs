@@ -170,6 +170,37 @@ fn post_market_monitoring_bundle() -> EvidenceBundle {
     )
 }
 
+fn provider_governance_bundle() -> EvidenceBundle {
+    let risk: RiskAssessmentEvidence = read_json("provider_governance", "risk_assessment.json");
+    let data: DataGovernanceEvidence = read_json("provider_governance", "data_governance.json");
+    let technical: TechnicalDocEvidence = read_json("provider_governance", "technical_doc.json");
+    let instructions: InstructionsForUseEvidence =
+        read_json("provider_governance", "instructions_for_use.json");
+    let qms: QmsRecordEvidence = read_json("provider_governance", "qms_record.json");
+    let standards: StandardsAlignmentEvidence =
+        read_json("provider_governance", "standards_alignment.json");
+    let monitoring: PostMarketMonitoringEvidence =
+        read_json("provider_governance", "post_market_monitoring.json");
+    let corrective: CorrectiveActionEvidence =
+        read_json("provider_governance", "corrective_action.json");
+
+    minimal_bundle(
+        "hiring-assistant",
+        "hiring-model-v3",
+        "2026.03",
+        vec![
+            EvidenceItem::TechnicalDoc(technical),
+            EvidenceItem::RiskAssessment(risk),
+            EvidenceItem::DataGovernance(data),
+            EvidenceItem::InstructionsForUse(instructions),
+            EvidenceItem::QmsRecord(qms),
+            EvidenceItem::StandardsAlignment(standards),
+            EvidenceItem::PostMarketMonitoring(monitoring),
+            EvidenceItem::CorrectiveAction(corrective),
+        ],
+    )
+}
+
 #[test]
 fn passing_annex_iv_governance_fixture_returns_pass() {
     let bundle = annex_iv_bundle();
@@ -336,6 +367,42 @@ fn passing_post_market_monitoring_fixture_returns_pass() {
     assert_eq!(report.pass_count, 6);
     assert_eq!(report.warn_count, 0);
     assert_eq!(report.fail_count, 0);
+}
+
+#[test]
+fn passing_provider_governance_fixture_returns_pass() {
+    let bundle = provider_governance_bundle();
+    let report = evaluate_completeness(&bundle, CompletenessProfile::ProviderGovernanceV1);
+
+    assert_eq!(report.status, CompletenessStatus::Pass);
+    assert_eq!(report.pass_count, 8);
+    assert_eq!(report.warn_count, 0);
+    assert_eq!(report.fail_count, 0);
+}
+
+#[test]
+fn provider_governance_missing_corrective_action_field_returns_fail() {
+    let mut bundle = provider_governance_bundle();
+    let evidence = bundle
+        .items
+        .iter_mut()
+        .find_map(|item| match item {
+            EvidenceItem::CorrectiveAction(evidence) => Some(evidence),
+            _ => None,
+        })
+        .expect("corrective_action should exist");
+    evidence.record_commitment = None;
+
+    let report = evaluate_completeness(&bundle, CompletenessProfile::ProviderGovernanceV1);
+
+    assert_eq!(report.status, CompletenessStatus::Fail);
+    let rule = report
+        .rules
+        .iter()
+        .find(|rule| rule.item_type == "corrective_action")
+        .expect("corrective_action rule should exist");
+    assert_eq!(rule.status, CompletenessStatus::Fail);
+    assert_eq!(rule.missing_fields, vec!["record_commitment"]);
 }
 
 #[test]

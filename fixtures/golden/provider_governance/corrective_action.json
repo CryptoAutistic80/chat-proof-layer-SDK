@@ -1,0 +1,10 @@
+{
+  "action_id": "ca-hiring-42",
+  "status": "in_progress",
+  "summary": "Tighten the ranking fallback rules and route borderline cases to manual review.",
+  "due_at": "2026-03-10T12:00:00Z",
+  "record_commitment": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+  "metadata": {
+    "owner": "quality-team"
+  }
+}

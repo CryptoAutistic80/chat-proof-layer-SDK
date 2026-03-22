@@ -882,6 +882,73 @@ textarea {
   background: rgba(184, 90, 50, 0.1);
 }
 
+.assurance-option-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  width: 100%;
+  margin: 8px 0 18px;
+}
+
+.assurance-option-card {
+  display: grid;
+  gap: 6px;
+  padding: 14px 16px;
+  text-align: left;
+  border-radius: 18px;
+  border: 1px solid var(--line);
+  background: rgba(255, 251, 246, 0.96);
+  transition:
+    border-color 160ms ease,
+    background-color 160ms ease,
+    transform 160ms ease,
+    box-shadow 160ms ease;
+}
+
+.assurance-option-card:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 10px 24px rgba(58, 40, 26, 0.06);
+}
+
+.assurance-option-card strong {
+  font-size: 1.02rem;
+}
+
+.assurance-option-card span:last-child {
+  color: var(--ink-soft);
+  line-height: 1.45;
+}
+
+.assurance-option-eyebrow {
+  display: inline-flex;
+  width: fit-content;
+  padding: 4px 8px;
+  border-radius: 999px;
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+}
+
+.assurance-option-card.is-enabled {
+  border-color: rgba(30, 114, 99, 0.32);
+  background: linear-gradient(180deg, rgba(244, 255, 251, 0.96), rgba(235, 248, 243, 0.96));
+}
+
+.assurance-option-card.is-enabled .assurance-option-eyebrow {
+  color: var(--green);
+  background: rgba(30, 114, 99, 0.12);
+}
+
+.assurance-option-card.is-disabled {
+  border-color: rgba(184, 90, 50, 0.22);
+  background: linear-gradient(180deg, rgba(255, 251, 246, 0.96), rgba(250, 244, 238, 0.96));
+}
+
+.assurance-option-card.is-disabled .assurance-option-eyebrow {
+  color: var(--accent-strong);
+  background: rgba(184, 90, 50, 0.1);
+}
+
 .panel-subsection {
   padding: 16px;
   border-radius: 20px;
@@ -1830,6 +1897,7 @@ pre {
   flex-wrap: wrap;
   gap: 8px;
   margin-top: 14px;
+  align-items: center;
 }
 
 .status-pill {
@@ -1862,6 +1930,76 @@ pre {
 .status-pill.is-muted {
   color: var(--ink-soft);
   background: rgba(24, 20, 16, 0.06);
+}
+
+.bundle-role-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 10px 14px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+}
+
+.bundle-role-pill.is-accent {
+  color: var(--accent-strong);
+  background: rgba(184, 90, 50, 0.1);
+}
+
+.bundle-role-pill.is-muted {
+  color: var(--ink-soft);
+  background: rgba(24, 20, 16, 0.04);
+}
+
+.bundle-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.82);
+}
+
+.bundle-check strong {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.11em;
+  font-family: "IBM Plex Mono", "SFMono-Regular", monospace;
+}
+
+.bundle-check span {
+  font-size: 0.82rem;
+  color: var(--ink-soft);
+}
+
+.bundle-check.is-good {
+  border-color: rgba(30, 114, 99, 0.24);
+  background: var(--green-soft);
+}
+
+.bundle-check.is-good strong {
+  color: var(--green);
+}
+
+.bundle-check.is-warn {
+  border-color: rgba(176, 125, 34, 0.28);
+  background: var(--amber-soft);
+}
+
+.bundle-check.is-warn strong {
+  color: var(--amber);
+}
+
+.bundle-check.is-muted {
+  background: rgba(24, 20, 16, 0.04);
+}
+
+.bundle-check.is-muted strong {
+  color: var(--ink-soft);
 }
 
 .review-grid {
@@ -2122,6 +2260,10 @@ pre {
 
   .sdk-hero-metrics,
   .bundle-run-list {
+    grid-template-columns: 1fr;
+  }
+
+  .assurance-option-grid {
     grid-template-columns: 1fr;
   }
 

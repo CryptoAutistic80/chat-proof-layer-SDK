@@ -1,6 +1,7 @@
 import React from "react";
 import { useNavigate } from "react-router-dom";
 import { useDemo } from "../app/DemoContext";
+import { AssuranceOptionToggles } from "../components/AssuranceOptionToggles";
 import {
   PRESETS,
   defaultTemplateName,
@@ -241,22 +242,11 @@ export function AdvancedPlaygroundPage() {
             : "Synthetic sample mode still runs through the real proof workflow for sealing, verification, disclosure, and export."}
         </p>
 
-        <div className="toggle-row">
-          <button
-            type="button"
-            className={`toggle-pill ${draft.attachTimestamp ? "is-active" : ""}`}
-            onClick={() => actions.updateDraft("attachTimestamp", !draft.attachTimestamp)}
-          >
-            Timestamp
-          </button>
-          <button
-            type="button"
-            className={`toggle-pill ${draft.attachTransparency ? "is-active" : ""}`}
-            onClick={() => actions.updateDraft("attachTransparency", !draft.attachTransparency)}
-          >
-            Transparency
-          </button>
-        </div>
+        <AssuranceOptionToggles
+          attachTimestamp={draft.attachTimestamp}
+          attachTransparency={draft.attachTransparency}
+          onChange={actions.updateDraft}
+        />
 
         <div className="panel-subsection">
           <div className="panel-head compact">

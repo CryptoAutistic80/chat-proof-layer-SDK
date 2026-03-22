@@ -88,8 +88,8 @@ pub use transparency::{
     ReceiptVerification, RekorTransparencyProvider, SCITT_STATEMENT_PROFILE,
     SCITT_TRANSPARENCY_KIND, SIGSTORE_REKOR_URL, ScittFormat, ScittStatementSigner,
     ScittTransparencyProvider, TransparencyEntry, TransparencyError, TransparencyProvider,
-    TransparencyTrustPolicy, anchor_bundle, validate_transparency_trust_policy,
-    verify_receipt, verify_receipt_with_live_check, verify_receipt_with_policy,
+    TransparencyTrustPolicy, anchor_bundle, validate_transparency_trust_policy, verify_receipt,
+    verify_receipt_with_live_check, verify_receipt_with_policy,
     verify_receipt_with_policy_and_live_check, verify_rekor_receipt_live,
 };
 pub use verify::{VerifyBundleRootError, verify_bundle_root};

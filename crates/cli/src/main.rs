@@ -5,22 +5,20 @@ use clap::{Args, Parser, Subcommand, ValueEnum};
 use ed25519_dalek::SigningKey;
 use flate2::{Compression, read::GzDecoder, write::GzEncoder};
 use proof_layer_core::{
-    ActorRole, ArtefactInput, CaptureEvent, CaptureInput, CompletenessProfile,
-    CompletenessReport, CompletenessStatus, DisclosureError, EvidenceItem,
-    LEGACY_BUNDLE_ROOT_ALGORITHM, ProofBundle, ReceiptAssessment, ReceiptLiveCheckMode,
-    ReceiptVerification, RedactedBundle, RekorTransparencyProvider,
-    Rfc3161HttpTimestampProvider, SCITT_TRANSPARENCY_KIND, ScittFormat,
+    ActorRole, ArtefactInput, CaptureEvent, CaptureInput, CompletenessProfile, CompletenessReport,
+    CompletenessStatus, DisclosureError, EvidenceItem, LEGACY_BUNDLE_ROOT_ALGORITHM, ProofBundle,
+    ReceiptAssessment, ReceiptLiveCheckMode, ReceiptVerification, RedactedBundle,
+    RekorTransparencyProvider, Rfc3161HttpTimestampProvider, SCITT_TRANSPARENCY_KIND, ScittFormat,
     ScittStatementSigner, ScittTransparencyProvider, TimestampAssessment,
     TimestampAssuranceProfile, TimestampProvider, TimestampToken, TimestampTrustPolicy,
     TransparencyProvider, TransparencyReceipt, TransparencyTrustPolicy,
-    anchor_bundle as anchor_bundle_receipt, assess_receipt_error,
-    assess_receipt_verification, assess_timestamp_error, assess_timestamp_verification,
-    build_bundle, build_inclusion_proof, capture_input_v01_to_event, decode_backup_encryption_key,
-    decode_private_key_pem, decode_public_key_pem, decrypt_backup_archive, encode_private_key_pem,
-    encode_public_key_pem, evaluate_completeness, redact_bundle,
-    redact_bundle_with_field_redactions, sha256_prefixed, timestamp_digest,
-    validate_bundle_integrity_fields, validate_timestamp_trust_policy, verify_receipt,
-    verify_receipt_with_live_check, verify_receipt_with_policy,
+    anchor_bundle as anchor_bundle_receipt, assess_receipt_error, assess_receipt_verification,
+    assess_timestamp_error, assess_timestamp_verification, build_bundle, build_inclusion_proof,
+    capture_input_v01_to_event, decode_backup_encryption_key, decode_private_key_pem,
+    decode_public_key_pem, decrypt_backup_archive, encode_private_key_pem, encode_public_key_pem,
+    evaluate_completeness, redact_bundle, redact_bundle_with_field_redactions, sha256_prefixed,
+    timestamp_digest, validate_bundle_integrity_fields, validate_timestamp_trust_policy,
+    verify_receipt, verify_receipt_with_live_check, verify_receipt_with_policy,
     verify_receipt_with_policy_and_live_check, verify_redacted_bundle, verify_timestamp,
     verify_timestamp_with_policy,
 };
@@ -3848,7 +3846,9 @@ fn build_timestamp_check_report(
     };
 
     let verification = match trust_policy {
-        Some(policy) if !policy.is_empty() => verify_timestamp_with_policy(timestamp, bundle_root, policy),
+        Some(policy) if !policy.is_empty() => {
+            verify_timestamp_with_policy(timestamp, bundle_root, policy)
+        }
         _ => verify_timestamp(timestamp, bundle_root),
     };
 
@@ -3865,7 +3865,10 @@ fn build_timestamp_check_report(
             let assessment = assess_timestamp_error(&err, trust_policy);
             TimestampCheckReport {
                 state: OptionalCheckState::Invalid,
-                message: format!("RFC 3161 timestamp verification failed: {}", assessment.summary),
+                message: format!(
+                    "RFC 3161 timestamp verification failed: {}",
+                    assessment.summary
+                ),
                 assessment: Some(assessment),
             }
         }
@@ -3975,8 +3978,7 @@ fn build_receipt_check_report(
     }
 
     let Some(receipt) = receipt else {
-        let report =
-            evaluate_receipt_check_from_parts(bundle_root, None, requested, trust_policy);
+        let report = evaluate_receipt_check_from_parts(bundle_root, None, requested, trust_policy);
         return ReceiptCheckReport {
             state: report.state,
             message: report.message,
@@ -4023,7 +4025,10 @@ fn build_receipt_check_report(
             );
             ReceiptCheckReport {
                 state: OptionalCheckState::Invalid,
-                message: format!("transparency receipt verification failed: {}", assessment.summary),
+                message: format!(
+                    "transparency receipt verification failed: {}",
+                    assessment.summary
+                ),
                 assessment: Some(assessment),
             }
         }
@@ -4342,7 +4347,8 @@ fn print_verification_checks(checks: &[proof_layer_core::VerificationCheck]) {
             "      [{}] {}{}",
             check_state_marker(check.state),
             check.label,
-            check.detail
+            check
+                .detail
                 .as_deref()
                 .map(|detail| format!(" — {detail}"))
                 .unwrap_or_default()
@@ -6556,17 +6562,16 @@ mod tests {
 
         let signing_key = SigningKey::from_bytes(&[7_u8; 32]);
         let verifying_key = signing_key.verifying_key();
-        let report =
-            verify_disclosure_package(
-                &package.files,
-                &verifying_key,
-                false,
-                false,
-                None,
-                None,
-                ReceiptLiveCheckMode::Off,
-            )
-                .unwrap();
+        let report = verify_disclosure_package(
+            &package.files,
+            &verifying_key,
+            false,
+            false,
+            None,
+            None,
+            ReceiptLiveCheckMode::Off,
+        )
+        .unwrap();
         assert_eq!(report.package_kind, "disclosure");
         assert_eq!(report.disclosure_proof_ok, Some(true));
         assert!(report.canonicalization_ok);
@@ -6749,17 +6754,16 @@ mod tests {
 
         let signing_key = SigningKey::from_bytes(&[7_u8; 32]);
         let verifying_key = signing_key.verifying_key();
-        let report =
-            verify_disclosure_package(
-                &package.files,
-                &verifying_key,
-                false,
-                false,
-                None,
-                None,
-                ReceiptLiveCheckMode::Off,
-            )
-                .unwrap();
+        let report = verify_disclosure_package(
+            &package.files,
+            &verifying_key,
+            false,
+            false,
+            None,
+            None,
+            ReceiptLiveCheckMode::Off,
+        )
+        .unwrap();
         assert_eq!(report.package_kind, "disclosure");
         assert!(report.manifest_ok);
         assert!(report.signature_ok);

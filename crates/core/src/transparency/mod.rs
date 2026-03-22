@@ -8,9 +8,14 @@ use crate::{
     },
 };
 use base64ct::{Base64, Encoding};
-use ciborium::{from_reader as cbor_from_reader, into_writer as cbor_into_writer};
+use bcder::{Mode, decode::Constructed, encode::Values};
 use chrono::{TimeZone, Utc};
+use ciborium::{from_reader as cbor_from_reader, into_writer as cbor_into_writer};
 use coset::{CborSerializable, CoseSign1, CoseSign1Builder, HeaderBuilder, iana};
+use cryptographic_message_syntax::{
+    TimeStampResponse,
+    asn1::rfc3161::{PkiStatus, PkiStatusInfo, TimeStampResp},
+};
 use ed25519_dalek::{Signer as Ed25519Signer, SigningKey as Ed25519SigningKey};
 use p256::{
     ecdsa::{Signature, VerifyingKey, signature::Verifier},
@@ -22,12 +27,7 @@ use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use sigstore_merkle::proof::verify_consistency_proof;
 use sigstore_types::Sha256Hash;
-use std::{
-    collections::BTreeMap,
-    io::Cursor,
-    sync::Arc,
-    time::Duration,
-};
+use std::{collections::BTreeMap, io::Cursor, sync::Arc, time::Duration};
 use thiserror::Error;
 
 pub const REKOR_TRANSPARENCY_KIND: &str = "rekor";
@@ -204,7 +204,7 @@ impl TransparencyProvider for RekorTransparencyProvider {
             api_version: REKOR_RFC3161_API_VERSION.to_string(),
             spec: RekorRfc3161Spec {
                 tsr: RekorRfc3161Tsr {
-                    content: entry.timestamp.token_base64.clone(),
+                    content: rekor_timestamp_response_base64(&entry.timestamp)?,
                 },
             },
         };
@@ -224,18 +224,72 @@ impl TransparencyProvider for RekorTransparencyProvider {
     }
 }
 
+fn rekor_timestamp_response_base64(
+    timestamp: &TimestampToken,
+) -> Result<String, TransparencyError> {
+    let token_der = Base64::decode_vec(&timestamp.token_base64)
+        .map_err(|err| TransparencyError::InvalidBody(err.to_string()))?;
+    let mut status_der = Vec::new();
+    PkiStatusInfo {
+        status: PkiStatus::Granted,
+        status_string: None,
+        fail_info: None,
+    }
+    .encode_ref()
+    .write_encoded(Mode::Der, &mut status_der)
+    .map_err(|err| TransparencyError::InvalidBody(err.to_string()))?;
+    let der = encode_der_sequence(&[status_der.as_slice(), token_der.as_slice()]);
+    Ok(Base64::encode_string(&der))
+}
+
+fn encode_der_sequence(parts: &[&[u8]]) -> Vec<u8> {
+    let content_len: usize = parts.iter().map(|part| part.len()).sum();
+    let mut der = Vec::with_capacity(1 + der_length_len(content_len) + content_len);
+    der.push(0x30);
+    encode_der_length(content_len, &mut der);
+    for part in parts {
+        der.extend_from_slice(part);
+    }
+    der
+}
+
+fn der_length_len(len: usize) -> usize {
+    if len < 128 {
+        1
+    } else {
+        let mut value = len;
+        let mut count = 0;
+        while value > 0 {
+            count += 1;
+            value >>= 8;
+        }
+        1 + count
+    }
+}
+
+fn encode_der_length(len: usize, out: &mut Vec<u8>) {
+    if len < 128 {
+        out.push(len as u8);
+        return;
+    }
+
+    let bytes = len.to_be_bytes();
+    let first_non_zero = bytes
+        .iter()
+        .position(|byte| *byte != 0)
+        .unwrap_or(bytes.len() - 1);
+    let encoded = &bytes[first_non_zero..];
+    out.push(0x80 | encoded.len() as u8);
+    out.extend_from_slice(encoded);
+}
+
 impl ScittTransparencyProvider {
     pub fn new(url: impl Into<String>) -> Self {
         Self::with_label(url, SCITT_TRANSPARENCY_KIND)
     }
 
     pub fn with_label(url: impl Into<String>, provider_label: impl Into<String>) -> Self {
-        Self::with_format_and_signer(
-            url,
-            provider_label,
-            ScittFormat::CoseCcf,
-            None,
-        )
+        Self::with_format_and_signer(url, provider_label, ScittFormat::CoseCcf, None)
     }
 
     pub fn with_format(
@@ -731,31 +785,19 @@ fn verify_rekor_receipt(
         .signed_entry_timestamp
         .as_deref()
         .ok_or(TransparencyError::MissingSignedEntryTimestamp)?;
-    if inclusion_proof.log_index != entry.log_index {
-        return Err(TransparencyError::InvalidBody(format!(
-            "inclusion proof log_index {} did not match entry log_index {}",
-            inclusion_proof.log_index, entry.log_index
-        )));
-    }
+    let proof_log_index = inclusion_proof.log_index;
 
-    if entry.log_index >= inclusion_proof.tree_size {
+    if proof_log_index >= inclusion_proof.tree_size {
         return Err(TransparencyError::InvalidTreeSize {
-            log_index: entry.log_index,
+            log_index: proof_log_index,
             tree_size: inclusion_proof.tree_size,
         });
     }
 
     let (body_bytes, proposed_entry) = decode_rekor_proposed_entry(entry.body.clone())?;
     let leaf_hash_bytes = hash_rekor_leaf(&body_bytes);
-    let leaf_hash = hex::encode(&leaf_hash_bytes);
-    if leaf_hash != entry_uuid {
-        return Err(TransparencyError::LeafHashMismatch {
-            expected: entry_uuid.clone(),
-            actual: leaf_hash,
-        });
-    }
     let root_hash = verify_rekor_inclusion_proof(
-        entry.log_index,
+        proof_log_index,
         inclusion_proof.tree_size,
         &leaf_hash_bytes,
         inclusion_proof,
@@ -770,11 +812,8 @@ fn verify_rekor_receipt(
         ));
     }
 
-    let embedded_token = TimestampToken {
-        kind: RFC3161_TIMESTAMP_KIND.to_string(),
-        provider: receipt.provider.clone(),
-        token_base64: proposed_entry.spec.tsr.content,
-    };
+    let embedded_token =
+        rekor_embedded_timestamp_token(&proposed_entry.spec.tsr.content, receipt.provider.clone())?;
     let timestamp = if let Some(policy) = policy.filter(|policy| !policy.timestamp.is_empty()) {
         verify_timestamp_with_policy(&embedded_token, bundle_root, &policy.timestamp)?
     } else {
@@ -816,7 +855,7 @@ fn verify_rekor_receipt(
         entry_uuid,
         leaf_hash: hex::encode(leaf_hash_bytes),
         log_id: entry.log_id,
-        log_index: entry.log_index,
+        log_index: proof_log_index,
         integrated_time,
         tree_size: inclusion_proof.tree_size,
         root_hash,
@@ -828,6 +867,43 @@ fn verify_rekor_receipt(
         trusted,
         timestamp_generated_at: timestamp.generated_at,
         live_verification: None,
+    })
+}
+
+fn rekor_embedded_timestamp_token(
+    tsr_content_b64: &str,
+    provider: Option<String>,
+) -> Result<TimestampToken, TransparencyError> {
+    let der = Base64::decode_vec(tsr_content_b64)
+        .map_err(|err| TransparencyError::InvalidBody(err.to_string()))?;
+
+    if cryptographic_message_syntax::SignedData::parse_ber(&der).is_ok() {
+        return Ok(TimestampToken {
+            kind: RFC3161_TIMESTAMP_KIND.to_string(),
+            provider,
+            token_base64: tsr_content_b64.to_string(),
+        });
+    }
+
+    let response = Constructed::decode(der.as_slice(), Mode::Der, TimeStampResp::take_from)
+        .map_err(|err| TransparencyError::InvalidBody(err.to_string()))?;
+    let signed_data = TimeStampResponse::from(response)
+        .signed_data()
+        .map_err(|err| TransparencyError::InvalidBody(err.to_string()))?
+        .ok_or_else(|| {
+            TransparencyError::InvalidBody(
+                "Rekor RFC 3161 response was missing timeStampToken".to_string(),
+            )
+        })?;
+    let mut token_der = Vec::new();
+    signed_data
+        .encode_ref()
+        .write_encoded(Mode::Der, &mut token_der)
+        .map_err(|err| TransparencyError::InvalidBody(err.to_string()))?;
+    Ok(TimestampToken {
+        kind: RFC3161_TIMESTAMP_KIND.to_string(),
+        provider,
+        token_base64: Base64::encode_string(&token_der),
     })
 }
 
@@ -940,9 +1016,11 @@ pub fn verify_rekor_receipt_live(
         });
     }
 
-    let body: RekorStoredReceiptBody = serde_json::from_value(receipt.body.clone())
-        .map_err(|err| TransparencyError::LiveCheckResponse {
-            message: err.to_string(),
+    let body: RekorStoredReceiptBody =
+        serde_json::from_value(receipt.body.clone()).map_err(|err| {
+            TransparencyError::LiveCheckResponse {
+                message: err.to_string(),
+            }
         })?;
     let client = Client::builder()
         .connect_timeout(Duration::from_secs(REKOR_CONNECT_TIMEOUT_SECONDS))
@@ -1111,8 +1189,9 @@ fn verify_scitt_receipt_signature(
     let canonical_payload = canonicalize_scitt_receipt_payload(body)?;
     let signature_b64 = match body {
         ScittStoredReceiptBody::Legacy(body) => body.receipt_b64.clone(),
-        ScittStoredReceiptBody::Cose(body) => decode_scitt_cose_receipt_envelope(body)?
-            .signature_der_b64,
+        ScittStoredReceiptBody::Cose(body) => {
+            decode_scitt_cose_receipt_envelope(body)?.signature_der_b64
+        }
     };
     let signature_bytes = Base64::decode_vec(&signature_b64)
         .map_err(|err| TransparencyError::InvalidReceiptSignature(err.to_string()))?;
@@ -1157,8 +1236,9 @@ fn canonicalize_scitt_receipt_payload(
                     "SCITT receipt payload did not match the stored metadata".to_string(),
                 ));
             }
-            cbor_to_vec(&envelope.payload)
-                .map_err(|err| TransparencyError::SignedEntryTimestampCanonicalization(err.to_string()))
+            cbor_to_vec(&envelope.payload).map_err(|err| {
+                TransparencyError::SignedEntryTimestampCanonicalization(err.to_string())
+            })
         }
     }
 }
@@ -1219,7 +1299,9 @@ impl ScittStoredReceiptBody {
     }
 }
 
-fn parse_scitt_stored_receipt_body(body: Value) -> Result<ScittStoredReceiptBody, TransparencyError> {
+fn parse_scitt_stored_receipt_body(
+    body: Value,
+) -> Result<ScittStoredReceiptBody, TransparencyError> {
     let body_format = body
         .get("body_format")
         .and_then(Value::as_str)
@@ -1297,7 +1379,9 @@ fn cbor_to_vec<T: Serialize>(value: &T) -> Result<Vec<u8>, TransparencyError> {
     Ok(bytes)
 }
 
-fn cbor_from_slice<T: for<'de> Deserialize<'de>>(bytes: &[u8]) -> Result<T, ciborium::de::Error<std::io::Error>> {
+fn cbor_from_slice<T: for<'de> Deserialize<'de>>(
+    bytes: &[u8],
+) -> Result<T, ciborium::de::Error<std::io::Error>> {
     cbor_from_reader(Cursor::new(bytes))
 }
 
@@ -1681,6 +1765,66 @@ mod tests {
     }
 
     #[test]
+    fn verify_receipt_accepts_rekor_entry_when_inclusion_proof_index_differs() {
+        let bundle_root = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        let mut receipt = build_test_rekor_receipt(bundle_root, Some("rekor"));
+        let entry_uuid = receipt.body["entry_uuid"].as_str().unwrap().to_string();
+        receipt.body["log_entry"][&entry_uuid]["logIndex"] = json!(42_u64);
+
+        let verification = verify_receipt(&receipt, bundle_root).unwrap();
+        assert_eq!(verification.log_index, 0);
+        assert_eq!(verification.tree_size, 1);
+        assert!(verification.inclusion_proof_verified);
+    }
+
+    #[test]
+    fn verify_receipt_accepts_rekor_entry_when_uuid_differs_from_leaf_hash() {
+        let bundle_root = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        let mut receipt = build_test_rekor_receipt(bundle_root, Some("rekor"));
+        let original_uuid = receipt.body["entry_uuid"].as_str().unwrap().to_string();
+        let replacement_uuid =
+            "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff".to_string();
+        let entry = receipt.body["log_entry"][&original_uuid].clone();
+        receipt.body["entry_uuid"] = json!(replacement_uuid.clone());
+        receipt.body["log_entry"] = json!({
+            replacement_uuid: entry,
+        });
+
+        let verification = verify_receipt(&receipt, bundle_root).unwrap();
+        assert_eq!(
+            verification.entry_uuid,
+            "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+        );
+        assert!(verification.inclusion_proof_verified);
+        assert!(!verification.leaf_hash.is_empty());
+    }
+
+    #[test]
+    fn verify_receipt_accepts_rekor_entry_with_wrapped_timestamp_response() {
+        let bundle_root = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        let token = build_test_timestamp_token(bundle_root, Some("rekor"));
+        let wrapped = rekor_timestamp_response_base64(&token).unwrap();
+        let (entry_uuid, log_entry) = build_test_rekor_log_entry_response(&wrapped);
+        let receipt = TransparencyReceipt {
+            kind: REKOR_TRANSPARENCY_KIND.to_string(),
+            provider: Some("rekor".to_string()),
+            body: json!({
+                "log_url": SIGSTORE_REKOR_URL,
+                "entry_uuid": entry_uuid,
+                "log_entry": log_entry,
+            }),
+        };
+
+        let verification = verify_receipt(&receipt, bundle_root).unwrap();
+        assert!(verification.inclusion_proof_verified);
+        assert!(
+            verification
+                .timestamp_generated_at
+                .starts_with("2026-03-06T12:00:00")
+        );
+    }
+
+    #[test]
     fn verify_receipt_with_policy_accepts_trusted_log_key() {
         let bundle_root = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
         let (receipt, log_public_key_pem) = build_trusted_rekor_receipt(bundle_root, Some("rekor"));
@@ -1869,7 +2013,6 @@ mod tests {
             "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
             Some("test-tsa"),
         );
-        let expected_token_base64 = token.token_base64.clone();
         let (_, receipt_json) = build_test_rekor_log_entry_response(&token.token_base64);
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let addr = listener.local_addr().unwrap();
@@ -1899,7 +2042,20 @@ mod tests {
             assert!(request.starts_with("POST /api/v1/log/entries HTTP/1.1"));
             assert!(request.contains("\"kind\":\"rfc3161\""));
             assert!(request.contains("\"apiVersion\":\"0.0.1\""));
-            assert!(request.contains(&expected_token_base64));
+            let body: serde_json::Value = serde_json::from_slice(&body).unwrap();
+            let tsr_b64 = body["spec"]["tsr"]["content"].as_str().unwrap();
+            let tsr_der = Base64::decode_vec(tsr_b64).unwrap();
+            let tsr = bcder::decode::Constructed::decode(
+                tsr_der.as_slice(),
+                Mode::Der,
+                cryptographic_message_syntax::asn1::rfc3161::TimeStampResp::take_from,
+            )
+            .unwrap();
+            assert!(matches!(tsr.status.status, PkiStatus::Granted));
+            let embedded = tsr.time_stamp_token.unwrap();
+            let mut token_der = Vec::new();
+            embedded.write_encoded(Mode::Der, &mut token_der).unwrap();
+            assert!(!token_der.is_empty());
 
             let body = receipt_json.to_string();
             write!(
@@ -2298,9 +2454,7 @@ mod tests {
                                 registered_at: registered_at.to_string(),
                                 statement_hash: statement_hash.to_string(),
                             },
-                            signature_der_b64: Base64::encode_string(
-                                signature.to_der().as_bytes()
-                            ),
+                            signature_der_b64: Base64::encode_string(signature.to_der().as_bytes()),
                         })
                         .unwrap(),
                     )

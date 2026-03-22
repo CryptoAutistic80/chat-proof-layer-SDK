@@ -927,6 +927,8 @@ export function DemoProvider({ children }) {
     return {
       ...step,
       bundleId: createMeta.bundle_id,
+      timestampRequested: draft.attachTimestamp,
+      transparencyRequested: draft.attachTransparency,
       createMeta,
       bundle,
       verifyResponse,
@@ -1195,6 +1197,8 @@ export function DemoProvider({ children }) {
             bundleId: createMeta.bundle_id,
             label: preset.label,
             bundleRole: "primary",
+            timestampRequested: draft.attachTimestamp,
+            transparencyRequested: draft.attachTransparency,
             itemTypes:
               envelope.itemTypes ??
               envelope.createPayload.capture.items.map((item) => item.type),

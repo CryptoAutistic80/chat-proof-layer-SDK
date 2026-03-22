@@ -3,7 +3,7 @@ use crate::{
     schema::TimestampToken,
 };
 use base64ct::{Base64, Encoding};
-use bcder::{Mode, Oid, decode::Constructed};
+use bcder::{Mode, Oid, decode::Constructed, encode::Values};
 use chrono::{DateTime, Utc};
 use cryptographic_message_syntax::{
     SignedData, SignerInfo, TimeStampError as CmsTimeStampError, asn1::rfc3161::TstInfo,
@@ -126,12 +126,15 @@ impl TimestampProvider for Rfc3161HttpTimestampProvider {
             return Err(TimestampError::UnsuccessfulResponse);
         }
 
-        let token_der = response
-            .time_stamp_token
-            .as_ref()
-            .map(|token| token.content.clone().into_bytes())
-            .ok_or(TimestampError::MissingToken)?
-            .to_vec();
+        let signed_data = response
+            .signed_data()
+            .map_err(|err| TimestampError::CmsParse(err.to_string()))?
+            .ok_or(TimestampError::MissingToken)?;
+        let mut token_der = Vec::new();
+        signed_data
+            .encode_ref()
+            .write_encoded(Mode::Der, &mut token_der)
+            .map_err(|err| TimestampError::CmsParse(err.to_string()))?;
 
         let token = TimestampToken {
             kind: RFC3161_TIMESTAMP_KIND.to_string(),

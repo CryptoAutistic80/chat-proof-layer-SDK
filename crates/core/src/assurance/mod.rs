@@ -3,14 +3,12 @@ use crate::{
         TimestampAssuranceProfile, TimestampError, TimestampTrustPolicy, TimestampVerification,
     },
     transparency::{
-        ReceiptVerification, TransparencyError, TransparencyTrustPolicy, REKOR_TRANSPARENCY_KIND,
-        SCITT_TRANSPARENCY_KIND,
+        REKOR_TRANSPARENCY_KIND, ReceiptVerification, SCITT_TRANSPARENCY_KIND, TransparencyError,
+        TransparencyTrustPolicy,
     },
 };
 
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, Default,
-)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum TrustLevel {
     #[default]
@@ -19,9 +17,7 @@ pub enum TrustLevel {
     Qualified,
 }
 
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, Default,
-)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum CheckState {
     Pass,
@@ -60,9 +56,7 @@ pub struct ReceiptAssessment {
     pub live_check: Option<ReceiptLiveVerification>,
 }
 
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, Default,
-)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum ReceiptLiveCheckMode {
     #[default]
@@ -158,9 +152,7 @@ pub fn assess_timestamp_verification(
                     .trust_anchor_subject
                     .as_deref()
                     .map(|subject| format!("Chained to trusted certificate {subject}."))
-                    .unwrap_or_else(|| {
-                        "Chained to a trusted signer certificate.".to_string()
-                    }),
+                    .unwrap_or_else(|| "Chained to a trusted signer certificate.".to_string()),
                 "No trusted signer certificate was configured.",
             ),
             policy_check(
@@ -172,9 +164,7 @@ pub fn assess_timestamp_verification(
                     .signer_subject
                     .as_deref()
                     .map(|subject| {
-                        format!(
-                            "Signer certificate {subject} is valid for timestamping."
-                        )
+                        format!("Signer certificate {subject} is valid for timestamping.")
                     })
                     .unwrap_or_else(|| {
                         "The signer certificate is valid for timestamping.".to_string()
@@ -235,9 +225,8 @@ pub fn assess_timestamp_error(
             "bundle_root_match",
             "Bundle root match",
             timestamp_bundle_root_state(error),
-            bundle_root_error_detail(error).unwrap_or_else(|| {
-                "The timestamp token matches this proof record.".to_string()
-            }),
+            bundle_root_error_detail(error)
+                .unwrap_or_else(|| "The timestamp token matches this proof record.".to_string()),
         ),
         check(
             "cms_signature",
@@ -273,8 +262,9 @@ pub fn assess_timestamp_error(
             } else {
                 CheckState::NotRun
             },
-            trust_anchor_error_detail(error)
-                .unwrap_or_else(|| "The token chained to a trusted signer certificate.".to_string()),
+            trust_anchor_error_detail(error).unwrap_or_else(|| {
+                "The token chained to a trusted signer certificate.".to_string()
+            }),
             "No trusted signer certificate was configured.",
         ),
         policy_check(
@@ -370,8 +360,7 @@ pub fn assess_receipt_verification(
     verification: &ReceiptVerification,
     policy: Option<&TransparencyTrustPolicy>,
 ) -> ReceiptAssessment {
-    let level = if policy
-        .and_then(|policy| policy.timestamp.assurance_profile)
+    let level = if policy.and_then(|policy| policy.timestamp.assurance_profile)
         == Some(TimestampAssuranceProfile::Qualified)
         && verification.trusted
     {
@@ -392,8 +381,7 @@ pub fn assess_receipt_verification(
                 .to_string()
         }
         Some(live) if live.state == CheckState::Fail => {
-            " The stored receipt checked out, but the requested live log check failed."
-                .to_string()
+            " The stored receipt checked out, but the requested live log check failed.".to_string()
         }
         _ => String::new(),
     };
@@ -604,7 +592,8 @@ pub fn assess_receipt_error(
             "Trusted log key",
             if failed_check_id == "trusted_log_key" {
                 CheckState::Fail
-            } else if has_log_public_key(policy) && receipt_error_happened_after_trusted_key(error) {
+            } else if has_log_public_key(policy) && receipt_error_happened_after_trusted_key(error)
+            {
                 CheckState::Pass
             } else if has_log_public_key(policy) {
                 CheckState::Warn
@@ -670,9 +659,7 @@ fn policy_check(
 }
 
 fn requests_qualified(policy: Option<&TimestampTrustPolicy>) -> bool {
-    policy
-        .and_then(|policy| policy.assurance_profile)
-        == Some(TimestampAssuranceProfile::Qualified)
+    policy.and_then(|policy| policy.assurance_profile) == Some(TimestampAssuranceProfile::Qualified)
 }
 
 fn has_policy_oids(policy: Option<&TimestampTrustPolicy>) -> bool {
@@ -819,8 +806,7 @@ fn timestamp_error_happened_after_trust_anchor(error: &TimestampError) -> bool {
             | TimestampError::QualifiedAssuranceRequiresTrustAnchors
             | TimestampError::InvalidTrustAnchor(_)
             | TimestampError::SignerCertificateNotTrusted { .. }
-    )
-    && timestamp_error_happened_after_policy(error)
+    ) && timestamp_error_happened_after_policy(error)
 }
 
 fn timestamp_error_happened_after_certificate_profile(error: &TimestampError) -> bool {
@@ -830,8 +816,7 @@ fn timestamp_error_happened_after_certificate_profile(error: &TimestampError) ->
             | TimestampError::SignerCertificateIsCa { .. }
             | TimestampError::SignerCertificateInvalidExtendedKeyUsage { .. }
             | TimestampError::SignerCertificateInvalidKeyUsage { .. }
-    )
-    && timestamp_error_happened_after_trust_anchor(error)
+    ) && timestamp_error_happened_after_trust_anchor(error)
 }
 
 fn timestamp_error_happened_after_crl(error: &TimestampError) -> bool {
@@ -845,8 +830,7 @@ fn timestamp_error_happened_after_crl(error: &TimestampError) -> bool {
             | TimestampError::CrlNotValidAtGenerationTime { .. }
             | TimestampError::CrlSignatureVerification { .. }
             | TimestampError::SignerCertificateRevoked { .. }
-    )
-    && timestamp_error_happened_after_certificate_profile(error)
+    ) && timestamp_error_happened_after_certificate_profile(error)
 }
 
 fn timestamp_error_happened_after_ocsp(error: &TimestampError) -> bool {
@@ -863,8 +847,7 @@ fn timestamp_error_happened_after_ocsp(error: &TimestampError) -> bool {
             | TimestampError::OcspResponseNotCurrent { .. }
             | TimestampError::OcspResponseVerification { .. }
             | TimestampError::SignerCertificateRevokedByOcsp { .. }
-    )
-    && timestamp_error_happened_after_crl(error)
+    ) && timestamp_error_happened_after_crl(error)
 }
 
 fn timestamp_error_happened_after_qualified_signer(error: &TimestampError) -> bool {
@@ -873,8 +856,7 @@ fn timestamp_error_happened_after_qualified_signer(error: &TimestampError) -> bo
         TimestampError::QualifiedAssuranceRequiresQualifiedSigners
             | TimestampError::InvalidQualifiedSigner(_)
             | TimestampError::UnexpectedQualifiedSigner { .. }
-    )
-    && timestamp_error_happened_after_ocsp(error)
+    ) && timestamp_error_happened_after_ocsp(error)
 }
 
 fn bundle_root_error_detail(error: &TimestampError) -> Option<String> {
@@ -891,7 +873,9 @@ fn cms_error_detail(error: &TimestampError) -> Option<String> {
         TimestampError::CmsParse(message)
         | TimestampError::TstInfoParse(message)
         | TimestampError::SignerVerification(message) => Some(message.clone()),
-        TimestampError::NoSigners => Some("The timestamp token did not contain a signer.".to_string()),
+        TimestampError::NoSigners => {
+            Some("The timestamp token did not contain a signer.".to_string())
+        }
         TimestampError::MissingSignedContent => {
             Some("The timestamp token did not contain signed timestamp data.".to_string())
         }
@@ -906,13 +890,13 @@ fn cms_error_detail(error: &TimestampError) -> Option<String> {
 
 fn policy_error_detail(error: &TimestampError) -> Option<String> {
     match error {
-        TimestampError::UnexpectedPolicyOid { actual } => {
-            Some(format!("The token used policy ID {actual}, which was not expected."))
-        }
+        TimestampError::UnexpectedPolicyOid { actual } => Some(format!(
+            "The token used policy ID {actual}, which was not expected."
+        )),
         TimestampError::InvalidPolicyOid(message) => Some(message.clone()),
-        TimestampError::QualifiedAssuranceRequiresPolicyOids => Some(
-            "The stronger qualified check needs at least one expected policy ID.".to_string(),
-        ),
+        TimestampError::QualifiedAssuranceRequiresPolicyOids => {
+            Some("The stronger qualified check needs at least one expected policy ID.".to_string())
+        }
         _ => None,
     }
 }
@@ -927,9 +911,9 @@ fn trust_anchor_error_detail(error: &TimestampError) -> Option<String> {
                 .to_string(),
         ),
         TimestampError::InvalidTrustAnchor(message) => Some(message.clone()),
-        TimestampError::SignerCertificateNotTrusted { subject } => {
-            Some(format!("Signer certificate {subject} did not chain to a trusted signer."))
-        }
+        TimestampError::SignerCertificateNotTrusted { subject } => Some(format!(
+            "Signer certificate {subject} did not chain to a trusted signer."
+        )),
         _ => None,
     }
 }
@@ -957,12 +941,12 @@ fn certificate_profile_error_detail(error: &TimestampError) -> Option<String> {
 
 fn crl_error_detail(error: &TimestampError) -> Option<String> {
     match error {
-        TimestampError::QualifiedAssuranceRequiresCrls => Some(
-            "The stronger qualified check needs at least one revocation list.".to_string(),
-        ),
-        TimestampError::RevocationRequiresTrustAnchors => Some(
-            "Revocation checking needs a trusted signer certificate too.".to_string(),
-        ),
+        TimestampError::QualifiedAssuranceRequiresCrls => {
+            Some("The stronger qualified check needs at least one revocation list.".to_string())
+        }
+        TimestampError::RevocationRequiresTrustAnchors => {
+            Some("Revocation checking needs a trusted signer certificate too.".to_string())
+        }
         TimestampError::InvalidCrl(message) => Some(message.clone()),
         TimestampError::MissingCrlIssuerCertificate { subject } => Some(format!(
             "No issuer certificate was found for signer certificate {subject}."
@@ -979,7 +963,10 @@ fn crl_error_detail(error: &TimestampError) -> Option<String> {
         TimestampError::CrlSignatureVerification { subject } => Some(format!(
             "The revocation list signature for signer certificate {subject} could not be verified."
         )),
-        TimestampError::SignerCertificateRevoked { subject, revoked_at } => Some(format!(
+        TimestampError::SignerCertificateRevoked {
+            subject,
+            revoked_at,
+        } => Some(format!(
             "Signer certificate {subject} had already been revoked at {revoked_at}."
         )),
         _ => None,
@@ -988,13 +975,13 @@ fn crl_error_detail(error: &TimestampError) -> Option<String> {
 
 fn ocsp_error_detail(error: &TimestampError) -> Option<String> {
     match error {
-        TimestampError::OcspRequiresTrustAnchors => Some(
-            "Online status checking needs a trusted signer certificate too.".to_string(),
-        ),
-        TimestampError::InvalidOcspResponderUrl(message) => Some(message.clone()),
-        TimestampError::OcspTransport { url, message } => {
-            Some(format!("Could not contact the online status service at {url}: {message}."))
+        TimestampError::OcspRequiresTrustAnchors => {
+            Some("Online status checking needs a trusted signer certificate too.".to_string())
         }
+        TimestampError::InvalidOcspResponderUrl(message) => Some(message.clone()),
+        TimestampError::OcspTransport { url, message } => Some(format!(
+            "Could not contact the online status service at {url}: {message}."
+        )),
         TimestampError::OcspHttpStatus { url, status } => Some(format!(
             "The online status service at {url} returned HTTP {status}."
         )),
@@ -1063,14 +1050,10 @@ fn timestamp_failure_next_step(check_id: &str) -> &'static str {
         "cms_signature" => "Use the original timestamp token or request a fresh one.",
         "policy_oid" => "Use the expected policy ID or update the policy list.",
         "trust_anchor" => "Add the right trusted signer certificate for this timestamp.",
-        "certificate_profile" => {
-            "Use a signer certificate that is meant for timestamp signing."
-        }
+        "certificate_profile" => "Use a signer certificate that is meant for timestamp signing.",
         "crl" => "Add a current revocation list for the timestamp signer.",
         "ocsp" => "Check the online status settings or try again later.",
-        "qualified_signer" => {
-            "Add the right approved signer certificate for the stronger check."
-        }
+        "qualified_signer" => "Add the right approved signer certificate for the stronger check.",
         _ => "Check the timestamp files and try again.",
     }
 }
@@ -1126,7 +1109,8 @@ fn receipt_error_happened_after_bundle_root(error: &TransparencyError) -> bool {
 }
 
 fn receipt_error_happened_after_timestamp(error: &TransparencyError) -> bool {
-    !matches!(error, TransparencyError::Timestamp(_)) && receipt_error_happened_after_bundle_root(error)
+    !matches!(error, TransparencyError::Timestamp(_))
+        && receipt_error_happened_after_bundle_root(error)
 }
 
 fn receipt_error_happened_after_inclusion(error: &TransparencyError) -> bool {
@@ -1174,15 +1158,15 @@ fn receipt_failure_summary(error: &TransparencyError) -> String {
         | TransparencyError::InvalidReceiptSignature(message)
         | TransparencyError::InvalidBody(message)
         | TransparencyError::InvalidLogPublicKey(message) => message.clone(),
-        TransparencyError::LeafHashMismatch { expected, actual } => format!(
-            "The receipt leaf hash did not match: expected {expected}, got {actual}."
-        ),
-        TransparencyError::InvalidProofLength { expected, actual } => format!(
-            "The inclusion proof length was {actual}, but {expected} was expected."
-        ),
-        TransparencyError::InclusionProofRootMismatch { expected, actual } => format!(
-            "The inclusion proof root did not match: expected {expected}, got {actual}."
-        ),
+        TransparencyError::LeafHashMismatch { expected, actual } => {
+            format!("The receipt leaf hash did not match: expected {expected}, got {actual}.")
+        }
+        TransparencyError::InvalidProofLength { expected, actual } => {
+            format!("The inclusion proof length was {actual}, but {expected} was expected.")
+        }
+        TransparencyError::InclusionProofRootMismatch { expected, actual } => {
+            format!("The inclusion proof root did not match: expected {expected}, got {actual}.")
+        }
         TransparencyError::MissingSignedEntryTimestamp => {
             "The receipt did not include a signature to verify.".to_string()
         }
@@ -1201,12 +1185,12 @@ fn receipt_failure_summary(error: &TransparencyError) -> String {
         TransparencyError::ReceiptSignatureVerification => {
             "The SCITT service signature could not be verified.".to_string()
         }
-        TransparencyError::LiveCheckUnsupported { kind } => format!(
-            "Live log confirmation is not supported for {kind} receipts."
-        ),
-        TransparencyError::LiveCheckTransport { url, message } => format!(
-            "Could not reach the live log at {url}: {message}."
-        ),
+        TransparencyError::LiveCheckUnsupported { kind } => {
+            format!("Live log confirmation is not supported for {kind} receipts.")
+        }
+        TransparencyError::LiveCheckTransport { url, message } => {
+            format!("Could not reach the live log at {url}: {message}.")
+        }
         TransparencyError::LiveCheckHttpStatus { url, status } => {
             format!("The live log at {url} returned HTTP {status}.")
         }
@@ -1297,6 +1281,9 @@ mod tests {
             }),
         );
 
-        assert_eq!(assessment.live_check.map(|live| live.state), Some(CheckState::Pass));
+        assert_eq!(
+            assessment.live_check.map(|live| live.state),
+            Some(CheckState::Pass)
+        );
     }
 }

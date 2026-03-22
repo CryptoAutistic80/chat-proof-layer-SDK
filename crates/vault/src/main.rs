@@ -14,24 +14,21 @@ use chrono::Utc;
 use ed25519_dalek::SigningKey;
 use flate2::{Compression, read::GzDecoder, write::GzEncoder};
 use proof_layer_core::{
-    ArtefactInput, BuildBundleError, CaptureEvent, CaptureInput, CheckState,
-    CompletenessProfile, CompletenessReport, CompletenessStatus, EvidenceContext, EvidenceItem,
-    Integrity, Policy, ProofBundle, ReceiptAssessment, ReceiptLiveCheckMode,
-    ReceiptVerification, RedactedBundle, RekorTransparencyProvider,
-    Rfc3161HttpTimestampProvider, ScittFormat, ScittStatementSigner,
+    ArtefactInput, BuildBundleError, CaptureEvent, CaptureInput, CheckState, CompletenessProfile,
+    CompletenessReport, CompletenessStatus, EvidenceContext, EvidenceItem, Integrity, Policy,
+    ProofBundle, ReceiptAssessment, ReceiptLiveCheckMode, ReceiptVerification, RedactedBundle,
+    RekorTransparencyProvider, Rfc3161HttpTimestampProvider, ScittFormat, ScittStatementSigner,
     ScittTransparencyProvider, TimestampAssessment, TimestampAssuranceProfile, TimestampToken,
     TimestampTrustPolicy, TimestampVerification, TransparencyReceipt, TransparencyTrustPolicy,
-    VAULT_BACKUP_ENCRYPTION_ALGORITHM,
+    VAULT_BACKUP_ENCRYPTION_ALGORITHM, anchor_bundle as anchor_bundle_receipt,
     assess_receipt_error, assess_receipt_verification, assess_timestamp_error,
-    assess_timestamp_verification,
-    anchor_bundle as anchor_bundle_receipt, build_bundle, canonicalize_value,
-    decode_backup_encryption_key, decode_private_key_pem, decode_public_key_pem,
-    encode_public_key_pem, encrypt_backup_archive, evaluate_completeness, redact_bundle,
-    redact_bundle_with_field_redactions, sha256_prefixed, timestamp_digest,
-    validate_bundle_integrity_fields, validate_timestamp_trust_policy,
+    assess_timestamp_verification, build_bundle, canonicalize_value, decode_backup_encryption_key,
+    decode_private_key_pem, decode_public_key_pem, encode_public_key_pem, encrypt_backup_archive,
+    evaluate_completeness, redact_bundle, redact_bundle_with_field_redactions, sha256_prefixed,
+    timestamp_digest, validate_bundle_integrity_fields, validate_timestamp_trust_policy,
     validate_transparency_trust_policy, verify_receipt, verify_receipt_with_live_check,
-    verify_receipt_with_policy, verify_receipt_with_policy_and_live_check,
-    verify_redacted_bundle, verify_timestamp, verify_timestamp_with_policy,
+    verify_receipt_with_policy, verify_receipt_with_policy_and_live_check, verify_redacted_bundle,
+    verify_timestamp, verify_timestamp_with_policy,
 };
 use reqwest::Client;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
@@ -1900,8 +1897,8 @@ fn resolve_transparency_file_config(
     if let Some(url) = file_config.url.or(file_config.rekor_url) {
         config.url = Some(url);
     }
-    config.scitt_format = normalize_optional_string(file_config.scitt_format)
-        .map(|value| value.to_ascii_lowercase());
+    config.scitt_format =
+        normalize_optional_string(file_config.scitt_format).map(|value| value.to_ascii_lowercase());
     config.log_public_key_pem = normalize_optional_string(file_config.log_public_key_pem);
     if let Some(path) = file_config.log_public_key_path {
         config.log_public_key_pem = Some(read_config_text_file(
@@ -4502,20 +4499,20 @@ async fn verify_timestamp_token(
             let assessment =
                 assess_timestamp_verification(&verification, timestamp_policy.as_ref());
             VerifyTimestampResponse {
-            valid: true,
-            message: format!("VALID: {} {}", assessment.headline, assessment.summary),
-            verification: Some(verification),
-            assessment,
-        }
+                valid: true,
+                message: format!("VALID: {} {}", assessment.headline, assessment.summary),
+                verification: Some(verification),
+                assessment,
+            }
         }
         Err(err) => {
             let assessment = assess_timestamp_error(&err, timestamp_policy.as_ref());
             VerifyTimestampResponse {
-            valid: false,
-            message: format!("INVALID: {}", assessment.summary),
-            verification: None,
-            assessment,
-        }
+                valid: false,
+                message: format!("INVALID: {}", assessment.summary),
+                verification: None,
+                assessment,
+            }
         }
     };
     append_audit_log(
@@ -4542,8 +4539,8 @@ async fn verify_transparency_receipt(
 ) -> Result<impl IntoResponse, ApiError> {
     let (bundle_id, bundle_root, receipt, live_check_mode) =
         resolve_receipt_verification_target(&state.db, request)
-        .await
-        .map_err(ApiError::bad_request_anyhow)?;
+            .await
+            .map_err(ApiError::bad_request_anyhow)?;
     let timestamp_config = load_timestamp_config(&state.db)
         .await
         .map_err(ApiError::internal_anyhow)?;
@@ -4556,21 +4553,26 @@ async fn verify_transparency_receipt(
         Some(policy) if live_check_mode == ReceiptLiveCheckMode::Off => {
             verify_receipt_with_policy(&receipt, &bundle_root, policy)
         }
-        Some(policy) => {
-            verify_receipt_with_policy_and_live_check(&receipt, &bundle_root, policy, live_check_mode)
+        Some(policy) => verify_receipt_with_policy_and_live_check(
+            &receipt,
+            &bundle_root,
+            policy,
+            live_check_mode,
+        ),
+        None if live_check_mode == ReceiptLiveCheckMode::Off => {
+            verify_receipt(&receipt, &bundle_root)
         }
-        None if live_check_mode == ReceiptLiveCheckMode::Off => verify_receipt(&receipt, &bundle_root),
         None => verify_receipt_with_live_check(&receipt, &bundle_root, live_check_mode),
     } {
         Ok(verification) => {
             let assessment =
                 assess_receipt_verification(&verification, transparency_policy.as_ref());
             VerifyReceiptResponse {
-            valid: true,
-            message: format!("VALID: {} {}", assessment.headline, assessment.summary),
-            verification: Some(verification),
-            assessment,
-        }
+                valid: true,
+                message: format!("VALID: {} {}", assessment.headline, assessment.summary),
+                verification: Some(verification),
+                assessment,
+            }
         }
         Err(err) => {
             let live_check = if live_check_mode == ReceiptLiveCheckMode::Off {
@@ -4587,14 +4589,13 @@ async fn verify_transparency_receipt(
                     consistency_verified: None,
                 })
             };
-            let assessment =
-                assess_receipt_error(&err, transparency_policy.as_ref(), live_check);
+            let assessment = assess_receipt_error(&err, transparency_policy.as_ref(), live_check);
             VerifyReceiptResponse {
-            valid: false,
-            message: format!("INVALID: {}", assessment.summary),
-            verification: None,
-            assessment,
-        }
+                valid: false,
+                message: format!("INVALID: {}", assessment.summary),
+                verification: None,
+                assessment,
+            }
         }
     };
     append_audit_log(
@@ -4805,7 +4806,12 @@ async fn resolve_timestamp_verification_target(
 async fn resolve_receipt_verification_target(
     db: &SqlitePool,
     request: VerifyReceiptRequest,
-) -> Result<(Option<String>, String, TransparencyReceipt, ReceiptLiveCheckMode)> {
+) -> Result<(
+    Option<String>,
+    String,
+    TransparencyReceipt,
+    ReceiptLiveCheckMode,
+)> {
     match request {
         VerifyReceiptRequest::BundleId {
             bundle_id,
@@ -4817,7 +4823,12 @@ async fn resolve_receipt_verification_target(
             let receipt = bundle
                 .receipt
                 .ok_or_else(|| anyhow::anyhow!("bundle has no transparency receipt"))?;
-            Ok((Some(bundle_id), bundle.integrity.bundle_root, receipt, live_check_mode))
+            Ok((
+                Some(bundle_id),
+                bundle.integrity.bundle_root,
+                receipt,
+                live_check_mode,
+            ))
         }
         VerifyReceiptRequest::Direct {
             bundle_root,

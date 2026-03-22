@@ -1,0 +1,11 @@
+{
+  "submission_id": "sub-claims-42",
+  "authority": "eu_ai_office",
+  "status": "submitted",
+  "channel": "portal",
+  "submitted_at": "2026-03-08T09:30:00Z",
+  "document_commitment": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+  "metadata": {
+    "incident_id": "inc-claims-42"
+  }
+}

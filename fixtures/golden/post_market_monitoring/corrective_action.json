@@ -1,0 +1,10 @@
+{
+  "action_id": "ca-claims-42",
+  "status": "in_progress",
+  "summary": "Tighten the missing-document threshold and route borderline claims to manual review.",
+  "due_at": "2026-03-10T12:00:00Z",
+  "record_commitment": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+  "metadata": {
+    "owner": "safety-ops"
+  }
+}

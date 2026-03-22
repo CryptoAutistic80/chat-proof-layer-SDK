@@ -13,7 +13,7 @@ class TestPackReadiness(unittest.TestCase):
                 "completeness_status": "fail",
                 "pack_completeness_profile": "annex_iv_governance_v1",
                 "pack_completeness_status": "pass",
-                "pack_completeness_pass_count": 5,
+                "pack_completeness_pass_count": 8,
                 "pack_completeness_warn_count": 0,
                 "pack_completeness_fail_count": 0,
             }
@@ -25,7 +25,7 @@ class TestPackReadiness(unittest.TestCase):
                 "source": "pack_scoped",
                 "profile": "annex_iv_governance_v1",
                 "status": "pass",
-                "pass_count": 5,
+                "pass_count": 8,
                 "warn_count": 0,
                 "fail_count": 0,
             },

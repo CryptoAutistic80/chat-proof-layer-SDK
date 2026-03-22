@@ -1,8 +1,13 @@
 use proof_layer_core::schema::{
-    BUNDLE_VERSION, ComputeMetricsEvidence, CopyrightPolicyEvidence, DataGovernanceEvidence,
-    EvidenceBundle, EvidenceItem, HumanOversightEvidence, InstructionsForUseEvidence,
-    ModelEvaluationEvidence, RiskAssessmentEvidence, TechnicalDocEvidence,
-    TrainingProvenanceEvidence, TrainingSummaryEvidence,
+    AuthorityNotificationEvidence, AuthoritySubmissionEvidence, BUNDLE_VERSION,
+    ComputeMetricsEvidence, ConformityAssessmentEvidence, CopyrightPolicyEvidence,
+    CorrectiveActionEvidence, DataGovernanceEvidence, DeclarationEvidence, EvidenceBundle,
+    EvidenceItem, FundamentalRightsAssessmentEvidence, HumanOversightEvidence,
+    IncidentReportEvidence, InstructionsForUseEvidence, ModelEvaluationEvidence,
+    PolicyDecisionEvidence, PostMarketMonitoringEvidence, QmsRecordEvidence, RegistrationEvidence,
+    RegulatorCorrespondenceEvidence, ReportingDeadlineEvidence, RiskAssessmentEvidence,
+    StandardsAlignmentEvidence, TechnicalDocEvidence, TrainingProvenanceEvidence,
+    TrainingSummaryEvidence,
 };
 use proof_layer_core::{
     Actor, ActorRole, CompletenessProfile, CompletenessStatus, EncryptionPolicy, EvidenceContext,
@@ -73,6 +78,11 @@ fn annex_iv_bundle() -> EvidenceBundle {
         read_json("annex_iv_governance", "instructions_for_use.json");
     let oversight: HumanOversightEvidence =
         read_json("annex_iv_governance", "human_oversight.json");
+    let qms: QmsRecordEvidence = read_json("annex_iv_governance", "qms_record.json");
+    let standards: StandardsAlignmentEvidence =
+        read_json("annex_iv_governance", "standards_alignment.json");
+    let monitoring: PostMarketMonitoringEvidence =
+        read_json("annex_iv_governance", "post_market_monitoring.json");
 
     minimal_bundle(
         "hiring-assistant",
@@ -84,6 +94,9 @@ fn annex_iv_bundle() -> EvidenceBundle {
             EvidenceItem::DataGovernance(data),
             EvidenceItem::InstructionsForUse(instructions),
             EvidenceItem::HumanOversight(oversight),
+            EvidenceItem::QmsRecord(qms),
+            EvidenceItem::StandardsAlignment(standards),
+            EvidenceItem::PostMarketMonitoring(monitoring),
         ],
     )
 }
@@ -112,13 +125,147 @@ fn gpai_provider_bundle() -> EvidenceBundle {
     )
 }
 
+fn fundamental_rights_bundle() -> EvidenceBundle {
+    let assessment: FundamentalRightsAssessmentEvidence =
+        read_json("fundamental_rights", "fundamental_rights_assessment.json");
+    let oversight: HumanOversightEvidence = read_json("fundamental_rights", "human_oversight.json");
+
+    let mut bundle = minimal_bundle(
+        "benefits-review",
+        "eligibility-ranker-v2",
+        "2026.03",
+        vec![
+            EvidenceItem::FundamentalRightsAssessment(assessment),
+            EvidenceItem::HumanOversight(oversight),
+        ],
+    );
+    bundle.actor.role = ActorRole::Deployer;
+    bundle
+}
+
+fn post_market_monitoring_bundle() -> EvidenceBundle {
+    let monitoring: PostMarketMonitoringEvidence =
+        read_json("post_market_monitoring", "post_market_monitoring.json");
+    let incident: IncidentReportEvidence =
+        read_json("post_market_monitoring", "incident_report.json");
+    let corrective: CorrectiveActionEvidence =
+        read_json("post_market_monitoring", "corrective_action.json");
+    let notification: AuthorityNotificationEvidence =
+        read_json("post_market_monitoring", "authority_notification.json");
+    let submission: AuthoritySubmissionEvidence =
+        read_json("post_market_monitoring", "authority_submission.json");
+    let deadline: ReportingDeadlineEvidence =
+        read_json("post_market_monitoring", "reporting_deadline.json");
+
+    minimal_bundle(
+        "claims-assistant",
+        "claims-model-v2",
+        "2026.03",
+        vec![
+            EvidenceItem::PostMarketMonitoring(monitoring),
+            EvidenceItem::IncidentReport(incident),
+            EvidenceItem::CorrectiveAction(corrective),
+            EvidenceItem::AuthorityNotification(notification),
+            EvidenceItem::AuthoritySubmission(submission),
+            EvidenceItem::ReportingDeadline(deadline),
+        ],
+    )
+}
+
+fn provider_governance_bundle() -> EvidenceBundle {
+    let risk: RiskAssessmentEvidence = read_json("provider_governance", "risk_assessment.json");
+    let data: DataGovernanceEvidence = read_json("provider_governance", "data_governance.json");
+    let technical: TechnicalDocEvidence = read_json("provider_governance", "technical_doc.json");
+    let instructions: InstructionsForUseEvidence =
+        read_json("provider_governance", "instructions_for_use.json");
+    let qms: QmsRecordEvidence = read_json("provider_governance", "qms_record.json");
+    let standards: StandardsAlignmentEvidence =
+        read_json("provider_governance", "standards_alignment.json");
+    let monitoring: PostMarketMonitoringEvidence =
+        read_json("provider_governance", "post_market_monitoring.json");
+    let corrective: CorrectiveActionEvidence =
+        read_json("provider_governance", "corrective_action.json");
+
+    minimal_bundle(
+        "hiring-assistant",
+        "hiring-model-v3",
+        "2026.03",
+        vec![
+            EvidenceItem::TechnicalDoc(technical),
+            EvidenceItem::RiskAssessment(risk),
+            EvidenceItem::DataGovernance(data),
+            EvidenceItem::InstructionsForUse(instructions),
+            EvidenceItem::QmsRecord(qms),
+            EvidenceItem::StandardsAlignment(standards),
+            EvidenceItem::PostMarketMonitoring(monitoring),
+            EvidenceItem::CorrectiveAction(corrective),
+        ],
+    )
+}
+
+fn conformity_bundle() -> EvidenceBundle {
+    let assessment: ConformityAssessmentEvidence =
+        read_json("conformity", "conformity_assessment.json");
+    let declaration: DeclarationEvidence = read_json("conformity", "declaration.json");
+    let registration: RegistrationEvidence = read_json("conformity", "registration.json");
+
+    minimal_bundle(
+        "system-conformity",
+        "conformity-file-v1",
+        "2026.03",
+        vec![
+            EvidenceItem::ConformityAssessment(assessment),
+            EvidenceItem::Declaration(declaration),
+            EvidenceItem::Registration(registration),
+        ],
+    )
+}
+
+fn incident_response_bundle() -> EvidenceBundle {
+    let technical: TechnicalDocEvidence = read_json("incident_response", "technical_doc.json");
+    let risk: RiskAssessmentEvidence = read_json("incident_response", "risk_assessment.json");
+    let oversight: HumanOversightEvidence = read_json("incident_response", "human_oversight.json");
+    let decision: PolicyDecisionEvidence = read_json("incident_response", "policy_decision.json");
+    let incident: IncidentReportEvidence = read_json("incident_response", "incident_report.json");
+    let corrective: CorrectiveActionEvidence =
+        read_json("incident_response", "corrective_action.json");
+    let notification: AuthorityNotificationEvidence =
+        read_json("incident_response", "authority_notification.json");
+    let submission: AuthoritySubmissionEvidence =
+        read_json("incident_response", "authority_submission.json");
+    let deadline: ReportingDeadlineEvidence =
+        read_json("incident_response", "reporting_deadline.json");
+    let correspondence: RegulatorCorrespondenceEvidence =
+        read_json("incident_response", "regulator_correspondence.json");
+
+    let mut bundle = minimal_bundle(
+        "benefits-review",
+        "eligibility-ranker-v2",
+        "2026.03",
+        vec![
+            EvidenceItem::TechnicalDoc(technical),
+            EvidenceItem::RiskAssessment(risk),
+            EvidenceItem::HumanOversight(oversight),
+            EvidenceItem::PolicyDecision(decision),
+            EvidenceItem::IncidentReport(incident),
+            EvidenceItem::CorrectiveAction(corrective),
+            EvidenceItem::AuthorityNotification(notification),
+            EvidenceItem::AuthoritySubmission(submission),
+            EvidenceItem::ReportingDeadline(deadline),
+            EvidenceItem::RegulatorCorrespondence(correspondence),
+        ],
+    );
+    bundle.actor.role = ActorRole::Deployer;
+    bundle
+}
+
 #[test]
 fn passing_annex_iv_governance_fixture_returns_pass() {
     let bundle = annex_iv_bundle();
     let report = evaluate_completeness(&bundle, CompletenessProfile::AnnexIvGovernanceV1);
 
     assert_eq!(report.status, CompletenessStatus::Pass);
-    assert_eq!(report.pass_count, 5);
+    assert_eq!(report.pass_count, 8);
     assert_eq!(report.warn_count, 0);
     assert_eq!(report.fail_count, 0);
 }
@@ -259,6 +406,186 @@ fn gpai_provider_missing_required_field_returns_fail() {
 }
 
 #[test]
+fn passing_fundamental_rights_fixture_returns_pass() {
+    let bundle = fundamental_rights_bundle();
+    let report = evaluate_completeness(&bundle, CompletenessProfile::FundamentalRightsV1);
+
+    assert_eq!(report.status, CompletenessStatus::Pass);
+    assert_eq!(report.pass_count, 2);
+    assert_eq!(report.warn_count, 0);
+    assert_eq!(report.fail_count, 0);
+}
+
+#[test]
+fn passing_post_market_monitoring_fixture_returns_pass() {
+    let bundle = post_market_monitoring_bundle();
+    let report = evaluate_completeness(&bundle, CompletenessProfile::PostMarketMonitoringV1);
+
+    assert_eq!(report.status, CompletenessStatus::Pass);
+    assert_eq!(report.pass_count, 6);
+    assert_eq!(report.warn_count, 0);
+    assert_eq!(report.fail_count, 0);
+}
+
+#[test]
+fn passing_incident_response_fixture_returns_pass() {
+    let bundle = incident_response_bundle();
+    let report = evaluate_completeness(&bundle, CompletenessProfile::IncidentResponseV1);
+
+    assert_eq!(report.status, CompletenessStatus::Pass);
+    assert_eq!(report.pass_count, 10);
+    assert_eq!(report.warn_count, 0);
+    assert_eq!(report.fail_count, 0);
+}
+
+#[test]
+fn passing_provider_governance_fixture_returns_pass() {
+    let bundle = provider_governance_bundle();
+    let report = evaluate_completeness(&bundle, CompletenessProfile::ProviderGovernanceV1);
+
+    assert_eq!(report.status, CompletenessStatus::Pass);
+    assert_eq!(report.pass_count, 8);
+    assert_eq!(report.warn_count, 0);
+    assert_eq!(report.fail_count, 0);
+}
+
+#[test]
+fn passing_conformity_fixture_returns_pass() {
+    let bundle = conformity_bundle();
+    let report = evaluate_completeness(&bundle, CompletenessProfile::ConformityV1);
+
+    assert_eq!(report.status, CompletenessStatus::Pass);
+    assert_eq!(report.pass_count, 3);
+    assert_eq!(report.warn_count, 0);
+    assert_eq!(report.fail_count, 0);
+}
+
+#[test]
+fn provider_governance_missing_corrective_action_field_returns_fail() {
+    let mut bundle = provider_governance_bundle();
+    let evidence = bundle
+        .items
+        .iter_mut()
+        .find_map(|item| match item {
+            EvidenceItem::CorrectiveAction(evidence) => Some(evidence),
+            _ => None,
+        })
+        .expect("corrective_action should exist");
+    evidence.record_commitment = None;
+
+    let report = evaluate_completeness(&bundle, CompletenessProfile::ProviderGovernanceV1);
+
+    assert_eq!(report.status, CompletenessStatus::Fail);
+    let rule = report
+        .rules
+        .iter()
+        .find(|rule| rule.item_type == "corrective_action")
+        .expect("corrective_action rule should exist");
+    assert_eq!(rule.status, CompletenessStatus::Fail);
+    assert_eq!(rule.missing_fields, vec!["record_commitment"]);
+}
+
+#[test]
+fn conformity_missing_registration_receipt_returns_fail() {
+    let mut bundle = conformity_bundle();
+    let evidence = bundle
+        .items
+        .iter_mut()
+        .find_map(|item| match item {
+            EvidenceItem::Registration(evidence) => Some(evidence),
+            _ => None,
+        })
+        .expect("registration should exist");
+    evidence.receipt_commitment = None;
+
+    let report = evaluate_completeness(&bundle, CompletenessProfile::ConformityV1);
+
+    assert_eq!(report.status, CompletenessStatus::Fail);
+    let rule = report
+        .rules
+        .iter()
+        .find(|rule| rule.item_type == "registration")
+        .expect("registration rule should exist");
+    assert_eq!(rule.status, CompletenessStatus::Fail);
+    assert_eq!(rule.missing_fields, vec!["receipt_commitment"]);
+}
+
+#[test]
+fn incident_response_missing_policy_rationale_returns_fail() {
+    let mut bundle = incident_response_bundle();
+    let evidence = bundle
+        .items
+        .iter_mut()
+        .find_map(|item| match item {
+            EvidenceItem::PolicyDecision(evidence) => Some(evidence),
+            _ => None,
+        })
+        .expect("policy_decision should exist");
+    evidence.rationale_commitment = None;
+
+    let report = evaluate_completeness(&bundle, CompletenessProfile::IncidentResponseV1);
+
+    assert_eq!(report.status, CompletenessStatus::Fail);
+    let rule = report
+        .rules
+        .iter()
+        .find(|rule| rule.item_type == "policy_decision")
+        .expect("policy_decision rule should exist");
+    assert_eq!(rule.status, CompletenessStatus::Fail);
+    assert_eq!(rule.missing_fields, vec!["rationale_commitment"]);
+}
+
+#[test]
+fn annex_iv_qms_record_missing_required_field_returns_fail() {
+    let mut bundle = annex_iv_bundle();
+    let evidence = bundle
+        .items
+        .iter_mut()
+        .find_map(|item| match item {
+            EvidenceItem::QmsRecord(evidence) => Some(evidence),
+            _ => None,
+        })
+        .expect("qms_record should exist");
+    evidence.continuous_improvement_actions.clear();
+
+    let report = evaluate_completeness(&bundle, CompletenessProfile::AnnexIvGovernanceV1);
+
+    assert_eq!(report.status, CompletenessStatus::Fail);
+    let rule = report
+        .rules
+        .iter()
+        .find(|rule| rule.item_type == "qms_record")
+        .expect("qms_record rule should exist");
+    assert_eq!(rule.status, CompletenessStatus::Fail);
+    assert_eq!(rule.missing_fields, vec!["continuous_improvement_actions"]);
+}
+
+#[test]
+fn fundamental_rights_missing_mitigation_summary_returns_fail() {
+    let mut bundle = fundamental_rights_bundle();
+    let evidence = bundle
+        .items
+        .iter_mut()
+        .find_map(|item| match item {
+            EvidenceItem::FundamentalRightsAssessment(evidence) => Some(evidence),
+            _ => None,
+        })
+        .expect("fundamental_rights_assessment should exist");
+    evidence.mitigation_plan_summary = None;
+
+    let report = evaluate_completeness(&bundle, CompletenessProfile::FundamentalRightsV1);
+
+    assert_eq!(report.status, CompletenessStatus::Fail);
+    let rule = report
+        .rules
+        .iter()
+        .find(|rule| rule.item_type == "fundamental_rights_assessment")
+        .expect("fundamental_rights_assessment rule should exist");
+    assert_eq!(rule.status, CompletenessStatus::Fail);
+    assert_eq!(rule.missing_fields, vec!["mitigation_plan_summary"]);
+}
+
+#[test]
 fn gpai_provider_complete_and_incomplete_items_of_same_type_return_warn() {
     let mut bundle = gpai_provider_bundle();
     let mut incomplete: ModelEvaluationEvidence =
@@ -278,6 +605,53 @@ fn gpai_provider_complete_and_incomplete_items_of_same_type_return_warn() {
     assert_eq!(rule.present_count, 2);
     assert_eq!(rule.complete_count, 1);
     assert_eq!(rule.missing_fields, vec!["metrics_summary"]);
+}
+
+#[test]
+fn post_market_monitoring_missing_notification_deadline_returns_fail() {
+    let mut bundle = post_market_monitoring_bundle();
+    let evidence = bundle
+        .items
+        .iter_mut()
+        .find_map(|item| match item {
+            EvidenceItem::AuthorityNotification(evidence) => Some(evidence),
+            _ => None,
+        })
+        .expect("authority_notification should exist");
+    evidence.due_at = None;
+
+    let report = evaluate_completeness(&bundle, CompletenessProfile::PostMarketMonitoringV1);
+
+    assert_eq!(report.status, CompletenessStatus::Fail);
+    let rule = report
+        .rules
+        .iter()
+        .find(|rule| rule.item_type == "authority_notification")
+        .expect("authority_notification rule should exist");
+    assert_eq!(rule.status, CompletenessStatus::Fail);
+    assert_eq!(rule.missing_fields, vec!["due_at"]);
+}
+
+#[test]
+fn post_market_monitoring_complete_and_incomplete_items_of_same_type_return_warn() {
+    let mut bundle = post_market_monitoring_bundle();
+    let mut incomplete: IncidentReportEvidence =
+        read_json("post_market_monitoring", "incident_report.json");
+    incomplete.authority_notification_status = None;
+    bundle.items.push(EvidenceItem::IncidentReport(incomplete));
+
+    let report = evaluate_completeness(&bundle, CompletenessProfile::PostMarketMonitoringV1);
+
+    assert_eq!(report.status, CompletenessStatus::Warn);
+    let rule = report
+        .rules
+        .iter()
+        .find(|rule| rule.item_type == "incident_report")
+        .expect("incident_report rule should exist");
+    assert_eq!(rule.status, CompletenessStatus::Warn);
+    assert_eq!(rule.present_count, 2);
+    assert_eq!(rule.complete_count, 1);
+    assert_eq!(rule.missing_fields, vec!["authority_notification_status"]);
 }
 
 #[test]

@@ -52,10 +52,47 @@ const mocks = vi.hoisted(() => {
     if (packType === "annex_iv") {
       return "annex_iv_governance_v1";
     }
+    if (packType === "conformity") {
+      return "conformity_v1";
+    }
+    if (packType === "provider_governance") {
+      return "provider_governance_v1";
+    }
+    if (packType === "fundamental_rights") {
+      return "fundamental_rights_v1";
+    }
     if (packType === "annex_xi") {
       return "gpai_provider_v1";
     }
+    if (packType === "incident_response") {
+      return "incident_response_v1";
+    }
+    if (packType === "post_market_monitoring") {
+      return "post_market_monitoring_v1";
+    }
     return null;
+  }
+
+  function ruleCountForProfile(profile) {
+    if (profile === "annex_iv_governance_v1") {
+      return 8;
+    }
+    if (profile === "conformity_v1") {
+      return 3;
+    }
+    if (profile === "provider_governance_v1") {
+      return 8;
+    }
+    if (profile === "fundamental_rights_v1") {
+      return 2;
+    }
+    if (profile === "incident_response_v1") {
+      return 10;
+    }
+    if (profile === "post_market_monitoring_v1") {
+      return 6;
+    }
+    return 6;
   }
 
   return {
@@ -196,23 +233,23 @@ const mocks = vi.hoisted(() => {
           profile: payload.profile,
           status: "pass",
           bundle_id: payload.pack_id,
-          pass_count: payload.profile === "annex_iv_governance_v1" ? 5 : 6,
+          pass_count: ruleCountForProfile(payload.profile),
           warn_count: 0,
           fail_count: 0,
           rules: []
         };
       }
-      return {
-        profile: payload.profile,
-        status: "fail",
-        bundle_id: payload.bundle_id ?? payload.bundle?.bundle_id ?? "inline-bundle",
-        pass_count: 0,
-        warn_count: 0,
-        fail_count: payload.profile === "annex_iv_governance_v1" ? 5 : 6,
-        rules: [
-          {
-            status: "fail",
-            missing_fields: ["summary"]
+        return {
+          profile: payload.profile,
+          status: "fail",
+          bundle_id: payload.bundle_id ?? payload.bundle?.bundle_id ?? "inline-bundle",
+          pass_count: 0,
+          warn_count: 0,
+          fail_count: ruleCountForProfile(payload.profile),
+          rules: [
+            {
+              status: "fail",
+              missing_fields: ["summary"]
           }
         ]
       };
@@ -226,8 +263,9 @@ const mocks = vi.hoisted(() => {
         bundle_count: payload.bundle_ids?.length ?? state.bundles.size,
         pack_completeness_profile: packCompletenessProfile ?? undefined,
         pack_completeness_status: packCompletenessProfile ? "pass" : undefined,
-        pack_completeness_pass_count:
-          packType === "annex_iv" ? 5 : packType === "annex_xi" ? 6 : undefined,
+        pack_completeness_pass_count: packCompletenessProfile
+          ? ruleCountForProfile(packCompletenessProfile)
+          : undefined,
         pack_completeness_warn_count: packCompletenessProfile ? 0 : undefined,
         pack_completeness_fail_count: packCompletenessProfile ? 0 : undefined
       };
@@ -240,8 +278,9 @@ const mocks = vi.hoisted(() => {
         pack_type: packType,
         pack_completeness_profile: packCompletenessProfile ?? undefined,
         pack_completeness_status: packCompletenessProfile ? "pass" : undefined,
-        pack_completeness_pass_count:
-          packType === "annex_iv" ? 5 : packType === "annex_xi" ? 6 : undefined,
+        pack_completeness_pass_count: packCompletenessProfile
+          ? ruleCountForProfile(packCompletenessProfile)
+          : undefined,
         pack_completeness_warn_count: packCompletenessProfile ? 0 : undefined,
         pack_completeness_fail_count: packCompletenessProfile ? 0 : undefined,
         bundles: Array.from(state.bundles.entries()).map(([bundleId, payload]) => ({
@@ -428,7 +467,7 @@ describe("AppRoutes", () => {
         "The structured governance fields for this Annex IV exported pack meet the current advisory minimum."
       )
     ).toBeTruthy();
-    expect(screen.getByText("5 pass · 0 warn · 0 fail")).toBeTruthy();
+    expect(screen.getAllByText("8 pass · 0 warn · 0 fail").length).toBeGreaterThan(0);
     expect(mocks.evaluateCompleteness).toHaveBeenCalledWith(
       expect.any(String),
       expect.any(String),

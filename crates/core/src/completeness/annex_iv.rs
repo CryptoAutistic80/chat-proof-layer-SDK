@@ -44,6 +44,24 @@ const RULES: &[RuleDefinition] = &[
         obligation_ref: "art14",
         check: check_human_oversight,
     },
+    RuleDefinition {
+        rule_id: "annex_iv_qms_record_minimum",
+        item_type: "qms_record",
+        obligation_ref: "art17",
+        check: check_qms_record,
+    },
+    RuleDefinition {
+        rule_id: "annex_iv_standards_alignment_minimum",
+        item_type: "standards_alignment",
+        obligation_ref: "art40_43",
+        check: check_standards_alignment,
+    },
+    RuleDefinition {
+        rule_id: "annex_iv_post_market_monitoring_minimum",
+        item_type: "post_market_monitoring",
+        obligation_ref: "art72",
+        check: check_post_market_monitoring,
+    },
 ];
 
 pub(super) fn evaluate(bundle: &EvidenceBundle) -> crate::completeness::CompletenessReport {
@@ -286,6 +304,53 @@ fn check_human_oversight(item: &EvidenceItem) -> Option<Vec<String>> {
             "stop_reason",
             has_optional_text(evidence.stop_reason.as_deref()),
         ),
+    ]))
+}
+
+fn check_qms_record(item: &EvidenceItem) -> Option<Vec<String>> {
+    let EvidenceItem::QmsRecord(evidence) = item else {
+        return None;
+    };
+    Some(required_fields([
+        ("record_id", !evidence.record_id.trim().is_empty()),
+        ("process", !evidence.process.trim().is_empty()),
+        ("status", !evidence.status.trim().is_empty()),
+        (
+            "policy_name",
+            has_optional_text(evidence.policy_name.as_deref()),
+        ),
+        ("revision", has_optional_text(evidence.revision.as_deref())),
+        ("scope", has_optional_text(evidence.scope.as_deref())),
+        (
+            "audit_results_summary",
+            has_optional_text(evidence.audit_results_summary.as_deref()),
+        ),
+        (
+            "continuous_improvement_actions",
+            !evidence.continuous_improvement_actions.is_empty(),
+        ),
+    ]))
+}
+
+fn check_standards_alignment(item: &EvidenceItem) -> Option<Vec<String>> {
+    let EvidenceItem::StandardsAlignment(evidence) = item else {
+        return None;
+    };
+    Some(required_fields([
+        ("standard_ref", !evidence.standard_ref.trim().is_empty()),
+        ("status", !evidence.status.trim().is_empty()),
+        ("scope", has_optional_text(evidence.scope.as_deref())),
+    ]))
+}
+
+fn check_post_market_monitoring(item: &EvidenceItem) -> Option<Vec<String>> {
+    let EvidenceItem::PostMarketMonitoring(evidence) = item else {
+        return None;
+    };
+    Some(required_fields([
+        ("plan_id", !evidence.plan_id.trim().is_empty()),
+        ("status", !evidence.status.trim().is_empty()),
+        ("summary", has_optional_text(evidence.summary.as_deref())),
     ]))
 }
 

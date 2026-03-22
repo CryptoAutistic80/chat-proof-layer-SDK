@@ -315,6 +315,12 @@ export const PLAYGROUND_SCENARIOS = [
     primaryStepId: "training_provenance",
     recordExplorerIntro:
       "This record set shows a GPAI provider workflow where provenance and compute-threshold evidence are captured as separate but linked records.",
+    readinessScope: {
+      mode: "partial_profile",
+      label: "full GPAI provider file",
+      note:
+        "This example only captures training provenance and compute-threshold evidence, so the full GPAI provider readiness check will stay incomplete until technical documentation, model evaluation, copyright policy, and training summary records are added."
+    },
     defaults: {
       serviceUrl: DEFAULT_SERVICE_URL,
       systemId: "foundation-model-alpha",
@@ -512,12 +518,13 @@ export const PLAYGROUND_SCENARIOS = [
     label: "Incident escalation",
     category: "Incident workflow",
     description:
-      "Capture an incident, the draft authority notification, the reporting deadline, and regulator correspondence in one workflow.",
-    audienceSummary: "An operational incident path where teams need a reviewable escalation trail.",
+      "Capture the incident context, triage decision, corrective action, authority reporting, and correspondence in one workflow.",
+    audienceSummary:
+      "An incident-response path where teams need a reviewable escalation and reporting trail.",
     lawExplainer: explainer(
       "When something goes wrong, teams usually need a clear incident trail that shows what happened, who was notified, and what follow-up is due.",
-      "This example records the incident itself plus authority and deadline material needed for follow-up.",
-      "Your team still needs to decide whether the event is reportable, complete the real submission process, and carry out corrective action outside the tool."
+      "This example records the incident context, triage decision, human-oversight evidence, incident, corrective-action, authority, deadline, and correspondence material needed for follow-up.",
+      "Your team still needs to decide whether the event is reportable, complete the real submission process, and carry out closure work outside the tool."
     ),
     sourceRef: "examples/python-incident-response/run.py",
     codeLanguage: "python",
@@ -529,7 +536,7 @@ export const PLAYGROUND_SCENARIOS = [
     templateId: "py_incident_escalation",
     primaryStepId: "incident_report",
     recordExplorerIntro:
-      "This record set shows how an incident trail can be built from the first report through regulator-facing follow-up.",
+      "This record set shows how an incident-response file can be built from the first triage decision through regulator-facing follow-up.",
     defaults: {
       serviceUrl: DEFAULT_SERVICE_URL,
       systemId: "benefits-review",
@@ -546,8 +553,12 @@ export const PLAYGROUND_SCENARIOS = [
       rootCauseSummary:
         "Missing-document threshold was too permissive for a narrow public-service case segment.",
       correctiveActionRef: "ca-benefits-42",
+      correctiveActionSummary:
+        "Tighten the borderline threshold and route similar cases to manual review.",
       notificationSummary:
         "Initial authority notification for a potentially adverse recommendation incident.",
+      submissionSummary:
+        "Initial notification package for public-service incident follow-up.",
       dueAt: "2026-03-09T12:00:00Z",
       correspondenceSubject: "Initial authority follow-up"
     },
@@ -577,6 +588,12 @@ export const PLAYGROUND_SCENARIOS = [
         type: "text"
       },
       {
+        key: "correctiveActionSummary",
+        label: "Corrective action summary",
+        type: "textarea",
+        rows: 3
+      },
+      {
         key: "dueAt",
         label: "Reporting deadline",
         type: "text"
@@ -588,17 +605,59 @@ export const PLAYGROUND_SCENARIOS = [
         rows: 3
       },
       {
+        key: "submissionSummary",
+        label: "Submission summary",
+        type: "textarea",
+        rows: 3
+      },
+      {
         key: "correspondenceSubject",
         label: "Correspondence subject",
         type: "text"
       }
     ],
     steps: [
+      {
+        id: "technical_doc",
+        kind: "evidence",
+        itemType: "technical_doc",
+        bundleRole: "support"
+      },
+      {
+        id: "risk_assessment",
+        kind: "evidence",
+        itemType: "risk_assessment",
+        bundleRole: "support"
+      },
+      {
+        id: "human_oversight",
+        kind: "evidence",
+        itemType: "human_oversight",
+        bundleRole: "support"
+      },
+      {
+        id: "policy_decision",
+        kind: "evidence",
+        itemType: "policy_decision",
+        bundleRole: "primary"
+      },
       { id: "incident_report", kind: "evidence", itemType: "incident_report", bundleRole: "primary" },
+      {
+        id: "corrective_action",
+        kind: "evidence",
+        itemType: "corrective_action",
+        bundleRole: "support"
+      },
       {
         id: "authority_notification",
         kind: "evidence",
         itemType: "authority_notification",
+        bundleRole: "support"
+      },
+      {
+        id: "authority_submission",
+        kind: "evidence",
+        itemType: "authority_submission",
         bundleRole: "support"
       },
       {
@@ -616,8 +675,8 @@ export const PLAYGROUND_SCENARIOS = [
     ],
     missingEvidence: [
       "Add the final submission receipt if the review needs proof that a regulator actually received the filing.",
-      "Add corrective-action and closure records once the incident moves beyond initial escalation.",
-      "Add the operational evidence that explains what caused the incident if the reviewer needs deeper root-cause material."
+      "Add closure evidence once the incident moves beyond corrective action and the workflow is fully stabilized.",
+      "Add underlying runtime or model-evaluation evidence if the reviewer needs deeper technical root-cause material."
     ]
   },
   {
@@ -713,11 +772,26 @@ export function applyScenarioToDraft(currentDraft, scenario) {
 
 export function inferPackTypeFromItems(items = []) {
   const types = items.map((item) => item.type);
-  if (types.includes("incident_report") || types.includes("authority_notification")) {
-    return "incident_response";
-  }
   if (types.includes("training_provenance") || types.includes("compute_metrics")) {
     return "annex_xi";
+  }
+  if (
+    types.includes("conformity_assessment") ||
+    types.includes("declaration") ||
+    types.includes("registration")
+  ) {
+    return "conformity";
+  }
+  if (types.includes("post_market_monitoring")) {
+    return "post_market_monitoring";
+  }
+  if (
+    types.includes("incident_report") ||
+    types.includes("authority_notification") ||
+    types.includes("regulator_correspondence") ||
+    types.includes("policy_decision")
+  ) {
+    return "incident_response";
   }
   if (
     types.includes("technical_doc") ||
@@ -728,9 +802,6 @@ export function inferPackTypeFromItems(items = []) {
   }
   if (types.includes("fundamental_rights_assessment") || types.includes("human_oversight")) {
     return "fundamental_rights";
-  }
-  if (types.includes("post_market_monitoring") || types.includes("authority_submission")) {
-    return "post_market_monitoring";
   }
   if (
     types.includes("data_governance") ||
@@ -749,6 +820,12 @@ export function findScenarioByPackType(packType, items = []) {
   const scenario = PLAYGROUND_SCENARIOS.find((entry) => entry.packType === packType);
   if (scenario) {
     return scenario;
+  }
+  if (packType === "conformity" || packType === "provider_governance") {
+    return PLAYGROUND_SCENARIOS.find((entry) => entry.id === "ts_support_rules") ?? null;
+  }
+  if (packType === "post_market_monitoring") {
+    return PLAYGROUND_SCENARIOS.find((entry) => entry.id === "py_incident_escalation") ?? null;
   }
   if (items.some((item) => item.type === "llm_interaction")) {
     return PLAYGROUND_SCENARIOS.find((entry) => entry.id === "ts_chatbot_support") ?? null;

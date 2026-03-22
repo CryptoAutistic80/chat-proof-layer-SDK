@@ -1746,6 +1746,11 @@ def create_fundamental_rights_assessment_request(
                     "assessment_id": assessment_id,
                     "status": status,
                     "scope": scope,
+                    "legal_basis": legal_basis,
+                    "affected_rights": _list_or_empty(affected_rights),
+                    "stakeholder_consultation_summary": stakeholder_consultation_summary,
+                    "mitigation_plan_summary": mitigation_plan_summary,
+                    "assessor": assessor,
                     "metadata": metadata,
                 },
             )

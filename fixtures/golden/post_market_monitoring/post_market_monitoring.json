@@ -1,0 +1,10 @@
+{
+  "plan_id": "pmm-claims-2026-03",
+  "status": "active",
+  "summary": "Weekly drift review with escalation thresholds for adverse outcomes.",
+  "report_commitment": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "metadata": {
+    "owner": "safety-ops",
+    "market": "eu"
+  }
+}

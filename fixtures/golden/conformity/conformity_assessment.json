@@ -1,0 +1,11 @@
+{
+  "assessment_id": "conf-assess-42",
+  "procedure": "annex_vii_quality_management",
+  "status": "completed",
+  "report_commitment": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "assessment_body": "notified_body_eu_1234",
+  "certificate_ref": "cert://eu/nb-1234/conf-assess-42",
+  "metadata": {
+    "owner": "conformity-team"
+  }
+}

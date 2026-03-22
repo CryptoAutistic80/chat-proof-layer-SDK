@@ -57,6 +57,19 @@ def main() -> None:
             "owner": "rights-review-team",
             "finding": "Human escalation required for borderline cases.",
         },
+        legal_basis="GDPR Art. 22 and public-service review safeguards",
+        affected_rights=[
+            "equal treatment",
+            "access to public services",
+            "explanation",
+        ],
+        stakeholder_consultation_summary=(
+            "Legal, service-operations, and rights-review stakeholders approved the workflow."
+        ),
+        mitigation_plan_summary=(
+            "Borderline cases require human review and documented justification before any outcome is finalized."
+        ),
+        assessor="rights-review-team",
         retention_class="technical_doc",
     )
 
@@ -67,6 +80,7 @@ def main() -> None:
             "reason": "Borderline case with public-service impact.",
             "sla_hours": 24,
         },
+        override_action="route_to_manual_review",
         retention_class="risk_mgmt",
     )
 
@@ -74,6 +88,10 @@ def main() -> None:
         pack_type="fundamental_rights",
         system_id="benefits-review",
         bundle_format="full",
+    )
+    pack_readiness = proof_layer.evaluate_completeness(
+        pack_id=pack["pack_id"],
+        profile="fundamental_rights_v1",
     )
     manifest = proof_layer.get_pack_manifest(pack["pack_id"])
     export_bytes = proof_layer.download_pack_export(pack["pack_id"])
@@ -94,6 +112,7 @@ def main() -> None:
     )
     print("pack_id:", pack["pack_id"])
     print("pack_type:", manifest["pack_type"])
+    print("pack_readiness:", pack_readiness["status"], pack_readiness["pass_count"])
     print("manifest_bundle_count:", len(manifest["bundles"]))
     print(
         "manifest_items:",

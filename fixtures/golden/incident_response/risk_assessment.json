@@ -1,0 +1,24 @@
+{
+  "risk_id": "risk-benefits-incident-001",
+  "severity": "high",
+  "status": "mitigated",
+  "summary": "Incident-response risk for adverse public-service recommendations is tracked in the response file.",
+  "risk_description": "A borderline threshold could over-rely on incomplete evidence and surface adverse recommendations without sufficient escalation.",
+  "likelihood": "medium",
+  "affected_groups": [
+    "benefit_applicants",
+    "case_officers"
+  ],
+  "mitigation_measures": [
+    "Mandatory manual review for borderline or adverse recommendations.",
+    "Escalation to incident operations when an affected person could receive an adverse outcome.",
+    "Authority-notification and corrective-action workflow when serious incidents are suspected."
+  ],
+  "residual_risk_level": "medium",
+  "risk_owner": "incident-ops",
+  "vulnerable_groups_considered": true,
+  "test_results_summary": "Replay and reviewer-agreement checks are acceptable only when the escalation workflow remains active.",
+  "metadata": {
+    "reviewer": "rights-review-team"
+  }
+}

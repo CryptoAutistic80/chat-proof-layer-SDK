@@ -1,0 +1,14 @@
+{
+  "document_ref": "docs://benefits-review/incident-response-context",
+  "section": "incident_context",
+  "commitment": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+  "annex_iv_sections": [],
+  "system_description_summary": "Public-sector benefit eligibility workflow with incident triage and regulator-facing escalation controls.",
+  "model_description_summary": "Advisory eligibility review assistant that prepares summaries for human case officers.",
+  "capabilities_and_limitations": "Flags incomplete or high-risk cases, but it does not finalize benefit determinations.",
+  "design_choices_summary": "Incident-response records capture triage, escalation, notification, and follow-up decisions in one reviewable file.",
+  "evaluation_metrics_summary": "Appeal-rate, false-negative, and escalation-timeliness checks are reviewed after reportable incidents.",
+  "human_oversight_design_summary": "Human case officers review adverse or borderline recommendations before any public-service outcome is finalized.",
+  "post_market_monitoring_plan_ref": "incident://benefits-review/triage-playbook-2026-03",
+  "simplified_tech_doc": true
+}

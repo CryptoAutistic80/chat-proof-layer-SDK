@@ -48,6 +48,7 @@ const baseDraft = {
   incidentSummary: "Potentially adverse recommendation surfaced.",
   rootCauseSummary: "Threshold too permissive for a narrow case segment.",
   correctiveActionRef: "ca-benefits-42",
+  correctiveActionSummary: "Tighten the threshold and route similar cases to manual review.",
   notificationSummary: "Initial authority notification.",
   dueAt: "2026-03-09T12:00:00Z",
   correspondenceSubject: "Initial authority follow-up"
@@ -97,12 +98,24 @@ describe("buildScenarioWorkflow", () => {
     const steps = await buildScenarioWorkflow(scenario, baseDraft, null);
 
     expect(steps.map((step) => step.itemTypes[0])).toEqual([
+      "technical_doc",
+      "risk_assessment",
+      "human_oversight",
+      "policy_decision",
       "incident_report",
+      "corrective_action",
       "authority_notification",
+      "authority_submission",
       "reporting_deadline",
       "regulator_correspondence"
     ]);
-    expect(steps[0].createPayload.capture.items[0].data.summary).toContain("Potentially adverse");
+    expect(steps[0].createPayload.capture.items[0].data.document_ref).toBe(
+      "docs://benefits-review/incident-response-context"
+    );
+    expect(steps[3].createPayload.capture.items[0].data.policy_name).toBe(
+      "incident_reportability_triage"
+    );
+    expect(steps[4].createPayload.capture.items[0].data.summary).toContain("Potentially adverse");
   });
 
   test("builds a GPAI threshold workflow with linked provenance and compute evidence", async () => {

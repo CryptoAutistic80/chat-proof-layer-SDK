@@ -16,7 +16,12 @@ from proofsdk.native import (
 REPO_ROOT = Path(__file__).resolve().parents[3]
 GOLDEN_DIR = REPO_ROOT / "fixtures" / "golden"
 ANNEX_IV_DIR = GOLDEN_DIR / "annex_iv_governance"
+FUNDAMENTAL_RIGHTS_DIR = GOLDEN_DIR / "fundamental_rights"
 GPAI_DIR = GOLDEN_DIR / "gpai_provider"
+INCIDENT_RESPONSE_DIR = GOLDEN_DIR / "incident_response"
+POST_MARKET_MONITORING_DIR = GOLDEN_DIR / "post_market_monitoring"
+PROVIDER_GOVERNANCE_DIR = GOLDEN_DIR / "provider_governance"
+CONFORMITY_DIR = GOLDEN_DIR / "conformity"
 
 
 class TestNativeBindings(unittest.TestCase):
@@ -138,6 +143,22 @@ class TestNativeBindings(unittest.TestCase):
                     "type": "human_oversight",
                     "data": json.loads((ANNEX_IV_DIR / "human_oversight.json").read_text(encoding="utf-8")),
                 },
+                {
+                    "type": "qms_record",
+                    "data": json.loads((ANNEX_IV_DIR / "qms_record.json").read_text(encoding="utf-8")),
+                },
+                {
+                    "type": "standards_alignment",
+                    "data": json.loads(
+                        (ANNEX_IV_DIR / "standards_alignment.json").read_text(encoding="utf-8")
+                    ),
+                },
+                {
+                    "type": "post_market_monitoring",
+                    "data": json.loads(
+                        (ANNEX_IV_DIR / "post_market_monitoring.json").read_text(encoding="utf-8")
+                    ),
+                },
             ],
             "artefacts": [],
             "policy": {"redactions": [], "encryption": {"enabled": False}},
@@ -158,7 +179,7 @@ class TestNativeBindings(unittest.TestCase):
 
         report = evaluate_completeness(bundle=bundle, profile="annex_iv_governance_v1")
         self.assertEqual(report["status"], "pass")
-        self.assertEqual(report["pass_count"], 5)
+        self.assertEqual(report["pass_count"], 8)
 
     def test_native_evaluate_completeness_supports_gpai_provider_profile(self):
         bundle = {
@@ -220,6 +241,415 @@ class TestNativeBindings(unittest.TestCase):
         report = evaluate_completeness(bundle=bundle, profile="gpai_provider_v1")
         self.assertEqual(report["status"], "pass")
         self.assertEqual(report["pass_count"], 6)
+
+    def test_native_evaluate_completeness_supports_provider_governance_profile(self):
+        bundle = {
+            "bundle_version": "1.0",
+            "bundle_id": "B-provider-governance",
+            "created_at": "2026-03-22T12:00:00Z",
+            "actor": {
+                "issuer": "proof-layer-test",
+                "app_id": "python-sdk",
+                "env": "test",
+                "signing_key_id": "kid-dev-01",
+                "role": "provider",
+            },
+            "subject": {"system_id": "hiring-assistant"},
+            "context": {},
+            "items": [
+                {
+                    "type": "technical_doc",
+                    "data": json.loads(
+                        (PROVIDER_GOVERNANCE_DIR / "technical_doc.json").read_text(encoding="utf-8")
+                    ),
+                },
+                {
+                    "type": "risk_assessment",
+                    "data": json.loads(
+                        (PROVIDER_GOVERNANCE_DIR / "risk_assessment.json").read_text(
+                            encoding="utf-8"
+                        )
+                    ),
+                },
+                {
+                    "type": "data_governance",
+                    "data": json.loads(
+                        (PROVIDER_GOVERNANCE_DIR / "data_governance.json").read_text(
+                            encoding="utf-8"
+                        )
+                    ),
+                },
+                {
+                    "type": "instructions_for_use",
+                    "data": json.loads(
+                        (PROVIDER_GOVERNANCE_DIR / "instructions_for_use.json").read_text(
+                            encoding="utf-8"
+                        )
+                    ),
+                },
+                {
+                    "type": "qms_record",
+                    "data": json.loads(
+                        (PROVIDER_GOVERNANCE_DIR / "qms_record.json").read_text(encoding="utf-8")
+                    ),
+                },
+                {
+                    "type": "standards_alignment",
+                    "data": json.loads(
+                        (PROVIDER_GOVERNANCE_DIR / "standards_alignment.json").read_text(
+                            encoding="utf-8"
+                        )
+                    ),
+                },
+                {
+                    "type": "post_market_monitoring",
+                    "data": json.loads(
+                        (PROVIDER_GOVERNANCE_DIR / "post_market_monitoring.json").read_text(
+                            encoding="utf-8"
+                        )
+                    ),
+                },
+                {
+                    "type": "corrective_action",
+                    "data": json.loads(
+                        (PROVIDER_GOVERNANCE_DIR / "corrective_action.json").read_text(
+                            encoding="utf-8"
+                        )
+                    ),
+                },
+            ],
+            "artefacts": [],
+            "policy": {"redactions": [], "encryption": {"enabled": False}},
+            "integrity": {
+                "canonicalization": "RFC8785-JCS",
+                "hash": "SHA-256",
+                "header_digest": "sha256:" + "a" * 64,
+                "bundle_root_algorithm": "pl-merkle-sha256-v4",
+                "bundle_root": "sha256:" + "b" * 64,
+                "signature": {
+                    "format": "JWS",
+                    "alg": "EdDSA",
+                    "kid": "kid-dev-01",
+                    "value": "sig",
+                },
+            },
+        }
+
+        report = evaluate_completeness(bundle=bundle, profile="provider_governance_v1")
+        self.assertEqual(report["status"], "pass")
+        self.assertEqual(report["pass_count"], 8)
+
+    def test_native_evaluate_completeness_supports_conformity_profile(self):
+        bundle = {
+            "bundle_version": "1.0",
+            "bundle_id": "B-conformity",
+            "created_at": "2026-03-22T15:00:00Z",
+            "actor": {
+                "issuer": "proof-layer-test",
+                "app_id": "python-sdk",
+                "env": "test",
+                "signing_key_id": "kid-dev-01",
+                "role": "provider",
+            },
+            "subject": {"system_id": "system-conformity"},
+            "context": {},
+            "items": [
+                {
+                    "type": "conformity_assessment",
+                    "data": json.loads(
+                        (CONFORMITY_DIR / "conformity_assessment.json").read_text(
+                            encoding="utf-8"
+                        )
+                    ),
+                },
+                {
+                    "type": "declaration",
+                    "data": json.loads(
+                        (CONFORMITY_DIR / "declaration.json").read_text(encoding="utf-8")
+                    ),
+                },
+                {
+                    "type": "registration",
+                    "data": json.loads(
+                        (CONFORMITY_DIR / "registration.json").read_text(encoding="utf-8")
+                    ),
+                },
+            ],
+            "artefacts": [],
+            "policy": {"redactions": [], "encryption": {"enabled": False}},
+            "integrity": {
+                "canonicalization": "RFC8785-JCS",
+                "hash": "SHA-256",
+                "header_digest": "sha256:" + "a" * 64,
+                "bundle_root_algorithm": "pl-merkle-sha256-v4",
+                "bundle_root": "sha256:" + "b" * 64,
+                "signature": {
+                    "format": "JWS",
+                    "alg": "EdDSA",
+                    "kid": "kid-dev-01",
+                    "value": "sig",
+                },
+            },
+        }
+
+        report = evaluate_completeness(bundle=bundle, profile="conformity_v1")
+        self.assertEqual(report["status"], "pass")
+        self.assertEqual(report["pass_count"], 3)
+
+    def test_native_evaluate_completeness_supports_fundamental_rights_profile(self):
+        bundle = {
+            "bundle_version": "1.0",
+            "bundle_id": "B-fundamental-rights",
+            "created_at": "2026-03-22T00:00:00Z",
+            "actor": {
+                "issuer": "proof-layer-test",
+                "app_id": "python-sdk",
+                "env": "test",
+                "signing_key_id": "kid-dev-01",
+                "role": "deployer",
+            },
+            "subject": {"system_id": "benefits-review"},
+            "context": {},
+            "items": [
+                {
+                    "type": "fundamental_rights_assessment",
+                    "data": json.loads(
+                        (FUNDAMENTAL_RIGHTS_DIR / "fundamental_rights_assessment.json").read_text(
+                            encoding="utf-8"
+                        )
+                    ),
+                },
+                {
+                    "type": "human_oversight",
+                    "data": json.loads(
+                        (FUNDAMENTAL_RIGHTS_DIR / "human_oversight.json").read_text(
+                            encoding="utf-8"
+                        )
+                    ),
+                },
+            ],
+            "artefacts": [],
+            "policy": {"redactions": [], "encryption": {"enabled": False}},
+            "integrity": {
+                "canonicalization": "RFC8785-JCS",
+                "hash": "SHA-256",
+                "header_digest": "sha256:" + "a" * 64,
+                "bundle_root_algorithm": "pl-merkle-sha256-v4",
+                "bundle_root": "sha256:" + "b" * 64,
+                "signature": {
+                    "format": "JWS",
+                    "alg": "EdDSA",
+                    "kid": "kid-dev-01",
+                    "value": "sig",
+                },
+            },
+        }
+
+        report = evaluate_completeness(bundle=bundle, profile="fundamental_rights_v1")
+        self.assertEqual(report["status"], "pass")
+        self.assertEqual(report["pass_count"], 2)
+
+    def test_native_evaluate_completeness_supports_post_market_monitoring_profile(self):
+        bundle = {
+            "bundle_version": "1.0",
+            "bundle_id": "B-post-market-monitoring",
+            "created_at": "2026-03-22T00:00:00Z",
+            "actor": {
+                "issuer": "proof-layer-test",
+                "app_id": "python-sdk",
+                "env": "test",
+                "signing_key_id": "kid-dev-01",
+                "role": "provider",
+            },
+            "subject": {"system_id": "claims-assistant"},
+            "context": {},
+            "items": [
+                {
+                    "type": "post_market_monitoring",
+                    "data": json.loads(
+                        (POST_MARKET_MONITORING_DIR / "post_market_monitoring.json").read_text(
+                            encoding="utf-8"
+                        )
+                    ),
+                },
+                {
+                    "type": "incident_report",
+                    "data": json.loads(
+                        (POST_MARKET_MONITORING_DIR / "incident_report.json").read_text(
+                            encoding="utf-8"
+                        )
+                    ),
+                },
+                {
+                    "type": "corrective_action",
+                    "data": json.loads(
+                        (POST_MARKET_MONITORING_DIR / "corrective_action.json").read_text(
+                            encoding="utf-8"
+                        )
+                    ),
+                },
+                {
+                    "type": "authority_notification",
+                    "data": json.loads(
+                        (POST_MARKET_MONITORING_DIR / "authority_notification.json").read_text(
+                            encoding="utf-8"
+                        )
+                    ),
+                },
+                {
+                    "type": "authority_submission",
+                    "data": json.loads(
+                        (POST_MARKET_MONITORING_DIR / "authority_submission.json").read_text(
+                            encoding="utf-8"
+                        )
+                    ),
+                },
+                {
+                    "type": "reporting_deadline",
+                    "data": json.loads(
+                        (POST_MARKET_MONITORING_DIR / "reporting_deadline.json").read_text(
+                            encoding="utf-8"
+                        )
+                    ),
+                },
+            ],
+            "artefacts": [],
+            "policy": {"redactions": [], "encryption": {"enabled": False}},
+            "integrity": {
+                "canonicalization": "RFC8785-JCS",
+                "hash": "SHA-256",
+                "header_digest": "sha256:" + "a" * 64,
+                "bundle_root_algorithm": "pl-merkle-sha256-v4",
+                "bundle_root": "sha256:" + "b" * 64,
+                "signature": {
+                    "format": "JWS",
+                    "alg": "EdDSA",
+                    "kid": "kid-dev-01",
+                    "value": "sig",
+                },
+            },
+        }
+
+        report = evaluate_completeness(bundle=bundle, profile="post_market_monitoring_v1")
+        self.assertEqual(report["status"], "pass")
+        self.assertEqual(report["pass_count"], 6)
+
+    def test_native_evaluate_completeness_supports_incident_response_profile(self):
+        bundle = {
+            "bundle_version": "1.0",
+            "bundle_id": "B-incident-response",
+            "created_at": "2026-03-22T18:00:00Z",
+            "actor": {
+                "issuer": "proof-layer-test",
+                "app_id": "python-sdk",
+                "env": "test",
+                "signing_key_id": "kid-dev-01",
+                "role": "deployer",
+            },
+            "subject": {"system_id": "benefits-review"},
+            "context": {},
+            "items": [
+                {
+                    "type": "technical_doc",
+                    "data": json.loads(
+                        (INCIDENT_RESPONSE_DIR / "technical_doc.json").read_text(
+                            encoding="utf-8"
+                        )
+                    ),
+                },
+                {
+                    "type": "risk_assessment",
+                    "data": json.loads(
+                        (INCIDENT_RESPONSE_DIR / "risk_assessment.json").read_text(
+                            encoding="utf-8"
+                        )
+                    ),
+                },
+                {
+                    "type": "human_oversight",
+                    "data": json.loads(
+                        (INCIDENT_RESPONSE_DIR / "human_oversight.json").read_text(
+                            encoding="utf-8"
+                        )
+                    ),
+                },
+                {
+                    "type": "policy_decision",
+                    "data": json.loads(
+                        (INCIDENT_RESPONSE_DIR / "policy_decision.json").read_text(
+                            encoding="utf-8"
+                        )
+                    ),
+                },
+                {
+                    "type": "incident_report",
+                    "data": json.loads(
+                        (INCIDENT_RESPONSE_DIR / "incident_report.json").read_text(
+                            encoding="utf-8"
+                        )
+                    ),
+                },
+                {
+                    "type": "corrective_action",
+                    "data": json.loads(
+                        (INCIDENT_RESPONSE_DIR / "corrective_action.json").read_text(
+                            encoding="utf-8"
+                        )
+                    ),
+                },
+                {
+                    "type": "authority_notification",
+                    "data": json.loads(
+                        (INCIDENT_RESPONSE_DIR / "authority_notification.json").read_text(
+                            encoding="utf-8"
+                        )
+                    ),
+                },
+                {
+                    "type": "authority_submission",
+                    "data": json.loads(
+                        (INCIDENT_RESPONSE_DIR / "authority_submission.json").read_text(
+                            encoding="utf-8"
+                        )
+                    ),
+                },
+                {
+                    "type": "reporting_deadline",
+                    "data": json.loads(
+                        (INCIDENT_RESPONSE_DIR / "reporting_deadline.json").read_text(
+                            encoding="utf-8"
+                        )
+                    ),
+                },
+                {
+                    "type": "regulator_correspondence",
+                    "data": json.loads(
+                        (INCIDENT_RESPONSE_DIR / "regulator_correspondence.json").read_text(
+                            encoding="utf-8"
+                        )
+                    ),
+                },
+            ],
+            "artefacts": [],
+            "policy": {"redactions": [], "encryption": {"enabled": False}},
+            "integrity": {
+                "canonicalization": "RFC8785-JCS",
+                "hash": "SHA-256",
+                "header_digest": "sha256:" + "a" * 64,
+                "bundle_root_algorithm": "pl-merkle-sha256-v4",
+                "bundle_root": "sha256:" + "b" * 64,
+                "signature": {
+                    "format": "JWS",
+                    "alg": "EdDSA",
+                    "kid": "kid-dev-01",
+                    "value": "sig",
+                },
+            },
+        }
+
+        report = evaluate_completeness(bundle=bundle, profile="incident_response_v1")
+        self.assertEqual(report["status"], "pass")
+        self.assertEqual(report["pass_count"], 10)
 
 
 if __name__ == "__main__":

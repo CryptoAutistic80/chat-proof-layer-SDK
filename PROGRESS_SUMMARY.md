@@ -2,6 +2,14 @@
 
 Completed:
 
+- Added a new advisory `incident_response_v1` completeness profile for incident-handling workflows, covering `technical_doc`, `risk_assessment`, `human_oversight`, `policy_decision`, `incident_report`, `corrective_action`, `authority_notification`, `authority_submission`, `reporting_deadline`, and `regulator_correspondence`.
+- Added a new advisory `conformity_v1` completeness profile for market-placement workflows, covering `conformity_assessment`, `declaration`, and `registration`.
+- Added a new advisory `provider_governance_v1` completeness profile for provider-side governance workflows, covering `technical_doc`, `risk_assessment`, `data_governance`, `instructions_for_use`, `qms_record`, `standards_alignment`, `post_market_monitoring`, and `corrective_action`.
+- Added a new advisory `post_market_monitoring_v1` completeness profile for monitoring and incident-response workflows, covering `post_market_monitoring`, `incident_report`, `corrective_action`, `authority_notification`, `authority_submission`, and `reporting_deadline`.
+- Expanded `annex_iv_governance_v1` so it now assesses the full eight-family Annex IV governance bundle, adding `qms_record`, `standards_alignment`, and `post_market_monitoring` minimum-field checks.
+- Added a new advisory `fundamental_rights_v1` completeness profile for deployer-side FRIA workflows, covering structured `fundamental_rights_assessment` and linked `human_oversight` evidence.
+- Wired that profile through Rust core, `proofctl assess`, vault pack readiness for `fundamental_rights`, the TypeScript/Python SDK surfaces, the checked schemas, docs, and the web demo readiness copy.
+- Added checked FRIA completeness fixtures plus stronger TypeScript/Python builder/native coverage, and refreshed the Python FRIA example to emit the fuller structured assessment shape and print pack readiness.
 - Added a shared assurance-reporting layer in Rust core with plain-English trust levels, stable check IDs, and additive `assessment` payloads for timestamp and receipt verification.
 - Updated vault `POST /v1/verify/timestamp` and `POST /v1/verify/receipt` to return those assessments, plus additive receipt `live_check_mode` support with `off`, `best_effort`, and `required`.
 - Added opt-in Rekor live-log consistency and freshness verification against the current tree head and entry body.
@@ -368,7 +376,7 @@ Still outstanding from `plan.md`:
 - SQLite pilots now have matched backup export, optional backup encryption, scheduled local backup rotation, and offline restore/import flows, but there is still no live in-place restore endpoint or remote backup targets.
 - TypeScript and Python now both have native FFI bridges, local sealing paths, higher-level `ProofLayer` facades, a local artifact build path for npm tarballs and platform-tagged wheels, and CI-backed multi-platform GitHub artifact builds, but there is still no automated publish step to npm or PyPI.
 - TypeScript and Python SDKs now expose local redacted-bundle helpers (`disclose` / `verifyRedactedBundle` in TypeScript, `disclose` / `verify_redacted_bundle` in Python), including top-level field redaction for local v3 bundles and nested JSON-pointer path redaction for local v4 bundles, plus vault pack helpers for `bundle_format = "full" | "disclosure"` with `disclosure_policy` or inline `disclosure_template`, vault disclosure-config read/update helpers, and disclosure-preview helpers.
-- Catalog breadth is now strong, and the first Annex IV minimum-field contract is machine-assessed; the remaining gap is broader completeness-profile coverage, alongside harder later-phase items like deeper trust-list/evidence-preservation work, alternative storage backends, and automated npm/PyPI/prebuilt release publishing hardening.
+- Catalog breadth is now strong, and Annex IV plus FRIA minimum-field contracts are machine-assessed; the remaining gap is broader completeness-profile coverage, alongside harder later-phase items like deeper trust-list/evidence-preservation work, alternative storage backends, and automated npm/PyPI/prebuilt release publishing hardening.
 - RFC 3161 verification now supports signer-chain validation against configured PEM trust anchors, optional `TSTInfo.policy` OID enforcement, CRL-based revocation checking, optional live OCSP checks, qualified TSA signer allowlist matching, and operational `qualified` profile gating, but full eIDAS-qualified trust-list evaluation and archival OCSP evidence handling are still outstanding.
 - Rekor verification now supports SET signature validation, `logID` binding against a configured PEM log public key, and opt-in live-log consistency / freshness checks; broader production hardening and provider expansion remain future work.
 - The SCITT path now writes a COSE/CCF-style receipt body by default and keeps legacy JSON verification compatibility, but broader interop and trust-list work are still future work.
@@ -392,7 +400,7 @@ Completed:
   `examples/typescript-compliance` now captures the full Annex IV governance workflow and exports both full and disclosure packs,
   and `examples/python-annex-iv` provides the matching Python walkthrough while preserving the older FRIA example separately.
 - Landed advisory Annex IV readiness/completeness evaluation across the stack:
-  Rust core now ships `annex_iv_governance_v1`,
+  Rust core now ships `annex_iv_governance_v1`, `conformity_v1`, `incident_response_v1`, `provider_governance_v1`,
   `proofctl` now exposes `assess`,
   the vault now exposes `POST /v1/completeness/evaluate` and attaches completeness summary fields to `annex_iv` pack manifests,
   TypeScript/Python now expose `evaluateCompleteness` / `evaluate_completeness`,

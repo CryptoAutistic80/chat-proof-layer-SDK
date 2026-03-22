@@ -1,0 +1,41 @@
+{
+  "decision": "approved_with_restrictions",
+  "dataset_ref": "dataset://hiring-assistant/training-v3",
+  "dataset_name": "hiring-assistant-training",
+  "dataset_version": "2026.03",
+  "source_description": "Curated applicant and recruiter-feedback corpus.",
+  "collection_period": {
+    "start": "2024-01-01",
+    "end": "2025-12-31"
+  },
+  "geographical_scope": ["EU"],
+  "preprocessing_operations": [
+    "deduplication",
+    "pii_minimization",
+    "label_review"
+  ],
+  "bias_detection_methodology": "Quarterly protected-group parity review.",
+  "bias_metrics": [
+    {
+      "name": "selection_rate_gap",
+      "value": "0.04",
+      "unit": "ratio"
+    }
+  ],
+  "mitigation_actions": [
+    "oversample underrepresented profiles",
+    "human review on borderline scores"
+  ],
+  "data_gaps": ["limited historic data for niche technical roles"],
+  "personal_data_categories": [
+    "employment_history",
+    "education_history"
+  ],
+  "safeguards": [
+    "pseudonymization",
+    "role-based dataset access"
+  ],
+  "metadata": {
+    "owner": "data-governance-board"
+  }
+}

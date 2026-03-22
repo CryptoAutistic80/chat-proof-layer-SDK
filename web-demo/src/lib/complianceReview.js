@@ -36,12 +36,16 @@ function defaultShareAudience(scenario) {
   switch (scenario.packType) {
     case "annex_iv":
       return "an Annex IV, regulator-facing, or conformity review";
+    case "conformity":
+      return "regulators, notified bodies, or market-placement reviewers";
     case "provider_governance":
       return "an internal quality or regulator-facing review";
     case "annex_xi":
       return "a GPAI, technical-documentation, or regulator-facing review";
     case "fundamental_rights":
       return "a deployer-side rights, risk, or regulator review";
+    case "post_market_monitoring":
+      return "post-market monitoring leads, incident managers, or regulators";
     case "incident_response":
       return "incident managers, regulators, or internal response leads";
     default:
@@ -51,6 +55,17 @@ function defaultShareAudience(scenario) {
 
 function bundleRunsFromRun(run) {
   return Array.isArray(run?.bundleRuns) ? run.bundleRuns : [];
+}
+
+function readinessScopeNote(scenario, report) {
+  if (
+    !scenario?.readinessScope ||
+    !report ||
+    scenario.readinessScope.mode !== "partial_profile"
+  ) {
+    return null;
+  }
+  return scenario.readinessScope.note;
 }
 
 function readinessCopy(profile, status, subject = "workflow") {
@@ -71,6 +86,51 @@ function readinessCopy(profile, status, subject = "workflow") {
       return `The ${subject} has at least one minimally complete GPAI provider record for each required area, but some captured records are thinner than the current advisory minimum.`;
     }
     return `The ${subject} is missing at least one required GPAI provider area or does not yet include a minimally complete record for that area.`;
+  }
+  if (profile === "conformity_v1") {
+    if (status === "pass") {
+      return `The structured conformity-assessment, declaration, and registration fields for this ${subject} meet the current advisory minimum.`;
+    }
+    if (status === "warn") {
+      return `The ${subject} has at least one minimally complete conformity record for each required area, but some captured records are thinner than the current advisory minimum.`;
+    }
+    return `The ${subject} is missing at least one required conformity area, or it does not yet include a minimally complete version of that record.`;
+  }
+  if (profile === "fundamental_rights_v1") {
+    if (status === "pass") {
+      return `The structured fundamental-rights assessment and oversight fields for this ${subject} meet the current advisory minimum.`;
+    }
+    if (status === "warn") {
+      return `The ${subject} has at least one minimally complete deployer-side rights record for each required area, but some captured records are thinner than the current advisory minimum.`;
+    }
+    return `The ${subject} is missing either the deployer-side fundamental-rights assessment record or the linked oversight record, or it does not yet include a minimally complete version of them.`;
+  }
+  if (profile === "incident_response_v1") {
+    if (status === "pass") {
+      return `The structured incident-response fields for this ${subject} meet the current advisory minimum.`;
+    }
+    if (status === "warn") {
+      return `The ${subject} has at least one minimally complete incident-response record for each required area, but some captured records are thinner than the current advisory minimum.`;
+    }
+    return `The ${subject} is missing at least one required incident-response area, or it does not yet include a minimally complete version of that record.`;
+  }
+  if (profile === "post_market_monitoring_v1") {
+    if (status === "pass") {
+      return `The structured post-market monitoring and incident-reporting fields for this ${subject} meet the current advisory minimum.`;
+    }
+    if (status === "warn") {
+      return `The ${subject} has at least one minimally complete post-market monitoring record for each required area, but some captured records are thinner than the current advisory minimum.`;
+    }
+    return `The ${subject} is missing at least one required post-market monitoring or authority-reporting area, or it does not yet include a minimally complete version of that record.`;
+  }
+  if (profile === "provider_governance_v1") {
+    if (status === "pass") {
+      return `The structured provider-governance fields for this ${subject} meet the current advisory minimum.`;
+    }
+    if (status === "warn") {
+      return `The ${subject} has at least one minimally complete provider-governance record for each required area, but some captured records are thinner than the current advisory minimum.`;
+    }
+    return `The ${subject} is missing at least one required provider-governance area, or it does not yet include a minimally complete version of that record.`;
   }
   if (status === "pass") {
     return `The structured fields for this ${subject} meet the current advisory minimum.`;
@@ -150,6 +210,11 @@ export function buildComplianceReview(inputScenario, run) {
     },
     readiness,
     packReadiness,
+    readinessScopeNote: readinessScopeNote(scenario, run?.completenessReport),
+    packReadinessScopeNote: readinessScopeNote(
+      scenario,
+      run?.packCompletenessReport,
+    ),
     lawExplainer: scenario.lawExplainer,
     commonNextEvidence: scenario.missingEvidence,
   };

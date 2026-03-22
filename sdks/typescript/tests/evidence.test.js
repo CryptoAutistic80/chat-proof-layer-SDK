@@ -7,6 +7,7 @@ import {
   createComputeMetricsRequest,
   createDataGovernanceRequest,
   createDeclarationRequest,
+  createFundamentalRightsAssessmentRequest,
   createHumanOversightRequest,
   createIncidentReportRequest,
   createInstructionsForUseRequest,
@@ -211,6 +212,47 @@ test("createInstructionsForUseRequest emits the recommended governance artefact 
     service_lifetime: null,
     log_management_guidance: ["Retain logs for post-market monitoring."],
     metadata: { owner: "product-compliance" }
+  });
+});
+
+test("createFundamentalRightsAssessmentRequest emits the recommended FRIA artefact shape", () => {
+  const request = createFundamentalRightsAssessmentRequest({
+    keyId: "kid-dev-01",
+    role: "deployer",
+    systemId: "benefits-review",
+    assessmentId: "fria-2026-03",
+    status: "completed",
+    scope: "Public-sector benefit eligibility review",
+    report: {
+      owner: "rights-review-team",
+      finding: "Borderline cases require human review.",
+    },
+    legalBasis: "GDPR Art. 22 and public-service review safeguards",
+    affectedRights: ["equal treatment", "access to public services"],
+    stakeholderConsultationSummary:
+      "Legal, service-operations, and rights-review stakeholders approved the workflow.",
+    mitigationPlanSummary:
+      "Borderline cases require human review and documented justification before any outcome is finalized.",
+    assessor: "rights-review-team",
+    metadata: { owner: "benefits-review" },
+  });
+
+  assert.equal(request.capture.items[0].type, "fundamental_rights_assessment");
+  assert.ok(request.capture.items[0].data.report_commitment.startsWith("sha256:"));
+  assert.equal(request.artefacts[0].name, "fundamental_rights_assessment.json");
+  assert.equal(request.artefacts[1].name, "fundamental_rights_assessment_report.json");
+  assert.deepEqual(decodeJsonArtefact(request.artefacts[0]), {
+    assessment_id: "fria-2026-03",
+    status: "completed",
+    scope: "Public-sector benefit eligibility review",
+    legal_basis: "GDPR Art. 22 and public-service review safeguards",
+    affected_rights: ["equal treatment", "access to public services"],
+    stakeholder_consultation_summary:
+      "Legal, service-operations, and rights-review stakeholders approved the workflow.",
+    mitigation_plan_summary:
+      "Borderline cases require human review and documented justification before any outcome is finalized.",
+    assessor: "rights-review-team",
+    metadata: { owner: "benefits-review" }
   });
 });
 

@@ -1,0 +1,11 @@
+{
+  "declaration_id": "decl-42",
+  "jurisdiction": "eu",
+  "status": "issued",
+  "document_commitment": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "signatory": "head_of_compliance",
+  "document_version": "2026.03",
+  "metadata": {
+    "annex": "v"
+  }
+}

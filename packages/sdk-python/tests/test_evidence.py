@@ -9,6 +9,7 @@ from proofsdk import (
     create_instructions_for_use_request,
     create_data_governance_request,
     create_declaration_request,
+    create_fundamental_rights_assessment_request,
     create_human_oversight_request,
     create_incident_report_request,
     create_literacy_attestation_request,
@@ -203,6 +204,55 @@ class TestEvidenceBuilders(unittest.TestCase):
                 "safeguards": [],
                 "metadata": {"reviewer": "privacy"},
                 "record": None,
+            },
+        )
+
+    def test_fundamental_rights_request_emits_full_default_artefact(self):
+        request = create_fundamental_rights_assessment_request(
+            key_id="kid-dev-01",
+            role="deployer",
+            system_id="benefits-review",
+            assessment_id="fria-2026-03",
+            status="completed",
+            scope="Public-sector benefit eligibility review",
+            report={"finding": "Borderline cases require human review."},
+            legal_basis="GDPR Art. 22 and public-service review safeguards",
+            affected_rights=["equal treatment", "access to public services"],
+            stakeholder_consultation_summary=(
+                "Legal, service-operations, and rights-review stakeholders approved the workflow."
+            ),
+            mitigation_plan_summary=(
+                "Borderline cases require human review and documented justification before any outcome is finalized."
+            ),
+            assessor="rights-review-team",
+            metadata={"owner": "benefits-review"},
+        )
+
+        self.assertEqual(request["capture"]["items"][0]["type"], "fundamental_rights_assessment")
+        self.assertTrue(
+            request["capture"]["items"][0]["data"]["report_commitment"].startswith("sha256:")
+        )
+        self.assertEqual(request["artefacts"][0]["name"], "fundamental_rights_assessment.json")
+        self.assertEqual(
+            request["artefacts"][1]["name"],
+            "fundamental_rights_assessment_report.json",
+        )
+        self.assertEqual(
+            self.decode_json_artefact(request["artefacts"][0]),
+            {
+                "assessment_id": "fria-2026-03",
+                "status": "completed",
+                "scope": "Public-sector benefit eligibility review",
+                "legal_basis": "GDPR Art. 22 and public-service review safeguards",
+                "affected_rights": ["equal treatment", "access to public services"],
+                "stakeholder_consultation_summary": (
+                    "Legal, service-operations, and rights-review stakeholders approved the workflow."
+                ),
+                "mitigation_plan_summary": (
+                    "Borderline cases require human review and documented justification before any outcome is finalized."
+                ),
+                "assessor": "rights-review-team",
+                "metadata": {"owner": "benefits-review"},
             },
         )
 

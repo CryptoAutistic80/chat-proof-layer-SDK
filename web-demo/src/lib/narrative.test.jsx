@@ -7,6 +7,7 @@ describe("buildRunNarrativeSummary", () => {
       {
         presetKey: "investor_summary",
         scenarioLabel: "GPAI thresholds",
+        scenarioId: "ts_gpai_thresholds",
         bundleId: "bundle-1",
         bundleRuns: [{ bundleId: "bundle-1" }],
         completenessProfile: "gpai_provider_v1",
@@ -25,6 +26,134 @@ describe("buildRunNarrativeSummary", () => {
     expect(summary.completenessStatus.title).toBe("Readiness check failed");
     expect(summary.completenessStatus.summary).toContain(
       "required GPAI provider area(s)",
+    );
+    expect(summary.completenessStatus.summary).toContain(
+      "training provenance and compute-threshold evidence",
+    );
+  });
+
+  test("uses FRIA-specific readiness wording for deployer rights flows", () => {
+    const summary = buildRunNarrativeSummary(
+      {
+        presetKey: "investor_summary",
+        scenarioLabel: "FRIA review",
+        bundleId: "bundle-2",
+        bundleRuns: [{ bundleId: "bundle-2" }],
+        completenessProfile: "fundamental_rights_v1",
+        completenessReport: {
+          profile: "fundamental_rights_v1",
+          status: "fail",
+          pass_count: 0,
+          warn_count: 0,
+          fail_count: 1,
+          rules: [],
+        },
+      },
+      null,
+    );
+
+    expect(summary.completenessStatus.summary).toContain(
+      "required deployer-side rights area(s)",
+    );
+  });
+
+  test("uses conformity-specific readiness wording for conformity flows", () => {
+    const summary = buildRunNarrativeSummary(
+      {
+        presetKey: "investor_summary",
+        scenarioLabel: "Conformity file",
+        bundleId: "bundle-5",
+        bundleRuns: [{ bundleId: "bundle-5" }],
+        completenessProfile: "conformity_v1",
+        completenessReport: {
+          profile: "conformity_v1",
+          status: "warn",
+          pass_count: 2,
+          warn_count: 1,
+          fail_count: 0,
+          rules: [],
+        },
+      },
+      null,
+    );
+
+    expect(summary.completenessStatus.summary).toContain(
+      "required conformity area",
+    );
+  });
+
+  test("uses monitoring-specific readiness wording for monitoring flows", () => {
+    const summary = buildRunNarrativeSummary(
+      {
+        presetKey: "investor_summary",
+        scenarioLabel: "Monitoring escalation",
+        bundleId: "bundle-3",
+        bundleRuns: [{ bundleId: "bundle-3" }],
+        completenessProfile: "post_market_monitoring_v1",
+        completenessReport: {
+          profile: "post_market_monitoring_v1",
+          status: "warn",
+          pass_count: 5,
+          warn_count: 1,
+          fail_count: 0,
+          rules: [],
+        },
+      },
+      null,
+    );
+
+    expect(summary.completenessStatus.summary).toContain(
+      "required post-market monitoring area",
+    );
+  });
+
+  test("uses incident-response readiness wording for incident flows", () => {
+    const summary = buildRunNarrativeSummary(
+      {
+        presetKey: "investor_summary",
+        scenarioLabel: "Incident response",
+        bundleId: "bundle-6",
+        bundleRuns: [{ bundleId: "bundle-6" }],
+        completenessProfile: "incident_response_v1",
+        completenessReport: {
+          profile: "incident_response_v1",
+          status: "fail",
+          pass_count: 0,
+          warn_count: 0,
+          fail_count: 1,
+          rules: [],
+        },
+      },
+      null,
+    );
+
+    expect(summary.completenessStatus.summary).toContain(
+      "required incident-response area(s)",
+    );
+  });
+
+  test("uses provider-governance readiness wording for provider governance flows", () => {
+    const summary = buildRunNarrativeSummary(
+      {
+        presetKey: "investor_summary",
+        scenarioLabel: "Provider governance",
+        bundleId: "bundle-4",
+        bundleRuns: [{ bundleId: "bundle-4" }],
+        completenessProfile: "provider_governance_v1",
+        completenessReport: {
+          profile: "provider_governance_v1",
+          status: "fail",
+          pass_count: 0,
+          warn_count: 0,
+          fail_count: 2,
+          rules: [],
+        },
+      },
+      null,
+    );
+
+    expect(summary.completenessStatus.summary).toContain(
+      "required provider-governance area(s)",
     );
   });
 

@@ -1,5 +1,10 @@
 mod annex_iv;
+mod conformity;
+mod fundamental_rights;
 mod gpai_provider;
+mod incident_response;
+mod post_market_monitoring;
+mod provider_governance;
 
 use crate::schema::EvidenceBundle;
 use serde::{Deserialize, Serialize};
@@ -9,14 +14,24 @@ use std::{fmt, str::FromStr};
 #[serde(rename_all = "snake_case")]
 pub enum CompletenessProfile {
     AnnexIvGovernanceV1,
+    ConformityV1,
+    FundamentalRightsV1,
     GpaiProviderV1,
+    IncidentResponseV1,
+    PostMarketMonitoringV1,
+    ProviderGovernanceV1,
 }
 
 impl CompletenessProfile {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::AnnexIvGovernanceV1 => "annex_iv_governance_v1",
+            Self::ConformityV1 => "conformity_v1",
+            Self::FundamentalRightsV1 => "fundamental_rights_v1",
             Self::GpaiProviderV1 => "gpai_provider_v1",
+            Self::IncidentResponseV1 => "incident_response_v1",
+            Self::PostMarketMonitoringV1 => "post_market_monitoring_v1",
+            Self::ProviderGovernanceV1 => "provider_governance_v1",
         }
     }
 }
@@ -33,7 +48,12 @@ impl FromStr for CompletenessProfile {
     fn from_str(value: &str) -> Result<Self, Self::Err> {
         match value {
             "annex_iv_governance_v1" => Ok(Self::AnnexIvGovernanceV1),
+            "conformity_v1" => Ok(Self::ConformityV1),
+            "fundamental_rights_v1" => Ok(Self::FundamentalRightsV1),
             "gpai_provider_v1" => Ok(Self::GpaiProviderV1),
+            "incident_response_v1" => Ok(Self::IncidentResponseV1),
+            "post_market_monitoring_v1" => Ok(Self::PostMarketMonitoringV1),
+            "provider_governance_v1" => Ok(Self::ProviderGovernanceV1),
             other => Err(format!("unsupported completeness profile {other}")),
         }
     }
@@ -93,7 +113,12 @@ pub fn evaluate_completeness(
 ) -> CompletenessReport {
     match profile {
         CompletenessProfile::AnnexIvGovernanceV1 => annex_iv::evaluate(bundle),
+        CompletenessProfile::ConformityV1 => conformity::evaluate(bundle),
+        CompletenessProfile::FundamentalRightsV1 => fundamental_rights::evaluate(bundle),
         CompletenessProfile::GpaiProviderV1 => gpai_provider::evaluate(bundle),
+        CompletenessProfile::IncidentResponseV1 => incident_response::evaluate(bundle),
+        CompletenessProfile::PostMarketMonitoringV1 => post_market_monitoring::evaluate(bundle),
+        CompletenessProfile::ProviderGovernanceV1 => provider_governance::evaluate(bundle),
     }
 }
 

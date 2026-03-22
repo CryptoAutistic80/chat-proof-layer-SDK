@@ -14,7 +14,7 @@ test("selectPackReadiness prefers pack-scoped completeness fields", () => {
     completeness_status: "fail",
     pack_completeness_profile: "annex_iv_governance_v1",
     pack_completeness_status: "pass",
-    pack_completeness_pass_count: 5,
+    pack_completeness_pass_count: 8,
     pack_completeness_warn_count: 0,
     pack_completeness_fail_count: 0,
   });
@@ -23,7 +23,7 @@ test("selectPackReadiness prefers pack-scoped completeness fields", () => {
     source: "pack_scoped",
     profile: "annex_iv_governance_v1",
     status: "pass",
-    passCount: 5,
+    passCount: 8,
     warnCount: 0,
     failCount: 0,
   });

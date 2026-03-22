@@ -1,0 +1,16 @@
+{
+  "incident_id": "inc-claims-42",
+  "severity": "serious",
+  "status": "open",
+  "occurred_at": "2026-03-08T07:15:00Z",
+  "summary": "Potentially adverse recommendation surfaced in a sensitive claims case.",
+  "report_commitment": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "detection_method": "post_market_monitoring",
+  "root_cause_summary": "Missing-document threshold was too permissive for a narrow claims segment.",
+  "corrective_action_ref": "ca-claims-42",
+  "authority_notification_required": true,
+  "authority_notification_status": "drafted",
+  "metadata": {
+    "owner": "incident-ops"
+  }
+}

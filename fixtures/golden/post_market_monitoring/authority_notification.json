@@ -1,0 +1,11 @@
+{
+  "notification_id": "notif-claims-42",
+  "authority": "eu_ai_office",
+  "status": "drafted",
+  "incident_id": "inc-claims-42",
+  "due_at": "2026-03-10T12:00:00Z",
+  "report_commitment": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+  "metadata": {
+    "channel": "portal"
+  }
+}

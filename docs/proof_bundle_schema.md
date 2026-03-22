@@ -214,14 +214,14 @@ Those disclosure policies can now also supply `redacted_fields_by_item_type`, us
 
 ## Recommended Minimum Governance Fields
 
-This section is normative for the checked-in Annex IV governance fixtures, examples, and pack-acceptance tests. It does not change the bundle contract; it defines the minimum structured detail we expect callers to provide for an audit-ready high-risk governance record.
+This section is normative for the checked-in governance and conformity fixtures, examples, and pack-acceptance tests. It does not change the bundle contract; it defines the minimum structured detail we expect callers to provide for an audit-ready governed record.
 
-These minimums are now machine-assessed by the advisory `annex_iv_governance_v1` completeness profile exposed through Rust core, `proofctl assess`, `POST /v1/completeness/evaluate`, the TypeScript/Python SDKs, and the `web-demo` readiness check. Integrity and completeness remain separate concerns: verification answers whether the sealed record changed; completeness answers whether the structured governance record is minimally populated for Annex IV-style review.
+These minimums are now machine-assessed by the advisory completeness profiles exposed through Rust core, `proofctl assess`, `POST /v1/completeness/evaluate`, the TypeScript/Python SDKs, and the `web-demo` readiness check. Today that includes `annex_iv_governance_v1`, `conformity_v1`, `provider_governance_v1`, `fundamental_rights_v1`, `gpai_provider_v1`, `incident_response_v1`, and `post_market_monitoring_v1`. Integrity and completeness remain separate concerns: verification answers whether the sealed record changed; completeness answers whether the structured governance record is minimally populated for the selected review profile.
 
 ### `risk_assessment`
 
 - Already schema-supported: `risk_id`, `severity`, `status`, `summary`, `risk_description`, `likelihood`, `affected_groups`, `mitigation_measures`, `residual_risk_level`, `risk_owner`, `vulnerable_groups_considered`, `test_results_summary`, `metadata`
-- Recommended for Annex IV readiness: `risk_id`, `severity`, `status`, `risk_description`, `likelihood`, `affected_groups`, `mitigation_measures`, `residual_risk_level`, `risk_owner`, `test_results_summary`
+- Recommended for Annex IV, provider-governance, and incident-response readiness: `risk_id`, `severity`, `status`, `risk_description`, `likelihood`, `affected_groups`, `mitigation_measures`, `residual_risk_level`, `risk_owner`, `test_results_summary`
 - Typical supporting artefact: `risk_assessment.json`
 - Typical obligation intent: `art9`
 - Disclosure-sensitive paths: `/metadata`
@@ -229,7 +229,7 @@ These minimums are now machine-assessed by the advisory `annex_iv_governance_v1`
 ### `data_governance`
 
 - Already schema-supported: `decision`, `dataset_ref`, `dataset_name`, `dataset_version`, `source_description`, `collection_period`, `geographical_scope`, `preprocessing_operations`, `bias_detection_methodology`, `bias_metrics`, `mitigation_actions`, `data_gaps`, `personal_data_categories`, `safeguards`, `metadata`
-- Recommended for Annex IV readiness: `decision`, `dataset_ref` or `dataset_name`, `source_description`, `collection_period`, `preprocessing_operations`, `bias_detection_methodology`, `bias_metrics`, `mitigation_actions`, `data_gaps`, `personal_data_categories`, `safeguards`
+- Recommended for Annex IV and provider-governance readiness: `decision`, `dataset_ref` or `dataset_name`, `source_description`, `collection_period`, `preprocessing_operations`, `bias_detection_methodology`, `bias_metrics`, `mitigation_actions`, `data_gaps`, `personal_data_categories`, `safeguards`
 - Typical supporting artefact: `data_governance.json`
 - Typical obligation intent: `art10`
 - Disclosure-sensitive paths: `/metadata`, `/personal_data_categories`, `/safeguards`
@@ -237,7 +237,8 @@ These minimums are now machine-assessed by the advisory `annex_iv_governance_v1`
 ### `technical_doc`
 
 - Already schema-supported: `document_ref`, `section`, `commitment`, `annex_iv_sections`, `system_description_summary`, `model_description_summary`, `capabilities_and_limitations`, `design_choices_summary`, `evaluation_metrics_summary`, `human_oversight_design_summary`, `post_market_monitoring_plan_ref`, `simplified_tech_doc`
-- Recommended for Annex IV readiness: `document_ref`, `annex_iv_sections`, `system_description_summary`, `model_description_summary`, `capabilities_and_limitations`, `design_choices_summary`, `evaluation_metrics_summary`, `human_oversight_design_summary`, `post_market_monitoring_plan_ref`
+- Recommended for Annex IV and provider-governance readiness: `document_ref`, `annex_iv_sections`, `system_description_summary`, `model_description_summary`, `capabilities_and_limitations`, `design_choices_summary`, `evaluation_metrics_summary`, `human_oversight_design_summary`, `post_market_monitoring_plan_ref`
+- Recommended for `incident_response_v1` readiness: `document_ref`, `commitment`, `system_description_summary`, `capabilities_and_limitations`, `design_choices_summary`, `human_oversight_design_summary`
 - Typical supporting artefact: `technical_doc.json` plus optional binary document attachment
 - Typical obligation intent: `art11_annex_iv`
 - Disclosure-sensitive fields: typically the attached document artefacts rather than the structured item itself
@@ -245,7 +246,7 @@ These minimums are now machine-assessed by the advisory `annex_iv_governance_v1`
 ### `instructions_for_use`
 
 - Already schema-supported: `document_ref`, `version`, `section`, `commitment`, `provider_identity`, `intended_purpose`, `system_capabilities`, `accuracy_metrics`, `foreseeable_risks`, `explainability_capabilities`, `human_oversight_guidance`, `compute_requirements`, `service_lifetime`, `log_management_guidance`, `metadata`
-- Recommended for Annex IV readiness: `document_ref`, `version`, `provider_identity`, `intended_purpose`, `system_capabilities`, `accuracy_metrics`, `foreseeable_risks`, `human_oversight_guidance`, `log_management_guidance`
+- Recommended for Annex IV and provider-governance readiness: `document_ref`, `version`, `provider_identity`, `intended_purpose`, `system_capabilities`, `accuracy_metrics`, `foreseeable_risks`, `human_oversight_guidance`, `log_management_guidance`
 - Typical supporting artefact: `instructions_for_use.json` plus optional binary document attachment
 - Typical obligation intent: `art13`
 - Disclosure-sensitive paths: `/metadata`
@@ -254,18 +255,91 @@ These minimums are now machine-assessed by the advisory `annex_iv_governance_v1`
 
 - Already schema-supported: `action`, `reviewer`, `notes_commitment`, `actor_role`, `anomaly_detected`, `override_action`, `interpretation_guidance_followed`, `automation_bias_detected`, `two_person_verification`, `stop_triggered`, `stop_reason`
 - Recommended for Annex IV readiness: `action`, `reviewer`, `actor_role`, `anomaly_detected`, `override_action`, `automation_bias_detected`, `stop_triggered`, `stop_reason`
+- Recommended for `incident_response_v1` readiness: `action`, `reviewer`, `notes_commitment`, `override_action`
 - Typical supporting artefact: `human_oversight.json` plus optional `oversight_notes.*`
 - Typical obligation intent: `art14`
 - Disclosure-sensitive fields: supporting notes artefacts, if present
 
+### `policy_decision`
+
+- Already schema-supported: `policy_name`, `decision`, `rationale_commitment`, `metadata`
+- Recommended for `incident_response_v1` readiness: `policy_name`, `decision`, `rationale_commitment`
+- Typical supporting artefact: `policy_decision.json` plus optional `policy_rationale.*`
+- Typical obligation intent: `art20_73`
+- Disclosure-sensitive paths: `/metadata`
+
+### `fundamental_rights_assessment`
+
+- Already schema-supported: `assessment_id`, `status`, `scope`, `report_commitment`, `legal_basis`, `affected_rights`, `stakeholder_consultation_summary`, `mitigation_plan_summary`, `assessor`, `metadata`
+- Recommended for `fundamental_rights_v1` readiness: `assessment_id`, `status`, `scope`, `report_commitment`, `legal_basis`, `affected_rights`, `stakeholder_consultation_summary`, `mitigation_plan_summary`, `assessor`
+- Typical supporting artefact: `fundamental_rights_assessment.json` plus optional `fundamental_rights_assessment_report.*`
+- Typical obligation intent: `art27`
+- Disclosure-sensitive paths: `/metadata`
+
+### Conformity And Market Placement Items
+
+- `conformity_assessment`
+  Recommended for `conformity_v1` readiness: `assessment_id`, `procedure`, `status`, `report_commitment`, and either `assessment_body` or `certificate_ref`
+  Typical supporting artefact: `conformity_assessment.json` plus optional `conformity_assessment_report.*`
+  Typical obligation intent: `art43_annex_vi_vii`
+  Recommended disclosure-sensitive path: `/metadata`
+- `declaration`
+  Recommended for `conformity_v1` readiness: `declaration_id`, `jurisdiction`, `status`, `document_commitment`, `signatory`, `document_version`
+  Typical supporting artefact: `declaration.json` plus optional `declaration_document.*`
+  Typical obligation intent: `art47_annex_v`
+  Recommended disclosure-sensitive path: `/metadata`
+- `registration`
+  Recommended for `conformity_v1` readiness: `registration_id`, `authority`, `status`, `receipt_commitment`, `registration_number`, `submitted_at`
+  Typical supporting artefact: `registration.json` plus optional `registration_receipt.*`
+  Typical obligation intent: `art49_71`
+  Recommended disclosure-sensitive path: `/metadata`
+
 ### Linked Governance Items
 
 - `qms_record`
+  Recommended for Annex IV and provider-governance readiness: `record_id`, `process`, `status`, `policy_name`, `revision`, `scope`, `audit_results_summary`, `continuous_improvement_actions`
   Typical obligation intent: `art17`
   Recommended disclosure-sensitive path: `/metadata`
 - `standards_alignment`
+  Recommended for Annex IV and provider-governance readiness: `standard_ref`, `status`, `scope`
   Typical obligation intent: `art40_43`
   Recommended disclosure-sensitive path: `/metadata`
 - `post_market_monitoring`
+  Recommended for Annex IV and provider-governance readiness: `plan_id`, `status`, `summary`
+  Recommended for `post_market_monitoring_v1` readiness: `plan_id`, `status`, `summary`, `report_commitment`
   Typical obligation intent: `art72`
+  Recommended disclosure-sensitive path: `/metadata`
+
+### Monitoring And Incident Reporting Items
+
+- `incident_report`
+  Recommended for `post_market_monitoring_v1` readiness: `incident_id`, `severity`, `status`, `occurred_at`, `summary`, `report_commitment`, `detection_method`, `root_cause_summary`, `corrective_action_ref`, `authority_notification_required`, `authority_notification_status`
+  Recommended for `incident_response_v1` readiness: `incident_id`, `severity`, `status`, `occurred_at`, `summary`, `report_commitment`, `detection_method`, `root_cause_summary`, `corrective_action_ref`, `authority_notification_required`, `authority_notification_status`
+  Typical obligation intent: `art55_73`
+  Recommended disclosure-sensitive path: `/metadata`
+- `corrective_action`
+  Recommended for `provider_governance_v1` readiness: `action_id`, `status`, `summary`, `due_at`, `record_commitment`
+  Recommended for `incident_response_v1` readiness: `action_id`, `status`, `summary`, `due_at`, `record_commitment`
+  Recommended for `post_market_monitoring_v1` readiness: `action_id`, `status`, `summary`, `due_at`, `record_commitment`
+  Typical obligation intent: `art20_73`
+  Recommended disclosure-sensitive path: `/metadata`
+- `authority_notification`
+  Recommended for `incident_response_v1` readiness: `notification_id`, `authority`, `status`, `incident_id`, `due_at`, `report_commitment`
+  Recommended for `post_market_monitoring_v1` readiness: `notification_id`, `authority`, `status`, `incident_id`, `due_at`, `report_commitment`
+  Typical obligation intent: `art73_notification`
+  Recommended disclosure-sensitive path: `/metadata`
+- `authority_submission`
+  Recommended for `incident_response_v1` readiness: `submission_id`, `authority`, `status`, `channel`, `submitted_at`, `document_commitment`
+  Recommended for `post_market_monitoring_v1` readiness: `submission_id`, `authority`, `status`, `channel`, `submitted_at`, `document_commitment`
+  Typical obligation intent: `art73_submission`
+  Recommended disclosure-sensitive path: `/metadata`
+- `reporting_deadline`
+  Recommended for `incident_response_v1` readiness: `deadline_id`, `authority`, `obligation_ref`, `due_at`, `status`, `incident_id`
+  Recommended for `post_market_monitoring_v1` readiness: `deadline_id`, `authority`, `obligation_ref`, `due_at`, `status`, `incident_id`
+  Typical obligation intent: `art73_deadline`
+  Recommended disclosure-sensitive path: `/metadata`
+- `regulator_correspondence`
+  Recommended for `incident_response_v1` readiness: `correspondence_id`, `authority`, `direction`, `status`, `occurred_at`, `message_commitment`
+  Useful supporting evidence for monitoring workflows, but not currently required by `post_market_monitoring_v1`
+  Typical obligation intent: `art73_correspondence`
   Recommended disclosure-sensitive path: `/metadata`

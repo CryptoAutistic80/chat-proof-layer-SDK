@@ -1,0 +1,9 @@
+{
+  "policy_name": "incident_reportability_triage",
+  "decision": "notify_and_continue_manual_review",
+  "rationale_commitment": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+  "metadata": {
+    "article": "73",
+    "owner": "incident-ops"
+  }
+}

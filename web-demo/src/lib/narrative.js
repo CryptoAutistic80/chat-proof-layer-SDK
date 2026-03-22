@@ -1,4 +1,5 @@
 import { getPreset } from "./presets";
+import { getPlaygroundScenario } from "./sdkPlaygroundScenarios";
 
 export function humanCaptureMode(captureMode) {
   if (captureMode === "live_provider_capture") {
@@ -262,7 +263,17 @@ function completenessStatus(run) {
     const scope =
       report.profile === "gpai_provider_v1"
         ? "required GPAI provider area"
-        : "required governance area";
+        : report.profile === "conformity_v1"
+          ? "required conformity area"
+        : report.profile === "fundamental_rights_v1"
+          ? "required deployer-side rights area"
+          : report.profile === "incident_response_v1"
+            ? "required incident-response area"
+          : report.profile === "post_market_monitoring_v1"
+            ? "required post-market monitoring area"
+            : report.profile === "provider_governance_v1"
+              ? "required provider-governance area"
+            : "required governance area";
     return {
       tone: "accent",
       title: "Readiness check has warnings",
@@ -272,7 +283,17 @@ function completenessStatus(run) {
   const scope =
     report.profile === "gpai_provider_v1"
       ? "required GPAI provider area(s)"
-      : "required governance area(s)";
+      : report.profile === "conformity_v1"
+        ? "required conformity area(s)"
+      : report.profile === "fundamental_rights_v1"
+        ? "required deployer-side rights area(s)"
+        : report.profile === "incident_response_v1"
+          ? "required incident-response area(s)"
+        : report.profile === "post_market_monitoring_v1"
+          ? "required post-market monitoring area(s)"
+          : report.profile === "provider_governance_v1"
+            ? "required provider-governance area(s)"
+        : "required governance area(s)";
   return {
     tone: "warn",
     title: "Readiness check failed",
@@ -282,8 +303,9 @@ function completenessStatus(run) {
 
 export function buildRunNarrativeSummary(run, vaultConfig) {
   const preset = getPreset(run?.presetKey);
+  const scenario = run?.scenarioId ? getPlaygroundScenario(run.scenarioId) : null;
   const mode = humanCaptureMode(run?.captureMode);
-  const scenario = run?.scenarioLabel ?? preset.label;
+  const scenarioLabel = run?.scenarioLabel ?? preset.label;
   const bundleCount =
     Array.isArray(run?.bundleRuns) && run.bundleRuns.length > 0
       ? run.bundleRuns.length
@@ -291,25 +313,35 @@ export function buildRunNarrativeSummary(run, vaultConfig) {
         ? 1
         : 0;
   const headline = run?.bundleId
-    ? `${scenario} completed`
+    ? `${scenarioLabel} completed`
     : "Run a scenario to create a proof record";
   const summary = run?.bundleId
     ? run?.provider && run?.model
-      ? `${mode} for ${run.provider}:${run.model} created ${bundleCount} proof record(s) for the ${scenario.toLowerCase()} scenario.`
-      : `${mode} created ${bundleCount} proof record(s) for the ${scenario.toLowerCase()} scenario.`
+      ? `${mode} for ${run.provider}:${run.model} created ${bundleCount} proof record(s) for the ${scenarioLabel.toLowerCase()} scenario.`
+      : `${mode} created ${bundleCount} proof record(s) for the ${scenarioLabel.toLowerCase()} scenario.`
     : "Choose a scenario, run it, and the site will explain what happened, what can be proven, and what can be shared.";
+  const completeness = completenessStatus(run);
+  const scopedCompleteness =
+    scenario?.readinessScope?.mode === "partial_profile" &&
+    run?.completenessReport &&
+    run.completenessReport.status !== "pass"
+      ? {
+          ...completeness,
+          summary: `${completeness.summary} ${scenario.readinessScope.note}`,
+        }
+      : completeness;
 
   return {
     headline,
     summary,
-    scenario,
+    scenario: scenarioLabel,
     preset,
     mode,
     proofRecord: proofRecordLabel(run?.bundleId),
     integrityStatus: integrityStatus(run),
     timestampStatus: timestampStatus(run, vaultConfig),
     transparencyStatus: transparencyStatus(run, vaultConfig),
-    completenessStatus: completenessStatus(run),
+    completenessStatus: scopedCompleteness,
     disclosureStatus: disclosureStatus(run),
     exportStatus: exportStatus(run),
   };

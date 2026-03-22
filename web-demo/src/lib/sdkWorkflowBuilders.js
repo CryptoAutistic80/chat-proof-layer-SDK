@@ -112,17 +112,54 @@ async function buildTechnicalDocStep(scenario, draft) {
     version: governedVersion()
   });
   const complianceProfile = serializeComplianceProfile(buildPlaygroundComplianceProfile(draft));
-  const descriptor = {
-    owner: draft.owner,
-    document_class: "annex_iv_system_card",
-    system_id: draft.systemId,
-    release: governedVersion()
-  };
+  const isIncidentResponse = scenario.id === "py_incident_escalation";
+  const descriptor = isIncidentResponse
+    ? {
+        owner: draft.owner,
+        document_class: "incident_response_context",
+        system_id: draft.systemId,
+        release: governedVersion(),
+        authority: draft.authority
+      }
+    : {
+        owner: draft.owner,
+        document_class: "annex_iv_system_card",
+        system_id: draft.systemId,
+        release: governedVersion()
+      };
   const descriptorArtefact = await buildDocumentArtefact(
     "technical_doc_descriptor.json",
     descriptor,
     "application/json"
   );
+  const documentRef = isIncidentResponse
+    ? `docs://${draft.systemId}/incident-response-context`
+    : `docs://${draft.systemId}/annex-iv-system-card`;
+  const section = isIncidentResponse ? "incident_context" : "system_description";
+  const annexIvSections = isIncidentResponse
+    ? []
+    : ["section_2", "section_3", "section_5", "section_7"];
+  const systemDescriptionSummary = isIncidentResponse
+    ? "Public-sector benefit eligibility workflow with incident triage and regulator-facing escalation controls."
+    : "Provider-operated employment-screening assistant for first-pass candidate review in the EU market.";
+  const modelDescriptionSummary = isIncidentResponse
+    ? `Advisory eligibility review workflow using ${governedModelId(draft)} for case summaries and escalation prompts.`
+    : `Structured reviewer support workflow using ${governedModelId(draft)} for candidate summaries and escalation prompts.`;
+  const capabilitiesAndLimitations = isIncidentResponse
+    ? "Flags incomplete or high-risk cases, but does not finalize benefit determinations."
+    : "Summarizes candidate materials and highlights gaps, but does not make autonomous employment decisions.";
+  const designChoicesSummary = isIncidentResponse
+    ? "Incident-response records capture triage, notification, corrective action, and regulator follow-up in one reviewable file."
+    : "The workflow prioritizes explanation, escalation, and review traceability over full automation.";
+  const evaluationMetricsSummary = isIncidentResponse
+    ? "Appeal-rate, false-negative, and escalation-timeliness checks are reviewed after reportable incidents."
+    : "Quarterly fairness, reviewer-agreement, and false-negative checks are tracked in the provider file.";
+  const humanOversightDesignSummary = isIncidentResponse
+    ? "Human case officers review adverse or borderline recommendations before any public-service outcome is finalized."
+    : "Borderline or adverse recommendations route to a human reviewer with documented override controls.";
+  const monitoringPlanRef = isIncidentResponse
+    ? `incident://${draft.systemId}/triage-playbook-2026-03`
+    : `pmm-${draft.systemId}-2026-03`;
   return buildSimpleEvidenceCapture({
     actor,
     subject,
@@ -130,49 +167,39 @@ async function buildTechnicalDocStep(scenario, draft) {
     item: {
       type: "technical_doc",
       data: {
-        document_ref: `docs://${draft.systemId}/annex-iv-system-card`,
-        section: "system_description",
+        document_ref: documentRef,
+        section,
         commitment: descriptorArtefact.commitment,
-        annex_iv_sections: ["section_2", "section_3", "section_5", "section_7"],
-        system_description_summary:
-          "Provider-operated employment-screening assistant for first-pass candidate review in the EU market.",
-        model_description_summary:
-          `Structured reviewer support workflow using ${governedModelId(draft)} for candidate summaries and escalation prompts.`,
-        capabilities_and_limitations:
-          "Summarizes candidate materials and highlights gaps, but does not make autonomous employment decisions.",
-        design_choices_summary:
-          "The workflow prioritizes explanation, escalation, and review traceability over full automation.",
-        evaluation_metrics_summary:
-          "Quarterly fairness, reviewer-agreement, and false-negative checks are tracked in the provider file.",
-        human_oversight_design_summary:
-          "Borderline or adverse recommendations route to a human reviewer with documented override controls.",
-        post_market_monitoring_plan_ref: `pmm-${draft.systemId}-2026-03`
+        annex_iv_sections: annexIvSections,
+        system_description_summary: systemDescriptionSummary,
+        model_description_summary: modelDescriptionSummary,
+        capabilities_and_limitations: capabilitiesAndLimitations,
+        design_choices_summary: designChoicesSummary,
+        evaluation_metrics_summary: evaluationMetricsSummary,
+        human_oversight_design_summary: humanOversightDesignSummary,
+        post_market_monitoring_plan_ref: monitoringPlanRef
       }
     },
     artefacts: [
       jsonArtefact("technical_doc.json", {
-        document_ref: `docs://${draft.systemId}/annex-iv-system-card`,
-        section: "system_description",
-        annex_iv_sections: ["section_2", "section_3", "section_5", "section_7"],
-        system_description_summary:
-          "Provider-operated employment-screening assistant for first-pass candidate review in the EU market.",
-        model_description_summary:
-          `Structured reviewer support workflow using ${governedModelId(draft)} for candidate summaries and escalation prompts.`,
-        capabilities_and_limitations:
-          "Summarizes candidate materials and highlights gaps, but does not make autonomous employment decisions.",
-        design_choices_summary:
-          "The workflow prioritizes explanation, escalation, and review traceability over full automation.",
-        evaluation_metrics_summary:
-          "Quarterly fairness, reviewer-agreement, and false-negative checks are tracked in the provider file.",
-        human_oversight_design_summary:
-          "Borderline or adverse recommendations route to a human reviewer with documented override controls.",
-        post_market_monitoring_plan_ref: `pmm-${draft.systemId}-2026-03`
+        document_ref: documentRef,
+        section,
+        annex_iv_sections: annexIvSections,
+        system_description_summary: systemDescriptionSummary,
+        model_description_summary: modelDescriptionSummary,
+        capabilities_and_limitations: capabilitiesAndLimitations,
+        design_choices_summary: designChoicesSummary,
+        evaluation_metrics_summary: evaluationMetricsSummary,
+        human_oversight_design_summary: humanOversightDesignSummary,
+        post_market_monitoring_plan_ref: monitoringPlanRef
       }),
       descriptorArtefact.artefact
     ],
     retentionClass: "technical_doc",
-    label: "Technical documentation",
-    summary: "Annex IV technical documentation evidence captured for the provider file.",
+    label: isIncidentResponse ? "Incident context" : "Technical documentation",
+    summary: isIncidentResponse
+      ? "Technical context evidence added to the incident-response file."
+      : "Annex IV technical documentation evidence captured for the provider file.",
     localPayloads: { descriptor }
   });
 }
@@ -184,11 +211,35 @@ async function buildRiskAssessmentStep(scenario, draft) {
     version: governedVersion()
   });
   const complianceProfile = serializeComplianceProfile(buildPlaygroundComplianceProfile(draft));
+  const isIncidentResponse = scenario.id === "py_incident_escalation";
   const record = {
     risk_owner: draft.owner,
     review_cycle: "quarterly",
     reviewer: draft.reviewer
   };
+  const summary = isIncidentResponse
+    ? "Incident-response risk for adverse public-service recommendations is tracked in the response file."
+    : "High-risk employment workflow risk tracked for Annex IV readiness.";
+  const riskDescription = isIncidentResponse
+    ? "A borderline threshold could over-rely on incomplete evidence and surface adverse recommendations without sufficient escalation."
+    : "Candidate summaries could over-weight incomplete or proxy-sensitive profile signals without explicit human review.";
+  const affectedGroups = isIncidentResponse
+    ? ["benefit_applicants", "case_officers"]
+    : ["job_candidates", "recruiters"];
+  const mitigationMeasures = isIncidentResponse
+    ? [
+        "Mandatory manual review for borderline or adverse recommendations.",
+        "Escalation to incident operations when an affected person could receive an adverse outcome.",
+        "Authority-notification and corrective-action workflow when serious incidents are suspected."
+      ]
+    : [
+        "Mandatory human review before shortlist or rejection actions.",
+        "Escalation for low-confidence or incomplete-profile cases.",
+        "Quarterly fairness and reviewer-agreement sampling."
+      ];
+  const testResultsSummary = isIncidentResponse
+    ? "Replay and reviewer-agreement checks are acceptable only when the escalation workflow remains active."
+    : "Offline validation and reviewer-agreement checks show acceptable performance only when human oversight remains enabled.";
   return buildSimpleEvidenceCapture({
     actor,
     subject,
@@ -199,21 +250,15 @@ async function buildRiskAssessmentStep(scenario, draft) {
         risk_id: `risk-${draft.systemId}-001`,
         severity: "high",
         status: "mitigated",
-        summary: "High-risk employment workflow risk tracked for Annex IV readiness.",
-        risk_description:
-          "Candidate summaries could over-weight incomplete or proxy-sensitive profile signals without explicit human review.",
+        summary,
+        risk_description: riskDescription,
         likelihood: "medium",
-        affected_groups: ["job_candidates", "recruiters"],
-        mitigation_measures: [
-          "Mandatory human review before shortlist or rejection actions.",
-          "Escalation for low-confidence or incomplete-profile cases.",
-          "Quarterly fairness and reviewer-agreement sampling."
-        ],
+        affected_groups: affectedGroups,
+        mitigation_measures: mitigationMeasures,
         residual_risk_level: "medium",
         risk_owner: draft.owner,
         vulnerable_groups_considered: true,
-        test_results_summary:
-          "Offline validation and reviewer-agreement checks show acceptable performance only when human oversight remains enabled.",
+        test_results_summary: testResultsSummary,
         metadata: {
           owner: draft.owner,
           review_board: draft.reviewer
@@ -225,21 +270,15 @@ async function buildRiskAssessmentStep(scenario, draft) {
         risk_id: `risk-${draft.systemId}-001`,
         severity: "high",
         status: "mitigated",
-        summary: "High-risk employment workflow risk tracked for Annex IV readiness.",
-        risk_description:
-          "Candidate summaries could over-weight incomplete or proxy-sensitive profile signals without explicit human review.",
+        summary,
+        risk_description: riskDescription,
         likelihood: "medium",
-        affected_groups: ["job_candidates", "recruiters"],
-        mitigation_measures: [
-          "Mandatory human review before shortlist or rejection actions.",
-          "Escalation for low-confidence or incomplete-profile cases.",
-          "Quarterly fairness and reviewer-agreement sampling."
-        ],
+        affected_groups: affectedGroups,
+        mitigation_measures: mitigationMeasures,
         residual_risk_level: "medium",
         risk_owner: draft.owner,
         vulnerable_groups_considered: true,
-        test_results_summary:
-          "Offline validation and reviewer-agreement checks show acceptable performance only when human oversight remains enabled.",
+        test_results_summary: testResultsSummary,
         metadata: {
           owner: draft.owner,
           review_board: draft.reviewer
@@ -249,7 +288,9 @@ async function buildRiskAssessmentStep(scenario, draft) {
     ],
     retentionClass: "risk_mgmt",
     label: "Risk assessment",
-    summary: "Structured risk evidence added to the Annex IV governance set.",
+    summary: isIncidentResponse
+      ? "Structured risk evidence added to the incident-response file."
+      : "Structured risk evidence added to the Annex IV governance set.",
     localPayloads: { record }
   });
 }
@@ -625,6 +666,7 @@ async function buildAuthoritySubmissionStep(scenario, draft) {
   const actor = baseActor(scenario);
   const subject = baseSubject(draft, "authority-submission");
   const complianceProfile = serializeComplianceProfile(buildPlaygroundComplianceProfile(draft));
+  const isIncidentResponse = scenario.id === "py_incident_escalation";
   const document = {
     article: "73",
     summary: draft.submissionSummary
@@ -641,11 +683,11 @@ async function buildAuthoritySubmissionStep(scenario, draft) {
     item: {
       type: "authority_submission",
       data: {
-        submission_id: "sub-claims-42",
+        submission_id: isIncidentResponse ? "sub-benefits-42" : "sub-claims-42",
         authority: draft.authority,
         status: "submitted",
         channel: "portal",
-        submitted_at: "2026-03-08T09:30:00Z",
+        submitted_at: isIncidentResponse ? "2026-03-08T09:45:00Z" : "2026-03-08T09:30:00Z",
         document_commitment: documentArtefact.commitment,
         metadata: {
           owner: draft.owner
@@ -654,11 +696,11 @@ async function buildAuthoritySubmissionStep(scenario, draft) {
     },
     artefacts: [
       jsonArtefact("authority_submission.json", {
-        submission_id: "sub-claims-42",
+        submission_id: isIncidentResponse ? "sub-benefits-42" : "sub-claims-42",
         authority: draft.authority,
         status: "submitted",
         channel: "portal",
-        submitted_at: "2026-03-08T09:30:00Z",
+        submitted_at: isIncidentResponse ? "2026-03-08T09:45:00Z" : "2026-03-08T09:30:00Z",
         metadata: {
           owner: draft.owner
         }
@@ -667,8 +709,63 @@ async function buildAuthoritySubmissionStep(scenario, draft) {
     ],
     retentionClass: "risk_mgmt",
     label: "Authority submission",
-    summary: "Regulator submission evidence added to the monitoring pack.",
+    summary: isIncidentResponse
+      ? "Regulator submission evidence added to the incident-response file."
+      : "Regulator submission evidence added to the monitoring pack.",
     localPayloads: { document }
+  });
+}
+
+async function buildCorrectiveActionStep(scenario, draft) {
+  const actor = baseActor(scenario);
+  const subject = baseSubject(draft, "corrective-action");
+  const complianceProfile = serializeComplianceProfile(buildPlaygroundComplianceProfile(draft));
+  const isIncidentResponse = scenario.id === "py_incident_escalation";
+  const record = {
+    incident_id: "inc-benefits-42",
+    owner: draft.owner,
+    change: draft.correctiveActionSummary
+  };
+  const recordArtefact = await buildDocumentArtefact(
+    "corrective_action_record.json",
+    record,
+    "application/json"
+  );
+  return buildSimpleEvidenceCapture({
+    actor,
+    subject,
+    complianceProfile,
+    item: {
+      type: "corrective_action",
+      data: {
+        action_id: draft.correctiveActionRef ?? "ca-benefits-42",
+        status: "in_progress",
+        summary: draft.correctiveActionSummary,
+        due_at: draft.dueAt,
+        record_commitment: recordArtefact.commitment,
+        metadata: {
+          owner: draft.owner
+        }
+      }
+    },
+    artefacts: [
+      jsonArtefact("corrective_action.json", {
+        action_id: draft.correctiveActionRef ?? "ca-benefits-42",
+        status: "in_progress",
+        summary: draft.correctiveActionSummary,
+        due_at: draft.dueAt,
+        metadata: {
+          owner: draft.owner
+        }
+      }),
+      recordArtefact.artefact
+    ],
+    retentionClass: "risk_mgmt",
+    label: "Corrective action",
+    summary: isIncidentResponse
+      ? "Corrective action evidence added to the incident-response file."
+      : "Corrective action evidence added to the monitoring pack.",
+    localPayloads: { record }
   });
 }
 
@@ -740,12 +837,21 @@ async function buildHumanOversightStep(scenario, draft) {
   const actor = baseActor(scenario);
   const subject = baseSubject(draft, "human-oversight");
   const complianceProfile = serializeComplianceProfile(buildPlaygroundComplianceProfile(draft));
-  const notes = {
-    reason: draft.friaSummary,
-    reviewer: draft.reviewer,
-    override_action: draft.overrideAction,
-    sla_hours: 24
-  };
+  const isIncidentResponse = scenario.id === "py_incident_escalation";
+  const notes = isIncidentResponse
+    ? {
+        incident_summary: draft.incidentSummary,
+        root_cause_summary: draft.rootCauseSummary,
+        reviewer: draft.reviewer,
+        override_action: "route_to_manual_review",
+        sla_hours: 24
+      }
+    : {
+        reason: draft.friaSummary,
+        reviewer: draft.reviewer,
+        override_action: draft.overrideAction,
+        sla_hours: 24
+      };
   const notesArtefact = await buildDocumentArtefact(
     "human_oversight_notes.json",
     notes,
@@ -761,35 +867,94 @@ async function buildHumanOversightStep(scenario, draft) {
         action: "manual_case_review_required",
         reviewer: draft.reviewer,
         notes_commitment: notesArtefact.commitment,
-        actor_role: "human_reviewer",
-        anomaly_detected: false,
-        override_action: draft.overrideAction ?? null,
+        actor_role: isIncidentResponse ? "case_reviewer" : "human_reviewer",
+        anomaly_detected: isIncidentResponse,
+        override_action: isIncidentResponse
+          ? "route_to_manual_review"
+          : draft.overrideAction ?? null,
         interpretation_guidance_followed: true,
         automation_bias_detected: false,
-        two_person_verification: true,
+        two_person_verification: !isIncidentResponse,
         stop_triggered: false,
-        stop_reason: null
+        stop_reason: isIncidentResponse
+          ? "Human escalation handled the affected public-service case without a global stop."
+          : null
       }
     },
     artefacts: [
       jsonArtefact("human_oversight.json", {
         action: "manual_case_review_required",
         reviewer: draft.reviewer,
-        actor_role: "human_reviewer",
-        anomaly_detected: false,
-        override_action: draft.overrideAction ?? null,
+        actor_role: isIncidentResponse ? "case_reviewer" : "human_reviewer",
+        anomaly_detected: isIncidentResponse,
+        override_action: isIncidentResponse
+          ? "route_to_manual_review"
+          : draft.overrideAction ?? null,
         interpretation_guidance_followed: true,
         automation_bias_detected: false,
-        two_person_verification: true,
+        two_person_verification: !isIncidentResponse,
         stop_triggered: false,
-        stop_reason: null
+        stop_reason: isIncidentResponse
+          ? "Human escalation handled the affected public-service case without a global stop."
+          : null
       }),
       notesArtefact.artefact
     ],
     retentionClass: "risk_mgmt",
     label: "Human oversight",
-    summary: "Human review evidence added to the hiring review workflow.",
+    summary: isIncidentResponse
+      ? "Human-oversight evidence added to the incident-response file."
+      : "Human review evidence added to the hiring review workflow.",
     localPayloads: { notes }
+  });
+}
+
+async function buildPolicyDecisionStep(scenario, draft) {
+  const actor = baseActor(scenario);
+  const subject = baseSubject(draft, "policy-decision");
+  const complianceProfile = serializeComplianceProfile(buildPlaygroundComplianceProfile(draft));
+  const rationale = {
+    incident_summary: draft.incidentSummary,
+    notification_summary: draft.notificationSummary,
+    authority: draft.authority,
+    owner: draft.owner
+  };
+  const rationaleArtefact = await buildDocumentArtefact(
+    "policy_decision_rationale.json",
+    rationale,
+    "application/json"
+  );
+  return buildSimpleEvidenceCapture({
+    actor,
+    subject,
+    complianceProfile,
+    item: {
+      type: "policy_decision",
+      data: {
+        policy_name: "incident_reportability_triage",
+        decision: "notify_and_continue_manual_review",
+        rationale_commitment: rationaleArtefact.commitment,
+        metadata: {
+          article: "73",
+          owner: draft.owner
+        }
+      }
+    },
+    artefacts: [
+      jsonArtefact("policy_decision.json", {
+        policy_name: "incident_reportability_triage",
+        decision: "notify_and_continue_manual_review",
+        metadata: {
+          article: "73",
+          owner: draft.owner
+        }
+      }),
+      rationaleArtefact.artefact
+    ],
+    retentionClass: "risk_mgmt",
+    label: "Triage decision",
+    summary: "Reportability and escalation decision evidence added to the incident-response file.",
+    localPayloads: { rationale }
   });
 }
 
@@ -797,6 +962,10 @@ async function buildIncidentReportStep(scenario, draft) {
   const actor = baseActor(scenario);
   const subject = baseSubject(draft, "incident");
   const complianceProfile = serializeComplianceProfile(buildPlaygroundComplianceProfile(draft));
+  const detectionMethod =
+    scenario.id === "py_incident_escalation"
+      ? "human_review_escalation"
+      : "post_market_monitoring";
   const report = {
     owner: draft.owner,
     summary: draft.incidentSummary,
@@ -821,7 +990,7 @@ async function buildIncidentReportStep(scenario, draft) {
         occurred_at: "2026-03-07T18:30:00Z",
         summary: draft.incidentSummary,
         report_commitment: reportArtefact.commitment,
-        detection_method: "post_market_monitoring",
+        detection_method: detectionMethod,
         root_cause_summary: draft.rootCauseSummary ?? null,
         corrective_action_ref: draft.correctiveActionRef ?? null,
         authority_notification_required: true,
@@ -838,7 +1007,7 @@ async function buildIncidentReportStep(scenario, draft) {
         status: "open",
         occurred_at: "2026-03-07T18:30:00Z",
         summary: draft.incidentSummary,
-        detection_method: "post_market_monitoring",
+        detection_method: detectionMethod,
         root_cause_summary: draft.rootCauseSummary ?? null,
         corrective_action_ref: draft.correctiveActionRef ?? null,
         authority_notification_required: true,
@@ -851,7 +1020,10 @@ async function buildIncidentReportStep(scenario, draft) {
     ],
     retentionClass: "risk_mgmt",
     label: "Incident report",
-    summary: "Initial serious-incident evidence captured for follow-up.",
+    summary:
+      scenario.id === "py_incident_escalation"
+        ? "Initial serious-incident evidence captured for the incident-response file."
+        : "Initial serious-incident evidence captured for follow-up.",
     localPayloads: { report }
   });
 }
@@ -1110,7 +1282,10 @@ async function buildRegulatorCorrespondenceStep(scenario, draft) {
     ],
     retentionClass: "risk_mgmt",
     label: "Regulator correspondence",
-    summary: "Follow-up correspondence evidence added to the incident pack.",
+    summary:
+      scenario.id === "py_incident_escalation"
+        ? "Follow-up correspondence evidence added to the incident-response file."
+        : "Follow-up correspondence evidence added to the incident pack.",
     localPayloads: { message }
   });
 }
@@ -1123,10 +1298,12 @@ const STEP_BUILDERS = {
   qms_record: buildQmsRecordStep,
   standards_alignment: buildStandardsAlignmentStep,
   post_market_monitoring: buildPostMarketMonitoringStep,
+  corrective_action: buildCorrectiveActionStep,
   authority_submission: buildAuthoritySubmissionStep,
   fundamental_rights_assessment: buildFriaStep,
   human_oversight: buildHumanOversightStep,
   incident_report: buildIncidentReportStep,
+  policy_decision: buildPolicyDecisionStep,
   authority_notification: buildAuthorityNotificationStep,
   training_provenance: buildTrainingProvenanceStep,
   compute_metrics: buildComputeMetricsStep,

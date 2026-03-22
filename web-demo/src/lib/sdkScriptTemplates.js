@@ -322,6 +322,60 @@ const proofLayer = new ProofLayer({
   complianceProfile: ${indent(renderTsComplianceProfile(draft), 2).trimStart()}
 });
 
+const technicalDoc = await proofLayer.captureTechnicalDoc({
+  documentRef: "docs://${draft.systemId}/gpai-provider-overview",
+  section: "provider_overview",
+  annexIvSections: ["annex_xi_section_1", "annex_xi_section_2"],
+  systemDescriptionSummary:
+    "General-purpose text and workflow assistance model offered by the provider for EU market placement and downstream integration.",
+  modelDescriptionSummary:
+    "Foundation-model provider workflow for multilingual text generation and downstream enterprise assistance use cases.",
+  capabilitiesAndLimitations:
+    "Supports broad text and workflow tasks, but threshold tracking, evaluation coverage, and downstream documentation still govern safe release and use.",
+  designChoicesSummary:
+    "The provider file emphasizes lineage traceability, compute-threshold tracking, model evaluation, and publishable transparency outputs.",
+  evaluationMetricsSummary:
+    "Capability, multilingual quality, and policy-adherence metrics are reviewed before release and whenever material training updates occur.",
+  humanOversightDesignSummary:
+    "Provider release review gates publish model updates only after documented evaluation, threshold, and policy checks are complete.",
+  postMarketMonitoringPlanRef: "gpai://${draft.systemId}/provider-monitoring-2026-03",
+  descriptor: {
+    owner: ${q(draft.owner)},
+    document_class: "gpai_provider_system_card"
+  },
+  modelId: "${draft.systemId}-model-v3",
+  version: "2026.03",
+  retentionClass: "gpai_documentation"
+});
+
+const evaluation = await proofLayer.captureModelEvaluation({
+  evaluationId: "eval-${draft.systemId}-provider-2026-03",
+  benchmark: "gpai_provider_release_suite",
+  status: "passed_with_follow_up",
+  summary:
+    "Pre-release GPAI provider evaluation covered multilingual capability, policy adherence, and threshold-sensitive release checks.",
+  metricsSummary: [
+    { name: "instruction_following", value: "0.91", unit: "score" },
+    { name: "policy_adherence", value: "0.97", unit: "score" },
+    { name: "multilingual_quality", value: "0.88", unit: "score" }
+  ],
+  groupPerformance: [
+    { group: "en", summary: "Stable quality across enterprise help-desk and drafting tasks." },
+    { group: "fr_de_es", summary: "Slightly lower quality, but within release threshold." }
+  ],
+  evaluationMethodology:
+    "Combination of scripted benchmark runs, reviewer spot checks, and release-gate policy tests.",
+  report: {
+    owner: ${q(draft.owner)},
+    benchmark_suite: "gpai-provider-eval-2026-03",
+    release: "2026.03"
+  },
+  metadata: {
+    owner: ${q(draft.owner)},
+    market: ${q(draft.market)}
+  }
+});
+
 const training = await proofLayer.captureTrainingProvenance({
   datasetRef: ${q(draft.datasetRef)},
   stage: "pretraining",
@@ -348,6 +402,36 @@ const compute = await proofLayer.captureComputeMetrics({
     { name: "accelerator_count", value: ${q(draft.acceleratorCount)}, unit: "gpus" }
   ],
   consortiumContext: ${q(draft.consortiumContext)},
+  metadata: {
+    owner: ${q(draft.owner)},
+    market: ${q(draft.market)}
+  }
+});
+
+const copyrightPolicy = await proofLayer.captureCopyrightPolicy({
+  policyRef: "policy://${draft.systemId}/copyright-compliance",
+  status: "approved",
+  jurisdiction: "EU",
+  document: {
+    owner: ${q(draft.owner)},
+    policy_version: "2026.03",
+    review_cycle: "quarterly"
+  },
+  metadata: {
+    owner: ${q(draft.owner)},
+    market: ${q(draft.market)}
+  }
+});
+
+const trainingSummary = await proofLayer.captureTrainingSummary({
+  summaryRef: "summary://${draft.systemId}/training-2026-03",
+  status: "published",
+  audience: "public",
+  document: {
+    owner: ${q(draft.owner)},
+    publication_status: "ready_for_release",
+    dataset_summary: ${q(draft.trainingDatasetSummary)}
+  },
   metadata: {
     owner: ${q(draft.owner)},
     market: ${q(draft.market)}

@@ -40,7 +40,7 @@ export const DOC_PAGES = {
         body: [
           "SDKs and the CLI capture prompts, responses, traces, and governance artefacts for one AI run or decision point.",
           "They seal that material into a signed proof record that can be verified locally.",
-          "The optional vault adds retention, disclosure policy handling, and export packs for workflows such as provider governance, Annex XI or GPAI threshold tracking, post-market monitoring, incident response, and deployer-side FRIA reviews."
+          "The optional vault adds retention, disclosure policy handling, and export packs for workflows such as provider governance, Annex XI or GPAI provider-file review, post-market monitoring, incident response, and deployer-side FRIA reviews."
         ]
       },
       {

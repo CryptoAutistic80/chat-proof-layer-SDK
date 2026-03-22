@@ -2,33 +2,30 @@ import { describe, expect, test } from "vitest";
 import { buildRunNarrativeSummary } from "./narrative";
 
 describe("buildRunNarrativeSummary", () => {
-  test("uses generic pending copy and gpai-specific failure wording", () => {
+  test("uses GPAI-specific readiness wording for a passing provider-file flow", () => {
     const summary = buildRunNarrativeSummary(
       {
         presetKey: "investor_summary",
-        scenarioLabel: "GPAI thresholds",
+        scenarioLabel: "GPAI provider Annex XI pack",
         scenarioId: "ts_gpai_thresholds",
         bundleId: "bundle-1",
         bundleRuns: [{ bundleId: "bundle-1" }],
         completenessProfile: "gpai_provider_v1",
         completenessReport: {
           profile: "gpai_provider_v1",
-          status: "fail",
-          pass_count: 0,
+          status: "pass",
+          pass_count: 6,
           warn_count: 0,
-          fail_count: 2,
+          fail_count: 0,
           rules: [],
         },
       },
       null,
     );
 
-    expect(summary.completenessStatus.title).toBe("Readiness check failed");
+    expect(summary.completenessStatus.title).toBe("Readiness check passed");
     expect(summary.completenessStatus.summary).toContain(
-      "required GPAI provider area(s)",
-    );
-    expect(summary.completenessStatus.summary).toContain(
-      "training provenance and compute-threshold evidence",
+      "gpai_provider_v1",
     );
   });
 

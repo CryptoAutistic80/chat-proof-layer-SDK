@@ -113,6 +113,7 @@ async function buildTechnicalDocStep(scenario, draft) {
   });
   const complianceProfile = serializeComplianceProfile(buildPlaygroundComplianceProfile(draft));
   const isIncidentResponse = scenario.id === "py_incident_escalation";
+  const isGpaiProvider = scenario.id === "ts_gpai_thresholds";
   const descriptor = isIncidentResponse
     ? {
         owner: draft.owner,
@@ -121,6 +122,13 @@ async function buildTechnicalDocStep(scenario, draft) {
         release: governedVersion(),
         authority: draft.authority
       }
+    : isGpaiProvider
+      ? {
+          owner: draft.owner,
+          document_class: "gpai_provider_system_card",
+          system_id: draft.systemId,
+          release: governedVersion()
+        }
     : {
         owner: draft.owner,
         document_class: "annex_iv_system_card",
@@ -134,31 +142,53 @@ async function buildTechnicalDocStep(scenario, draft) {
   );
   const documentRef = isIncidentResponse
     ? `docs://${draft.systemId}/incident-response-context`
-    : `docs://${draft.systemId}/annex-iv-system-card`;
-  const section = isIncidentResponse ? "incident_context" : "system_description";
+    : isGpaiProvider
+      ? `docs://${draft.systemId}/gpai-provider-overview`
+      : `docs://${draft.systemId}/annex-iv-system-card`;
+  const section = isIncidentResponse
+    ? "incident_context"
+    : isGpaiProvider
+      ? "provider_overview"
+      : "system_description";
   const annexIvSections = isIncidentResponse
     ? []
+    : isGpaiProvider
+      ? ["annex_xi_section_1", "annex_xi_section_2"]
     : ["section_2", "section_3", "section_5", "section_7"];
   const systemDescriptionSummary = isIncidentResponse
     ? "Public-sector benefit eligibility workflow with incident triage and regulator-facing escalation controls."
+    : isGpaiProvider
+      ? "General-purpose text and workflow assistance model offered by the provider for EU market placement and downstream integration."
     : "Provider-operated employment-screening assistant for first-pass candidate review in the EU market.";
   const modelDescriptionSummary = isIncidentResponse
     ? `Advisory eligibility review workflow using ${governedModelId(draft)} for case summaries and escalation prompts.`
+    : isGpaiProvider
+      ? `Foundation-model provider workflow using ${governedModelId(draft)} for multilingual text generation and downstream enterprise assistance use cases.`
     : `Structured reviewer support workflow using ${governedModelId(draft)} for candidate summaries and escalation prompts.`;
   const capabilitiesAndLimitations = isIncidentResponse
     ? "Flags incomplete or high-risk cases, but does not finalize benefit determinations."
+    : isGpaiProvider
+      ? "Supports broad text and workflow tasks, but threshold tracking, evaluation coverage, and downstream documentation still govern safe release and use."
     : "Summarizes candidate materials and highlights gaps, but does not make autonomous employment decisions.";
   const designChoicesSummary = isIncidentResponse
     ? "Incident-response records capture triage, notification, corrective action, and regulator follow-up in one reviewable file."
+    : isGpaiProvider
+      ? "The provider file emphasizes lineage traceability, compute-threshold tracking, model evaluation, and publishable transparency outputs."
     : "The workflow prioritizes explanation, escalation, and review traceability over full automation.";
   const evaluationMetricsSummary = isIncidentResponse
     ? "Appeal-rate, false-negative, and escalation-timeliness checks are reviewed after reportable incidents."
+    : isGpaiProvider
+      ? "Capability, multilingual quality, and policy-adherence metrics are reviewed before release and whenever material training updates occur."
     : "Quarterly fairness, reviewer-agreement, and false-negative checks are tracked in the provider file.";
   const humanOversightDesignSummary = isIncidentResponse
     ? "Human case officers review adverse or borderline recommendations before any public-service outcome is finalized."
+    : isGpaiProvider
+      ? "Provider release review gates publish model updates only after documented evaluation, threshold, and policy checks are complete."
     : "Borderline or adverse recommendations route to a human reviewer with documented override controls.";
   const monitoringPlanRef = isIncidentResponse
     ? `incident://${draft.systemId}/triage-playbook-2026-03`
+    : isGpaiProvider
+      ? `gpai://${draft.systemId}/provider-monitoring-2026-03`
     : `pmm-${draft.systemId}-2026-03`;
   return buildSimpleEvidenceCapture({
     actor,
@@ -195,12 +225,93 @@ async function buildTechnicalDocStep(scenario, draft) {
       }),
       descriptorArtefact.artefact
     ],
-    retentionClass: "technical_doc",
+    retentionClass: isGpaiProvider ? "gpai_documentation" : "technical_doc",
     label: isIncidentResponse ? "Incident context" : "Technical documentation",
     summary: isIncidentResponse
       ? "Technical context evidence added to the incident-response file."
+      : isGpaiProvider
+        ? "GPAI provider technical documentation evidence captured for the Annex XI file."
       : "Annex IV technical documentation evidence captured for the provider file.",
     localPayloads: { descriptor }
+  });
+}
+
+async function buildModelEvaluationStep(scenario, draft) {
+  const actor = baseActor(scenario);
+  const subject = baseSubject(draft, "model-evaluation", {
+    modelId: governedModelId(draft),
+    version: governedVersion()
+  });
+  const complianceProfile = serializeComplianceProfile(buildPlaygroundComplianceProfile(draft));
+  const report = {
+    owner: draft.owner,
+    benchmark_suite: "gpai-provider-eval-2026-03",
+    release: governedVersion()
+  };
+  const reportArtefact = await buildDocumentArtefact(
+    "model_evaluation_report.json",
+    report,
+    "application/json"
+  );
+  return buildSimpleEvidenceCapture({
+    actor,
+    subject,
+    complianceProfile,
+    item: {
+      type: "model_evaluation",
+      data: {
+        evaluation_id: `eval-${draft.systemId}-provider-2026-03`,
+        benchmark: "gpai_provider_release_suite",
+        status: "passed_with_follow_up",
+        summary:
+          "Pre-release GPAI provider evaluation covered multilingual capability, policy adherence, and threshold-sensitive release checks.",
+        report_commitment: reportArtefact.commitment,
+        metrics_summary: compactList([
+          buildMetricSummary("instruction_following", "0.91", "score"),
+          buildMetricSummary("policy_adherence", "0.97", "score"),
+          buildMetricSummary("multilingual_quality", "0.88", "score")
+        ]),
+        group_performance: [
+          { group: "en", summary: "Stable quality across enterprise help-desk and drafting tasks." },
+          { group: "fr_de_es", summary: "Slightly lower quality, but within release threshold." }
+        ],
+        evaluation_methodology:
+          "Combination of scripted benchmark runs, reviewer spot checks, and release-gate policy tests.",
+        metadata: {
+          owner: draft.owner,
+          market: draft.market
+        }
+      }
+    },
+    artefacts: [
+      jsonArtefact("model_evaluation.json", {
+        evaluation_id: `eval-${draft.systemId}-provider-2026-03`,
+        benchmark: "gpai_provider_release_suite",
+        status: "passed_with_follow_up",
+        summary:
+          "Pre-release GPAI provider evaluation covered multilingual capability, policy adherence, and threshold-sensitive release checks.",
+        metrics_summary: compactList([
+          buildMetricSummary("instruction_following", "0.91", "score"),
+          buildMetricSummary("policy_adherence", "0.97", "score"),
+          buildMetricSummary("multilingual_quality", "0.88", "score")
+        ]),
+        group_performance: [
+          { group: "en", summary: "Stable quality across enterprise help-desk and drafting tasks." },
+          { group: "fr_de_es", summary: "Slightly lower quality, but within release threshold." }
+        ],
+        evaluation_methodology:
+          "Combination of scripted benchmark runs, reviewer spot checks, and release-gate policy tests.",
+        metadata: {
+          owner: draft.owner,
+          market: draft.market
+        }
+      }),
+      reportArtefact.artefact
+    ],
+    retentionClass: "gpai_documentation",
+    label: "Model evaluation",
+    summary: "Model evaluation evidence added to the GPAI provider file.",
+    localPayloads: { report }
   });
 }
 
@@ -1195,6 +1306,106 @@ async function buildComputeMetricsStep(scenario, draft) {
   });
 }
 
+async function buildCopyrightPolicyStep(scenario, draft) {
+  const actor = baseActor(scenario);
+  const subject = baseSubject(draft, "copyright-policy");
+  const complianceProfile = serializeComplianceProfile(buildPlaygroundComplianceProfile(draft));
+  const document = {
+    owner: draft.owner,
+    policy_version: "2026.03",
+    review_cycle: "quarterly"
+  };
+  const documentArtefact = await buildDocumentArtefact(
+    "copyright_policy_document.json",
+    document,
+    "application/json"
+  );
+  return buildSimpleEvidenceCapture({
+    actor,
+    subject,
+    complianceProfile,
+    item: {
+      type: "copyright_policy",
+      data: {
+        policy_ref: `policy://${draft.systemId}/copyright-compliance`,
+        status: "approved",
+        jurisdiction: "EU",
+        commitment: documentArtefact.commitment,
+        metadata: {
+          owner: draft.owner,
+          market: draft.market
+        }
+      }
+    },
+    artefacts: [
+      jsonArtefact("copyright_policy.json", {
+        policy_ref: `policy://${draft.systemId}/copyright-compliance`,
+        status: "approved",
+        jurisdiction: "EU",
+        metadata: {
+          owner: draft.owner,
+          market: draft.market
+        }
+      }),
+      documentArtefact.artefact
+    ],
+    retentionClass: "gpai_documentation",
+    label: "Copyright policy",
+    summary: "Copyright-policy evidence added to the GPAI provider file.",
+    localPayloads: { document }
+  });
+}
+
+async function buildTrainingSummaryStep(scenario, draft) {
+  const actor = baseActor(scenario);
+  const subject = baseSubject(draft, "training-summary");
+  const complianceProfile = serializeComplianceProfile(buildPlaygroundComplianceProfile(draft));
+  const document = {
+    owner: draft.owner,
+    publication_status: "ready_for_release",
+    dataset_summary: draft.trainingDatasetSummary
+  };
+  const documentArtefact = await buildDocumentArtefact(
+    "training_summary_document.json",
+    document,
+    "application/json"
+  );
+  return buildSimpleEvidenceCapture({
+    actor,
+    subject,
+    complianceProfile,
+    item: {
+      type: "training_summary",
+      data: {
+        summary_ref: `summary://${draft.systemId}/training-2026-03`,
+        status: "published",
+        audience: "public",
+        commitment: documentArtefact.commitment,
+        metadata: {
+          owner: draft.owner,
+          market: draft.market
+        }
+      }
+    },
+    artefacts: [
+      jsonArtefact("training_summary.json", {
+        summary_ref: `summary://${draft.systemId}/training-2026-03`,
+        status: "published",
+        audience: "public",
+        metadata: {
+          owner: draft.owner,
+          market: draft.market
+        }
+      }),
+      documentArtefact.artefact
+    ],
+    retentionClass: "gpai_documentation",
+    label: "Training summary",
+    summary: "Publishable training-summary evidence added to the GPAI provider file.",
+    localPayloads: { document }
+  });
+}
+
 async function buildReportingDeadlineStep(scenario, draft) {
   const actor = baseActor(scenario);
   const subject = baseSubject(draft, "reporting-deadline");
@@ -1305,8 +1516,11 @@ const STEP_BUILDERS = {
   incident_report: buildIncidentReportStep,
   policy_decision: buildPolicyDecisionStep,
   authority_notification: buildAuthorityNotificationStep,
+  model_evaluation: buildModelEvaluationStep,
   training_provenance: buildTrainingProvenanceStep,
   compute_metrics: buildComputeMetricsStep,
+  copyright_policy: buildCopyrightPolicyStep,
+  training_summary: buildTrainingSummaryStep,
   reporting_deadline: buildReportingDeadlineStep,
   regulator_correspondence: buildRegulatorCorrespondenceStep
 };

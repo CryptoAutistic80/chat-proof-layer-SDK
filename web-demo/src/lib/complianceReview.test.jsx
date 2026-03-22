@@ -80,25 +80,18 @@ describe("buildComplianceReview", () => {
       {
         completenessReport: {
           profile: "gpai_provider_v1",
-          status: "fail",
-          pass_count: 0,
+          status: "pass",
+          pass_count: 6,
           warn_count: 0,
-          fail_count: 2,
-          rules: [
-            {
-              status: "fail",
-              missing_fields: ["compute_resources_summary"],
-            },
-          ],
+          fail_count: 0,
+          rules: [],
         },
       },
     );
 
     expect(review.readiness.profile).toBe("gpai_provider_v1");
     expect(review.readiness.summary).toContain("GPAI provider");
-    expect(review.readinessScopeNote).toContain(
-      "training provenance and compute-threshold evidence",
-    );
+    expect(review.readinessScopeNote).toBeNull();
   });
 
   test("uses conformity-specific readiness wording when the conformity profile is attached", () => {

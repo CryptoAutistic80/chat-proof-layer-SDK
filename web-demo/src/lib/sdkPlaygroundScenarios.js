@@ -293,16 +293,16 @@ export const PLAYGROUND_SCENARIOS = [
   {
     id: "ts_gpai_thresholds",
     lane: "typescript",
-    label: "Foundation model threshold tracking",
+    label: "GPAI provider Annex XI pack",
     category: "GPAI workflow",
     description:
-      "Capture training provenance plus compute-threshold evidence for a GPAI provider workflow and export an Annex XI pack.",
+      "Capture the full GPAI provider evidence file and export an Annex XI pack.",
     audienceSummary:
-      "A GPAI or foundation-model provider that needs to track provenance and systemic-risk compute thresholds.",
+      "A GPAI or foundation-model provider preparing a fuller Annex XI style evidence package.",
     lawExplainer: explainer(
-      "For GPAI workflows, teams may need to show how training provenance and compute-threshold evidence line up with provider obligations.",
-      "This example records training provenance plus first-class compute metrics so a reviewer can trace dataset lineage and threshold status together.",
-      "Your team still needs the broader GPAI file such as downstream documentation, copyright policy, and evaluation evidence."
+      "For GPAI workflows, reviewers usually need more than threshold metrics alone. They need technical documentation, evaluation evidence, provenance, compute-threshold tracking, copyright-policy controls, and a publishable training summary to line up around the same provider file.",
+      "This example records the main structured GPAI provider evidence set and exports it as an Annex XI pack.",
+      "Your team still needs the actual legal interpretation, publication process, and operational governance outside the demo."
     ),
     sourceRef: "examples/typescript-gpai/run.mjs",
     codeLanguage: "javascript",
@@ -312,15 +312,9 @@ export const PLAYGROUND_SCENARIOS = [
     bundleFormat: "full",
     disclosureProfile: "annex_iv_redacted",
     templateId: "ts_gpai_thresholds",
-    primaryStepId: "training_provenance",
+    primaryStepId: "technical_doc",
     recordExplorerIntro:
-      "This record set shows a GPAI provider workflow where provenance and compute-threshold evidence are captured as separate but linked records.",
-    readinessScope: {
-      mode: "partial_profile",
-      label: "full GPAI provider file",
-      note:
-        "This example only captures training provenance and compute-threshold evidence, so the full GPAI provider readiness check will stay incomplete until technical documentation, model evaluation, copyright policy, and training summary records are added."
-    },
+      "This record set shows a GPAI provider workflow where the main Annex XI evidence families are captured as separate but linked records.",
     defaults: {
       serviceUrl: DEFAULT_SERVICE_URL,
       systemId: "foundation-model-alpha",
@@ -393,22 +387,46 @@ export const PLAYGROUND_SCENARIOS = [
     ],
     steps: [
       {
+        id: "technical_doc",
+        kind: "evidence",
+        itemType: "technical_doc",
+        bundleRole: "primary"
+      },
+      {
+        id: "model_evaluation",
+        kind: "evidence",
+        itemType: "model_evaluation",
+        bundleRole: "support"
+      },
+      {
         id: "training_provenance",
         kind: "evidence",
         itemType: "training_provenance",
-        bundleRole: "primary"
+        bundleRole: "support"
       },
       {
         id: "compute_metrics",
         kind: "evidence",
         itemType: "compute_metrics",
         bundleRole: "support"
+      },
+      {
+        id: "copyright_policy",
+        kind: "evidence",
+        itemType: "copyright_policy",
+        bundleRole: "support"
+      },
+      {
+        id: "training_summary",
+        kind: "evidence",
+        itemType: "training_summary",
+        bundleRole: "support"
       }
     ],
     missingEvidence: [
-      "Add downstream documentation and copyright-policy records when this needs to represent a fuller GPAI provider file.",
-      "Add evaluation or adversarial-testing evidence when reviewers need performance and robustness material with the provenance trail.",
-      "Add obligation-filtered export rules if you need to share only a narrow systemic-risk subset."
+      "Add downstream documentation when this needs to support integrator-facing Annex XII style sharing as well as provider-file review.",
+      "Add adversarial-testing evidence when reviewers need robustness material beyond the core evaluation record.",
+      "Add publication and sign-off controls for the public training-summary release process that sits outside the capture tool."
     ]
   },
   {

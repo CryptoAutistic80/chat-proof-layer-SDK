@@ -242,7 +242,19 @@ The compose stack mounts `./vault.toml`, `./keys`, and `./storage`, and sets `PR
 
 The service auto-loads `./vault.toml` when present. Environment variables still override file settings.
 
-The vault also exposes `POST /v1/completeness/evaluate` for advisory readiness checks against stored or inline full bundles. The TypeScript and Python SDK facades mirror that as `evaluateCompleteness(...)` and `evaluate_completeness(...)`.
+The vault also exposes `POST /v1/completeness/evaluate` for advisory readiness checks against stored full bundles, inline full bundles, or stored packs with pack-scoped completeness support. The TypeScript and Python SDK facades mirror that as `evaluateCompleteness(...)` and `evaluate_completeness(...)`.
+
+For pack responses, the legacy `completeness_*` fields remain the per-bundle aggregate view. New `pack_completeness_*` fields carry the true synthesized pack-level readiness result where supported for `annex_iv` and `annex_xi`.
+Pack summaries and manifests may now include `pack_completeness_profile`, `pack_completeness_status`, `pack_completeness_pass_count`, `pack_completeness_warn_count`, and `pack_completeness_fail_count`.
+
+For `annex_iv`, the current pack-scoped pass count is `5`, not `8`, because `annex_iv_governance_v1` currently evaluates five rule families even though the pack curates eight governance evidence families.
+
+```json
+{
+  "profile": "gpai_provider_v1",
+  "pack_id": "01JPACKEXAMPLE1234567890ABCD"
+}
+```
 
 ### 5. Query, Export, And Backup Through The CLI
 
@@ -431,6 +443,7 @@ Disclosure and packs:
 - `POST /v1/disclosure/preview`
 - `GET /v1/disclosure/templates`
 - `POST /v1/disclosure/templates/render`
+- `POST /v1/completeness/evaluate`
 - `POST /v1/packs`
 - `GET /v1/packs/{pack_id}`
 - `GET /v1/packs/{pack_id}/manifest`

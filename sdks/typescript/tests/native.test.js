@@ -274,3 +274,14 @@ test("native evaluateCompleteness supports gpai_provider_v1", async () => {
   assert.equal(report.status, "pass");
   assert.equal(report.pass_count, 6);
 });
+
+test("native evaluateCompleteness rejects packId", async () => {
+  assert.throws(
+    () =>
+      evaluateCompleteness({
+        packId: "P1",
+        profile: "gpai_provider_v1",
+      }),
+    /packId is not supported for local completeness evaluation/,
+  );
+});

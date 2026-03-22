@@ -182,8 +182,12 @@ export function verifyRedactedBundle({
 
 export function evaluateCompleteness({
   bundle,
+  packId,
   profile
 }: EvaluateCompletenessRequest): CompletenessReport {
+  if (packId) {
+    throw new Error("packId is not supported for local completeness evaluation");
+  }
   if (!bundle) {
     throw new Error("bundle is required for local completeness evaluation");
   }

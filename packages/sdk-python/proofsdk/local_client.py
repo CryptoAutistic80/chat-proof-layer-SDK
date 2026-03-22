@@ -77,8 +77,11 @@ class LocalProofLayerClient:
         *,
         bundle: dict[str, Any] | None = None,
         bundle_id: str | None = None,
+        pack_id: str | None = None,
         profile: str,
     ) -> dict[str, Any]:
+        if pack_id is not None:
+            raise ValueError("pack_id is not supported for local completeness evaluation")
         if bundle_id is not None:
             raise ValueError("bundle_id is not supported for local completeness evaluation")
         if bundle is None:

@@ -51,6 +51,7 @@ from .native import (
     verify_redacted_bundle,
     verify_bundle_root,
 )
+from .pack_readiness import select_pack_readiness
 from .proof_layer import ProofLayer
 
 __all__ = [
@@ -98,6 +99,7 @@ __all__ = [
     "hash_sha256",
     "prove_llm_call",
     "redact_bundle",
+    "select_pack_readiness",
     "sign_bundle_root",
     "verify_bundle",
     "verify_redacted_bundle",

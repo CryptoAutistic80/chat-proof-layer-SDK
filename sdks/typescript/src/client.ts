@@ -98,16 +98,19 @@ export class ProofLayerClient {
   async evaluateCompleteness({
     bundle,
     bundleId,
+    packId,
     profile
   }: EvaluateCompletenessRequest): Promise<CompletenessReport> {
-    const selectionCount = Number(Boolean(bundle)) + Number(Boolean(bundleId));
+    const selectionCount =
+      Number(Boolean(bundle)) + Number(Boolean(bundleId)) + Number(Boolean(packId));
     if (selectionCount !== 1) {
-      throw new Error("provide exactly one of bundle or bundleId");
+      throw new Error("provide exactly one of bundle_id, bundle, or pack_id");
     }
     const payload = {
       profile,
       ...(bundle ? { bundle } : {}),
-      ...(bundleId ? { bundle_id: bundleId } : {})
+      ...(bundleId ? { bundle_id: bundleId } : {}),
+      ...(packId ? { pack_id: packId } : {})
     };
     return this.#post("/v1/completeness/evaluate", payload);
   }

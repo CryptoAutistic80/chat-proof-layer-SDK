@@ -51,6 +51,7 @@ export {
 } from "./providers/index.js";
 export { ProofLayerExporter, eventsToOtelSpans } from "./otel/index.js";
 export { ProofLayerHttpError, ProofLayerSdkError } from "./utils/errors.js";
+export { selectPackReadiness } from "./utils/pack_readiness.js";
 export {
   buildBundle,
   canonicalizeJson,
@@ -145,6 +146,7 @@ export type {
   PackBundleEntry,
   PackBundleFormat,
   PackManifest,
+  PackReadinessSummary,
   PackSummaryResponse,
   VerifyBundleRequest,
   VerifyBundleSummary,

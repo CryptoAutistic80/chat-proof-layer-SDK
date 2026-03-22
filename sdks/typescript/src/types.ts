@@ -257,6 +257,7 @@ export interface EvaluateCompletenessRequest extends JsonObject {
   profile: CompletenessProfile;
   bundle?: string | ProofBundle;
   bundleId?: string;
+  packId?: string;
 }
 
 export type PackBundleFormat = "full" | "disclosure";
@@ -303,6 +304,11 @@ export interface PackSummaryResponse extends JsonObject {
   disclosure_policy?: string;
   completeness_profile?: CompletenessProfile;
   completeness_status?: CompletenessStatus;
+  pack_completeness_profile?: CompletenessProfile;
+  pack_completeness_status?: CompletenessStatus;
+  pack_completeness_pass_count?: number;
+  pack_completeness_warn_count?: number;
+  pack_completeness_fail_count?: number;
   bundle_count: number;
   bundle_ids: string[];
 }
@@ -321,8 +327,22 @@ export interface PackManifest extends JsonObject {
   completeness_pass_count?: number;
   completeness_warn_count?: number;
   completeness_fail_count?: number;
+  pack_completeness_profile?: CompletenessProfile;
+  pack_completeness_status?: CompletenessStatus;
+  pack_completeness_pass_count?: number;
+  pack_completeness_warn_count?: number;
+  pack_completeness_fail_count?: number;
   bundle_ids: string[];
   bundles: PackBundleEntry[];
+}
+
+export interface PackReadinessSummary extends JsonObject {
+  source: "pack_scoped" | "bundle_aggregate";
+  profile?: CompletenessProfile;
+  status?: CompletenessStatus;
+  passCount?: number;
+  warnCount?: number;
+  failCount?: number;
 }
 
 export interface DisclosurePolicyConfig extends JsonObject {

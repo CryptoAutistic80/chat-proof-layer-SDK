@@ -39,6 +39,7 @@ from proofsdk import (
     build_bundle,
     create_disclosure_policy_template,
     hash_sha256,
+    select_pack_readiness,
     verify_bundle,
 )
 from proofsdk.client import ProofLayerClient
@@ -192,6 +193,11 @@ vault_readiness = proof_client.evaluate_completeness(
     bundle_id="BUNDLE_ID",
     profile="annex_iv_governance_v1",
 )
+annex_xi_pack_readiness = proof_client.evaluate_completeness(
+    pack_id="PACK_ID",
+    profile="gpai_provider_v1",
+)
+pack_readiness = select_pack_readiness(pack)
 
 risk_bundle = proof_layer.capture_risk_assessment(
     risk_id="risk-42",
@@ -205,8 +211,15 @@ print(redacted_summary["disclosed_item_count"], len(archive))
 print(preview["disclosed_item_types"])
 print(template_pack["pack_id"], template_preview["disclosed_item_types"])
 print(template_catalog["templates"][0]["profile"], rendered_template["policy"]["name"])
+print(annex_xi_pack_readiness["status"])
+print(pack_readiness["source"], pack_readiness["status"])
 print(vault_readiness["status"])
 ```
+
+Vault pack responses preserve the legacy per-bundle `completeness_*` fields and add `pack_completeness_*` when a pack has synthesized pack-level readiness support.
+Use `select_pack_readiness(pack_summary_or_manifest)` when you want one helper that prefers the true pack-scoped signal (`source == "pack_scoped"`) and falls back to the legacy bundle aggregate signal (`source == "bundle_aggregate"`).
+
+For `annex_iv`, the pack-scoped pass count is currently `5` because `annex_iv_governance_v1` evaluates five rule families even though the pack curates eight governance evidence families.
 
 For the full provider-side Annex IV governance walkthrough, build the native module and run:
 

@@ -44,6 +44,7 @@ import {
   createDisclosurePolicyTemplate,
   createLlmInteractionRequest,
   hashSha256,
+  selectPackReadiness,
   verifyBundle
 } from "@proof-layer/sdk";
 import { withProofLayer } from "@proof-layer/sdk/providers/openai";
@@ -192,6 +193,12 @@ const vaultReadiness = await proofClient.evaluateCompleteness({
   profile: "annex_iv_governance_v1"
 });
 
+const annexXiPackReadiness = await proofClient.evaluateCompleteness({
+  packId: "PACK_ID",
+  profile: "gpai_provider_v1"
+});
+const packReadiness = selectPackReadiness(pack);
+
 const generic = withGenericProofLayer(
   async (params) => ({ id: "generic-1", model: params.model, output_text: "ok" }),
   proofLayer,
@@ -218,8 +225,15 @@ console.log(redactedSummary.disclosed_item_count, archive.length);
 console.log(preview.disclosed_item_types);
 console.log(templatePack.pack_id, templatePreview.disclosedItemTypes);
 console.log(templateCatalog.templates[0].profile, renderedTemplate.policy.name);
+console.log(annexXiPackReadiness.status);
+console.log(packReadiness?.source, packReadiness?.status);
 console.log(vaultReadiness.status);
 ```
+
+Vault pack responses preserve the legacy per-bundle `completeness_*` fields and add `pack_completeness_*` when a pack has synthesized pack-level readiness support.
+Use `selectPackReadiness(packSummaryOrManifest)` when you want one helper that prefers the true pack-scoped signal (`source === "pack_scoped"`) and falls back to the legacy bundle aggregate signal (`source === "bundle_aggregate"`).
+
+For `annex_iv`, the pack-scoped pass count is currently `5` because `annex_iv_governance_v1` evaluates five rule families even though the pack curates eight governance evidence families.
 
 For the full provider-side Annex IV governance walkthrough, build the SDK and run:
 

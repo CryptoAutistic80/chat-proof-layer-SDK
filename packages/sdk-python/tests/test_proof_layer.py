@@ -249,6 +249,22 @@ class TestProofLayer(unittest.TestCase):
         self.assertEqual(report["status"], "pass")
         self.assertEqual(report["pass_count"], 6)
 
+    def test_local_mode_rejects_pack_completeness_evaluation(self):
+        signing_key_pem = (GOLDEN_DIR / "signing_key.txt").read_text(encoding="utf-8")
+        proof_layer = ProofLayer(
+            signing_key_pem=signing_key_pem,
+            key_id="kid-dev-01",
+        )
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "pack_id is not supported for local completeness evaluation",
+        ):
+            proof_layer.evaluate_completeness(
+                pack_id="P1",
+                profile="gpai_provider_v1",
+            )
+
     def test_vault_mode_can_update_disclosure_config(self):
         captured = {}
 
@@ -314,6 +330,46 @@ class TestProofLayer(unittest.TestCase):
         self.assertEqual(captured["method"], "POST")
         self.assertEqual(captured["path"], "/v1/completeness/evaluate")
         self.assertEqual(result["status"], "warn")
+
+    def test_vault_mode_can_evaluate_pack_completeness(self):
+        captured = {}
+
+        def request_fn(method, path, headers, body):
+            captured["method"] = method
+            captured["path"] = path
+            captured["headers"] = headers
+            captured["body"] = body
+            return {
+                "profile": "gpai_provider_v1",
+                "status": "pass",
+                "bundle_id": "P1",
+                "system_id": "foundation-model-alpha",
+                "pass_count": 6,
+                "warn_count": 0,
+                "fail_count": 0,
+                "rules": [],
+            }
+
+        proof_layer = ProofLayer(
+            vault_url="http://127.0.0.1:8080",
+            request_fn=request_fn,
+        )
+
+        result = proof_layer.evaluate_completeness(
+            pack_id="P1",
+            profile="gpai_provider_v1",
+        )
+
+        self.assertEqual(captured["method"], "POST")
+        self.assertEqual(captured["path"], "/v1/completeness/evaluate")
+        self.assertEqual(
+            json.loads(captured["body"].decode("utf-8")),
+            {
+                "pack_id": "P1",
+                "profile": "gpai_provider_v1",
+            },
+        )
+        self.assertEqual(result["status"], "pass")
 
     def test_vault_mode_can_list_disclosure_templates(self):
         captured = {}

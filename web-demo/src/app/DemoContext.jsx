@@ -85,6 +85,14 @@ function readinessProfileForPackType(packType) {
   return COMPLETENESS_PROFILE_BY_PACK_TYPE[packType] ?? null;
 }
 
+function packCompletenessProfile(packSummary, packManifest) {
+  return (
+    packSummary?.pack_completeness_profile ??
+    packManifest?.pack_completeness_profile ??
+    null
+  );
+}
+
 function createInitialDraft() {
   const preset = getPreset("investor_summary");
   const scenario = initialPlaygroundScenario();
@@ -199,6 +207,13 @@ export function DemoProvider({ children }) {
     setActivityLog((items) =>
       [{ title, detail, tone, time }, ...items].slice(0, 16),
     );
+  }
+
+  function buildRunAnnotations(scenario, runState) {
+    return {
+      review: buildComplianceReview(scenario, runState),
+      recordExplainer: buildRecordExplainer(scenario, runState),
+    };
   }
 
   async function loadRecentRuns(systemId = draft.systemId) {
@@ -528,6 +543,32 @@ export function DemoProvider({ children }) {
       draft.apiKey,
       packSummary.pack_id,
     );
+    let packCompletenessReport = null;
+    const completenessProfile = packCompletenessProfile(packSummary, packManifest);
+    if (completenessProfile) {
+      try {
+        packCompletenessReport = await evaluateCompleteness(
+          draft.serviceUrl,
+          draft.apiKey,
+          {
+            pack_id: packSummary.pack_id,
+            profile: completenessProfile,
+          },
+        );
+        appendActivity(
+          "Exported pack readiness updated",
+          `${packCompletenessReport.status} · ${packCompletenessReport.pass_count} pass / ${packCompletenessReport.warn_count} warn / ${packCompletenessReport.fail_count} fail`,
+          packCompletenessReport.status === "fail"
+            ? "warn"
+            : packCompletenessReport.status === "warn"
+              ? "accent"
+              : "good",
+        );
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        appendActivity("Exported pack readiness unavailable", message, "warn");
+      }
+    }
     const exportPayload = await downloadPackExport(
       draft.serviceUrl,
       draft.apiKey,
@@ -549,7 +590,7 @@ export function DemoProvider({ children }) {
       `${packSummary.bundle_count} bundle(s) · ${formatBytes(blob.size)}`,
       "good",
     );
-    return { packSummary, packManifest, downloadInfo };
+    return { packSummary, packManifest, packCompletenessReport, downloadInfo };
   }
 
   async function loadRun(bundleId) {
@@ -579,6 +620,16 @@ export function DemoProvider({ children }) {
       currentRun?.bundleId === bundleId
         ? currentRun.disclosureProfile
         : (tracePayload?.disclosure_profile ?? draft.templateProfile);
+    const packSummary =
+      currentRun?.bundleId === bundleId ? currentRun.packSummary : null;
+    const packManifest =
+      currentRun?.bundleId === bundleId ? currentRun.packManifest : null;
+    const downloadInfo =
+      currentRun?.bundleId === bundleId ? currentRun.downloadInfo : null;
+    const packCompletenessReport =
+      currentRun?.bundleId === bundleId
+        ? currentRun.packCompletenessReport
+        : null;
     const previewResponse =
       inferredPackType !== null
         ? await previewFor(
@@ -712,12 +763,10 @@ export function DemoProvider({ children }) {
       anchorResponse: bundle.receipt ?? null,
       receiptVerification,
       disclosurePreview: previewResponse,
-      packSummary:
-        currentRun?.bundleId === bundleId ? currentRun.packSummary : null,
-      packManifest:
-        currentRun?.bundleId === bundleId ? currentRun.packManifest : null,
-      downloadInfo:
-        currentRun?.bundleId === bundleId ? currentRun.downloadInfo : null,
+      packSummary,
+      packManifest,
+      packCompletenessReport,
+      downloadInfo,
       completenessProfile: readinessState.completenessProfile,
       completenessReport: readinessState.completenessReport,
       systemSummary,
@@ -728,31 +777,22 @@ export function DemoProvider({ children }) {
           : scenarioId
             ? renderScenarioScript(scenarioId, draft)
             : "",
-      review:
-        currentRun?.bundleId === bundleId
-          ? currentRun.review
-          : scenario
-            ? buildComplianceReview(scenario, {
-                bundleRuns,
-                packManifest: currentRun?.packManifest,
-                packSummary: currentRun?.packSummary,
-                downloadInfo: currentRun?.downloadInfo,
-                completenessProfile: readinessState.completenessProfile,
-                completenessReport: readinessState.completenessReport,
-              })
-            : null,
-      recordExplainer:
-        currentRun?.bundleId === bundleId
-          ? currentRun.recordExplainer
-          : buildRecordExplainer(scenario, {
-              bundle,
-              bundleRuns,
-              packType: inferredPackType,
-              packManifest: currentRun?.packManifest,
-              packSummary: currentRun?.packSummary,
-              downloadInfo: currentRun?.downloadInfo,
-            }),
     };
+    Object.assign(
+      hydratedRun,
+      buildRunAnnotations(scenario, {
+        bundle,
+        bundleRuns,
+        packType: inferredPackType,
+        packSummary,
+        packManifest,
+        packCompletenessReport,
+        downloadInfo,
+        completenessProfile: readinessState.completenessProfile,
+        completenessReport: readinessState.completenessReport,
+        scenarioId,
+      }),
+    );
     setCurrentRun(hydratedRun);
     return hydratedRun;
   }
@@ -1046,6 +1086,7 @@ export function DemoProvider({ children }) {
       let exportState = {
         packSummary: null,
         packManifest: null,
+        packCompletenessReport: null,
         downloadInfo: null,
       };
       if (
@@ -1108,6 +1149,7 @@ export function DemoProvider({ children }) {
         disclosurePreview,
         packSummary: exportState.packSummary,
         packManifest: exportState.packManifest,
+        packCompletenessReport: exportState.packCompletenessReport,
         downloadInfo: exportState.downloadInfo,
         completenessProfile: readinessState.completenessProfile,
         completenessReport: readinessState.completenessReport,
@@ -1127,6 +1169,13 @@ export function DemoProvider({ children }) {
           },
         ],
       };
+      Object.assign(
+        nextRun,
+        buildRunAnnotations(null, {
+          ...nextRun,
+          scenarioId: null,
+        }),
+      );
       setCurrentRun(nextRun);
       return createMeta.bundle_id;
     } catch (error) {
@@ -1212,6 +1261,7 @@ export function DemoProvider({ children }) {
           : {
               packSummary: null,
               packManifest: null,
+              packCompletenessReport: null,
               downloadInfo: null,
             };
       const readinessState = await evaluateReadinessFor(
@@ -1231,6 +1281,7 @@ export function DemoProvider({ children }) {
         bundleRuns,
         packSummary: exportState.packSummary,
         packManifest: exportState.packManifest,
+        packCompletenessReport: exportState.packCompletenessReport,
         downloadInfo: exportState.downloadInfo,
         completenessProfile: readinessState.completenessProfile,
         completenessReport: readinessState.completenessReport,
@@ -1241,6 +1292,7 @@ export function DemoProvider({ children }) {
         packType: scenario.packType,
         packSummary: exportState.packSummary,
         packManifest: exportState.packManifest,
+        packCompletenessReport: exportState.packCompletenessReport,
         downloadInfo: exportState.downloadInfo,
       });
       const nextRun = {
@@ -1279,6 +1331,7 @@ export function DemoProvider({ children }) {
         disclosurePreview,
         packSummary: exportState.packSummary,
         packManifest: exportState.packManifest,
+        packCompletenessReport: exportState.packCompletenessReport,
         downloadInfo: exportState.downloadInfo,
         completenessProfile: readinessState.completenessProfile,
         completenessReport: readinessState.completenessReport,
@@ -1356,16 +1409,25 @@ export function DemoProvider({ children }) {
           templateProfile: currentRun.disclosureProfile,
         },
       );
-      setCurrentRun((run) =>
-        run
-          ? {
-              ...run,
-              packSummary: exportState.packSummary,
-              packManifest: exportState.packManifest,
-              downloadInfo: exportState.downloadInfo,
-            }
-          : run,
-      );
+      setCurrentRun((run) => {
+        if (!run) {
+          return run;
+        }
+        const nextRun = {
+          ...run,
+          packSummary: exportState.packSummary,
+          packManifest: exportState.packManifest,
+          packCompletenessReport: exportState.packCompletenessReport,
+          downloadInfo: exportState.downloadInfo,
+        };
+        return {
+          ...nextRun,
+          ...buildRunAnnotations(
+            run.scenarioId ? getPlaygroundScenario(run.scenarioId) : null,
+            nextRun,
+          ),
+        };
+      });
       return exportState;
     } finally {
       setIsExporting(false);

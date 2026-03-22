@@ -35,7 +35,7 @@ test("createBundle posts normalized payload", async () => {
   assert.ok(typeof body.artefacts[0].data_base64 === "string");
 });
 
-test("evaluateCompleteness posts bundle or bundleId to the vault", async () => {
+test("evaluateCompleteness posts bundleId to the vault", async () => {
   let captured;
   const fetchImpl = async (url, init) => {
     captured = { url, init };
@@ -69,6 +69,61 @@ test("evaluateCompleteness posts bundle or bundleId to the vault", async () => {
     profile: "gpai_provider_v1",
   });
   assert.equal(result.status, "pass");
+});
+
+test("evaluateCompleteness posts packId to the vault", async () => {
+  let captured;
+  const fetchImpl = async (url, init) => {
+    captured = { url, init };
+    return new Response(
+      JSON.stringify({
+        profile: "gpai_provider_v1",
+        status: "pass",
+        bundle_id: "P1",
+        system_id: "foundation-model-alpha",
+        pass_count: 6,
+        warn_count: 0,
+        fail_count: 0,
+        rules: [],
+      }),
+      { status: 200, headers: { "content-type": "application/json" } },
+    );
+  };
+
+  const client = new ProofLayerClient({
+    baseUrl: "http://127.0.0.1:8080",
+    fetchImpl,
+  });
+  const result = await client.evaluateCompleteness({
+    packId: "P1",
+    profile: "gpai_provider_v1",
+  });
+
+  assert.equal(captured.url, "http://127.0.0.1:8080/v1/completeness/evaluate");
+  assert.deepEqual(JSON.parse(captured.init.body), {
+    pack_id: "P1",
+    profile: "gpai_provider_v1",
+  });
+  assert.equal(result.status, "pass");
+});
+
+test("evaluateCompleteness rejects invalid selector combinations", async () => {
+  const client = new ProofLayerClient({
+    baseUrl: "http://127.0.0.1:8080",
+    fetchImpl: async () => {
+      throw new Error("fetch should not be called");
+    },
+  });
+
+  await assert.rejects(
+    () =>
+      client.evaluateCompleteness({
+        bundleId: "B1",
+        packId: "P1",
+        profile: "gpai_provider_v1",
+      }),
+    /provide exactly one of bundle_id, bundle, or pack_id/,
+  );
 });
 
 test("createPack posts vault pack filters including disclosure bundle_format", async () => {

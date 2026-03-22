@@ -37,6 +37,14 @@ describe("buildComplianceReview", () => {
             },
           ],
         },
+        packCompletenessReport: {
+          profile: "annex_iv_governance_v1",
+          status: "pass",
+          pass_count: 5,
+          warn_count: 0,
+          fail_count: 0,
+          rules: [],
+        },
       },
     );
 
@@ -47,6 +55,8 @@ describe("buildComplianceReview", () => {
     expect(review.lawExplainer.expectation).toContain("clear incident trail");
     expect(review.readiness.profile).toBe("annex_iv_governance_v1");
     expect(review.readiness.topMissingFields).toContain("stop_reason");
+    expect(review.packReadiness?.status).toBe("pass");
+    expect(review.packReadiness?.summary).toContain("exported pack");
     expect(review.commonNextEvidence.length).toBeGreaterThan(0);
   });
 
@@ -86,5 +96,24 @@ describe("buildComplianceReview", () => {
 
     expect(review.readiness.profile).toBe("gpai_provider_v1");
     expect(review.readiness.summary).toContain("GPAI provider");
+  });
+
+  test("leaves exported pack readiness empty when no pack completeness report is attached", () => {
+    const review = buildComplianceReview(
+      getPlaygroundScenario("ts_support_rules"),
+      {
+        completenessReport: {
+          profile: "annex_iv_governance_v1",
+          status: "pass",
+          pass_count: 5,
+          warn_count: 0,
+          fail_count: 0,
+          rules: [],
+        },
+      },
+    );
+
+    expect(review.readiness.status).toBe("pass");
+    expect(review.packReadiness).toBeNull();
   });
 });

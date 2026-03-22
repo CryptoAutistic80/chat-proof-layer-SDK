@@ -37,6 +37,10 @@ cargo run -p proofctl -- assess \
   --profile gpai_provider_v1
 ```
 
+If you later export an `annex_iv` or `annex_xi` pack from the vault, the pack summary and manifest will keep the legacy per-bundle `completeness_*` fields and, where supported, add `pack_completeness_*` fields for the synthesized pack-level readiness result.
+
+For `annex_iv`, the pack-scoped pass count is currently `5` because `annex_iv_governance_v1` evaluates five rule families even though the pack curates eight governance evidence families.
+
 If you want the bundle to carry your actor role and system-classification context from day one, create it with the compliance flags instead of adding that data later:
 
 ```bash

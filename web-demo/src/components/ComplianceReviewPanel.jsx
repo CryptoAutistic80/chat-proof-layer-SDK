@@ -1,5 +1,31 @@
 import React from "react";
 
+function ReadinessSection({ title, readiness }) {
+  return (
+    <>
+      <h4>{title}</h4>
+      <p>
+        <strong>{readiness.profile ?? "No readiness profile attached"}</strong>
+      </p>
+      <p>{readiness.summary}</p>
+      <p>
+        {readiness.passCount} pass · {readiness.warnCount} warn ·{" "}
+        {readiness.failCount} fail
+      </p>
+      {readiness.topMissingFields.length > 0 ? (
+        <>
+          <h4>Top missing fields</h4>
+          <ul className="review-list compact">
+            {readiness.topMissingFields.map((entry) => (
+              <li key={entry}>{entry}</li>
+            ))}
+          </ul>
+        </>
+      ) : null}
+    </>
+  );
+}
+
 export function ComplianceReviewPanel({ review }) {
   return (
     <section className="panel">
@@ -36,26 +62,15 @@ export function ComplianceReviewPanel({ review }) {
         </section>
 
         <section className="review-card">
-          <h4>Readiness check</h4>
-          <p>
-            <strong>{review.readiness.profile ?? "No readiness profile attached"}</strong>
-          </p>
-          <p>
-            {review.readiness.summary}
-          </p>
-          <p>
-            {review.readiness.passCount} pass · {review.readiness.warnCount} warn ·{" "}
-            {review.readiness.failCount} fail
-          </p>
-          {review.readiness.topMissingFields.length > 0 ? (
-            <>
-              <h4>Top missing fields</h4>
-              <ul className="review-list compact">
-                {review.readiness.topMissingFields.map((entry) => (
-                  <li key={entry}>{entry}</li>
-                ))}
-              </ul>
-            </>
+          <ReadinessSection
+            title="Workflow readiness check"
+            readiness={review.readiness}
+          />
+          {review.packReadiness ? (
+            <ReadinessSection
+              title="Exported pack readiness"
+              readiness={review.packReadiness}
+            />
           ) : null}
           <h4>Share or export status</h4>
           <p>

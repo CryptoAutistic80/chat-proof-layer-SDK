@@ -112,12 +112,14 @@ class ProofLayer:
         profile: str,
         bundle: dict[str, Any] | None = None,
         bundle_id: str | None = None,
+        pack_id: str | None = None,
     ) -> dict[str, Any]:
         if hasattr(self.client, "evaluate_completeness"):
             return self.client.evaluate_completeness(
                 profile=profile,
                 bundle=bundle,
                 bundle_id=bundle_id,
+                pack_id=pack_id,
             )
         raise ValueError("underlying client does not support evaluate_completeness")
 

@@ -364,6 +364,61 @@ test("ProofLayer vault mode can evaluate completeness", async () => {
   assert.equal(result.status, "warn");
 });
 
+test("ProofLayer vault mode can evaluate pack completeness", async () => {
+  let captured;
+  const proofLayer = new ProofLayer({
+    vaultUrl: "http://127.0.0.1:8080",
+    fetchImpl: async (url, init) => {
+      captured = { url, init };
+      return new Response(
+        JSON.stringify({
+          profile: "gpai_provider_v1",
+          status: "pass",
+          bundle_id: "P1",
+          system_id: "foundation-model-alpha",
+          pass_count: 6,
+          warn_count: 0,
+          fail_count: 0,
+          rules: [],
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    },
+  });
+
+  const result = await proofLayer.evaluateCompleteness({
+    packId: "P1",
+    profile: "gpai_provider_v1",
+  });
+
+  assert.equal(captured.url, "http://127.0.0.1:8080/v1/completeness/evaluate");
+  assert.deepEqual(JSON.parse(captured.init.body), {
+    pack_id: "P1",
+    profile: "gpai_provider_v1",
+  });
+  assert.equal(result.status, "pass");
+});
+
+test("ProofLayer local mode rejects pack completeness evaluation", async () => {
+  const signingKeyPem = await readFile(
+    path.join(goldenDir, "signing_key.txt"),
+    "utf8",
+  );
+  const proofLayer = new ProofLayer({
+    signingKeyPem,
+    keyId: "kid-dev-01",
+  });
+
+  await assert.rejects(
+    () =>
+      proofLayer.evaluateCompleteness({
+        packId: "P1",
+        profile: "gpai_provider_v1",
+      }),
+    /packId is not supported for local completeness evaluation/,
+  );
+});
+
 test("ProofLayer vault mode can list disclosure templates", async () => {
   let captured;
   const proofLayer = new ProofLayer({

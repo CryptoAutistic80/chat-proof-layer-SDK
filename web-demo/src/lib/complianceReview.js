@@ -53,46 +53,37 @@ function bundleRunsFromRun(run) {
   return Array.isArray(run?.bundleRuns) ? run.bundleRuns : [];
 }
 
-function readinessCopy(profile, status) {
+function readinessCopy(profile, status, subject = "workflow") {
   if (profile === "annex_iv_governance_v1") {
     if (status === "pass") {
-      return "The structured governance fields for this Annex IV workflow meet the current advisory minimum.";
+      return `The structured governance fields for this Annex IV ${subject} meet the current advisory minimum.`;
     }
     if (status === "warn") {
-      return "The workflow has at least one minimally complete governance record for each required area, but some captured records are thinner than the current advisory minimum.";
+      return `The ${subject} has at least one minimally complete governance record for each required area, but some captured records are thinner than the current advisory minimum.`;
     }
-    return "The workflow is missing at least one required governance area or does not yet include a minimally complete record for that area.";
+    return `The ${subject} is missing at least one required governance area or does not yet include a minimally complete record for that area.`;
   }
   if (profile === "gpai_provider_v1") {
     if (status === "pass") {
-      return "The structured GPAI provider fields for this workflow meet the current advisory minimum.";
+      return `The structured GPAI provider fields for this ${subject} meet the current advisory minimum.`;
     }
     if (status === "warn") {
-      return "The workflow has at least one minimally complete GPAI provider record for each required area, but some captured records are thinner than the current advisory minimum.";
+      return `The ${subject} has at least one minimally complete GPAI provider record for each required area, but some captured records are thinner than the current advisory minimum.`;
     }
-    return "The workflow is missing at least one required GPAI provider area or does not yet include a minimally complete record for that area.";
+    return `The ${subject} is missing at least one required GPAI provider area or does not yet include a minimally complete record for that area.`;
   }
   if (status === "pass") {
-    return "The structured fields for this workflow meet the current advisory minimum.";
+    return `The structured fields for this ${subject} meet the current advisory minimum.`;
   }
   if (status === "warn") {
-    return "The workflow has at least one minimally complete record for each required area, but some captured records are thinner than the current advisory minimum.";
+    return `The ${subject} has at least one minimally complete record for each required area, but some captured records are thinner than the current advisory minimum.`;
   }
-  return "The workflow is missing at least one required area or does not yet include a minimally complete record for that area.";
+  return `The ${subject} is missing at least one required area or does not yet include a minimally complete record for that area.`;
 }
 
-function buildReadinessSummary(run) {
-  const report = run?.completenessReport;
+function summarizeReadinessReport(report, subject = "workflow") {
   if (!report) {
-    return {
-      profile: null,
-      status: "muted",
-      passCount: 0,
-      warnCount: 0,
-      failCount: 0,
-      topMissingFields: [],
-      summary: "No readiness check is attached to this workflow.",
-    };
+    return null;
   }
 
   const topMissingFields = [
@@ -110,14 +101,32 @@ function buildReadinessSummary(run) {
     warnCount: report.warn_count ?? 0,
     failCount: report.fail_count ?? 0,
     topMissingFields,
-    summary: readinessCopy(report.profile, report.status),
+    summary: readinessCopy(report.profile, report.status, subject),
   };
+}
+
+function buildReadinessSummary(run) {
+  return (
+    summarizeReadinessReport(run?.completenessReport, "workflow") ?? {
+      profile: null,
+      status: "muted",
+      passCount: 0,
+      warnCount: 0,
+      failCount: 0,
+      topMissingFields: [],
+      summary: "No readiness check is attached to this workflow.",
+    }
+  );
 }
 
 export function buildComplianceReview(inputScenario, run) {
   const scenario = normalizeScenario(inputScenario, run);
   const bundleRuns = bundleRunsFromRun(run);
   const readiness = buildReadinessSummary(run);
+  const packReadiness = summarizeReadinessReport(
+    run?.packCompletenessReport,
+    "exported pack",
+  );
 
   return {
     title: `${scenario.label} evidence map`,
@@ -140,6 +149,7 @@ export function buildComplianceReview(inputScenario, run) {
         })) ?? [],
     },
     readiness,
+    packReadiness,
     lawExplainer: scenario.lawExplainer,
     commonNextEvidence: scenario.missingEvidence,
   };

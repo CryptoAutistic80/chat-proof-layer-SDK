@@ -15,10 +15,11 @@ use ed25519_dalek::SigningKey;
 use flate2::{Compression, read::GzDecoder, write::GzEncoder};
 use proof_layer_core::{
     ArtefactInput, BuildBundleError, CaptureEvent, CaptureInput, CompletenessProfile,
-    CompletenessStatus, EvidenceItem, ProofBundle, ReceiptVerification, RedactedBundle,
-    RekorTransparencyProvider, Rfc3161HttpTimestampProvider, ScittTransparencyProvider,
-    TimestampAssuranceProfile, TimestampToken, TimestampTrustPolicy, TimestampVerification,
-    TransparencyReceipt, TransparencyTrustPolicy, VAULT_BACKUP_ENCRYPTION_ALGORITHM,
+    CompletenessReport, CompletenessStatus, EvidenceContext, EvidenceItem, Integrity, Policy,
+    ProofBundle, ReceiptVerification, RedactedBundle, RekorTransparencyProvider,
+    Rfc3161HttpTimestampProvider, ScittTransparencyProvider, TimestampAssuranceProfile,
+    TimestampToken, TimestampTrustPolicy, TimestampVerification, TransparencyReceipt,
+    TransparencyTrustPolicy, VAULT_BACKUP_ENCRYPTION_ALGORITHM,
     anchor_bundle as anchor_bundle_receipt, build_bundle, canonicalize_value,
     decode_backup_encryption_key, decode_private_key_pem, decode_public_key_pem,
     encode_public_key_pem, encrypt_backup_archive, evaluate_completeness, redact_bundle,
@@ -952,6 +953,8 @@ struct EvaluateCompletenessRequest {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     bundle_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pack_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     bundle: Option<ProofBundle>,
     profile: CompletenessProfile,
 }
@@ -1031,6 +1034,16 @@ struct PackSummaryResponse {
     completeness_profile: Option<CompletenessProfile>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     completeness_status: Option<CompletenessStatus>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pack_completeness_profile: Option<CompletenessProfile>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pack_completeness_status: Option<CompletenessStatus>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pack_completeness_pass_count: Option<usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pack_completeness_warn_count: Option<usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pack_completeness_fail_count: Option<usize>,
     bundle_count: usize,
     bundle_ids: Vec<String>,
 }
@@ -1059,6 +1072,16 @@ struct PackManifest {
     completeness_warn_count: Option<usize>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     completeness_fail_count: Option<usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pack_completeness_profile: Option<CompletenessProfile>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pack_completeness_status: Option<CompletenessStatus>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pack_completeness_pass_count: Option<usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pack_completeness_warn_count: Option<usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pack_completeness_fail_count: Option<usize>,
     bundle_ids: Vec<String>,
     bundles: Vec<PackBundleEntry>,
 }
@@ -1126,6 +1149,7 @@ struct StoredPackRow {
     bundle_count: i64,
     export_path: String,
     manifest_json: String,
+    pack_completeness_report_json: Option<String>,
 }
 
 #[derive(Debug, FromRow)]
@@ -3575,33 +3599,62 @@ async fn evaluate_completeness_api(
     actor: Option<Extension<AuthenticatedActor>>,
     Json(request): Json<EvaluateCompletenessRequest>,
 ) -> Result<impl IntoResponse, ApiError> {
-    let selection_count =
-        usize::from(request.bundle_id.is_some()) + usize::from(request.bundle.is_some());
+    let EvaluateCompletenessRequest {
+        bundle_id,
+        pack_id,
+        bundle,
+        profile,
+    } = request;
+    let selection_count = usize::from(bundle_id.is_some())
+        + usize::from(pack_id.is_some())
+        + usize::from(bundle.is_some());
     if selection_count != 1 {
         return Err(ApiError::bad_request(
-            "provide exactly one of bundle_id or bundle",
+            "provide exactly one of bundle_id, bundle, or pack_id",
         ));
     }
 
-    let bundle = if let Some(bundle_id) = request.bundle_id.as_deref() {
-        load_active_bundle(&state.db, bundle_id)
+    let (report, audit_bundle_id, audit_pack_id) = if let Some(pack_id) = pack_id {
+        let row = load_pack_row(&state.db, &pack_id)
             .await
             .map_err(ApiError::internal_anyhow)?
-            .ok_or_else(|| ApiError::not_found("bundle not found"))?
+            .ok_or_else(|| ApiError::not_found("pack not found"))?;
+        let manifest = parse_pack_manifest(&row).map_err(ApiError::internal_anyhow)?;
+        let pack_profile = manifest
+            .pack_completeness_profile
+            .ok_or_else(|| ApiError::conflict("pack does not have pack-scoped completeness"))?;
+        if pack_profile != profile {
+            return Err(ApiError::bad_request(
+                "requested profile does not match pack completeness profile",
+            ));
+        }
+        let report = parse_pack_completeness_report(&row)
+            .map_err(ApiError::internal_anyhow)?
+            .ok_or_else(|| {
+                ApiError::conflict(
+                    "pack-scoped completeness report unavailable for this pack; recreate the pack",
+                )
+            })?;
+        (report, None, Some(pack_id))
     } else {
-        request
-            .bundle
-            .expect("selection_count ensures bundle is present")
+        let bundle = if let Some(bundle_id) = bundle_id.as_deref() {
+            load_active_bundle(&state.db, bundle_id)
+                .await
+                .map_err(ApiError::internal_anyhow)?
+                .ok_or_else(|| ApiError::not_found("bundle not found"))?
+        } else {
+            bundle.expect("selection_count ensures bundle is present")
+        };
+        let report = evaluate_completeness(&bundle, profile);
+        (report, Some(bundle.bundle_id), None)
     };
-
-    let report = evaluate_completeness(&bundle, request.profile);
 
     append_audit_log(
         &state.db,
         "evaluate_completeness",
         Some(request_actor_label(&actor)),
-        Some(&bundle.bundle_id),
-        None,
+        audit_bundle_id.as_deref(),
+        audit_pack_id.as_deref(),
         serde_json::json!({
             "profile": report.profile,
             "status": report.status,
@@ -3614,6 +3667,62 @@ async fn evaluate_completeness_api(
     .map_err(ApiError::internal_anyhow)?;
 
     Ok((StatusCode::OK, Json(report)))
+}
+
+fn build_pack_completeness_bundle(
+    pack_id: &str,
+    created_at: &str,
+    requested_system_id: Option<&str>,
+    curated_rows: &[CuratedPackBundle],
+) -> ProofBundle {
+    let first_bundle = &curated_rows
+        .first()
+        .expect("pack completeness requires at least one curated bundle")
+        .bundle;
+    let mut subject = first_bundle.subject.clone();
+    if let Some(system_id) = requested_system_id {
+        subject.system_id = Some(system_id.to_string());
+    }
+
+    ProofBundle {
+        bundle_version: first_bundle.bundle_version.clone(),
+        bundle_id: pack_id.to_string(),
+        created_at: created_at.to_string(),
+        actor: first_bundle.actor.clone(),
+        subject,
+        compliance_profile: curated_rows
+            .iter()
+            .find_map(|curated| curated.bundle.compliance_profile.clone()),
+        context: EvidenceContext::default(),
+        items: curated_rows
+            .iter()
+            .flat_map(|curated| curated.bundle.items.iter().cloned())
+            .collect(),
+        artefacts: curated_rows
+            .iter()
+            .flat_map(|curated| curated.bundle.artefacts.iter().cloned())
+            .collect(),
+        policy: Policy::default(),
+        integrity: Integrity::default(),
+        timestamp: None,
+        receipt: None,
+    }
+}
+
+fn parse_pack_completeness_report(row: &StoredPackRow) -> Result<Option<CompletenessReport>> {
+    let Some(report_json) = row.pack_completeness_report_json.as_deref() else {
+        return Ok(None);
+    };
+    let report: CompletenessReport = serde_json::from_str(report_json).with_context(|| {
+        format!(
+            "failed to parse pack completeness report for pack {}",
+            row.pack_id
+        )
+    })?;
+    if report.bundle_id != row.pack_id {
+        bail!("pack completeness report id mismatch for {}", row.pack_id);
+    }
+    Ok(Some(report))
 }
 
 async fn delete_bundle(
@@ -3981,7 +4090,17 @@ async fn create_pack(
     let pack_id = generate_bundle_id();
     let created_at = Utc::now().to_rfc3339();
     let disclosure_policy_name = disclosure_policy.as_ref().map(|policy| policy.name.clone());
-    let completeness_profile = completeness_profile_for_pack(&request.pack_type);
+    let completeness_profile = bundle_completeness_profile_for_pack(&request.pack_type);
+    let pack_completeness_profile = pack_completeness_profile_for_pack(&request.pack_type);
+    let pack_completeness_report = pack_completeness_profile.map(|profile| {
+        let bundle = build_pack_completeness_bundle(
+            &pack_id,
+            &created_at,
+            request.system_id.as_deref(),
+            &curated_rows,
+        );
+        evaluate_completeness(&bundle, profile)
+    });
     let mut completeness_pass_count = 0usize;
     let mut completeness_warn_count = 0usize;
     let mut completeness_fail_count = 0usize;
@@ -4083,6 +4202,19 @@ async fn create_pack(
         completeness_pass_count: completeness_profile.map(|_| completeness_pass_count),
         completeness_warn_count: completeness_profile.map(|_| completeness_warn_count),
         completeness_fail_count: completeness_profile.map(|_| completeness_fail_count),
+        pack_completeness_profile,
+        pack_completeness_status: pack_completeness_report
+            .as_ref()
+            .map(|report| report.status),
+        pack_completeness_pass_count: pack_completeness_report
+            .as_ref()
+            .map(|report| report.pass_count),
+        pack_completeness_warn_count: pack_completeness_report
+            .as_ref()
+            .map(|report| report.warn_count),
+        pack_completeness_fail_count: pack_completeness_report
+            .as_ref()
+            .map(|report| report.fail_count),
         bundle_ids,
         bundles: bundle_entries,
     };
@@ -4094,9 +4226,14 @@ async fn create_pack(
     let export_bytes = gzip_json_bytes(&archive).map_err(ApiError::internal_anyhow)?;
     let export_path = pack_export_path(&state.storage_dir, &pack_id);
     persist_pack_export(&export_path, &export_bytes).map_err(ApiError::internal_anyhow)?;
-    persist_pack_metadata(&state.db, &manifest, &export_path)
-        .await
-        .map_err(ApiError::internal_anyhow)?;
+    persist_pack_metadata(
+        &state.db,
+        &manifest,
+        pack_completeness_report.as_ref(),
+        &export_path,
+    )
+    .await
+    .map_err(ApiError::internal_anyhow)?;
     append_audit_log(
         &state.db,
         "create_pack",
@@ -4111,6 +4248,11 @@ async fn create_pack(
             "completeness_pass_count": manifest.completeness_pass_count,
             "completeness_warn_count": manifest.completeness_warn_count,
             "completeness_fail_count": manifest.completeness_fail_count,
+            "pack_completeness_profile": manifest.pack_completeness_profile,
+            "pack_completeness_status": manifest.pack_completeness_status,
+            "pack_completeness_pass_count": manifest.pack_completeness_pass_count,
+            "pack_completeness_warn_count": manifest.pack_completeness_warn_count,
+            "pack_completeness_fail_count": manifest.pack_completeness_fail_count,
             "bundle_count": manifest.bundle_ids.len(),
             "system_id": manifest.system_id.clone(),
         }),
@@ -4907,13 +5049,28 @@ fn pack_summary(manifest: &PackManifest) -> PackSummaryResponse {
         disclosure_policy: manifest.disclosure_policy.clone(),
         completeness_profile: manifest.completeness_profile,
         completeness_status: aggregate_manifest_completeness_status(manifest),
+        pack_completeness_profile: manifest.pack_completeness_profile,
+        pack_completeness_status: manifest.pack_completeness_status,
+        pack_completeness_pass_count: manifest.pack_completeness_pass_count,
+        pack_completeness_warn_count: manifest.pack_completeness_warn_count,
+        pack_completeness_fail_count: manifest.pack_completeness_fail_count,
         bundle_count: manifest.bundle_ids.len(),
         bundle_ids: manifest.bundle_ids.clone(),
     }
 }
 
-fn completeness_profile_for_pack(pack_type: &str) -> Option<CompletenessProfile> {
+fn bundle_completeness_profile_for_pack(pack_type: &str) -> Option<CompletenessProfile> {
     match pack_type {
+        "annex_iv" => Some(CompletenessProfile::AnnexIvGovernanceV1),
+        "annex_xi" => Some(CompletenessProfile::GpaiProviderV1),
+        _ => None,
+    }
+}
+
+fn pack_completeness_profile_for_pack(pack_type: &str) -> Option<CompletenessProfile> {
+    match pack_type {
+        // annex_iv packs curate eight evidence families, but the current
+        // annex_iv_governance_v1 readiness profile evaluates five rule families.
         "annex_iv" => Some(CompletenessProfile::AnnexIvGovernanceV1),
         "annex_xi" => Some(CompletenessProfile::GpaiProviderV1),
         _ => None,
@@ -5936,6 +6093,7 @@ fn persist_pack_export(path: &FsPath, bytes: &[u8]) -> Result<()> {
 async fn persist_pack_metadata(
     db: &SqlitePool,
     manifest: &PackManifest,
+    pack_completeness_report: Option<&CompletenessReport>,
     export_path: &FsPath,
 ) -> Result<()> {
     sqlx::query(
@@ -5948,8 +6106,9 @@ async fn persist_pack_metadata(
             to_date,
             bundle_count,
             export_path,
-            manifest_json
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            manifest_json,
+            pack_completeness_report_json
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(&manifest.pack_id)
     .bind(&manifest.pack_type)
@@ -5960,6 +6119,11 @@ async fn persist_pack_metadata(
     .bind(manifest.bundle_ids.len() as i64)
     .bind(export_path.to_string_lossy().to_string())
     .bind(serde_json::to_string(manifest)?)
+    .bind(
+        pack_completeness_report
+            .map(serde_json::to_string)
+            .transpose()?,
+    )
     .execute(db)
     .await
     .with_context(|| format!("failed to insert pack {}", manifest.pack_id))?;
@@ -5977,7 +6141,8 @@ async fn load_pack_row(db: &SqlitePool, pack_id: &str) -> Result<Option<StoredPa
             to_date,
             bundle_count,
             export_path,
-            manifest_json
+            manifest_json,
+            pack_completeness_report_json
          FROM packs
          WHERE pack_id = ?",
     )
@@ -8977,6 +9142,7 @@ async fn initialize_sqlite_schema(db: &SqlitePool) -> Result<()> {
     ensure_sqlite_column(db, "bundles", "legal_hold_reason", "TEXT").await?;
     ensure_sqlite_column(db, "bundles", "legal_hold_until", "TEXT").await?;
     ensure_sqlite_column(db, "bundles", "legal_hold_placed_at", "TEXT").await?;
+    ensure_sqlite_column(db, "packs", "pack_completeness_report_json", "TEXT").await?;
     ensure_sqlite_column(
         db,
         "retention_policies",
@@ -14826,6 +14992,7 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
             .body(Body::from(
                 serde_json::to_vec(&EvaluateCompletenessRequest {
                     bundle_id: Some(scenario.technical_doc.bundle_id.clone()),
+                    pack_id: None,
                     bundle: None,
                     profile: CompletenessProfile::AnnexIvGovernanceV1,
                 })
@@ -14858,6 +15025,7 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
             .body(Body::from(
                 serde_json::to_vec(&EvaluateCompletenessRequest {
                     bundle_id: None,
+                    pack_id: None,
                     bundle: Some(bundle),
                     profile: CompletenessProfile::AnnexIvGovernanceV1,
                 })
@@ -14889,6 +15057,7 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
             .body(Body::from(
                 serde_json::to_vec(&EvaluateCompletenessRequest {
                     bundle_id: Some(scenario.compute_metrics.bundle_id.clone()),
+                    pack_id: None,
                     bundle: None,
                     profile: CompletenessProfile::GpaiProviderV1,
                 })
@@ -14921,6 +15090,7 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
             .body(Body::from(
                 serde_json::to_vec(&EvaluateCompletenessRequest {
                     bundle_id: None,
+                    pack_id: None,
                     bundle: Some(bundle),
                     profile: CompletenessProfile::GpaiProviderV1,
                 })
@@ -14948,11 +15118,25 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
         for payload in [
             EvaluateCompletenessRequest {
                 bundle_id: None,
+                pack_id: None,
                 bundle: None,
                 profile: CompletenessProfile::AnnexIvGovernanceV1,
             },
             EvaluateCompletenessRequest {
                 bundle_id: Some("bundle-123".to_string()),
+                pack_id: None,
+                bundle: Some(bundle.clone()),
+                profile: CompletenessProfile::AnnexIvGovernanceV1,
+            },
+            EvaluateCompletenessRequest {
+                bundle_id: Some("bundle-123".to_string()),
+                pack_id: Some("pack-123".to_string()),
+                bundle: None,
+                profile: CompletenessProfile::AnnexIvGovernanceV1,
+            },
+            EvaluateCompletenessRequest {
+                bundle_id: None,
+                pack_id: Some("pack-123".to_string()),
                 bundle: Some(bundle.clone()),
                 profile: CompletenessProfile::AnnexIvGovernanceV1,
             },
@@ -14969,8 +15153,304 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
                 .await
                 .unwrap();
             let error: serde_json::Value = serde_json::from_slice(&body).unwrap();
-            assert_eq!(error["error"], "provide exactly one of bundle_id or bundle");
+            assert_eq!(
+                error["error"],
+                "provide exactly one of bundle_id, bundle, or pack_id"
+            );
         }
+    }
+
+    #[tokio::test]
+    async fn evaluate_completeness_api_supports_pack_id_requests() {
+        let state = test_state(DEFAULT_MAX_PAYLOAD_BYTES).await;
+        let app = build_router(state, DEFAULT_MAX_PAYLOAD_BYTES);
+        let _scenario = create_gpai_provider_scenario(&app).await;
+
+        let pack_req = Request::builder()
+            .method("POST")
+            .uri("/v1/packs")
+            .header("content-type", "application/json")
+            .body(Body::from(
+                serde_json::to_vec(&CreatePackRequest {
+                    pack_type: "annex_xi".to_string(),
+                    system_id: Some("foundation-model-alpha".to_string()),
+                    from: None,
+                    to: None,
+                    bundle_format: default_pack_bundle_format(),
+                    disclosure_policy: None,
+                    disclosure_template: None,
+                })
+                .unwrap(),
+            ))
+            .unwrap();
+        let pack_res = app.clone().oneshot(pack_req).await.unwrap();
+        assert_eq!(pack_res.status(), StatusCode::CREATED);
+        let body = axum::body::to_bytes(pack_res.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let pack: PackSummaryResponse = serde_json::from_slice(&body).unwrap();
+
+        let request = Request::builder()
+            .method("POST")
+            .uri("/v1/completeness/evaluate")
+            .header("content-type", "application/json")
+            .body(Body::from(
+                serde_json::to_vec(&EvaluateCompletenessRequest {
+                    bundle_id: None,
+                    pack_id: Some(pack.pack_id.clone()),
+                    bundle: None,
+                    profile: CompletenessProfile::GpaiProviderV1,
+                })
+                .unwrap(),
+            ))
+            .unwrap();
+        let response = app.oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let report: proof_layer_core::CompletenessReport = serde_json::from_slice(&body).unwrap();
+
+        assert_eq!(report.profile, CompletenessProfile::GpaiProviderV1);
+        assert_eq!(report.bundle_id, pack.pack_id);
+        assert_eq!(report.status, CompletenessStatus::Pass);
+        assert_eq!(report.pass_count, 6);
+        assert_eq!(report.warn_count, 0);
+        assert_eq!(report.fail_count, 0);
+    }
+
+    #[tokio::test]
+    async fn evaluate_completeness_api_supports_annex_iv_pack_id_requests() {
+        let state = test_state(DEFAULT_MAX_PAYLOAD_BYTES).await;
+        let app = build_router(state, DEFAULT_MAX_PAYLOAD_BYTES);
+        let _scenario = create_annex_iv_scenario(&app).await;
+
+        let pack_req = Request::builder()
+            .method("POST")
+            .uri("/v1/packs")
+            .header("content-type", "application/json")
+            .body(Body::from(
+                serde_json::to_vec(&CreatePackRequest {
+                    pack_type: "annex_iv".to_string(),
+                    system_id: Some("hiring-assistant".to_string()),
+                    from: None,
+                    to: None,
+                    bundle_format: PACK_BUNDLE_FORMAT_FULL.to_string(),
+                    disclosure_policy: None,
+                    disclosure_template: None,
+                })
+                .unwrap(),
+            ))
+            .unwrap();
+        let pack_res = app.clone().oneshot(pack_req).await.unwrap();
+        assert_eq!(pack_res.status(), StatusCode::CREATED);
+        let body = axum::body::to_bytes(pack_res.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let pack: PackSummaryResponse = serde_json::from_slice(&body).unwrap();
+
+        let request = Request::builder()
+            .method("POST")
+            .uri("/v1/completeness/evaluate")
+            .header("content-type", "application/json")
+            .body(Body::from(
+                serde_json::to_vec(&EvaluateCompletenessRequest {
+                    bundle_id: None,
+                    pack_id: Some(pack.pack_id.clone()),
+                    bundle: None,
+                    profile: CompletenessProfile::AnnexIvGovernanceV1,
+                })
+                .unwrap(),
+            ))
+            .unwrap();
+        let response = app.oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let report: proof_layer_core::CompletenessReport = serde_json::from_slice(&body).unwrap();
+
+        assert_eq!(report.profile, CompletenessProfile::AnnexIvGovernanceV1);
+        assert_eq!(report.bundle_id, pack.pack_id);
+        assert_eq!(report.status, CompletenessStatus::Pass);
+        assert_eq!(report.pass_count, 5);
+        assert_eq!(report.warn_count, 0);
+        assert_eq!(report.fail_count, 0);
+    }
+
+    #[tokio::test]
+    async fn evaluate_completeness_api_rejects_pack_profile_mismatch() {
+        let state = test_state(DEFAULT_MAX_PAYLOAD_BYTES).await;
+        let app = build_router(state, DEFAULT_MAX_PAYLOAD_BYTES);
+        let _scenario = create_gpai_provider_scenario(&app).await;
+
+        let pack_req = Request::builder()
+            .method("POST")
+            .uri("/v1/packs")
+            .header("content-type", "application/json")
+            .body(Body::from(
+                serde_json::to_vec(&CreatePackRequest {
+                    pack_type: "annex_xi".to_string(),
+                    system_id: Some("foundation-model-alpha".to_string()),
+                    from: None,
+                    to: None,
+                    bundle_format: default_pack_bundle_format(),
+                    disclosure_policy: None,
+                    disclosure_template: None,
+                })
+                .unwrap(),
+            ))
+            .unwrap();
+        let pack_res = app.clone().oneshot(pack_req).await.unwrap();
+        assert_eq!(pack_res.status(), StatusCode::CREATED);
+        let body = axum::body::to_bytes(pack_res.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let pack: PackSummaryResponse = serde_json::from_slice(&body).unwrap();
+
+        let request = Request::builder()
+            .method("POST")
+            .uri("/v1/completeness/evaluate")
+            .header("content-type", "application/json")
+            .body(Body::from(
+                serde_json::to_vec(&EvaluateCompletenessRequest {
+                    bundle_id: None,
+                    pack_id: Some(pack.pack_id),
+                    bundle: None,
+                    profile: CompletenessProfile::AnnexIvGovernanceV1,
+                })
+                .unwrap(),
+            ))
+            .unwrap();
+        let response = app.oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let error: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(
+            error["error"],
+            "requested profile does not match pack completeness profile"
+        );
+    }
+
+    #[tokio::test]
+    async fn evaluate_completeness_api_rejects_pack_without_pack_scoped_completeness() {
+        let state = test_state(DEFAULT_MAX_PAYLOAD_BYTES).await;
+        let app = build_router(state, DEFAULT_MAX_PAYLOAD_BYTES);
+        let _scenario = create_annex_iv_scenario(&app).await;
+
+        let pack_req = Request::builder()
+            .method("POST")
+            .uri("/v1/packs")
+            .header("content-type", "application/json")
+            .body(Body::from(
+                serde_json::to_vec(&CreatePackRequest {
+                    pack_type: "runtime_logs".to_string(),
+                    system_id: Some("hiring-assistant".to_string()),
+                    from: None,
+                    to: None,
+                    bundle_format: PACK_BUNDLE_FORMAT_FULL.to_string(),
+                    disclosure_policy: None,
+                    disclosure_template: None,
+                })
+                .unwrap(),
+            ))
+            .unwrap();
+        let pack_res = app.clone().oneshot(pack_req).await.unwrap();
+        assert_eq!(pack_res.status(), StatusCode::CREATED);
+        let body = axum::body::to_bytes(pack_res.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let pack: PackSummaryResponse = serde_json::from_slice(&body).unwrap();
+
+        let request = Request::builder()
+            .method("POST")
+            .uri("/v1/completeness/evaluate")
+            .header("content-type", "application/json")
+            .body(Body::from(
+                serde_json::to_vec(&EvaluateCompletenessRequest {
+                    bundle_id: None,
+                    pack_id: Some(pack.pack_id),
+                    bundle: None,
+                    profile: CompletenessProfile::GpaiProviderV1,
+                })
+                .unwrap(),
+            ))
+            .unwrap();
+        let response = app.oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::CONFLICT);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let error: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(
+            error["error"],
+            "pack does not have pack-scoped completeness"
+        );
+    }
+
+    #[tokio::test]
+    async fn evaluate_completeness_api_rejects_missing_pack_completeness_report() {
+        let state = test_state(DEFAULT_MAX_PAYLOAD_BYTES).await;
+        let db = state.db.clone();
+        let app = build_router(state, DEFAULT_MAX_PAYLOAD_BYTES);
+        let _scenario = create_gpai_provider_scenario(&app).await;
+
+        let pack_req = Request::builder()
+            .method("POST")
+            .uri("/v1/packs")
+            .header("content-type", "application/json")
+            .body(Body::from(
+                serde_json::to_vec(&CreatePackRequest {
+                    pack_type: "annex_xi".to_string(),
+                    system_id: Some("foundation-model-alpha".to_string()),
+                    from: None,
+                    to: None,
+                    bundle_format: default_pack_bundle_format(),
+                    disclosure_policy: None,
+                    disclosure_template: None,
+                })
+                .unwrap(),
+            ))
+            .unwrap();
+        let pack_res = app.clone().oneshot(pack_req).await.unwrap();
+        assert_eq!(pack_res.status(), StatusCode::CREATED);
+        let body = axum::body::to_bytes(pack_res.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let pack: PackSummaryResponse = serde_json::from_slice(&body).unwrap();
+
+        sqlx::query("UPDATE packs SET pack_completeness_report_json = NULL WHERE pack_id = ?")
+            .bind(&pack.pack_id)
+            .execute(&db)
+            .await
+            .unwrap();
+
+        let request = Request::builder()
+            .method("POST")
+            .uri("/v1/completeness/evaluate")
+            .header("content-type", "application/json")
+            .body(Body::from(
+                serde_json::to_vec(&EvaluateCompletenessRequest {
+                    bundle_id: None,
+                    pack_id: Some(pack.pack_id),
+                    bundle: None,
+                    profile: CompletenessProfile::GpaiProviderV1,
+                })
+                .unwrap(),
+            ))
+            .unwrap();
+        let response = app.oneshot(request).await.unwrap();
+        assert_eq!(response.status(), StatusCode::CONFLICT);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let error: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(
+            error["error"],
+            "pack-scoped completeness report unavailable for this pack; recreate the pack"
+        );
     }
 
     #[tokio::test]
@@ -15007,6 +15487,17 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
             Some(CompletenessProfile::AnnexIvGovernanceV1)
         );
         assert_eq!(pack.completeness_status, Some(CompletenessStatus::Fail));
+        assert_eq!(
+            pack.pack_completeness_profile,
+            Some(CompletenessProfile::AnnexIvGovernanceV1)
+        );
+        assert_eq!(
+            pack.pack_completeness_status,
+            Some(CompletenessStatus::Pass)
+        );
+        assert_eq!(pack.pack_completeness_pass_count, Some(5));
+        assert_eq!(pack.pack_completeness_warn_count, Some(0));
+        assert_eq!(pack.pack_completeness_fail_count, Some(0));
 
         let expected_bundle_ids = BTreeSet::from([
             scenario.technical_doc.bundle_id.clone(),
@@ -15077,6 +15568,17 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
         assert_eq!(manifest.completeness_pass_count, Some(0));
         assert_eq!(manifest.completeness_warn_count, Some(0));
         assert_eq!(manifest.completeness_fail_count, Some(8));
+        assert_eq!(
+            manifest.pack_completeness_profile,
+            Some(CompletenessProfile::AnnexIvGovernanceV1)
+        );
+        assert_eq!(
+            manifest.pack_completeness_status,
+            Some(CompletenessStatus::Pass)
+        );
+        assert_eq!(manifest.pack_completeness_pass_count, Some(5));
+        assert_eq!(manifest.pack_completeness_warn_count, Some(0));
+        assert_eq!(manifest.pack_completeness_fail_count, Some(0));
 
         let technical_entry = manifest
             .bundles
@@ -15335,6 +15837,49 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
             seen_bundle_ids,
             pack.bundle_ids.into_iter().collect::<BTreeSet<_>>()
         );
+    }
+
+    #[tokio::test]
+    async fn annex_iv_disclosure_pack_uses_full_bundle_inputs_for_pack_completeness() {
+        let state = test_state(DEFAULT_MAX_PAYLOAD_BYTES).await;
+        let app = build_router(state, DEFAULT_MAX_PAYLOAD_BYTES);
+        let _scenario = create_annex_iv_scenario(&app).await;
+
+        let pack_req = Request::builder()
+            .method("POST")
+            .uri("/v1/packs")
+            .header("content-type", "application/json")
+            .body(Body::from(
+                serde_json::to_vec(&CreatePackRequest {
+                    pack_type: "annex_iv".to_string(),
+                    system_id: Some("hiring-assistant".to_string()),
+                    from: None,
+                    to: None,
+                    bundle_format: PACK_BUNDLE_FORMAT_DISCLOSURE.to_string(),
+                    disclosure_policy: None,
+                    disclosure_template: None,
+                })
+                .unwrap(),
+            ))
+            .unwrap();
+        let pack_res = app.clone().oneshot(pack_req).await.unwrap();
+        assert_eq!(pack_res.status(), StatusCode::CREATED);
+        let body = axum::body::to_bytes(pack_res.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let pack: PackSummaryResponse = serde_json::from_slice(&body).unwrap();
+
+        assert_eq!(
+            pack.pack_completeness_profile,
+            Some(CompletenessProfile::AnnexIvGovernanceV1)
+        );
+        assert_eq!(
+            pack.pack_completeness_status,
+            Some(CompletenessStatus::Pass)
+        );
+        assert_eq!(pack.pack_completeness_pass_count, Some(5));
+        assert_eq!(pack.pack_completeness_warn_count, Some(0));
+        assert_eq!(pack.pack_completeness_fail_count, Some(0));
     }
 
     #[tokio::test]
@@ -16311,6 +16856,17 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
             Some(CompletenessProfile::GpaiProviderV1)
         );
         assert_eq!(pack.completeness_status, Some(CompletenessStatus::Fail));
+        assert_eq!(
+            pack.pack_completeness_profile,
+            Some(CompletenessProfile::GpaiProviderV1)
+        );
+        assert_eq!(
+            pack.pack_completeness_status,
+            Some(CompletenessStatus::Pass)
+        );
+        assert_eq!(pack.pack_completeness_pass_count, Some(6));
+        assert_eq!(pack.pack_completeness_warn_count, Some(0));
+        assert_eq!(pack.pack_completeness_fail_count, Some(0));
         assert_eq!(pack.bundle_count, 6);
         assert_eq!(
             pack.bundle_ids,
@@ -16348,6 +16904,17 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
         assert_eq!(manifest.completeness_pass_count, Some(0));
         assert_eq!(manifest.completeness_warn_count, Some(0));
         assert_eq!(manifest.completeness_fail_count, Some(6));
+        assert_eq!(
+            manifest.pack_completeness_profile,
+            Some(CompletenessProfile::GpaiProviderV1)
+        );
+        assert_eq!(
+            manifest.pack_completeness_status,
+            Some(CompletenessStatus::Pass)
+        );
+        assert_eq!(manifest.pack_completeness_pass_count, Some(6));
+        assert_eq!(manifest.pack_completeness_warn_count, Some(0));
+        assert_eq!(manifest.pack_completeness_fail_count, Some(0));
         assert_eq!(manifest.bundles.len(), 6);
         assert!(
             manifest
@@ -16381,6 +16948,49 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
                 .matched_rules
                 .contains(&"obligation_ref:art51_compute_threshold".to_string())
         );
+    }
+
+    #[tokio::test]
+    async fn annex_xi_disclosure_pack_uses_full_bundle_inputs_for_pack_completeness() {
+        let state = test_state(DEFAULT_MAX_PAYLOAD_BYTES).await;
+        let app = build_router(state, DEFAULT_MAX_PAYLOAD_BYTES);
+        let _scenario = create_gpai_provider_scenario(&app).await;
+
+        let pack_req = Request::builder()
+            .method("POST")
+            .uri("/v1/packs")
+            .header("content-type", "application/json")
+            .body(Body::from(
+                serde_json::to_vec(&CreatePackRequest {
+                    pack_type: "annex_xi".to_string(),
+                    system_id: Some("foundation-model-alpha".to_string()),
+                    from: None,
+                    to: None,
+                    bundle_format: PACK_BUNDLE_FORMAT_DISCLOSURE.to_string(),
+                    disclosure_policy: None,
+                    disclosure_template: None,
+                })
+                .unwrap(),
+            ))
+            .unwrap();
+        let pack_res = app.clone().oneshot(pack_req).await.unwrap();
+        assert_eq!(pack_res.status(), StatusCode::CREATED);
+        let body = axum::body::to_bytes(pack_res.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let pack: PackSummaryResponse = serde_json::from_slice(&body).unwrap();
+
+        assert_eq!(
+            pack.pack_completeness_profile,
+            Some(CompletenessProfile::GpaiProviderV1)
+        );
+        assert_eq!(
+            pack.pack_completeness_status,
+            Some(CompletenessStatus::Pass)
+        );
+        assert_eq!(pack.pack_completeness_pass_count, Some(6));
+        assert_eq!(pack.pack_completeness_warn_count, Some(0));
+        assert_eq!(pack.pack_completeness_fail_count, Some(0));
     }
 
     #[tokio::test]

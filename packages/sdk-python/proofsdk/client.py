@@ -67,15 +67,18 @@ class ProofLayerClient:
         profile: str,
         bundle: dict[str, Any] | None = None,
         bundle_id: str | None = None,
+        pack_id: str | None = None,
     ) -> dict[str, Any]:
-        selection_count = sum(1 for value in (bundle, bundle_id) if value is not None)
+        selection_count = sum(1 for value in (bundle, bundle_id, pack_id) if value is not None)
         if selection_count != 1:
-            raise ValueError("provide exactly one of bundle or bundle_id")
+            raise ValueError("provide exactly one of bundle_id, bundle, or pack_id")
         payload: dict[str, Any] = {"profile": profile}
         if bundle is not None:
             payload["bundle"] = bundle
         if bundle_id is not None:
             payload["bundle_id"] = bundle_id
+        if pack_id is not None:
+            payload["pack_id"] = pack_id
         return self._request_fn(
             "POST",
             "/v1/completeness/evaluate",

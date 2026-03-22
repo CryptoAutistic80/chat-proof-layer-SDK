@@ -68,7 +68,7 @@ class TestProofLayerClient(unittest.TestCase):
             },
         )
 
-    def test_evaluate_completeness_posts_bundle_id_or_bundle(self):
+    def test_evaluate_completeness_posts_bundle_id(self):
         captured = {}
 
         def request_fn(method, path, headers, body):
@@ -103,6 +103,58 @@ class TestProofLayerClient(unittest.TestCase):
             },
         )
         self.assertEqual(out["status"], "pass")
+
+    def test_evaluate_completeness_posts_pack_id(self):
+        captured = {}
+
+        def request_fn(method, path, headers, body):
+            captured["method"] = method
+            captured["path"] = path
+            captured["headers"] = headers
+            captured["body"] = body
+            return {
+                "profile": "gpai_provider_v1",
+                "status": "pass",
+                "bundle_id": "P1",
+                "system_id": "foundation-model-alpha",
+                "pass_count": 6,
+                "warn_count": 0,
+                "fail_count": 0,
+                "rules": [],
+            }
+
+        client = ProofLayerClient(base_url="http://127.0.0.1:8080", request_fn=request_fn)
+        out = client.evaluate_completeness(
+            pack_id="P1",
+            profile="gpai_provider_v1",
+        )
+
+        self.assertEqual(captured["method"], "POST")
+        self.assertEqual(captured["path"], "/v1/completeness/evaluate")
+        self.assertEqual(
+            json.loads(captured["body"].decode("utf-8")),
+            {
+                "pack_id": "P1",
+                "profile": "gpai_provider_v1",
+            },
+        )
+        self.assertEqual(out["status"], "pass")
+
+    def test_evaluate_completeness_rejects_invalid_selector_combinations(self):
+        client = ProofLayerClient(
+            base_url="http://127.0.0.1:8080",
+            request_fn=lambda *_args: {"ok": True},
+        )
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "provide exactly one of bundle_id, bundle, or pack_id",
+        ):
+            client.evaluate_completeness(
+                bundle_id="B1",
+                pack_id="P1",
+                profile="gpai_provider_v1",
+            )
 
     def test_create_pack_serializes_inline_disclosure_template(self):
         captured = {}

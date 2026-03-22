@@ -139,6 +139,22 @@ class TestNativeBindings(unittest.TestCase):
                     "type": "human_oversight",
                     "data": json.loads((ANNEX_IV_DIR / "human_oversight.json").read_text(encoding="utf-8")),
                 },
+                {
+                    "type": "qms_record",
+                    "data": json.loads((ANNEX_IV_DIR / "qms_record.json").read_text(encoding="utf-8")),
+                },
+                {
+                    "type": "standards_alignment",
+                    "data": json.loads(
+                        (ANNEX_IV_DIR / "standards_alignment.json").read_text(encoding="utf-8")
+                    ),
+                },
+                {
+                    "type": "post_market_monitoring",
+                    "data": json.loads(
+                        (ANNEX_IV_DIR / "post_market_monitoring.json").read_text(encoding="utf-8")
+                    ),
+                },
             ],
             "artefacts": [],
             "policy": {"redactions": [], "encryption": {"enabled": False}},
@@ -159,7 +175,7 @@ class TestNativeBindings(unittest.TestCase):
 
         report = evaluate_completeness(bundle=bundle, profile="annex_iv_governance_v1")
         self.assertEqual(report["status"], "pass")
-        self.assertEqual(report["pass_count"], 5)
+        self.assertEqual(report["pass_count"], 8)
 
     def test_native_evaluate_completeness_supports_gpai_provider_profile(self):
         bundle = {

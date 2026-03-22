@@ -5167,8 +5167,8 @@ fn bundle_completeness_profile_for_pack(pack_type: &str) -> Option<CompletenessP
 
 fn pack_completeness_profile_for_pack(pack_type: &str) -> Option<CompletenessProfile> {
     match pack_type {
-        // annex_iv packs curate eight evidence families, but the current
-        // annex_iv_governance_v1 readiness profile evaluates five rule families.
+        // annex_iv pack completeness now aligns with the eight governance
+        // rule families curated by the pack itself.
         "annex_iv" => Some(CompletenessProfile::AnnexIvGovernanceV1),
         // fundamental_rights packs can contain incident/supporting items, but the
         // current deployer-side readiness profile evaluates the assessment and
@@ -10641,6 +10641,60 @@ mod tests {
                         "No emergency stop was required for this review path.".to_string(),
                     ),
                 }),
+                EvidenceItem::QmsRecord(proof_layer_core::schema::QmsRecordEvidence {
+                    record_id: "qms-release-approval-42".to_string(),
+                    process: "release_approval".to_string(),
+                    status: "approved".to_string(),
+                    record_commitment: Some(
+                        "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+                            .to_string(),
+                    ),
+                    policy_name: Some("Hiring Assistant Release Governance".to_string()),
+                    revision: Some("3.1".to_string()),
+                    effective_date: Some("2026-03-01".to_string()),
+                    expiry_date: None,
+                    scope: Some("EU provider release control".to_string()),
+                    approval_commitment: None,
+                    audit_results_summary: Some(
+                        "Release gate approved after compliance review.".to_string(),
+                    ),
+                    continuous_improvement_actions: vec![
+                        "monitor subgroup parity monthly".to_string(),
+                    ],
+                    metadata: serde_json::json!({
+                        "owner": "quality-lead",
+                    }),
+                }),
+                EvidenceItem::StandardsAlignment(
+                    proof_layer_core::schema::StandardsAlignmentEvidence {
+                        standard_ref: "harmonized://eu-ai-act/annex-iv".to_string(),
+                        status: "aligned".to_string(),
+                        scope: Some("high-risk technical documentation".to_string()),
+                        mapping_commitment: Some(
+                            "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+                                .to_string(),
+                        ),
+                        metadata: serde_json::json!({
+                            "owner": "compliance-mapping-team",
+                        }),
+                    },
+                ),
+                EvidenceItem::PostMarketMonitoring(
+                    proof_layer_core::schema::PostMarketMonitoringEvidence {
+                        plan_id: "pmm-42".to_string(),
+                        status: "active".to_string(),
+                        summary: Some(
+                            "Weekly drift review with escalation thresholds.".to_string(),
+                        ),
+                        report_commitment: Some(
+                            "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+                                .to_string(),
+                        ),
+                        metadata: serde_json::json!({
+                            "owner": "safety-ops",
+                        }),
+                    },
+                ),
             ],
             Some("annex_iv"),
         );
@@ -15610,7 +15664,7 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
         assert_eq!(report.profile, CompletenessProfile::AnnexIvGovernanceV1);
         assert_eq!(report.bundle_id, pack.pack_id);
         assert_eq!(report.status, CompletenessStatus::Pass);
-        assert_eq!(report.pass_count, 5);
+        assert_eq!(report.pass_count, 8);
         assert_eq!(report.warn_count, 0);
         assert_eq!(report.fail_count, 0);
     }
@@ -15836,7 +15890,7 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
             pack.pack_completeness_status,
             Some(CompletenessStatus::Pass)
         );
-        assert_eq!(pack.pack_completeness_pass_count, Some(5));
+        assert_eq!(pack.pack_completeness_pass_count, Some(8));
         assert_eq!(pack.pack_completeness_warn_count, Some(0));
         assert_eq!(pack.pack_completeness_fail_count, Some(0));
 
@@ -16001,7 +16055,7 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
             manifest.pack_completeness_status,
             Some(CompletenessStatus::Pass)
         );
-        assert_eq!(manifest.pack_completeness_pass_count, Some(5));
+        assert_eq!(manifest.pack_completeness_pass_count, Some(8));
         assert_eq!(manifest.pack_completeness_warn_count, Some(0));
         assert_eq!(manifest.pack_completeness_fail_count, Some(0));
 
@@ -16304,7 +16358,7 @@ lbMJi3Q4AiEA9D8MwQFYMn4s0CXt3fdhssaMf69SlNwNKpMpVVWs54A=
             pack.pack_completeness_status,
             Some(CompletenessStatus::Pass)
         );
-        assert_eq!(pack.pack_completeness_pass_count, Some(5));
+        assert_eq!(pack.pack_completeness_pass_count, Some(8));
         assert_eq!(pack.pack_completeness_warn_count, Some(0));
         assert_eq!(pack.pack_completeness_fail_count, Some(0));
     }

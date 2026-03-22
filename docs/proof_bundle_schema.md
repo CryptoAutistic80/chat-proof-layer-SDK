@@ -269,11 +269,14 @@ These minimums are now machine-assessed by the advisory `annex_iv_governance_v1`
 ### Linked Governance Items
 
 - `qms_record`
+  Recommended for Annex IV readiness: `record_id`, `process`, `status`, `policy_name`, `revision`, `scope`, `audit_results_summary`, `continuous_improvement_actions`
   Typical obligation intent: `art17`
   Recommended disclosure-sensitive path: `/metadata`
 - `standards_alignment`
+  Recommended for Annex IV readiness: `standard_ref`, `status`, `scope`
   Typical obligation intent: `art40_43`
   Recommended disclosure-sensitive path: `/metadata`
 - `post_market_monitoring`
+  Recommended for Annex IV readiness: `plan_id`, `status`, `summary`
   Typical obligation intent: `art72`
   Recommended disclosure-sensitive path: `/metadata`

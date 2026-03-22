@@ -267,7 +267,7 @@ The vault also exposes `POST /v1/completeness/evaluate` for advisory readiness c
 For pack responses, the legacy `completeness_*` fields remain the per-bundle aggregate view. New `pack_completeness_*` fields carry the true synthesized pack-level readiness result where supported for `annex_iv`, `fundamental_rights`, and `annex_xi`.
 Pack summaries and manifests may now include `pack_completeness_profile`, `pack_completeness_status`, `pack_completeness_pass_count`, `pack_completeness_warn_count`, and `pack_completeness_fail_count`.
 
-For `annex_iv`, the current pack-scoped pass count is `5`, not `8`, because `annex_iv_governance_v1` currently evaluates five rule families even though the pack curates eight governance evidence families.
+For `annex_iv`, the current pack-scoped pass count is `8` because `annex_iv_governance_v1` now evaluates the full governance set curated by the pack.
 For `fundamental_rights`, the current pack-scoped pass count is `2` because `fundamental_rights_v1` currently evaluates the deployer-side assessment and oversight rule families.
 
 ```json
@@ -713,4 +713,3 @@ JSON schemas:
 - Rekor verification checks receipt structure, entry binding, inclusion proof, signed-entry-timestamp signature, and optional live log consistency / freshness when requested.
 - SCITT now writes the COSE/CCF-style receipt body by default and keeps legacy JSON read compatibility, but broader interop and trust-list work are still future work.
 - SQLite is the production-default path in this repo today; PostgreSQL and S3 are future expansion paths, not current backends.
-

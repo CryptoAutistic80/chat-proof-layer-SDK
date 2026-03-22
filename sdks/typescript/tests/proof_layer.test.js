@@ -19,12 +19,18 @@ async function annexIvBundle() {
     technicalDoc,
     instructionsForUse,
     humanOversight,
+    qmsRecord,
+    standardsAlignment,
+    postMarketMonitoring,
   ] = await Promise.all([
     readFile(path.join(annexIvDir, "risk_assessment.json"), "utf8"),
     readFile(path.join(annexIvDir, "data_governance.json"), "utf8"),
     readFile(path.join(annexIvDir, "technical_doc.json"), "utf8"),
     readFile(path.join(annexIvDir, "instructions_for_use.json"), "utf8"),
     readFile(path.join(annexIvDir, "human_oversight.json"), "utf8"),
+    readFile(path.join(annexIvDir, "qms_record.json"), "utf8"),
+    readFile(path.join(annexIvDir, "standards_alignment.json"), "utf8"),
+    readFile(path.join(annexIvDir, "post_market_monitoring.json"), "utf8"),
   ]);
 
   return {
@@ -48,6 +54,12 @@ async function annexIvBundle() {
       { type: "data_governance", data: JSON.parse(dataGovernance) },
       { type: "instructions_for_use", data: JSON.parse(instructionsForUse) },
       { type: "human_oversight", data: JSON.parse(humanOversight) },
+      { type: "qms_record", data: JSON.parse(qmsRecord) },
+      { type: "standards_alignment", data: JSON.parse(standardsAlignment) },
+      {
+        type: "post_market_monitoring",
+        data: JSON.parse(postMarketMonitoring),
+      },
     ],
     artefacts: [],
     policy: {
@@ -281,7 +293,7 @@ test("ProofLayer local mode can evaluate completeness", async () => {
   });
 
   assert.equal(report.status, "pass");
-  assert.equal(report.pass_count, 5);
+  assert.equal(report.pass_count, 8);
 });
 
 test("ProofLayer local mode can evaluate gpai provider completeness", async () => {

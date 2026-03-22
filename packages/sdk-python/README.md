@@ -244,7 +244,7 @@ Vault verification responses now also include a plain-English `assessment` block
 Use `verify_timestamp(...)` and `verify_receipt(...)` when you want both the low-level crypto result and a short human-readable trust summary.
 For receipts, `live_check_mode="best_effort"` adds an opt-in live Rekor freshness check without turning temporary network problems into a hard failure.
 
-For `annex_iv`, the pack-scoped pass count is currently `5` because `annex_iv_governance_v1` evaluates five rule families even though the pack curates eight governance evidence families.
+For `annex_iv`, the pack-scoped pass count is currently `8` because `annex_iv_governance_v1` now evaluates the full governance set curated by the pack.
 
 For the full provider-side Annex IV governance walkthrough, build the native module and run:
 

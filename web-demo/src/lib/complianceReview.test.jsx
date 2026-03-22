@@ -40,7 +40,7 @@ describe("buildComplianceReview", () => {
         packCompletenessReport: {
           profile: "annex_iv_governance_v1",
           status: "pass",
-          pass_count: 5,
+          pass_count: 8,
           warn_count: 0,
           fail_count: 0,
           rules: [],
@@ -124,7 +124,7 @@ describe("buildComplianceReview", () => {
         completenessReport: {
           profile: "annex_iv_governance_v1",
           status: "pass",
-          pass_count: 5,
+          pass_count: 8,
           warn_count: 0,
           fail_count: 0,
           rules: [],

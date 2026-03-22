@@ -45,6 +45,22 @@ def annex_iv_bundle() -> dict[str, object]:
                 "type": "human_oversight",
                 "data": json.loads((ANNEX_IV_DIR / "human_oversight.json").read_text(encoding="utf-8")),
             },
+            {
+                "type": "qms_record",
+                "data": json.loads((ANNEX_IV_DIR / "qms_record.json").read_text(encoding="utf-8")),
+            },
+            {
+                "type": "standards_alignment",
+                "data": json.loads(
+                    (ANNEX_IV_DIR / "standards_alignment.json").read_text(encoding="utf-8")
+                ),
+            },
+            {
+                "type": "post_market_monitoring",
+                "data": json.loads(
+                    (ANNEX_IV_DIR / "post_market_monitoring.json").read_text(encoding="utf-8")
+                ),
+            },
         ],
         "artefacts": [],
         "policy": {"redactions": [], "encryption": {"enabled": False}},
@@ -232,7 +248,7 @@ class TestProofLayer(unittest.TestCase):
         )
 
         self.assertEqual(report["status"], "pass")
-        self.assertEqual(report["pass_count"], 5)
+        self.assertEqual(report["pass_count"], 8)
 
     def test_local_mode_can_evaluate_gpai_provider_completeness(self):
         signing_key_pem = (GOLDEN_DIR / "signing_key.txt").read_text(encoding="utf-8")

@@ -63,7 +63,7 @@ const mocks = vi.hoisted(() => {
 
   function ruleCountForProfile(profile) {
     if (profile === "annex_iv_governance_v1") {
-      return 5;
+      return 8;
     }
     if (profile === "fundamental_rights_v1") {
       return 2;
@@ -443,7 +443,7 @@ describe("AppRoutes", () => {
         "The structured governance fields for this Annex IV exported pack meet the current advisory minimum."
       )
     ).toBeTruthy();
-    expect(screen.getByText("5 pass · 0 warn · 0 fail")).toBeTruthy();
+    expect(screen.getByText("8 pass · 0 warn · 0 fail")).toBeTruthy();
     expect(mocks.evaluateCompleteness).toHaveBeenCalledWith(
       expect.any(String),
       expect.any(String),

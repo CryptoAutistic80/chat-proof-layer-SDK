@@ -47,7 +47,7 @@ cargo run -p proofctl -- assess \
 
 If you later export an `annex_iv`, `fundamental_rights`, or `annex_xi` pack from the vault, the pack summary and manifest will keep the legacy per-bundle `completeness_*` fields and, where supported, add `pack_completeness_*` fields for the synthesized pack-level readiness result.
 
-For `annex_iv`, the pack-scoped pass count is currently `5` because `annex_iv_governance_v1` evaluates five rule families even though the pack curates eight governance evidence families.
+For `annex_iv`, the pack-scoped pass count is currently `8` because `annex_iv_governance_v1` now evaluates the full governance set curated by the pack.
 For `fundamental_rights`, the pack-scoped pass count is currently `2` because `fundamental_rights_v1` evaluates the deployer-side assessment and oversight rule families.
 
 If you want the plain-English timestamp and transparency trust result from the CLI, run verify with the assurance checks turned on:

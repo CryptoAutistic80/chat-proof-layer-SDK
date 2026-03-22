@@ -1,8 +1,9 @@
 use proof_layer_core::schema::{
     BUNDLE_VERSION, ComputeMetricsEvidence, CopyrightPolicyEvidence, DataGovernanceEvidence,
     EvidenceBundle, EvidenceItem, FundamentalRightsAssessmentEvidence, HumanOversightEvidence,
-    InstructionsForUseEvidence, ModelEvaluationEvidence, RiskAssessmentEvidence,
-    TechnicalDocEvidence, TrainingProvenanceEvidence, TrainingSummaryEvidence,
+    InstructionsForUseEvidence, ModelEvaluationEvidence, PostMarketMonitoringEvidence,
+    QmsRecordEvidence, RiskAssessmentEvidence, StandardsAlignmentEvidence, TechnicalDocEvidence,
+    TrainingProvenanceEvidence, TrainingSummaryEvidence,
 };
 use proof_layer_core::{
     Actor, ActorRole, CompletenessProfile, CompletenessStatus, EncryptionPolicy, EvidenceContext,
@@ -73,6 +74,11 @@ fn annex_iv_bundle() -> EvidenceBundle {
         read_json("annex_iv_governance", "instructions_for_use.json");
     let oversight: HumanOversightEvidence =
         read_json("annex_iv_governance", "human_oversight.json");
+    let qms: QmsRecordEvidence = read_json("annex_iv_governance", "qms_record.json");
+    let standards: StandardsAlignmentEvidence =
+        read_json("annex_iv_governance", "standards_alignment.json");
+    let monitoring: PostMarketMonitoringEvidence =
+        read_json("annex_iv_governance", "post_market_monitoring.json");
 
     minimal_bundle(
         "hiring-assistant",
@@ -84,6 +90,9 @@ fn annex_iv_bundle() -> EvidenceBundle {
             EvidenceItem::DataGovernance(data),
             EvidenceItem::InstructionsForUse(instructions),
             EvidenceItem::HumanOversight(oversight),
+            EvidenceItem::QmsRecord(qms),
+            EvidenceItem::StandardsAlignment(standards),
+            EvidenceItem::PostMarketMonitoring(monitoring),
         ],
     )
 }
@@ -136,7 +145,7 @@ fn passing_annex_iv_governance_fixture_returns_pass() {
     let report = evaluate_completeness(&bundle, CompletenessProfile::AnnexIvGovernanceV1);
 
     assert_eq!(report.status, CompletenessStatus::Pass);
-    assert_eq!(report.pass_count, 5);
+    assert_eq!(report.pass_count, 8);
     assert_eq!(report.warn_count, 0);
     assert_eq!(report.fail_count, 0);
 }
@@ -285,6 +294,31 @@ fn passing_fundamental_rights_fixture_returns_pass() {
     assert_eq!(report.pass_count, 2);
     assert_eq!(report.warn_count, 0);
     assert_eq!(report.fail_count, 0);
+}
+
+#[test]
+fn annex_iv_qms_record_missing_required_field_returns_fail() {
+    let mut bundle = annex_iv_bundle();
+    let evidence = bundle
+        .items
+        .iter_mut()
+        .find_map(|item| match item {
+            EvidenceItem::QmsRecord(evidence) => Some(evidence),
+            _ => None,
+        })
+        .expect("qms_record should exist");
+    evidence.continuous_improvement_actions.clear();
+
+    let report = evaluate_completeness(&bundle, CompletenessProfile::AnnexIvGovernanceV1);
+
+    assert_eq!(report.status, CompletenessStatus::Fail);
+    let rule = report
+        .rules
+        .iter()
+        .find(|rule| rule.item_type == "qms_record")
+        .expect("qms_record rule should exist");
+    assert_eq!(rule.status, CompletenessStatus::Fail);
+    assert_eq!(rule.missing_fields, vec!["continuous_improvement_actions"]);
 }
 
 #[test]

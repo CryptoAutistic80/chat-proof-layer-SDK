@@ -1398,5 +1398,31 @@ class TestProofLayer(unittest.TestCase):
         )
 
 
+    def test_start_chat_session_logs_transcript_and_seals_once(self):
+        signing_key_pem = (GOLDEN_DIR / "signing_key.txt").read_text(encoding="utf-8")
+        proof_layer = ProofLayer.load(
+            signing_key_pem=signing_key_pem,
+            key_id="kid-dev-01",
+            system_id="system-chat-01",
+        )
+
+        session = proof_layer.start_chat_session(
+            provider="openai",
+            model="gpt-4.1-mini",
+            request_id="req-chat-01",
+        )
+        session.log_user("Hello")
+        session.log_ai("Hi, how can I help?")
+        session.log_user("Give me an Article 12 summary")
+        session.log_ai("Article 12 requires automatic logging for high-risk systems.")
+
+        result = session.finish_session()
+
+        self.assertEqual(len(result["transcript"]), 4)
+        self.assertEqual(result["proof"]["bundle"]["items"][0]["type"], "llm_interaction")
+        self.assertEqual(result["proof"]["bundle"]["subject"]["system_id"], "system-chat-01")
+
+
+
 if __name__ == "__main__":
     unittest.main()

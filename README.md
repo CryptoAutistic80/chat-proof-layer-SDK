@@ -709,6 +709,7 @@ Start with:
 ## Docs Map
 
 - [Architecture](docs/architecture.md)
+- [EU AI Act Fork Executive Summary](docs/eu_ai_act_fork_executive_summary.md)
 - [Proof Bundle Schema](docs/proof_bundle_schema.md)
 - [Threat Model](docs/threat_model.md)
 - [Verification Test Matrix](docs/verification-test-matrix.md)

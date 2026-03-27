@@ -95,6 +95,74 @@ import type {
   VerifyRedactedBundleSummary
 } from "./types.js";
 
+
+export interface ChatSessionOptions {
+  provider: string;
+  model: string;
+  systemId?: string;
+  requestId?: string;
+  threadId?: string;
+  userRef?: string;
+  modelParameters?: ProofLayerCaptureOptions["modelParameters"];
+  retentionClass?: string;
+  complianceProfile?: ComplianceProfileInput;
+  artefacts?: ProofLayerCaptureOptions["artefacts"];
+}
+
+export interface ChatSessionResult {
+  transcript: Array<{ role: "user" | "assistant"; content: string }>;
+  proof: ProofLayerResult;
+}
+
+class ChatProofSession {
+  readonly #proofLayer: ProofLayer;
+  readonly #options: ChatSessionOptions;
+  readonly #transcript: Array<{ role: "user" | "assistant"; content: string }> = [];
+
+  constructor(proofLayer: ProofLayer, options: ChatSessionOptions) {
+    this.#proofLayer = proofLayer;
+    this.#options = options;
+  }
+
+  logUser(content: string): void {
+    this.#transcript.push({ role: "user", content });
+  }
+
+  logAI(content: string): void {
+    this.#transcript.push({ role: "assistant", content });
+  }
+
+  async finishSession(): Promise<ChatSessionResult> {
+    const input = this.#transcript
+      .filter((entry) => entry.role === "user")
+      .map((entry) => entry.content);
+    const output = this.#transcript
+      .filter((entry) => entry.role === "assistant")
+      .map((entry) => entry.content)
+      .join("\n\n");
+
+    const proof = await this.#proofLayer.capture({
+      provider: this.#options.provider,
+      model: this.#options.model,
+      systemId: this.#options.systemId,
+      requestId: this.#options.requestId,
+      threadId: this.#options.threadId,
+      userRef: this.#options.userRef,
+      modelParameters: this.#options.modelParameters,
+      complianceProfile: this.#options.complianceProfile,
+      retentionClass: this.#options.retentionClass,
+      artefacts: this.#options.artefacts,
+      input,
+      output
+    });
+
+    return {
+      transcript: [...this.#transcript],
+      proof
+    };
+  }
+}
+
 function resolveSigningKeyPem(options: ProofLayerOptions): string | undefined {
   if (options.signingKeyPem) {
     return options.signingKeyPem;
@@ -148,6 +216,14 @@ export class ProofLayer implements BundleCreateClient {
     }
 
     throw new Error("ProofLayer requires either signingKeyPem/signingKeyPath or vaultUrl");
+  }
+
+  static load(options: ProofLayerOptions): ProofLayer {
+    return new ProofLayer(options);
+  }
+
+  startChatSession(options: ChatSessionOptions): ChatProofSession {
+    return new ChatProofSession(this, options);
   }
 
   async createBundle(request: CreateBundleRequest): Promise<CreateBundleResponse> {

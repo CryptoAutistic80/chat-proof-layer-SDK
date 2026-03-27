@@ -1531,3 +1531,31 @@ test("ProofLayer.captureRegistration seals registration evidence locally", async
     result.bundle?.items[0].data.receipt_commitment.startsWith("sha256:"),
   );
 });
+
+test("ProofLayer.startChatSession logs transcript and seals once", async () => {
+  const signingKeyPem = await readFile(
+    path.join(goldenDir, "signing_key.txt"),
+    "utf8",
+  );
+  const proofLayer = ProofLayer.load({
+    signingKeyPem,
+    keyId: "kid-dev-01",
+    systemId: "system-chat-01",
+  });
+
+  const session = proofLayer.startChatSession({
+    provider: "openai",
+    model: "gpt-4.1-mini",
+    requestId: "req-chat-01",
+  });
+  session.logUser("Hello");
+  session.logAI("Hi, how can I help?");
+  session.logUser("Give me an Article 12 summary");
+  session.logAI("Article 12 requires automatic logging for high-risk systems.");
+
+  const result = await session.finishSession();
+
+  assert.equal(result.transcript.length, 4);
+  assert.equal(result.proof.bundle?.items[0].type, "llm_interaction");
+  assert.equal(result.proof.bundle?.subject.system_id, "system-chat-01");
+});

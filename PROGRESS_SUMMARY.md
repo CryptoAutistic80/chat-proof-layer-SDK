@@ -1,3 +1,10 @@
+## March 27, 2026
+
+Completed:
+
+- Added executive-summary-aligned chat-session ergonomics to both SDKs with `load(...)` constructors plus session helpers that support `logUser`/`logAI`/`finishSession` in TypeScript and `log_user`/`log_ai`/`finish_session` in Python.
+- Added TypeScript and Python coverage proving the new chat session helpers capture transcript entries and seal a single `llm_interaction` evidence bundle.
+
 ## March 22, 2026
 
 Completed:

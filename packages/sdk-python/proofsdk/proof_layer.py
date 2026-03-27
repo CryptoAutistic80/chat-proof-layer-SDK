@@ -39,6 +39,64 @@ from proofsdk.evidence import (
 from proofsdk.local_client import LocalProofLayerClient
 
 
+
+
+class ChatProofSession:
+    def __init__(
+        self,
+        proof_layer: "ProofLayer",
+        *,
+        provider: str,
+        model: str,
+        system_id: str | None = None,
+        request_id: str | None = None,
+        thread_id: str | None = None,
+        user_ref: str | None = None,
+        model_parameters: Any = None,
+        compliance_profile: dict[str, Any] | None = None,
+        retention_class: str | None = None,
+        artefacts: list[dict[str, Any]] | None = None,
+    ) -> None:
+        self._proof_layer = proof_layer
+        self._provider = provider
+        self._model = model
+        self._system_id = system_id
+        self._request_id = request_id
+        self._thread_id = thread_id
+        self._user_ref = user_ref
+        self._model_parameters = model_parameters
+        self._compliance_profile = compliance_profile
+        self._retention_class = retention_class
+        self._artefacts = artefacts
+        self._transcript: list[dict[str, str]] = []
+
+    def log_user(self, content: str) -> None:
+        self._transcript.append({"role": "user", "content": content})
+
+    def log_ai(self, content: str) -> None:
+        self._transcript.append({"role": "assistant", "content": content})
+
+    def finish_session(self) -> dict[str, Any]:
+        user_messages = [entry["content"] for entry in self._transcript if entry["role"] == "user"]
+        assistant_messages = [
+            entry["content"] for entry in self._transcript if entry["role"] == "assistant"
+        ]
+        proof = self._proof_layer.capture(
+            provider=self._provider,
+            model=self._model,
+            input=user_messages,
+            output="\n\n".join(assistant_messages),
+            system_id=self._system_id,
+            request_id=self._request_id,
+            thread_id=self._thread_id,
+            user_ref=self._user_ref,
+            model_parameters=self._model_parameters,
+            compliance_profile=self._compliance_profile,
+            retention_class=self._retention_class,
+            artefacts=self._artefacts,
+        )
+        return {"transcript": list(self._transcript), "proof": proof}
+
 class ProofLayer:
     def __init__(
         self,
@@ -85,6 +143,38 @@ class ProofLayer:
             self.client = ProofLayerClient(base_url=vault_url, api_key=api_key, request_fn=request_fn)
         else:
             raise ValueError("ProofLayer requires either signing_key_pem/signing_key_path or vault_url")
+
+    @classmethod
+    def load(cls, **kwargs: Any) -> "ProofLayer":
+        return cls(**kwargs)
+
+    def start_chat_session(
+        self,
+        *,
+        provider: str,
+        model: str,
+        system_id: str | None = None,
+        request_id: str | None = None,
+        thread_id: str | None = None,
+        user_ref: str | None = None,
+        model_parameters: Any = None,
+        compliance_profile: dict[str, Any] | None = None,
+        retention_class: str | None = None,
+        artefacts: list[dict[str, Any]] | None = None,
+    ) -> ChatProofSession:
+        return ChatProofSession(
+            self,
+            provider=provider,
+            model=model,
+            system_id=system_id,
+            request_id=request_id,
+            thread_id=thread_id,
+            user_ref=user_ref,
+            model_parameters=model_parameters,
+            compliance_profile=compliance_profile,
+            retention_class=retention_class,
+            artefacts=artefacts,
+        )
 
     def create_bundle(
         self,

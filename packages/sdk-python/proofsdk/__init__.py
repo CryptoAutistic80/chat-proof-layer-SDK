@@ -1,3 +1,4 @@
+from .chat_proof import LocalChatProofSession, verify_local_chat_bundle
 from .client import ProofLayerClient
 from .decorators import prove_llm_call
 from .disclosure_policy import (
@@ -55,6 +56,7 @@ from .pack_readiness import select_pack_readiness
 from .proof_layer import ProofLayer
 
 __all__ = [
+    "LocalChatProofSession",
     "LocalProofLayerClient",
     "ProofLayer",
     "ProofLayerClient",
@@ -104,4 +106,5 @@ __all__ = [
     "verify_bundle",
     "verify_redacted_bundle",
     "verify_bundle_root",
+    "verify_local_chat_bundle",
 ]

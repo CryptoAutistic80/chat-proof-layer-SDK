@@ -1,0 +1,83 @@
+{
+  "bundle_version": "1.0",
+  "bundle_id": "PLFIXEDCHATEXAMPLE000000000001",
+  "created_at": "2026-03-29T00:00:00+00:00",
+  "actor": {
+    "issuer": "proof-layer-python",
+    "app_id": "python-sdk",
+    "env": "dev",
+    "signing_key_id": "kid-dev-01",
+    "role": "provider"
+  },
+  "subject": {
+    "thread_id": "example-chat-session-001",
+    "system_id": "support-assistant",
+    "model_id": "openai:gpt-4.1-mini"
+  },
+  "context": {
+    "provider": "openai",
+    "model": "gpt-4.1-mini",
+    "parameters": {
+      "chat_proof": {
+        "session_signature": {
+          "alg": "EdDSA",
+          "format": "JWS",
+          "kid": "kid-dev-01",
+          "value": "eyJhbGciOiJFZERTQSIsImtpZCI6ImtpZC1kZXYtMDEifQ.c2hhMjU2OmM5N2YwYzk3OGExMjI0MTk4M2Y2NGY5MWM5ODA4OWI2MWI3OGU4YjVmMDhkOTYwYjg4MGQ3YTZhMDg0YTJlMjk.6VACwtpIlG_bDyda5VlbWXKEAUb3Ep9E9JPyru0BZYdh7dTAQHy8pYBCAKXjbHVvD11V0-DGpKFO5HnZ63D9DQ"
+        },
+        "transcript_hash": "sha256:c97f0c978a12241983f64f91c98089b61b78e8b5f08d960b880d7a6a084a2e29",
+        "turn_count": 2
+      }
+    }
+  },
+  "items": [
+    {
+      "type": "llm_interaction",
+      "data": {
+        "provider": "openai",
+        "model": "gpt-4.1-mini",
+        "parameters": {
+          "chat_proof": {
+            "session_signature": {
+              "alg": "EdDSA",
+              "format": "JWS",
+              "kid": "kid-dev-01",
+              "value": "eyJhbGciOiJFZERTQSIsImtpZCI6ImtpZC1kZXYtMDEifQ.c2hhMjU2OmM5N2YwYzk3OGExMjI0MTk4M2Y2NGY5MWM5ODA4OWI2MWI3OGU4YjVmMDhkOTYwYjg4MGQ3YTZhMDg0YTJlMjk.6VACwtpIlG_bDyda5VlbWXKEAUb3Ep9E9JPyru0BZYdh7dTAQHy8pYBCAKXjbHVvD11V0-DGpKFO5HnZ63D9DQ"
+            },
+            "transcript_hash": "sha256:c97f0c978a12241983f64f91c98089b61b78e8b5f08d960b880d7a6a084a2e29",
+            "turn_count": 2
+          }
+        },
+        "input_commitment": "sha256:ad1ac00dd62916a523946fa7235c683da4fa94c0e1e32a52329ad01016833052",
+        "output_commitment": "sha256:a1c14294b546597c6de2920b9c44622c3ffc52d41e947b42026612dd437bf73e"
+      }
+    }
+  ],
+  "artefacts": [
+    {
+      "name": "transcript.json",
+      "digest": "sha256:b49e5f6ee519c91dbfde6a2c170ea8c5ac314bd050c32c1df26c3bb56ad66fb2",
+      "size": 145,
+      "content_type": "application/json"
+    }
+  ],
+  "policy": {
+    "redactions": [],
+    "encryption": {
+      "enabled": false
+    }
+  },
+  "integrity": {
+    "canonicalization": "RFC8785-JCS",
+    "hash": "SHA-256",
+    "header_digest": "sha256:96af7c262347c5c4a36533e6d02661c3121a7c6e0166a11af51a3a6b1794f5e0",
+    "bundle_root_algorithm": "pl-merkle-sha256-v4",
+    "bundle_root": "sha256:4998c1127718777253ff037dd5138460cd88a20a0e9ad02775e9cbf98b50112b",
+    "signature": {
+      "format": "JWS",
+      "alg": "EdDSA",
+      "kid": "kid-dev-01",
+      "value": "eyJhbGciOiJFZERTQSIsImtpZCI6ImtpZC1kZXYtMDEifQ.c2hhMjU2OjQ5OThjMTEyNzcxODc3NzI1M2ZmMDM3ZGQ1MTM4NDYwY2Q4OGEyMGEwZTlhZDAyNzc1ZTljYmY5OGI1MDExMmI.yTjgdDNrGirL2mpMaRrNspMn4yqWrLY4V2jFdsvZ4Jl6CEiNnsJ0TGCPXBWoMdeFx9o-5Z8PXbk8liXpQ6WADw"
+    }
+  }
+}

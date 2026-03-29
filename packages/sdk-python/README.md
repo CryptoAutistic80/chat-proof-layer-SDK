@@ -30,6 +30,21 @@ This builds a platform-tagged wheel under `dist/`, runs the native build during 
 
 The repo’s `.github/workflows/sdk-artifacts.yml` workflow runs the same checked wheel build on Linux, macOS, and Windows, and `.github/workflows/sdk-release.yml` attaches those wheels to GitHub releases for `sdk-v*` tags.
 
+## Chat Session Vertical Slice (Local)
+
+Use `LocalChatProofSession` for deterministic transcript hashing, session-level signatures, and local tamper verification. A runnable end-to-end sample is available at `examples/python-chat-proof/run.py`, which writes `examples/bundles/chat-session.bundle.json`.
+
+```python
+from proofsdk import LocalChatProofSession, verify_local_chat_bundle
+
+session = LocalChatProofSession(signing_key_pem=PRIVATE_KEY_PEM, provider="openai", model="gpt-4.1-mini")
+session.log_turn(role="user", content="hello")
+session.log_turn(role="assistant", content="hi")
+sealed = session.finalize_bundle()
+check = verify_local_chat_bundle(sealed["bundle"], sealed["transcript"], PUBLIC_KEY_PEM)
+print(check["verified"])
+```
+
 ## Quick Usage
 
 ```python

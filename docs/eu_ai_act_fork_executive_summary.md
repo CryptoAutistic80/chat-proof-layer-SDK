@@ -4,6 +4,8 @@
 
 We propose a lean **Proof Layer SDK** fork that retains only the essential components needed to integrate with chat systems and meet EU AI Act obligations. The existing repository is a large, multi-language monorepo (Rust/Python/TypeScript/JavaScript) with demos, documentation, and CI. The fork will remove non-essential surfaces and keep core runtime libraries and APIs for logging, evidencing, and management.
 
+Per **ADR-0001** (`docs/adr/0001-scope-language-targets.md`), **v1 scope is Python-only**.
+
 The forked SDK will focus on:
 
 - built-in transcript logging (Article 12 record-keeping)
@@ -11,7 +13,7 @@ The forked SDK will focus on:
 - human-in-the-loop hooks for oversight
 - practical support for transparency, documentation, risk workflows, and incident handling
 
-Estimated effort: **~3–4 months** (approximately **60–80 person-days**) to reach production readiness, including tests, security review, and developer documentation.
+Estimated effort for v1: **~10–12 weeks** (about **55–75 person-days**) to reach production readiness, including tests, security review, and developer documentation.
 
 ## Current Repository Structure (Snapshot)
 
@@ -49,7 +51,7 @@ A minimal Proof Layer surface can support these obligations through:
 - **Oversight hooks** for human review or escalation policies
 - **Incident reconstruction capability** through signed session evidence
 
-## Minimal SDK Components and API
+## Minimal SDK Components and API (v1)
 
 The proposed minimal SDK should include:
 
@@ -70,9 +72,7 @@ The proposed minimal SDK should include:
 - **Minimal dependencies**
   - only required crypto/runtime libraries
 - **Packaging**
-  - npm package
-  - PyPI package
-  - optional Docker wrapper service
+  - Python package (PyPI)
 
 ### Illustrative Python Usage
 
@@ -90,59 +90,59 @@ bundle = proof.finish_session()
 send_to_compliance_server(bundle)
 ```
 
-### Illustrative TypeScript Usage
+## Scope Decision (Final)
 
-```ts
-import { ProofLayer } from "proof-layer-sdk";
+### Supported SDKs for v1
 
-async function chatWithProof(userInput: string) {
-  const proof = await ProofLayer.load("keys/sign_key.json");
-  proof.logUser(userInput);
-  const aiReply = await openai.chatCompletion(userInput);
-  proof.logAI(aiReply);
-  const bundle = await proof.finishSession();
-  await sendProof(bundle);
-}
-```
+- ✅ **Python SDK only**
+- ❌ TypeScript/JavaScript SDK in v1 (deferred to post-v1)
 
-## Proposed Fork Plan and Timeline
+### Explicit Non-goals for v1
 
-1. **Requirements and design** (~5 days)
-2. **Core implementation** (~15–20 days)
-3. **Key management tooling** (~5 days)
-4. **Packaging and distribution** (~5 days)
-5. **Testing and CI hardening** (~10 days)
-6. **Documentation and migration guide** (~10 days)
-7. **Security review** (~5 days)
-8. **Release and feedback loop** (~5 days)
+- web demo implementation
+- extra language wrappers beyond Python
+- optional service layer(s), including Dockerized HTTP wrapper APIs
+
+## Timeline and Staffing Impact by Scope Option
+
+| Option | Timeline | Effort | Staffing | Risk |
+| --- | --- | --- | --- | --- |
+| **A. Python only (chosen)** | **10–12 weeks** | **55–75 person-days** | 2 engineers + 0.25 FTE compliance/security + 0.25 FTE docs | Lower |
+| B. Python + TypeScript | 14–18 weeks | 85–120 person-days | 3–4 engineers + 0.5 FTE compliance/security + 0.5 FTE docs | Higher |
+
+## Proposed Fork Plan and Timeline (Chosen Scope)
+
+1. **Requirements and design lock (Python-only)** (~1 week)
+2. **Core Python implementation** (~3–4 weeks)
+3. **Key management + verification tooling** (~1–1.5 weeks)
+4. **Packaging/release pipeline (PyPI)** (~1 week)
+5. **Testing and CI hardening** (~2 weeks)
+6. **Documentation and migration guide** (~1.5 weeks)
+7. **Security review + release readiness** (~1 week)
 
 ```mermaid
 gantt
-  title Forked Proof Layer SDK Plan (3 months)
+  title Forked Proof Layer SDK Plan (Python-only v1)
   dateFormat  YYYY-MM-DD
   section Planning
-  Requirements        :done,   des1, 2026-04-01, 5d
+  Scope + Requirements Lock       :done,   des1, 2026-04-01, 5d
   section Development
-  Core Implementation :active, dev1, after des1, 15d
-  Key Management      :        dev2, after des1, 5d
-  Packaging           :        dev3, after dev2, 5d
+  Core Python Implementation      :active, dev1, after des1, 20d
+  Key Mgmt + Verification         :        dev2, after dev1, 7d
+  Packaging (PyPI)                :        dev3, after dev2, 5d
   section Testing/CI
-  Write Tests         :        test1, after dev1, 7d
-  Setup CI Pipeline   :        test2, after test1, 3d
+  Tests + CI Hardening            :        test1, after dev3, 10d
   section Documentation
-  Write README/Guide  :        doc1, after test1, 7d
-  Examples & Demos    :        doc2, after doc1, 5d
-  section Security/Review
-  Security Audit      :        sec1, after test2, 5d
-  section Release
-  Launch Release      :        rel1, after doc2, 3d
+  Docs + Migration Guide          :        doc1, after test1, 8d
+  section Security/Release
+  Security Review + Release       :        rel1, after doc1, 5d
 ```
 
-## Packaging and Distribution
+## Packaging and Distribution (v1)
 
 - **Python** (`proof_layer_sdk`) via PyPI
-- **TypeScript/JavaScript** (`proof-layer-sdk`) via npm
-- **Optional Docker image** exposing proof APIs over HTTP for service-style integration
+- No npm package in v1
+- No Docker wrapper service in v1
 
 ## Security and Privacy Considerations
 
@@ -177,9 +177,9 @@ gantt
 
 ## Current vs Proposed (Condensed)
 
-| Area | Current SDK | Proposed Minimal SDK |
+| Area | Current SDK | Proposed Minimal SDK (v1) |
 | --- | --- | --- |
-| Surface | Multi-language, demos, broad tooling | Compliance-focused runtime and APIs |
+| Surface | Multi-language, demos, broad tooling | Compliance-focused Python runtime and APIs |
 | UI/Demo | Included | Removed from core fork |
 | Logging/Proof | Present with broader abstractions | Core logging/signing only |
 | Key tooling | Partial | Required, explicit |
@@ -231,13 +231,12 @@ sequenceDiagram
   SDK->>Bundles: save signed evidence bundle
 ```
 
-## Next Steps
+## Next Steps (Unambiguous)
 
-Immediate actions:
-
-1. finalise target language scope (Python only vs Python + TypeScript)
-2. define the exact minimal API and JSON bundle schema
-3. build a thin prototype in one SDK to validate ergonomics
-4. lock packaging/release pipeline and migration documentation plan
+1. Ratify ADR-0001 in governance records and communicate that **v1 is Python-only**.
+2. Freeze Python v1 API and JSON proof bundle schema.
+3. Start implementation against the 10–12 week plan and staff to the Python-only model.
+4. Open a post-v1 backlog epic for TypeScript with explicit parity acceptance criteria.
+5. Define go/no-go gates for release: test pass rate, security review sign-off, and packaging verification.
 
 This fork direction keeps only what is needed for verifiable, practical chat compliance workflows while reducing operational and maintenance complexity.

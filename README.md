@@ -126,7 +126,7 @@ Selective disclosure:
 
 ```bash
 # Generate a dev signing keypair
-cargo run -p proofctl -- keygen --out ./keys
+cargo run -p proofctl -- generate-keypair --out ./keys
 
 # Create a bundle package from capture + artefacts
 cargo run -p proofctl -- create \
@@ -137,7 +137,7 @@ cargo run -p proofctl -- create \
   --out ./bundle.pkg
 
 # Verify offline
-cargo run -p proofctl -- verify --in ./bundle.pkg --key ./keys/verify.pub
+cargo run -p proofctl -- verify-bundle --in ./bundle.pkg --key ./keys/verify.pub
 
 # Produce a selective-disclosure package for item 0
 cargo run -p proofctl -- disclose \
@@ -146,7 +146,7 @@ cargo run -p proofctl -- disclose \
   --out ./bundle.disclosure.pkg
 
 # Verify the redacted package
-cargo run -p proofctl -- verify --in ./bundle.disclosure.pkg --key ./keys/verify.pub
+cargo run -p proofctl -- verify-bundle --in ./bundle.disclosure.pkg --key ./keys/verify.pub
 
 # Assess Annex IV governance readiness for a full bundle
 cargo run -p proofctl -- assess \
@@ -190,6 +190,26 @@ Notes:
 - Migration overrides are available, for example `--system-id`, `--retention-class`, `--evidence-type`, `--role`, and the `--intended-use` / `--risk-tier` compliance flags.
 - Deterministic fixture inputs live under `fixtures/golden/`.
 - Checked completeness fixtures now include `fixtures/golden/annex_iv_governance/`, `fixtures/golden/conformity/`, `fixtures/golden/fundamental_rights/`, `fixtures/golden/gpai_provider/`, `fixtures/golden/incident_response/`, `fixtures/golden/post_market_monitoring/`, and `fixtures/golden/provider_governance/`.
+
+### Key Loading Modes (CLI)
+
+`proofctl create` and `proofctl verify-bundle` accept exactly one key source:
+
+- `--key <path>`: PEM from disk (recommended).
+- `--key-env <ENV_VAR>`: PEM from an environment variable.
+- `--key-kms-uri <uri>`: KMS/HSM adapter placeholder (currently returns not implemented).
+
+Unsafe-mode restrictions are explicit:
+
+- `create --key-env ...` requires both `--unsafe-allow-env-key` and `PROOFCTL_UNSAFE_MODE=1`.
+- `verify-bundle --key-env ...` is allowed without unsafe mode because it loads public verify keys only.
+
+Key utility commands:
+
+```bash
+cargo run -p proofctl -- key inspect --in ./keys/signing.pem
+cargo run -p proofctl -- key export-public --in ./keys/signing.pem --out ./keys/verify.pub
+```
 
 Example with an SDK-first compliance profile stamped at create time:
 

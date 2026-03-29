@@ -53,14 +53,16 @@ struct Cli {
 #[derive(Subcommand)]
 enum Commands {
     /// Generate a local development Ed25519 keypair.
-    Keygen {
+    #[command(name = "generate-keypair", visible_alias = "keygen")]
+    GenerateKeypair {
         #[arg(long)]
         out: PathBuf,
     },
     /// Create a proof bundle package from capture input and artefacts.
     Create(Box<CreateArgs>),
     /// Verify a proof bundle package offline.
-    Verify(Box<VerifyArgs>),
+    #[command(name = "verify-bundle", visible_alias = "verify")]
+    VerifyBundle(Box<VerifyArgs>),
     /// Assess advisory completeness for a full bundle package.
     Assess(Box<AssessArgs>),
     /// Produce a redacted disclosure package with Merkle proofs for selected items.
@@ -106,6 +108,11 @@ enum Commands {
         #[command(subcommand)]
         command: VaultCommands,
     },
+    /// Inspect or export key material.
+    Key {
+        #[command(subcommand)]
+        command: KeyCommands,
+    },
 }
 
 #[derive(Args)]
@@ -115,7 +122,13 @@ struct CreateArgs {
     #[arg(long, value_parser = parse_artefact_arg)]
     artefact: Vec<ArtefactArg>,
     #[arg(long)]
-    key: PathBuf,
+    key: Option<PathBuf>,
+    #[arg(long = "key-env")]
+    key_env: Option<String>,
+    #[arg(long = "key-kms-uri")]
+    key_kms_uri: Option<String>,
+    #[arg(long = "unsafe-allow-env-key", default_value_t = false)]
+    unsafe_allow_env_key: bool,
     #[arg(long)]
     out: PathBuf,
     #[arg(long)]
@@ -177,7 +190,11 @@ struct VerifyArgs {
     #[arg(long = "in")]
     input: PathBuf,
     #[arg(long)]
-    key: PathBuf,
+    key: Option<PathBuf>,
+    #[arg(long = "key-env")]
+    key_env: Option<String>,
+    #[arg(long = "key-kms-uri")]
+    key_kms_uri: Option<String>,
     #[arg(long, default_value = "human")]
     format: OutputFormat,
     #[arg(long)]
@@ -366,6 +383,24 @@ enum VaultCommands {
         out: Option<PathBuf>,
         #[arg(long, default_value = "human")]
         format: OutputFormat,
+    },
+}
+
+#[derive(Subcommand)]
+enum KeyCommands {
+    /// Inspect a private or public Ed25519 PEM key.
+    Inspect {
+        #[arg(long = "in")]
+        input: PathBuf,
+        #[arg(long, default_value = "human")]
+        format: OutputFormat,
+    },
+    /// Export the public verify key from a private signing key PEM.
+    ExportPublic {
+        #[arg(long = "in")]
+        input: PathBuf,
+        #[arg(long)]
+        out: PathBuf,
     },
 }
 
@@ -633,7 +668,7 @@ impl CreateOverrides {
 struct CreateCommandInput<'a> {
     input_path: &'a Path,
     artefacts: &'a [ArtefactArg],
-    key_path: &'a Path,
+    key_options: KeyLoadOptions<'a>,
     out_path: &'a Path,
     bundle_id: Option<&'a str>,
     created_at: Option<&'a str>,
@@ -654,7 +689,7 @@ struct CreateCommandInput<'a> {
 
 struct VerifyCommandInput<'a> {
     input_path: &'a Path,
-    key_path: &'a Path,
+    key_options: KeyLoadOptions<'a>,
     format: OutputFormat,
     check_timestamp: bool,
     check_receipt: bool,
@@ -666,6 +701,14 @@ struct VerifyCommandInput<'a> {
     timestamp_policy_oids: &'a [String],
     timestamp_assurance: Option<TimestampAssuranceArg>,
     transparency_public_key_path: Option<&'a Path>,
+}
+
+#[derive(Clone, Copy)]
+struct KeyLoadOptions<'a> {
+    key_path: Option<&'a Path>,
+    key_env: Option<&'a str>,
+    key_kms_uri: Option<&'a str>,
+    unsafe_allow_env_key: bool,
 }
 
 struct AssessCommandInput<'a> {
@@ -1641,11 +1684,16 @@ fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
-        Commands::Keygen { out } => cmd_keygen(&out),
+        Commands::GenerateKeypair { out } => cmd_keygen(&out),
         Commands::Create(args) => cmd_create(CreateCommandInput {
             input_path: &args.input,
             artefacts: &args.artefact,
-            key_path: &args.key,
+            key_options: KeyLoadOptions {
+                key_path: args.key.as_deref(),
+                key_env: args.key_env.as_deref(),
+                key_kms_uri: args.key_kms_uri.as_deref(),
+                unsafe_allow_env_key: args.unsafe_allow_env_key,
+            },
             out_path: &args.out,
             bundle_id: args.bundle_id.as_deref(),
             created_at: args.created_at.as_deref(),
@@ -1676,9 +1724,14 @@ fn main() -> Result<()> {
             timestamp_assurance: args.timestamp_assurance,
             transparency_public_key_path: args.transparency_public_key.as_deref(),
         }),
-        Commands::Verify(args) => cmd_verify(VerifyCommandInput {
+        Commands::VerifyBundle(args) => cmd_verify(VerifyCommandInput {
             input_path: &args.input,
-            key_path: &args.key,
+            key_options: KeyLoadOptions {
+                key_path: args.key.as_deref(),
+                key_env: args.key_env.as_deref(),
+                key_kms_uri: args.key_kms_uri.as_deref(),
+                unsafe_allow_env_key: false,
+            },
             format: args.format,
             check_timestamp: args.check_timestamp,
             check_receipt: args.check_receipt,
@@ -1845,6 +1898,10 @@ fn main() -> Result<()> {
                 format,
             ),
         },
+        Commands::Key { command } => match command {
+            KeyCommands::Inspect { input, format } => cmd_key_inspect(&input, format),
+            KeyCommands::ExportPublic { input, out } => cmd_key_export_public(&input, &out),
+        },
     }
 }
 
@@ -1868,6 +1925,113 @@ fn cmd_keygen(out_dir: &Path) -> Result<()> {
 
     info!("wrote {}", signing_path.display());
     info!("wrote {}", public_path.display());
+    Ok(())
+}
+
+#[derive(Clone, Copy)]
+enum KeyPurpose {
+    SigningPrivateKey,
+    VerificationPublicKey,
+}
+
+fn load_key_pem(options: KeyLoadOptions<'_>, purpose: KeyPurpose) -> Result<String> {
+    let provided_sources = usize::from(options.key_path.is_some())
+        + usize::from(options.key_env.is_some())
+        + usize::from(options.key_kms_uri.is_some());
+    if provided_sources != 1 {
+        bail!(
+            "exactly one key source is required: --key <path>, --key-env <VAR>, or --key-kms-uri <URI>"
+        );
+    }
+
+    if let Some(path) = options.key_path {
+        return fs::read_to_string(path)
+            .with_context(|| format!("failed to read key from {}", path.display()));
+    }
+
+    if let Some(env_var) = options.key_env {
+        if matches!(purpose, KeyPurpose::SigningPrivateKey) {
+            if !options.unsafe_allow_env_key {
+                bail!("--key-env for signing keys requires --unsafe-allow-env-key (unsafe mode)");
+            }
+            let unsafe_mode = env::var("PROOFCTL_UNSAFE_MODE").unwrap_or_default();
+            if unsafe_mode != "1" {
+                bail!(
+                    "--key-env for signing keys requires PROOFCTL_UNSAFE_MODE=1 in addition to --unsafe-allow-env-key"
+                );
+            }
+        }
+
+        return env::var(env_var)
+            .with_context(|| format!("environment variable {env_var} is not set or unreadable"));
+    }
+
+    if let Some(kms_uri) = options.key_kms_uri {
+        bail!(
+            "key adapter not configured for {kms_uri}. Implement a KMS/HSM adapter for --key-kms-uri before use."
+        );
+    }
+
+    bail!("missing key source")
+}
+
+fn cmd_key_inspect(input_path: &Path, format: OutputFormat) -> Result<()> {
+    let key_pem = fs::read_to_string(input_path)
+        .with_context(|| format!("failed to read {}", input_path.display()))?;
+
+    if let Ok(signing_key) = decode_private_key_pem(&key_pem) {
+        let public_pem = encode_public_key_pem(&signing_key.verifying_key());
+        return match format {
+            OutputFormat::Human => {
+                println!("type: ed25519_private");
+                println!("derived_public_key:\n{}", public_pem.trim());
+                Ok(())
+            }
+            OutputFormat::Json => {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&serde_json::json!({
+                        "type": "ed25519_private",
+                        "derived_public_key_pem": public_pem
+                    }))?
+                );
+                Ok(())
+            }
+        };
+    }
+
+    if decode_public_key_pem(&key_pem).is_ok() {
+        return match format {
+            OutputFormat::Human => {
+                println!("type: ed25519_public");
+                println!("public_key:\n{}", key_pem.trim());
+                Ok(())
+            }
+            OutputFormat::Json => {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&serde_json::json!({
+                        "type": "ed25519_public",
+                        "public_key_pem": key_pem
+                    }))?
+                );
+                Ok(())
+            }
+        };
+    }
+
+    bail!("failed to parse key as either Ed25519 private PEM or public PEM")
+}
+
+fn cmd_key_export_public(input_path: &Path, out_path: &Path) -> Result<()> {
+    let signing_key_pem = fs::read_to_string(input_path)
+        .with_context(|| format!("failed to read {}", input_path.display()))?;
+    let signing_key = decode_private_key_pem(&signing_key_pem)
+        .with_context(|| format!("failed to parse signing key {}", input_path.display()))?;
+    let public_pem = encode_public_key_pem(&signing_key.verifying_key());
+    fs::write(out_path, public_pem)
+        .with_context(|| format!("failed to write {}", out_path.display()))?;
+    info!("wrote {}", out_path.display());
     Ok(())
 }
 
@@ -1924,10 +2088,9 @@ fn cmd_create(args: CreateCommandInput<'_>) -> Result<()> {
         })?;
     let capture = apply_create_overrides(materialize_capture_event(capture), args.overrides)?;
 
-    let signing_key_pem = fs::read_to_string(args.key_path)
-        .with_context(|| format!("failed to read {}", args.key_path.display()))?;
+    let signing_key_pem = load_key_pem(args.key_options, KeyPurpose::SigningPrivateKey)?;
     let signing_key = decode_private_key_pem(&signing_key_pem)
-        .with_context(|| format!("failed to parse signing key {}", args.key_path.display()))?;
+        .context("failed to parse signing key PEM from configured key source")?;
     let timestamp_trust_policy = load_timestamp_trust_policy(
         args.timestamp_trust_anchor_paths,
         args.timestamp_crl_paths,
@@ -2072,10 +2235,9 @@ fn cmd_verify(args: VerifyCommandInput<'_>) -> Result<()> {
         );
     }
 
-    let key_pem = fs::read_to_string(args.key_path)
-        .with_context(|| format!("failed to read {}", args.key_path.display()))?;
+    let key_pem = load_key_pem(args.key_options, KeyPurpose::VerificationPublicKey)?;
     let verifying_key = decode_public_key_pem(&key_pem)
-        .with_context(|| format!("failed to parse public key {}", args.key_path.display()))?;
+        .context("failed to parse public key PEM from configured key source")?;
     let timestamp_trust_policy = load_timestamp_trust_policy(
         args.timestamp_trust_anchor_paths,
         args.timestamp_crl_paths,

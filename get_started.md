@@ -5,7 +5,7 @@ From the repo root, start with the local SDK and CLI flow.
 Generate a stable local signing keypair:
 
 ```bash
-cargo run -p proofctl -- keygen --out ./keys
+cargo run -p proofctl -- generate-keypair --out ./keys
 ```
 
 Create and verify a bundle locally from the included golden fixtures:
@@ -18,7 +18,7 @@ cargo run -p proofctl -- create \
   --key ./keys/signing.pem \
   --out ./bundle.pkg
 
-cargo run -p proofctl -- verify --in ./bundle.pkg --key ./keys/verify.pub
+cargo run -p proofctl -- verify-bundle --in ./bundle.pkg --key ./keys/verify.pub
 ```
 
 If you have a full high-risk governance bundle and want the advisory readiness view:
@@ -89,7 +89,7 @@ For `post_market_monitoring`, the pack-scoped pass count is currently `6` becaus
 If you want the plain-English timestamp and transparency trust result from the CLI, run verify with the assurance checks turned on:
 
 ```bash
-cargo run -p proofctl -- verify \
+cargo run -p proofctl -- verify-bundle \
   --in ./bundle.pkg \
   --key ./keys/verify.pub \
   --check-timestamp \

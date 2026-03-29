@@ -1,0 +1,69 @@
+{
+  "schema_version": "1.0.0",
+  "bundle_id": "bundle-2026-03-29-0001",
+  "session": {
+    "session_id": "sess-abc123",
+    "started_at": "2026-03-29T10:00:00Z",
+    "ended_at": "2026-03-29T10:01:30Z",
+    "participants": [
+      {
+        "id": "assistant-1",
+        "role": "assistant"
+      },
+      {
+        "id": "user-42",
+        "role": "user"
+      }
+    ],
+    "context": {
+      "environment": "production",
+      "region": "us-east-1"
+    }
+  },
+  "turns": [
+    {
+      "turn_index": 0,
+      "role": "user",
+      "content_hash": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+      "prev_turn_hash": null,
+      "turn_hash": "sha256:2222222222222222222222222222222222222222222222222222222222222222"
+    },
+    {
+      "turn_index": 1,
+      "role": "assistant",
+      "content_hash": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+      "prev_turn_hash": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+      "turn_hash": "sha256:4444444444444444444444444444444444444444444444444444444444444444"
+    }
+  ],
+  "integrity": {
+    "canonicalization": {
+      "spec": "RFC8785-JCS",
+      "version": "1",
+      "normalization": "UTF-8"
+    },
+    "hash_algorithm": "SHA-256",
+    "bundle_hash": "sha256:5555555555555555555555555555555555555555555555555555555555555555",
+    "turn_order_hash": "sha256:6666666666666666666666666666666666666666666666666666666666666666"
+  },
+  "signature": {
+    "algorithm": "Ed25519",
+    "key_id": "did:key:z6Mkexample#key-1",
+    "signed_at": "2026-03-29T10:01:35Z",
+    "signature_value": "z4NfD8ExampleDetachedSignatureValue"
+  },
+  "provenance": {
+    "producer": {
+      "name": "proofctl",
+      "version": "0.7.0"
+    },
+    "captured_at": "2026-03-29T10:01:31Z",
+    "source_refs": [
+      {
+        "type": "transcript",
+        "uri": "urn:session:sess-abc123",
+        "digest": "sha256:7777777777777777777777777777777777777777777777777777777777777777"
+      }
+    ]
+  }
+}

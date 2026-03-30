@@ -7,6 +7,7 @@ export {
   disclosurePolicyTemplateNames,
   disclosureRedactionGroups
 } from "./disclosure_policy.js";
+// Deprecated: import non-chat evidence builders from "@proof-layer/sdk/advanced".
 export {
   createAdversarialTestRequest,
   createAuthorityNotificationRequest,
@@ -42,6 +43,7 @@ export {
 } from "./evidence.js";
 export { provedCompletion } from "./providers/openai_like.js";
 export { provedMessage } from "./providers/anthropic_like.js";
+// Deprecated: import captureToolCall from "@proof-layer/sdk/advanced".
 export { captureToolCall } from "./tooling/tool_capture.js";
 export {
   withAnthropicProofLayer,

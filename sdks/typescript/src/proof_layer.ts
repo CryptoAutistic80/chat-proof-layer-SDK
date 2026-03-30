@@ -163,6 +163,21 @@ class ChatProofSession {
   }
 }
 
+const NON_CHAT_CAPTURE_DEPRECATION_MESSAGE =
+  "Non-chat capture convenience methods are deprecated on the default entrypoint. Import from @proof-layer/sdk/advanced instead.";
+
+const warnedNonChatCaptureMethods = new Set<string>();
+
+function warnDeprecatedNonChatCapture(methodName: string): void {
+  if (warnedNonChatCaptureMethods.has(methodName)) {
+    return;
+  }
+  warnedNonChatCaptureMethods.add(methodName);
+  process.emitWarning(`${methodName}() is deprecated. ${NON_CHAT_CAPTURE_DEPRECATION_MESSAGE}`, {
+    code: "PROOF_LAYER_DEPRECATED_NON_CHAT_CAPTURE"
+  });
+}
+
 function resolveSigningKeyPem(options: ProofLayerOptions): string | undefined {
   if (options.signingKeyPem) {
     return options.signingKeyPem;
@@ -453,6 +468,7 @@ export class ProofLayer implements BundleCreateClient {
   async captureRiskAssessment(
     options: Omit<RiskAssessmentRequestOptions, "keyId" | "role" | "issuer" | "appId" | "env">
   ): Promise<ProofLayerResult> {
+    warnDeprecatedNonChatCapture("captureRiskAssessment");
     return this.#submitCapture(
       createRiskAssessmentRequest({
         keyId: this.keyId,
@@ -471,6 +487,7 @@ export class ProofLayer implements BundleCreateClient {
   async captureDataGovernance(
     options: Omit<DataGovernanceRequestOptions, "keyId" | "role" | "issuer" | "appId" | "env">
   ): Promise<ProofLayerResult> {
+    warnDeprecatedNonChatCapture("captureDataGovernance");
     return this.#submitCapture(
       createDataGovernanceRequest({
         keyId: this.keyId,
@@ -489,6 +506,7 @@ export class ProofLayer implements BundleCreateClient {
   async captureTechnicalDoc(
     options: Omit<TechnicalDocRequestOptions, "keyId" | "role" | "issuer" | "appId" | "env">
   ): Promise<ProofLayerResult> {
+    warnDeprecatedNonChatCapture("captureTechnicalDoc");
     return this.#submitCapture(
       createTechnicalDocRequest({
         keyId: this.keyId,
@@ -510,6 +528,7 @@ export class ProofLayer implements BundleCreateClient {
       "keyId" | "role" | "issuer" | "appId" | "env"
     >
   ): Promise<ProofLayerResult> {
+    warnDeprecatedNonChatCapture("captureInstructionsForUse");
     return this.#submitCapture(
       createInstructionsForUseRequest({
         keyId: this.keyId,
@@ -528,6 +547,7 @@ export class ProofLayer implements BundleCreateClient {
   async captureQmsRecord(
     options: Omit<QmsRecordRequestOptions, "keyId" | "role" | "issuer" | "appId" | "env">
   ): Promise<ProofLayerResult> {
+    warnDeprecatedNonChatCapture("captureQmsRecord");
     return this.#submitCapture(
       createQmsRecordRequest({
         keyId: this.keyId,
@@ -549,6 +569,7 @@ export class ProofLayer implements BundleCreateClient {
       "keyId" | "role" | "issuer" | "appId" | "env"
     >
   ): Promise<ProofLayerResult> {
+    warnDeprecatedNonChatCapture("captureFundamentalRightsAssessment");
     return this.#submitCapture(
       createFundamentalRightsAssessmentRequest({
         keyId: this.keyId,
@@ -570,6 +591,7 @@ export class ProofLayer implements BundleCreateClient {
       "keyId" | "role" | "issuer" | "appId" | "env"
     >
   ): Promise<ProofLayerResult> {
+    warnDeprecatedNonChatCapture("captureStandardsAlignment");
     return this.#submitCapture(
       createStandardsAlignmentRequest({
         keyId: this.keyId,
@@ -591,6 +613,7 @@ export class ProofLayer implements BundleCreateClient {
       "keyId" | "role" | "issuer" | "appId" | "env"
     >
   ): Promise<ProofLayerResult> {
+    warnDeprecatedNonChatCapture("capturePostMarketMonitoring");
     return this.#submitCapture(
       createPostMarketMonitoringRequest({
         keyId: this.keyId,
@@ -612,6 +635,7 @@ export class ProofLayer implements BundleCreateClient {
       "keyId" | "role" | "issuer" | "appId" | "env"
     >
   ): Promise<ProofLayerResult> {
+    warnDeprecatedNonChatCapture("captureCorrectiveAction");
     return this.#submitCapture(
       createCorrectiveActionRequest({
         keyId: this.keyId,
@@ -633,6 +657,7 @@ export class ProofLayer implements BundleCreateClient {
       "keyId" | "role" | "issuer" | "appId" | "env"
     >
   ): Promise<ProofLayerResult> {
+    warnDeprecatedNonChatCapture("captureAuthorityNotification");
     return this.#submitCapture(
       createAuthorityNotificationRequest({
         keyId: this.keyId,
@@ -654,6 +679,7 @@ export class ProofLayer implements BundleCreateClient {
       "keyId" | "role" | "issuer" | "appId" | "env"
     >
   ): Promise<ProofLayerResult> {
+    warnDeprecatedNonChatCapture("captureAuthoritySubmission");
     return this.#submitCapture(
       createAuthoritySubmissionRequest({
         keyId: this.keyId,
@@ -675,6 +701,7 @@ export class ProofLayer implements BundleCreateClient {
       "keyId" | "role" | "issuer" | "appId" | "env"
     >
   ): Promise<ProofLayerResult> {
+    warnDeprecatedNonChatCapture("captureReportingDeadline");
     return this.#submitCapture(
       createReportingDeadlineRequest({
         keyId: this.keyId,
@@ -696,6 +723,7 @@ export class ProofLayer implements BundleCreateClient {
       "keyId" | "role" | "issuer" | "appId" | "env"
     >
   ): Promise<ProofLayerResult> {
+    warnDeprecatedNonChatCapture("captureRegulatorCorrespondence");
     return this.#submitCapture(
       createRegulatorCorrespondenceRequest({
         keyId: this.keyId,
@@ -714,6 +742,7 @@ export class ProofLayer implements BundleCreateClient {
   async captureToolCall(
     options: Omit<ToolCallRequestOptions, "keyId" | "role" | "issuer" | "appId" | "env">
   ): Promise<ProofLayerResult> {
+    warnDeprecatedNonChatCapture("captureToolCall");
     return this.#submitCapture(
       createToolCallRequest({
         keyId: this.keyId,
@@ -732,6 +761,7 @@ export class ProofLayer implements BundleCreateClient {
   async captureRetrieval(
     options: Omit<RetrievalRequestOptions, "keyId" | "role" | "issuer" | "appId" | "env">
   ): Promise<ProofLayerResult> {
+    warnDeprecatedNonChatCapture("captureRetrieval");
     return this.#submitCapture(
       createRetrievalRequest({
         keyId: this.keyId,
@@ -750,6 +780,7 @@ export class ProofLayer implements BundleCreateClient {
   async captureHumanOversight(
     options: Omit<HumanOversightRequestOptions, "keyId" | "role" | "issuer" | "appId" | "env">
   ): Promise<ProofLayerResult> {
+    warnDeprecatedNonChatCapture("captureHumanOversight");
     return this.#submitCapture(
       createHumanOversightRequest({
         keyId: this.keyId,
@@ -768,6 +799,7 @@ export class ProofLayer implements BundleCreateClient {
   async capturePolicyDecision(
     options: Omit<PolicyDecisionRequestOptions, "keyId" | "role" | "issuer" | "appId" | "env">
   ): Promise<ProofLayerResult> {
+    warnDeprecatedNonChatCapture("capturePolicyDecision");
     return this.#submitCapture(
       createPolicyDecisionRequest({
         keyId: this.keyId,
@@ -789,6 +821,7 @@ export class ProofLayer implements BundleCreateClient {
       "keyId" | "role" | "issuer" | "appId" | "env"
     >
   ): Promise<ProofLayerResult> {
+    warnDeprecatedNonChatCapture("captureLiteracyAttestation");
     return this.#submitCapture(
       createLiteracyAttestationRequest({
         keyId: this.keyId,
@@ -807,6 +840,7 @@ export class ProofLayer implements BundleCreateClient {
   async captureIncidentReport(
     options: Omit<IncidentReportRequestOptions, "keyId" | "role" | "issuer" | "appId" | "env">
   ): Promise<ProofLayerResult> {
+    warnDeprecatedNonChatCapture("captureIncidentReport");
     return this.#submitCapture(
       createIncidentReportRequest({
         keyId: this.keyId,
@@ -825,6 +859,7 @@ export class ProofLayer implements BundleCreateClient {
   async captureModelEvaluation(
     options: Omit<ModelEvaluationRequestOptions, "keyId" | "role" | "issuer" | "appId" | "env">
   ): Promise<ProofLayerResult> {
+    warnDeprecatedNonChatCapture("captureModelEvaluation");
     return this.#submitCapture(
       createModelEvaluationRequest({
         keyId: this.keyId,
@@ -843,6 +878,7 @@ export class ProofLayer implements BundleCreateClient {
   async captureAdversarialTest(
     options: Omit<AdversarialTestRequestOptions, "keyId" | "role" | "issuer" | "appId" | "env">
   ): Promise<ProofLayerResult> {
+    warnDeprecatedNonChatCapture("captureAdversarialTest");
     return this.#submitCapture(
       createAdversarialTestRequest({
         keyId: this.keyId,
@@ -864,6 +900,7 @@ export class ProofLayer implements BundleCreateClient {
       "keyId" | "role" | "issuer" | "appId" | "env"
     >
   ): Promise<ProofLayerResult> {
+    warnDeprecatedNonChatCapture("captureTrainingProvenance");
     return this.#submitCapture(
       createTrainingProvenanceRequest({
         keyId: this.keyId,
@@ -885,6 +922,7 @@ export class ProofLayer implements BundleCreateClient {
       "keyId" | "role" | "issuer" | "appId" | "env"
     >
   ): Promise<ProofLayerResult> {
+    warnDeprecatedNonChatCapture("captureComputeMetrics");
     return this.#submitCapture(
       createComputeMetricsRequest({
         keyId: this.keyId,
@@ -906,6 +944,7 @@ export class ProofLayer implements BundleCreateClient {
       "keyId" | "role" | "issuer" | "appId" | "env"
     >
   ): Promise<ProofLayerResult> {
+    warnDeprecatedNonChatCapture("captureDownstreamDocumentation");
     return this.#submitCapture(
       createDownstreamDocumentationRequest({
         keyId: this.keyId,
@@ -927,6 +966,7 @@ export class ProofLayer implements BundleCreateClient {
       "keyId" | "role" | "issuer" | "appId" | "env"
     >
   ): Promise<ProofLayerResult> {
+    warnDeprecatedNonChatCapture("captureCopyrightPolicy");
     return this.#submitCapture(
       createCopyrightPolicyRequest({
         keyId: this.keyId,
@@ -948,6 +988,7 @@ export class ProofLayer implements BundleCreateClient {
       "keyId" | "role" | "issuer" | "appId" | "env"
     >
   ): Promise<ProofLayerResult> {
+    warnDeprecatedNonChatCapture("captureTrainingSummary");
     return this.#submitCapture(
       createTrainingSummaryRequest({
         keyId: this.keyId,
@@ -969,6 +1010,7 @@ export class ProofLayer implements BundleCreateClient {
       "keyId" | "role" | "issuer" | "appId" | "env"
     >
   ): Promise<ProofLayerResult> {
+    warnDeprecatedNonChatCapture("captureConformityAssessment");
     return this.#submitCapture(
       createConformityAssessmentRequest({
         keyId: this.keyId,
@@ -987,6 +1029,7 @@ export class ProofLayer implements BundleCreateClient {
   async captureDeclaration(
     options: Omit<DeclarationRequestOptions, "keyId" | "role" | "issuer" | "appId" | "env">
   ): Promise<ProofLayerResult> {
+    warnDeprecatedNonChatCapture("captureDeclaration");
     return this.#submitCapture(
       createDeclarationRequest({
         keyId: this.keyId,
@@ -1005,6 +1048,7 @@ export class ProofLayer implements BundleCreateClient {
   async captureRegistration(
     options: Omit<RegistrationRequestOptions, "keyId" | "role" | "issuer" | "appId" | "env">
   ): Promise<ProofLayerResult> {
+    warnDeprecatedNonChatCapture("captureRegistration");
     return this.#submitCapture(
       createRegistrationRequest({
         keyId: this.keyId,

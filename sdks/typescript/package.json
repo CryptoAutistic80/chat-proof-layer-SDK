@@ -63,6 +63,14 @@
     "./errors": {
       "types": "./dist/utils/errors.d.ts",
       "import": "./dist/utils/errors.js"
+    },
+    "./chat": {
+      "types": "./dist/chat.d.ts",
+      "import": "./dist/chat.js"
+    },
+    "./advanced": {
+      "types": "./dist/advanced.d.ts",
+      "import": "./dist/advanced.js"
     }
   },
   "engines": {

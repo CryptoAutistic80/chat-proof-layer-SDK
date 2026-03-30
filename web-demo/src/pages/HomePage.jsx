@@ -1,33 +1,27 @@
 import React from "react";
 import { Link } from "react-router-dom";
-import { HeroDemo } from "../components/HeroDemo";
-import {
-  AI_ACT_EXPECTATIONS,
-  COMMON_WORKFLOWS,
-  LEARN_HERO,
-  LEGAL_BOUNDARY,
-  LIMITS,
-  RECORDED_ITEMS,
-  WORKFLOW_STEPS
-} from "../lib/siteContent";
+import { LEGAL_BOUNDARY } from "../lib/siteContent";
 
 export function HomePage() {
   return (
     <section className="page-stack learn-page">
       <section className="panel learn-hero">
         <div className="learn-hero-copy">
-          <span className="section-label">{LEARN_HERO.eyebrow}</span>
-          <h1>{LEARN_HERO.title}</h1>
-          <p className="learn-lead">{LEARN_HERO.summary}</p>
+          <span className="section-label">Chatbot proof flows</span>
+          <h1>Prove each conversation without slowing down your app team</h1>
+          <p className="learn-lead">
+            Run a chatbot interaction, seal it into a cryptographic bundle, then verify or selectively
+            share the evidence later.
+          </p>
           <div className="cta-row">
-            <Link className="primary-cta" to={LEARN_HERO.primaryCta.to}>
-              {LEARN_HERO.primaryCta.label}
-            </Link>
-            <Link className="secondary-cta" to={LEARN_HERO.secondaryCta.to}>
-              {LEARN_HERO.secondaryCta.label}
+            <Link className="primary-cta" to="/chat-demo">
+              Start chat demo
             </Link>
             <Link className="secondary-cta" to="/verify">
-              Try the tamper playground
+              Verify a proof
+            </Link>
+            <Link className="secondary-cta" to="/share">
+              Share/export view
             </Link>
           </div>
         </div>
@@ -37,101 +31,55 @@ export function HomePage() {
         </aside>
       </section>
 
-      {/* Interactive hero demo — runs entirely in the browser */}
-      <section className="panel section-panel hero-demo-section">
-        <HeroDemo />
+      <section className="panel section-panel">
+        <div className="panel-head compact">
+          <div>
+            <span className="section-label">1 · What gets proven for each conversation</span>
+            <h2>Each sealed run gets immutable conversation evidence</h2>
+          </div>
+        </div>
+        <ul className="plain-list">
+          <li>Prompt + response context bound to the same bundle root.</li>
+          <li>Provider/model/session metadata for audit replay.</li>
+          <li>Signature verification status and optional timestamp/transparency checks.</li>
+        </ul>
       </section>
 
       <section className="panel section-panel">
         <div className="panel-head compact">
           <div>
-            <span className="section-label">EU AI Act in practice</span>
-            <h2>What most teams need in plain English</h2>
+            <span className="section-label">2 · How to verify later</span>
+            <h2>Open verification tools anytime after sealing</h2>
           </div>
         </div>
-        <div className="learn-card-grid">
-          {AI_ACT_EXPECTATIONS.map((item) => (
-            <article key={item.title} className="learn-card">
-              <strong>{item.title}</strong>
-              <p>{item.body}</p>
-            </article>
-          ))}
-        </div>
+        <p className="section-intro">
+          Use the verify flow to inspect integrity, timestamp, and tamper-evidence details. You can
+          validate immediately after sealing or revisit old bundle IDs from the records explorer.
+        </p>
+        <Link className="secondary-cta" to="/verify">
+          Go to verification
+        </Link>
       </section>
 
       <section className="panel section-panel">
         <div className="panel-head compact">
           <div>
-            <span className="section-label">Workflow fit</span>
-            <h2>Where Proof Layer fits in an AI workflow</h2>
+            <span className="section-label">3 · What can be selectively shared</span>
+            <h2>Disclose only what each audience needs</h2>
           </div>
         </div>
-        <ol className="workflow-steps">
-          {WORKFLOW_STEPS.map((step, index) => (
-            <li key={step.title} className="workflow-step">
-              <span className="workflow-step-number">0{index + 1}</span>
-              <div>
-                <strong>{step.title}</strong>
-                <p>{step.body}</p>
-              </div>
-            </li>
-          ))}
-        </ol>
-      </section>
-
-      <div className="learn-split-grid">
-        <section className="panel section-panel">
-          <div className="panel-head compact">
-            <div>
-              <span className="section-label">What gets recorded</span>
-              <h2>Evidence you can inspect later</h2>
-            </div>
-          </div>
-          <ul className="plain-list">
-            {RECORDED_ITEMS.map((item) => (
-              <li key={item}>{item}</li>
-            ))}
-          </ul>
-        </section>
-
-        <section className="panel section-panel">
-          <div className="panel-head compact">
-            <div>
-              <span className="section-label">What it does not do</span>
-              <h2>Important limits</h2>
-            </div>
-          </div>
-          <ul className="plain-list">
-            {LIMITS.map((item) => (
-              <li key={item}>{item}</li>
-            ))}
-          </ul>
-        </section>
-      </div>
-
-      <section className="panel section-panel">
-        <div className="panel-head compact">
-          <div>
-            <span className="section-label">Common developer workflows</span>
-            <h2>What you can try in the playground</h2>
-          </div>
-          <Link className="secondary-cta" to="/playground">
-            Open playground
+        <p className="section-intro">
+          Export a disclosure/share package and review exactly what items and artefacts are included.
+          Keep the full record internal while sharing only the required subset.
+        </p>
+        <div className="cta-row">
+          <Link className="secondary-cta" to="/share">
+            Open share/export view
+          </Link>
+          <Link className="secondary-cta" to="/advanced">
+            Advanced/legacy playground
           </Link>
         </div>
-        <div className="learn-card-grid">
-          {COMMON_WORKFLOWS.map((workflow) => (
-            <article key={workflow.slug} className="learn-card">
-              <strong>{workflow.title}</strong>
-              <p>{workflow.body}</p>
-            </article>
-          ))}
-        </div>
-      </section>
-
-      <section className="panel legal-boundary-panel">
-        <span className="section-label">Important note</span>
-        <p>{LEGAL_BOUNDARY}</p>
       </section>
     </section>
   );

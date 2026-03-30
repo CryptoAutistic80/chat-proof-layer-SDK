@@ -135,7 +135,7 @@ export function RecordsExplorerPage() {
           Run one playground example first, then come back here to inspect what was stored, what
           can be checked, and what could be shared.
         </p>
-        <Link className="primary-cta" to="/playground">
+        <Link className="primary-cta" to="/chat-demo">
           Open playground
         </Link>
       </section>

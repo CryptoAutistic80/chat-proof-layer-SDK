@@ -80,7 +80,7 @@ If you are starting fresh, complete the chatbot flow first (`get_started.md`) be
 | Status | Surface | Support level | Import path / docs |
 | --- | --- | --- | --- |
 | **chatbot-first stable** | Chat transcript capture + verification (`ProofLayer.capture`, `start_chat_session/startChatSession`, `LocalChatProofSession`, chat provider wrappers) | Fully supported as the primary onboarding path for v1 and future minors. | Default SDK entrypoints (`proofsdk`, `@proof-layer/sdk`) and `get_started.md`. |
-| **advanced supported** | Non-chat lifecycle/compliance capture builders, tooling helpers, local/native helpers, vault/completeness operations | Supported, but designated advanced. New adopters should use these only after chatbot flows are in place. | `proofsdk.advanced` and `@proof-layer/sdk/advanced`; see `docs/migration/chatbot-focus-v1.md`. |
+| **advanced supported** | Non-chat lifecycle/compliance capture builders, tooling helpers, local/native helpers, vault/completeness operations | Supported, but designated advanced. New adopters should use these only after chatbot flows are in place. | `docs/migration/chatbot-focus-v1.md` for the secondary expert track once chat flows are live. |
 | **legacy/deprecated** | Non-chat APIs imported from default SDK surface (`proofsdk.<non-chat>`, `@proof-layer/sdk` non-chat builders/helpers) | Runtime deprecation warnings in v1; compatibility maintained during transition window only. | Migrate to advanced imports above; timeline in `docs/migration/chatbot-focus-v1.md`. |
 
 ## Root Docs Example Ordering
@@ -623,7 +623,7 @@ The demo frontend can connect to a local `proof-service` instance. It is there t
 - landing and use-case pages for explanation
 - integrated docs under `/docs/*`
 - a guided demo for scenario walkthroughs
-- an advanced playground for deeper workflow control
+- an expert-mode playground for deeper workflow control (secondary path after chat-first setup)
 - an Annex IV-oriented readiness check card backed by the completeness API
 
 When connected to a running vault, the interactive workflow can:

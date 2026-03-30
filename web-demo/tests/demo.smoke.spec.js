@@ -47,6 +47,18 @@ test("homepage to guided demo to proof/share pages stays understandable", async 
   );
   await expect(downloadLink.or(emptyDisclosure)).toBeVisible();
 
+
+
+  await page.goto("/chat-demo");
+  await expect(page.getByRole("heading", { level: 1, name: "Run a chat, seal it, and get proof metadata instantly" })).toBeVisible();
+
+  await page.goto("/verify");
+  await expect(page.getByRole("heading", { level: 1, name: "See tamper evidence in action" })).toBeVisible();
+
+  await page.goto("/share");
+  await page.waitForURL(/\/records\?view=share/);
+  await expect(page.getByRole("tab", { name: /Share/i })).toBeVisible();
+
   await page.getByRole("link", { name: "Docs" }).click();
   await page.waitForURL(/\/docs/);
   await expect(page.getByRole("heading", { level: 1, name: "Start with the path that fits your role" })).toBeVisible();

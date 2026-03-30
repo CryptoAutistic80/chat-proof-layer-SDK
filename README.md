@@ -1,195 +1,104 @@
 # Proof Layer SDK
 
-Rust-first SDK and optional evidence vault for tamper-evident AI compliance records.
+Rust-first SDK for **proving chat assistant interactions** as tamper-evident, portable records.
 
-Proof Layer turns an AI run into a signed, portable evidence package that can be verified later, including offline. The primary product surface is the SDK, CLI, and local verification flow. The vault is an optional operational layer for teams that need retention, auditability, policy management, and export orchestration.
+Proof Layer’s **primary path** is chatbot evidence capture: record a chat session, seal it as a signed bundle, and verify that transcript later (including offline). The vault and broader compliance surfaces still exist, but they are explicitly advanced paths.
 
-## What This Project Does
+## Primary Use Case: Prove Chat Assistant Interactions
 
-- Captures AI interaction evidence as typed `CaptureEvent` / `EvidenceBundle` data.
-- Canonicalizes and hashes that data deterministically.
-- Builds a Merkle commitment over bundle content and signs the bundle root with Ed25519.
-- Packages the result as `bundle.pkg` for offline verification.
-- Supports RFC 3161 timestamping and transparency anchoring.
-- Supports selective disclosure with verifiable redacted packages.
-- Provides an optional vault service for storage, retention, audit, export packs, backup, and restore.
-- Exposes native TypeScript and Python SDKs over the Rust core.
-- Includes a demo frontend in `web-demo` for walkthroughs and API exercises.
+Use this repo when you need to answer, with cryptographic evidence:
 
-## What Works Today
+- What prompts/messages were sent in a chat session?
+- What assistant outputs were returned?
+- Which chat artefacts were included in the sealed record?
+- Has anything in that transcript bundle changed since sealing?
+- Can another party verify the transcript proof without trusting your server?
 
-Current implemented surface:
+The canonical starter example is:
 
-- Rust core for canonicalization, hashing, signing, verification, timestamping, transparency, disclosure, and backup-envelope crypto.
-- `proofctl` CLI for local keygen, create, verify, inspect, disclose, plus optional vault query/export/backup/restore flows.
-- Advisory readiness/completeness evaluation for full governance and deployer-side rights bundles via `proofctl assess`, the vault API, and the SDK facades.
-- `proof-service` optional self-hosted vault with SQLite storage, filesystem blobs, TLS, bearer auth, single-tenant enforcement, retention, legal holds, audit log, metrics, backup, restore layout export, and pack assembly.
-- TypeScript SDK in `sdks/typescript`, packaged as `@proof-layer/sdk`.
-- Python SDK in `packages/sdk-python`, packaged as `proof-layer-sdk-python`.
-- Demo-only site in `web-demo` with landing pages, integrated docs, guided walkthroughs, and a playground wired to the local vault API.
+- `examples/python-chat-proof/run.py`
+- `examples/bundles/chat-session.bundle.json`
 
-Important current limits:
+## Chatbot-First Quick Start
 
-- PostgreSQL and S3 are parsed in config but not implemented.
-- Full EU trusted-list / archival eIDAS trust evaluation is not implemented yet.
-- SCITT now defaults to a COSE/CCF-friendly receipt format and still reads the legacy JSON format, but broader ecosystem interoperability and trust-list work are still incomplete.
-- Multitenancy is bounded single-tenant enforcement today, not a full multi-org isolation model.
+For a full chatbot-first walkthrough, see `get_started.md`. Short version:
+
+1. Generate a keypair.
+2. Run the chat proof example.
+3. Verify the transcript bundle.
+4. (Optional) Export a selective-disclosure bundle.
+
+```bash
+# 1) Generate a local signing keypair
+cargo run -p proofctl -- generate-keypair --out ./keys
+
+# 2) Run chatbot example (creates chat bundle artefacts)
+python3 examples/python-chat-proof/run.py
+
+# 3) Verify transcript proof
+cargo run -p proofctl -- verify-bundle \
+  --in ./examples/bundles/chat-session.bundle.json \
+  --key ./keys/verify.pub
+
+# 4) Optional disclosure export
+cargo run -p proofctl -- disclose \
+  --in ./examples/bundles/chat-session.bundle.json \
+  --items 0 \
+  --out ./chat-session.disclosure.pkg
+```
+
+## Scope Guardrails (Chatbot-First Version)
+
+Intentionally **in scope** for the primary path:
+
+- Capturing chatbot interactions (`llm_interaction`) and related chat artefacts.
+- Deterministic canonicalization, hashing, Merkle commitments, signing, and verification.
+- Local/offline transcript proof verification.
+- Optional selective disclosure of chat evidence.
+
+Intentionally **out of scope** for the chatbot-first path:
+
+- Acting as a full legal/compliance determination engine.
+- Guaranteeing model determinism or output correctness.
+- Replacing enterprise records management systems.
+- Requiring vault deployment for basic transcript proof workflows.
+- Making non-chat governance packs the default onboarding experience.
+
+## Advanced/Legacy Capabilities (Not Primary Path)
+
+> **Not primary path:** The features below are supported, but not the recommended entry point for new adopters focused on chatbot transcript proof.
+
+- Optional vault service (`proof-service`) for storage, retention, audit, export, backup, and restore.
+- Broader compliance/readiness profiles (Annex IV, provider governance, conformity, FRIA, incident response, post-market monitoring).
+- Additional SDK/provider integrations and non-chat evidence workflows.
+- Demo site (`web-demo`) for walkthroughs and API exercises.
+
+If you are starting fresh, complete the chatbot flow first (`get_started.md`) before using these advanced paths.
+
+## Root Docs Example Ordering
+
+Chatbot-first references in root docs:
+
+- `examples/python-chat-proof/run.py`
+- `examples/bundles/chat-session.bundle.json`
+- Chat session disclosure artefacts produced from that bundle
+
+### Appendix: Advanced/Legacy References (Not Primary Path)
+
+- `examples/python-annex-iv/run.py`
+- `examples/python-compliance/run.py`
+- `examples/python-incident-response/run.py`
+- `examples/typescript-compliance/run.mjs`
+- `examples/typescript-monitoring/run.mjs`
+- `examples/typescript-gpai/run.mjs`
+- `examples/python-basic/run.py`
+- `examples/agent-simulated/run.py`
 
 ## Why This Exists
 
-Normal logs answer "what happened?" but not "can an independent party verify this record was not changed?"
+Normal logs answer “what happened?” but not “can an independent party verify this chat transcript was not changed?”
 
-This project is for cases where those questions matter:
-
-- What exactly was sent to the model?
-- What exactly came back?
-- Which supporting artefacts were part of that run?
-- Has the record changed since it was sealed?
-- Can a third party verify the record without trusting our server?
-
-Proof Layer does not claim model determinism or legal finality. It proves what was captured and sealed for one execution.
-
-## Architecture At A Glance
-
-| Layer | Path | Purpose |
-| --- | --- | --- |
-| Core | `crates/core` | Canonicalization, hashing, Merkle commitments, signing, verification, timestamping, transparency, disclosure |
-| CLI | `crates/cli` | `proofctl` create/verify/disclose/inspect plus vault operations |
-| Vault | `crates/vault` | Optional self-hosted or managed service layer for retention, audit, packs, backup |
-| TypeScript bridge | `crates/napi` | Native N-API bindings over the Rust core |
-| Python bridge | `crates/pyo3` | Native PyO3 bindings over the Rust core |
-| TS SDK | `sdks/typescript` | `@proof-layer/sdk`, local/vault clients, providers, evidence helpers, OTel helpers |
-| Python SDK | `packages/sdk-python` | `proof-layer-sdk-python`, local/vault clients, providers, decorators, helpers |
-| Demo site | `web-demo` | Vite + React walkthrough UI for local demos and API exercises; not the production compliance surface |
-
-## Evidence And Assurance Model
-
-Evidence currently implemented in core and SDKs includes:
-
-- `llm_interaction`
-- `tool_call`
-- `retrieval`
-- `human_oversight`
-- `policy_decision`
-- `risk_assessment`
-- `data_governance`
-- `technical_doc`
-- `instructions_for_use`
-- `qms_record`
-- `fundamental_rights_assessment`
-- `standards_alignment`
-- `post_market_monitoring`
-- `corrective_action`
-- `authority_notification`
-- `authority_submission`
-- `reporting_deadline`
-- `regulator_correspondence`
-- `model_evaluation`
-- `adversarial_test`
-- `training_provenance`
-- `compute_metrics`
-- `downstream_documentation`
-- `copyright_policy`
-- `training_summary`
-- `literacy_attestation`
-- `incident_report`
-- `conformity_assessment`
-- `declaration`
-- `registration`
-
-Assurance levels:
-
-- `signed`
-- `timestamped`
-- `transparency_anchored`
-
-Bundle root algorithms:
-
-- New bundles default to `pl-merkle-sha256-v4`
-- Verification still accepts legacy `pl-merkle-sha256-v1`, `pl-merkle-sha256-v2`, and `pl-merkle-sha256-v3`
-
-Selective disclosure:
-
-- Full bundles are packaged as `bundle.pkg`
-- Redacted bundles are packaged as `pl-bundle-disclosure-pkg-v1`
-- Disclosure supports item-level selection, optional artefact inclusion, top-level field redaction, and nested JSON-pointer path redaction on v4 bundles
-
-## Quick Start
-
-### 1. Prerequisites
-
-- Rust toolchain
-- Node 20+ for the TypeScript SDK and demo
-- Python 3.10+ for the Python SDK
-
-### 2. Build A Bundle Offline
-
-```bash
-# Generate a dev signing keypair
-cargo run -p proofctl -- generate-keypair --out ./keys
-
-# Create a bundle package from capture + artefacts
-cargo run -p proofctl -- create \
-  --input ./capture.json \
-  --artefact prompt.json=./prompt.json \
-  --artefact response.json=./response.json \
-  --key ./keys/signing.pem \
-  --out ./bundle.pkg
-
-# Verify offline
-cargo run -p proofctl -- verify-bundle --in ./bundle.pkg --key ./keys/verify.pub
-
-# Produce a selective-disclosure package for item 0
-cargo run -p proofctl -- disclose \
-  --in ./bundle.pkg \
-  --items 0 \
-  --out ./bundle.disclosure.pkg
-
-# Verify the redacted package
-cargo run -p proofctl -- verify-bundle --in ./bundle.disclosure.pkg --key ./keys/verify.pub
-
-# Assess Annex IV governance readiness for a full bundle
-cargo run -p proofctl -- assess \
-  --in ./annex-iv-bundle.pkg \
-  --profile annex_iv_governance_v1
-
-# Assess provider-governance readiness for a full bundle
-cargo run -p proofctl -- assess \
-  --in ./provider-governance-bundle.pkg \
-  --profile provider_governance_v1
-
-# Assess conformity readiness for a full bundle
-cargo run -p proofctl -- assess \
-  --in ./conformity-bundle.pkg \
-  --profile conformity_v1
-
-# Assess GPAI provider completeness for a full bundle
-cargo run -p proofctl -- assess \
-  --in ./gpai-provider-bundle.pkg \
-  --profile gpai_provider_v1
-
-# Assess deployer-side FRIA completeness for a full bundle
-cargo run -p proofctl -- assess \
-  --in ./fundamental-rights-bundle.pkg \
-  --profile fundamental_rights_v1
-
-# Assess incident-response completeness for a full bundle
-cargo run -p proofctl -- assess \
-  --in ./incident-response-bundle.pkg \
-  --profile incident_response_v1
-
-# Assess post-market monitoring completeness for a full bundle
-cargo run -p proofctl -- assess \
-  --in ./post-market-monitoring-bundle.pkg \
-  --profile post_market_monitoring_v1
-```
-
-Notes:
-
-- `proofctl create` accepts both the legacy PoC capture shape and the current v1.0 `CaptureEvent` shape.
-- Migration overrides are available, for example `--system-id`, `--retention-class`, `--evidence-type`, `--role`, and the `--intended-use` / `--risk-tier` compliance flags.
-- Deterministic fixture inputs live under `fixtures/golden/`.
-- Checked completeness fixtures now include `fixtures/golden/annex_iv_governance/`, `fixtures/golden/conformity/`, `fixtures/golden/fundamental_rights/`, `fixtures/golden/gpai_provider/`, `fixtures/golden/incident_response/`, `fixtures/golden/post_market_monitoring/`, and `fixtures/golden/provider_governance/`.
+Proof Layer does not claim legal finality. It proves what was captured and sealed for one chat execution.
 
 ### Key Loading Modes (CLI)
 

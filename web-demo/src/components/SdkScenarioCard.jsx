@@ -1,8 +1,6 @@
 import React from "react";
 
 export function SdkScenarioCard({ scenario, active, onSelect }) {
-  const itemTypes = scenario.steps.map((step) => step.itemType);
-
   return (
     <button
       type="button"
@@ -11,14 +9,14 @@ export function SdkScenarioCard({ scenario, active, onSelect }) {
     >
       <div className="scenario-card-top">
         <span className="section-label">{scenario.category}</span>
-        <span className="scenario-role-tag">{scenario.actorRole}</span>
+        <span className="scenario-role-tag">{scenario.codeLanguage}</span>
       </div>
       <strong>{scenario.label}</strong>
       <p>{scenario.audienceSummary}</p>
       <div className="scenario-copy-stack">
         <div>
-          <span className="scenario-copy-label">What gets recorded</span>
-          <span>{itemTypes.join(" + ")}</span>
+          <span className="scenario-copy-label">Conversation proof</span>
+          <span>Transcript hash + session signature</span>
         </div>
         <div>
           <span className="scenario-copy-label">Why it helps</span>
@@ -26,10 +24,8 @@ export function SdkScenarioCard({ scenario, active, onSelect }) {
         </div>
       </div>
       <div className="scenario-chip-row">
-        <span className="scenario-chip">
-          {scenario.packType ?? "No pack by default"}
-        </span>
-        <span className="scenario-chip">{scenario.codeLanguage}</span>
+        <span className="scenario-chip">{scenario.bundleFormat}</span>
+        <span className="scenario-chip">{scenario.disclosureProfile}</span>
       </div>
     </button>
   );

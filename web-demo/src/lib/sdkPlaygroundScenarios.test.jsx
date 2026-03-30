@@ -3,14 +3,14 @@ import {
   applyScenarioToDraft,
   firstScenarioForLane,
   getPlaygroundScenario,
-  inferPackTypeFromItems
+  inferPackTypeFromItems,
+  listScenariosForLane
 } from "./sdkPlaygroundScenarios";
 
 describe("sdkPlaygroundScenarios", () => {
-  test("returns the first scenario for each lane", () => {
-    expect(firstScenarioForLane("typescript").id).toBe("ts_chatbot_support");
-    expect(firstScenarioForLane("python").id).toBe("py_hiring_review");
-    expect(firstScenarioForLane("cli").id).toBe("cli_chatbot_support");
+  test("returns the baseline chatbot scenario first", () => {
+    expect(firstScenarioForLane().id).toBe("chat_baseline_completion");
+    expect(listScenariosForLane()).toHaveLength(4);
   });
 
   test("applies scenario defaults without losing connection settings", () => {
@@ -23,64 +23,19 @@ describe("sdkPlaygroundScenarios", () => {
       temperature: "0.4",
       maxTokens: "512"
     };
-    const scenario = getPlaygroundScenario("ts_support_rules");
+    const scenario = getPlaygroundScenario("chat_redacted_sharing");
     const nextDraft = applyScenarioToDraft(draft, scenario);
 
     expect(nextDraft.serviceUrl).toBe("http://vault.example.test");
     expect(nextDraft.apiKey).toBe("secret");
     expect(nextDraft.providerApiKey).toBe("provider-secret");
-    expect(nextDraft.systemId).toBe("hiring-assistant");
-    expect(nextDraft.templateProfile).toBe("annex_iv_redacted");
+    expect(nextDraft.systemId).toBe("chat-assistant-share");
+    expect(nextDraft.templateProfile).toBe("runtime_minimum");
     expect(nextDraft.playgroundHydrated).toBe(true);
   });
 
-  test("infers Annex IV pack selection from governance evidence items", () => {
-    const packType = inferPackTypeFromItems([
-      { type: "technical_doc" },
-      { type: "risk_assessment" },
-      { type: "standards_alignment" }
-    ]);
-
-    expect(packType).toBe("annex_iv");
-  });
-
-  test("infers Annex XI pack selection from GPAI evidence items", () => {
-    const packType = inferPackTypeFromItems([
-      { type: "training_provenance" },
-      { type: "compute_metrics" }
-    ]);
-
-    expect(packType).toBe("annex_xi");
-  });
-
-  test("prefers post-market monitoring inference when monitoring and incident items coexist", () => {
-    const packType = inferPackTypeFromItems([
-      { type: "post_market_monitoring" },
-      { type: "incident_report" },
-      { type: "authority_submission" }
-    ]);
-
-    expect(packType).toBe("post_market_monitoring");
-  });
-
-  test("infers incident-response pack selection when incident items coexist with context items", () => {
-    const packType = inferPackTypeFromItems([
-      { type: "technical_doc" },
-      { type: "risk_assessment" },
-      { type: "policy_decision" },
-      { type: "incident_report" }
-    ]);
-
-    expect(packType).toBe("incident_response");
-  });
-
-  test("infers conformity pack selection from conformity evidence items", () => {
-    const packType = inferPackTypeFromItems([
-      { type: "conformity_assessment" },
-      { type: "declaration" },
-      { type: "registration" }
-    ]);
-
-    expect(packType).toBe("conformity");
+  test("infers chat interaction runs as no export pack", () => {
+    const packType = inferPackTypeFromItems([{ type: "llm_interaction" }]);
+    expect(packType).toBe(null);
   });
 });

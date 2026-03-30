@@ -716,20 +716,114 @@ cargo run -p proofctl -- verify \\
   --public-key ./keys/verify.pub`;
 }
 
+
+function renderTsChatSession(draft, scenarioName, extras = "") {
+  return `import { ProofLayer } from "@proof-layer/sdk";
+
+const proofLayer = new ProofLayer({
+  vaultUrl: ${q(draft.serviceUrl)},
+  appId: "web-demo-chat-session",
+  env: "dev",
+  systemId: ${q(draft.systemId)},
+  role: "provider"
+});
+
+const session = await proofLayer.capture({
+  provider: ${q(draft.provider)},
+  model: ${q(draft.model)},
+  requestId: ${q(`chat-${draft.systemId}-001`)},
+  input: {
+    transcript: [
+      { role: "user", content: ${q(draft.userPrompt)} }
+    ]
+  },
+  output: {
+    assistant_message: "Demo response for ${scenarioName}",
+    transcript_hash: "sha256:demo-transcript-hash",
+    session_signature: "ed25519:demo-session-signature"
+  },
+  retentionClass: "runtime_logs"${extras}
+});
+
+await session.verify();`;
+}
+
+function renderPyChatSession(draft, scenarioName, extras = "") {
+  return `from proof_layer import ProofLayer
+
+proof_layer = ProofLayer(
+    vault_url=${q(draft.serviceUrl)},
+    app_id="web-demo-chat-session",
+    env="dev",
+    system_id=${q(draft.systemId)},
+    role="provider",
+)
+
+session = proof_layer.capture(
+    provider=${q(draft.provider)},
+    model=${q(draft.model)},
+    request_id=${q(`chat-${draft.systemId}-001`)},
+    input={
+        "transcript": [
+            {"role": "user", "content": ${q(draft.userPrompt)}}
+        ]
+    },
+    output={
+        "assistant_message": "Demo response for ${scenarioName}",
+        "transcript_hash": "sha256:demo-transcript-hash",
+        "session_signature": "ed25519:demo-session-signature",
+    },
+    retention_class="runtime_logs"${extras}
+)
+
+session.verify()`;
+}
+
+function renderChatBaselineCompletion(draft) {
+  return renderTsChatSession(draft, "baseline chat completion");
+}
+
+function renderChatToolAssistedAnswer(draft) {
+  return renderTsChatSession(
+    draft,
+    "tool-assisted answer",
+    `,
+  metadata: { tool_name: "orders_lookup", tool_result_ref: "tool-run-10482" }`
+  );
+}
+
+function renderChatRetrievalAugmentedAnswer(draft) {
+  return renderPyChatSession(
+    draft,
+    "retrieval-augmented answer",
+    `,
+    metadata={"retrieval_index": "policy-kb", "citation_count": 2}`
+  );
+}
+
+function renderChatRedactedSharing(draft) {
+  return renderPyChatSession(
+    draft,
+    "redacted sharing scenario",
+    `,
+    policy={"redaction_profile": "runtime_minimum"}`
+  );
+}
+
 export function renderScenarioScript(scenarioInput, draft) {
   const scenario =
     typeof scenarioInput === "string"
       ? getPlaygroundScenario(scenarioInput)
       : scenarioInput;
   switch (scenario.templateId) {
-    case "ts_chatbot_support":
-      return renderTsChatbotSupport(draft);
-    case "ts_support_rules":
-      return renderTsSupportRules(draft);
-    case "ts_gpai_thresholds":
-      return renderTsGpaiThresholds(draft);
-    case "py_hiring_review":
-      return renderPyHiringReview(draft);
+    case "chat_baseline_completion":
+      return renderChatBaselineCompletion(draft);
+    case "chat_tool_assisted_answer":
+      return renderChatToolAssistedAnswer(draft);
+    case "chat_retrieval_augmented_answer":
+      return renderChatRetrievalAugmentedAnswer(draft);
+    case "chat_redacted_sharing":
+      return renderChatRedactedSharing(draft);
     case "py_incident_escalation":
       return renderPyIncidentEscalation(draft);
     case "cli_chatbot_support":

@@ -12,7 +12,7 @@ import { SdkLaneTabs } from "../components/SdkLaneTabs";
 import { SdkScenarioCard } from "../components/SdkScenarioCard";
 import { buildRunNarrativeSummary } from "../lib/narrative";
 import { buildMerkleTree } from "../lib/clientCrypto";
-import { PLAYGROUND_LANES, listScenariosForLane } from "../lib/sdkPlaygroundScenarios";
+import { listScenariosForLane } from "../lib/sdkPlaygroundScenarios";
 import { renderScenarioScript } from "../lib/sdkScriptTemplates";
 import { LEGAL_BOUNDARY } from "../lib/siteContent";
 import { isProviderLiveEnabled } from "../lib/presets";
@@ -30,18 +30,7 @@ export function SDKPlaygroundPage() {
     actions
   } = useDemo();
 
-  const selectedLane = useMemo(
-    () => PLAYGROUND_LANES.find((lane) => lane.id === draft.lane) ?? PLAYGROUND_LANES[0],
-    [draft.lane]
-  );
-  const scenarios = useMemo(() => listScenariosForLane(draft.lane), [draft.lane]);
-  const laneCounts = useMemo(
-    () =>
-      Object.fromEntries(
-        PLAYGROUND_LANES.map((lane) => [lane.id, listScenariosForLane(lane.id).length])
-      ),
-    []
-  );
+  const scenarios = useMemo(() => listScenariosForLane(), []);
   const liveAvailable = isProviderLiveEnabled(vaultConfig, draft.provider);
   const scriptSource = renderScenarioScript(currentScenario, draft);
   const scenarioRun = currentRun?.scenarioId === currentScenario.id ? currentRun : null;
@@ -82,9 +71,7 @@ export function SDKPlaygroundPage() {
           <span className="section-label">Advanced / legacy playground</span>
           <h1>Legacy multi-workflow studio for full configuration</h1>
           <p className="studio-lead">
-            Pick a language, choose a common workflow, tweak a few inputs, and run the real
-            vault-backed flow. The page then shows what was recorded, why that helps with review,
-            and how to inspect the resulting record.
+            Pick a chatbot scenario, tweak a few inputs, and run the real vault-backed flow. The page then shows the conversation proof, transcript hash details, and how to inspect the resulting session record.
           </p>
         </div>
         <aside className="studio-hero-side">
@@ -130,14 +117,13 @@ export function SDKPlaygroundPage() {
         <div className="panel-head compact">
           <div>
             <span className="section-label">Step 1</span>
-            <h2>Choose a language and workflow</h2>
+            <h2>Choose a chatbot scenario</h2>
           </div>
         </div>
         <SdkLaneTabs
-          lanes={PLAYGROUND_LANES}
-          activeLane={draft.lane}
-          laneCounts={laneCounts}
-          onSelect={actions.selectLane}
+          scenarios={scenarios}
+          activeScenarioId={currentScenario.id}
+          onSelect={actions.selectScenario}
         />
         <div className="scenario-grid sdk-scenario-grid">
           {scenarios.map((scenario) => (
@@ -212,7 +198,6 @@ export function SDKPlaygroundPage() {
           <span className="sdk-evidence-pill is-neutral">
             {currentScenario.packType ?? "No export pack by default"}
           </span>
-          <span className="sdk-evidence-pill is-neutral">{selectedLane.label}</span>
         </div>
       </section>
 

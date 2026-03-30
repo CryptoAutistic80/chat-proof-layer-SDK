@@ -29,7 +29,7 @@ export function RunSummaryCard({ run, preset, scenario }) {
           <span>{disclosureProfile}</span>
         </div>
         <div>
-          <strong>Proof record</strong>
+          <strong>Conversation proof</strong>
           <span>{run?.bundleId ?? "Not sealed yet"}</span>
         </div>
       </div>

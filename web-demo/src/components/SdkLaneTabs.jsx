@@ -1,23 +1,23 @@
 import React from "react";
 
-export function SdkLaneTabs({ lanes, activeLane, laneCounts = {}, onSelect }) {
+export function SdkLaneTabs({ scenarios, activeScenarioId, onSelect }) {
   return (
-    <div className="sdk-lane-tabs" role="tablist" aria-label="SDK lanes">
-      {lanes.map((lane) => (
+    <div className="sdk-lane-tabs" role="tablist" aria-label="Chatbot scenarios">
+      {scenarios.map((scenario) => (
         <button
-          key={lane.id}
+          key={scenario.id}
           type="button"
           role="tab"
-          aria-selected={activeLane === lane.id}
-          className={`sdk-lane-tab ${activeLane === lane.id ? "is-active" : ""}`}
-          onClick={() => onSelect(lane.id)}
+          aria-selected={activeScenarioId === scenario.id}
+          className={`sdk-lane-tab ${activeScenarioId === scenario.id ? "is-active" : ""}`}
+          onClick={() => onSelect(scenario.id)}
         >
           <div className="sdk-lane-tab-top">
-            <span className="section-label">{lane.eyebrow}</span>
-            <span className="sdk-lane-count">{laneCounts[lane.id] ?? 0} examples</span>
+            <span className="section-label">Scenario</span>
+            <span className="sdk-lane-count">{scenario.codeLanguage}</span>
           </div>
-          <strong>{lane.label}</strong>
-          <span>{lane.description}</span>
+          <strong>{scenario.label}</strong>
+          <span>{scenario.description}</span>
         </button>
       ))}
     </div>

@@ -18,7 +18,7 @@ export function ActivityFeed({ activityLog }) {
       <div className="panel-head compact">
         <div>
           <span className="section-label">Activity</span>
-          <h2>Recent workflow steps</h2>
+          <h2>Recent chat session events</h2>
         </div>
       </div>
       <ul className="activity-list">
@@ -27,7 +27,7 @@ export function ActivityFeed({ activityLog }) {
             <ActivityRow key={`${entry.time}-${index}`} entry={entry} />
           ))
         ) : (
-          <li className="activity-empty">Run the workflow to populate this audit-style feed.</li>
+          <li className="activity-empty">Run a chatbot scenario to populate this conversation-proof feed.</li>
         )}
       </ul>
     </section>

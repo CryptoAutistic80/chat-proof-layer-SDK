@@ -75,7 +75,7 @@ const FIELD_GROUPS = [
   {
     key: "capture",
     title: "App inputs",
-    description: "Control the provider path, model, run mode, and main prompt or incident input.",
+    description: "Control provider path, model, run mode, and the user message for this chat session.",
     matches: (fieldKey) =>
       fieldKey === "provider" ||
       fieldKey === "model" ||
@@ -86,14 +86,14 @@ const FIELD_GROUPS = [
   {
     key: "profile",
     title: "Workflow context",
-    description: "Reuse the core system context across every record created in this workflow.",
+    description: "Reuse the core assistant context across this chat scenario.",
     matches: (fieldKey) =>
       fieldKey === "systemId" || fieldKey === "intendedUse" || fieldKey === "owner"
   },
   {
     key: "evidence",
     title: "Extra records",
-    description: "Fill the workflow-specific governance or incident records that make this example realistic.",
+    description: "Any additional scenario-specific fields for this conversation flow.",
     matches: () => true
   }
 ];
@@ -153,12 +153,12 @@ export function ScenarioParameterForm({
 
       <p className="field-hint">
         {!hasInteraction
-          ? "This scenario is governance-only: the playground creates multiple evidence records without making a model call."
+          ? "This scenario captures a conversation proof without additional governance records."
           : draft.mode === "live"
           ? liveAvailable || draft.providerApiKey?.trim()
-            ? "Live provider access is available for this example."
+            ? "Live provider access is available for this chat scenario."
             : "Add a temporary provider key if the connected vault does not already have live access."
-          : "Synthetic mode still runs through the real vault workflow for create, verify, and later inspection."}
+          : "Synthetic mode still runs through the vault flow so you can inspect transcript hash and session signature output."}
       </p>
 
       <div className="scenario-form-footer">
@@ -170,7 +170,7 @@ export function ScenarioParameterForm({
 
         <div className="button-row">
           <button type="button" className="primary-cta" onClick={onRun} disabled={isRunning}>
-            {isRunning ? "Running example..." : "Run example"}
+            {isRunning ? "Running conversation..." : "Run conversation"}
           </button>
         </div>
       </div>

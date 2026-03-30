@@ -13,7 +13,7 @@ The forked SDK will focus on:
 - human-in-the-loop hooks for oversight
 - practical support for transparency, documentation, risk workflows, and incident handling
 
-Estimated effort for v1: **~10–12 weeks** (about **55–75 person-days**) to reach production readiness, including tests, security review, and developer documentation.
+**Delivery baseline (fixed):** kickoff on **2026-04-01** with planned v1.0.0 release on **2026-06-19**, contingent on phase exit criteria and final security/compliance sign-off.
 
 ## Current Repository Structure (Snapshot)
 
@@ -103,39 +103,34 @@ send_to_compliance_server(bundle)
 - extra language wrappers beyond Python
 - optional service layer(s), including Dockerized HTTP wrapper APIs
 
-## Timeline and Staffing Impact by Scope Option
+## Delivery Milestones and Gating Criteria (Chosen Scope)
 
-| Option | Timeline | Effort | Staffing | Risk |
-| --- | --- | --- | --- | --- |
-| **A. Python only (chosen)** | **10–12 weeks** | **55–75 person-days** | 2 engineers + 0.25 FTE compliance/security + 0.25 FTE docs | Lower |
-| B. Python + TypeScript | 14–18 weeks | 85–120 person-days | 3–4 engineers + 0.5 FTE compliance/security + 0.5 FTE docs | Higher |
-
-## Proposed Fork Plan and Timeline (Chosen Scope)
-
-1. **Requirements and design lock (Python-only)** (~1 week)
-2. **Core Python implementation** (~3–4 weeks)
-3. **Key management + verification tooling** (~1–1.5 weeks)
-4. **Packaging/release pipeline (PyPI)** (~1 week)
-5. **Testing and CI hardening** (~2 weeks)
-6. **Documentation and migration guide** (~1.5 weeks)
-7. **Security review + release readiness** (~1 week)
+| Phase | Milestone date | Entry criteria | Exit criteria |
+| --- | --- | --- | --- |
+| 1. Requirements + design lock | **2026-04-07** | ADR-0001 ratified, product/compliance owners assigned, draft v1 API boundaries documented | Frozen v1 API/scope approved by engineering + compliance, backlog split into must/should/could |
+| 2. Core Python implementation | **2026-05-05** | Phase 1 exit complete, signed architecture notes, coding standards adopted | Core session lifecycle (`start/log/finish`) implemented with deterministic transcript hashing and unit tests for happy-path + failure-path behaviors |
+| 3. Key management + verification tooling | **2026-05-14** | Core implementation merged behind stable interfaces | Key generation/loading helpers implemented, CLI/SDK verification command available, tamper-detection tests passing |
+| 4. Packaging/release pipeline (PyPI) | **2026-05-21** | Package metadata finalized, versioning policy approved | Reproducible build artifact generated, signed tag dry-run succeeds, TestPyPI publish + install verification succeeds |
+| 5. Testing + CI hardening | **2026-06-04** | CI baseline exists and release workflow configured | Required checks green (lint, unit, integration, bundle-verify), coverage threshold met, dependency/security scan has no unresolved critical issues |
+| 6. Documentation + migration guide | **2026-06-11** | APIs stable and examples validated in CI | Quickstart, migration guide, release runbook, and EU AI Act mapping docs complete and internally reviewed |
+| 7. Security/compliance review + GA release | **2026-06-19** | All earlier phase exits complete, release candidate tagged | Security review sign-off, compliance sign-off, changelog approved, signed `v1.0.0` release published |
 
 ```mermaid
 gantt
   title Forked Proof Layer SDK Plan (Python-only v1)
   dateFormat  YYYY-MM-DD
   section Planning
-  Scope + Requirements Lock       :done,   des1, 2026-04-01, 5d
+  Requirements + Design Lock       :done,   p1, 2026-04-01, 7d
   section Development
-  Core Python Implementation      :active, dev1, after des1, 20d
-  Key Mgmt + Verification         :        dev2, after dev1, 7d
-  Packaging (PyPI)                :        dev3, after dev2, 5d
+  Core Python Implementation       :active, p2, 2026-04-08, 28d
+  Key Mgmt + Verification          :        p3, 2026-05-06, 9d
+  Packaging + Release Pipeline     :        p4, 2026-05-15, 7d
   section Testing/CI
-  Tests + CI Hardening            :        test1, after dev3, 10d
+  Testing + CI Hardening           :        p5, 2026-05-22, 14d
   section Documentation
-  Docs + Migration Guide          :        doc1, after test1, 8d
+  Docs + Migration Guide           :        p6, 2026-06-05, 7d
   section Security/Release
-  Security Review + Release       :        rel1, after doc1, 5d
+  Security + Compliance + GA       :        p7, 2026-06-12, 8d
 ```
 
 ## Packaging and Distribution (v1)
@@ -235,8 +230,8 @@ sequenceDiagram
 
 1. Ratify ADR-0001 in governance records and communicate that **v1 is Python-only**.
 2. Freeze Python v1 API and JSON proof bundle schema.
-3. Start implementation against the 10–12 week plan and staff to the Python-only model.
+3. Execute delivery against the dated milestone plan and phase gates.
 4. Open a post-v1 backlog epic for TypeScript with explicit parity acceptance criteria.
-5. Define go/no-go gates for release: test pass rate, security review sign-off, and packaging verification.
+5. Enforce go/no-go release gates: required tests green, security sign-off, compliance sign-off, signed-release verification.
 
 This fork direction keeps only what is needed for verifiable, practical chat compliance workflows while reducing operational and maintenance complexity.

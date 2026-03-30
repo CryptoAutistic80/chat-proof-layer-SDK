@@ -62,14 +62,34 @@ jobs:
               - 'README.md'
               - 'get_started.md'
               - 'web-demo/src/pages/**'
-      - name: Require product-copy-reviewed label
+      - name: Require one explicit approval for product copy updates
         if: steps.paths.outputs.requires_review == 'true'
         uses: actions/github-script@v8
         with:
           script: |
-            const labels = context.payload.pull_request.labels.map((label) => label.name);
-            if (!labels.includes('product-copy-reviewed')) {
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const pull_number = context.issue.number;
+            const prAuthor = context.payload.pull_request.user.login;
+
+            const reviews = await github.paginate(github.rest.pulls.listReviews, {
+              owner,
+              repo,
+              pull_number,
+              per_page: 100,
+            });
+
+            const latestByReviewer = new Map();
+            for (const review of reviews) {
+              latestByReviewer.set(review.user.login, review.state);
+            }
+
+            const approvedReviewers = [...latestByReviewer.entries()]
+              .filter(([reviewer, state]) => reviewer !== prAuthor && state === 'APPROVED')
+              .map(([reviewer]) => reviewer);
+
+            if (approvedReviewers.length === 0) {
               core.setFailed(
-                "Product copy changed in README/get_started/web-demo pages. Add the 'product-copy-reviewed' label before merge."
+                'Product copy changed in README/get_started/web-demo pages. Add at least one non-author PR approval before merge.'
               );
             }

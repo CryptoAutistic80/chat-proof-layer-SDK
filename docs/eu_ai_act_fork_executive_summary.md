@@ -2,24 +2,24 @@
 
 ## Overview
 
-We propose a lean **Proof Layer SDK** fork that retains only the essential components needed to integrate with chat systems and meet EU AI Act obligations. The existing repository is a large, multi-language monorepo (Rust/Python/TypeScript/JavaScript) with demos, documentation, and CI. The fork will remove non-essential surfaces and keep core runtime libraries and APIs for logging, evidencing, and management.
+We propose a lean **Proof Layer SDK** fork that retains only the essential components needed to integrate with chat systems and meet EU AI Act obligations. The existing repository is a large, multi-language monorepo (Rust/Python/TypeScript/JavaScript) with demos, documentation, and CI. The fork removes non-essential release surfaces and keeps core runtime libraries and APIs for logging, evidencing, and management.
 
-Per **ADR-0001** (`docs/adr/0001-scope-language-targets.md`), **v1 scope is Python-only**.
+Per **ADR-0001** (`docs/adr/0001-scope-language-targets.md`), **v1 scope is Python + TypeScript**.
 
-The forked SDK will focus on:
+The forked SDK focuses on:
 
 - built-in transcript logging (Article 12 record-keeping)
 - automated proof generation
 - human-in-the-loop hooks for oversight
 - practical support for transparency, documentation, risk workflows, and incident handling
 
-**Delivery baseline (fixed):** kickoff on **2026-04-01** with planned v1.0.0 release on **2026-06-19**, contingent on phase exit criteria and final security/compliance sign-off.
+**Delivery baseline (fixed):** kickoff on **2026-04-01** with planned v1.0.0 release on **2026-06-28**, contingent on phase exit criteria and final security/compliance sign-off.
 
 ## Current Repository Structure (Snapshot)
 
-The current `proof-layer-sdk` repository is organised as a full-stack monorepo. Core areas include:
+The current `proof-layer-sdk` repository is organized as a full-stack monorepo. Core areas include:
 
-- **Rust crates** under `crates/` (core proof engine plus wrappers, including `crates/pyo3/`)
+- **Rust crates** under `crates/` (core proof engine plus wrappers, including `crates/pyo3/` and `crates/napi/`)
 - **Python SDK** under `packages/sdk-python/` (`proofsdk/`, decorators, CLI, packaging)
 - **TypeScript SDK** under `sdks/typescript/` (parallel API for JavaScript/TypeScript environments)
 - **Web demo** under `web-demo/` (React-based integration walkthrough)
@@ -53,18 +53,18 @@ A minimal Proof Layer surface can support these obligations through:
 
 ## Minimal SDK Components and API (v1)
 
-The proposed minimal SDK should include:
+The proposed minimal SDK includes:
 
 - **Core API** (`ProofLayer` or equivalent)
-  - initialise session
-  - `log_user(...)`
-  - `log_ai(...)`
-  - finalise session and produce bundle
+  - initialize session
+  - `log_user(...)` / `logUser(...)`
+  - `log_ai(...)` / `logAI(...)`
+  - finalize session and produce bundle
 - **Proof generation**
   - deterministic transcript hashing
   - signature over session proof root
 - **Verification utility**
-  - SDK function and/or CLI command
+  - SDK function and CLI command
 - **Key management tooling**
   - key generation and secure loading helpers
 - **Error handling**
@@ -73,71 +73,38 @@ The proposed minimal SDK should include:
   - only required crypto/runtime libraries
 - **Packaging**
   - Python package (PyPI)
-
-### Illustrative Python Usage
-
-```python
-from proofsdk import ProofLayer
-
-proof = ProofLayer.load(private_key_path="keys/sign_key.pem")
-
-user_msg = "List the EU AI Act transparency requirements."
-proof.log_user(user_msg)
-ai_response = llm.chat(user_msg)
-proof.log_ai(ai_response)
-
-bundle = proof.finish_session()
-send_to_compliance_server(bundle)
-```
+  - TypeScript package (npm)
 
 ## Scope Decision (Final)
 
 ### Supported SDKs for v1
 
-- ✅ **Python SDK only**
-- ❌ TypeScript/JavaScript SDK in v1 (deferred to post-v1)
+- ✅ **Python SDK** (`proof-layer-sdk-python`)
+- ✅ **TypeScript SDK** (`@proof-layer/sdk`)
 
 ### Explicit Non-goals for v1
 
-- web demo implementation
-- extra language wrappers beyond Python
-- optional service layer(s), including Dockerized HTTP wrapper APIs
+- web demo as a production surface
+- additional language wrappers beyond Python and TypeScript
+- managed hosted compliance service
 
 ## Delivery Milestones and Gating Criteria (Chosen Scope)
 
 | Phase | Milestone date | Entry criteria | Exit criteria |
 | --- | --- | --- | --- |
 | 1. Requirements + design lock | **2026-04-07** | ADR-0001 ratified, product/compliance owners assigned, draft v1 API boundaries documented | Frozen v1 API/scope approved by engineering + compliance, backlog split into must/should/could |
-| 2. Core Python implementation | **2026-05-05** | Phase 1 exit complete, signed architecture notes, coding standards adopted | Core session lifecycle (`start/log/finish`) implemented with deterministic transcript hashing and unit tests for happy-path + failure-path behaviors |
-| 3. Key management + verification tooling | **2026-05-14** | Core implementation merged behind stable interfaces | Key generation/loading helpers implemented, CLI/SDK verification command available, tamper-detection tests passing |
-| 4. Packaging/release pipeline (PyPI) | **2026-05-21** | Package metadata finalized, versioning policy approved | Reproducible build artifact generated, signed tag dry-run succeeds, TestPyPI publish + install verification succeeds |
-| 5. Testing + CI hardening | **2026-06-04** | CI baseline exists and release workflow configured | Required checks green (lint, unit, integration, bundle-verify), coverage threshold met, dependency/security scan has no unresolved critical issues |
-| 6. Documentation + migration guide | **2026-06-11** | APIs stable and examples validated in CI | Quickstart, migration guide, release runbook, and EU AI Act mapping docs complete and internally reviewed |
-| 7. Security/compliance review + GA release | **2026-06-19** | All earlier phase exits complete, release candidate tagged | Security review sign-off, compliance sign-off, changelog approved, signed `v1.0.0` release published |
-
-```mermaid
-gantt
-  title Forked Proof Layer SDK Plan (Python-only v1)
-  dateFormat  YYYY-MM-DD
-  section Planning
-  Requirements + Design Lock       :done,   p1, 2026-04-01, 7d
-  section Development
-  Core Python Implementation       :active, p2, 2026-04-08, 28d
-  Key Mgmt + Verification          :        p3, 2026-05-06, 9d
-  Packaging + Release Pipeline     :        p4, 2026-05-15, 7d
-  section Testing/CI
-  Testing + CI Hardening           :        p5, 2026-05-22, 14d
-  section Documentation
-  Docs + Migration Guide           :        p6, 2026-06-05, 7d
-  section Security/Release
-  Security + Compliance + GA       :        p7, 2026-06-12, 8d
-```
+| 2. Core SDK implementation | **2026-05-05** | Phase 1 exit complete, signed architecture notes, coding standards adopted | Core session lifecycle implemented in Python + TypeScript with deterministic transcript hashing and unit tests for happy-path + failure-path behaviors |
+| 3. Key management + verification tooling | **2026-05-14** | Core implementation merged behind stable interfaces | Key generation/loading helpers implemented, CLI/SDK verification path available, tamper-detection tests passing in both SDKs |
+| 4. Packaging/release pipelines (PyPI + npm) | **2026-05-24** | Package metadata finalized, versioning policy approved | Reproducible build artifacts generated, signed tag dry-run succeeds, TestPyPI and npm pack/install verification succeeds |
+| 5. Testing + CI hardening | **2026-06-08** | CI baseline exists and release workflow configured | Required checks green (lint, unit, integration, bundle-verify), coverage threshold met, dependency/security scan has no unresolved critical issues |
+| 6. Documentation + migration guide | **2026-06-17** | APIs stable and examples validated in CI | Quickstart, migration guide, release runbook, and EU AI Act mapping docs complete and internally reviewed for both SDKs |
+| 7. Security/compliance review + GA release | **2026-06-28** | All earlier phase exits complete, release candidate tagged | Security review sign-off, compliance sign-off, changelog approved, signed `v1.0.0` release published |
 
 ## Packaging and Distribution (v1)
 
-- **Python** (`proof_layer_sdk`) via PyPI
-- No npm package in v1
-- No Docker wrapper service in v1
+- **Python** (`proof-layer-sdk-python`) via PyPI
+- **TypeScript/JavaScript** (`@proof-layer/sdk`) via npm
+- No managed hosted compliance service in v1
 
 ## Security and Privacy Considerations
 
@@ -152,11 +119,12 @@ gantt
 - unit tests: logging, bundle generation, verification, tamper detection
 - integration tests: end-to-end chat capture flow
 - CI: lint, test, coverage, packaging checks, release automation on tags
+- cross-SDK parity checks on API semantics and schema compliance
 - optional fuzz/property testing for robustness
 
 ## Documentation Deliverables
 
-- Getting Started guide
+- Getting Started guide (Python + TypeScript)
 - API reference
 - concise integration examples
 - migration guide from broader SDK surface
@@ -174,64 +142,19 @@ gantt
 
 | Area | Current SDK | Proposed Minimal SDK (v1) |
 | --- | --- | --- |
-| Surface | Multi-language, demos, broad tooling | Compliance-focused Python runtime and APIs |
-| UI/Demo | Included | Removed from core fork |
-| Logging/Proof | Present with broader abstractions | Core logging/signing only |
+| Surface | Multi-language, demos, broad tooling | Compliance-focused Python + TypeScript runtime APIs |
+| UI/Demo | Included | Demo remains non-release-critical |
+| Logging/Proof | Present with broader abstractions | Core logging/signing emphasized |
 | Key tooling | Partial | Required, explicit |
-| Dependencies | Broad | Minimized |
-| CI/Testing | Present, mixed scope | Focused on critical assurance paths |
-| Docs | Extensive mixed docs | concise integration + compliance guides |
-
-## Reference Architecture
-
-```mermaid
-graph LR
-    subgraph Chat Application
-      User[User]
-      ChatUI[Chat UI]
-      AIModel[AI Model Service]
-    end
-    subgraph ProofLayer
-      Capturer[ProofLayer SDK]
-      KeyStore[Signing Keys\n(private/public)]
-      BundleStore[Secure Log Storage]
-    end
-    User --> ChatUI
-    ChatUI --> Capturer[Capture Hook]
-    Capturer --> AIModel
-    AIModel --> Capturer
-    Capturer --> BundleStore
-    Capturer -- key ops --> KeyStore
-    ChatUI -.-> AIModel
-```
-
-## Integration Sequence
-
-```mermaid
-sequenceDiagram
-  participant Dev as Developer Code
-  participant SDK as ProofLayer SDK
-  participant Chat as AI Chat Model
-  participant Bundles as Evidence Storage
-
-  Dev->>SDK: start_session()
-  loop for each turn
-    Dev->>SDK: log_user(prompt)
-    SDK->>Chat: send prompt to AI
-    Chat-->>SDK: response
-    SDK->>Dev: return response
-    Dev->>SDK: log_ai(response)
-  end
-  Dev->>SDK: finish_session()
-  SDK->>Bundles: save signed evidence bundle
-```
+| Dependencies | Broad | Minimized in release-critical paths |
+| CI/Testing | Present, mixed scope | Focused on critical assurance paths across both SDKs |
+| Docs | Extensive mixed docs | concise integration + compliance guides for both SDKs |
 
 ## Next Steps (Unambiguous)
 
-1. Ratify ADR-0001 in governance records and communicate that **v1 is Python-only**.
-2. Freeze Python v1 API and JSON proof bundle schema.
+1. Ratify ADR-0001 in governance records and communicate that **v1 is Python + TypeScript**.
+2. Freeze v1 API and JSON proof bundle schema shared by both SDKs.
 3. Execute delivery against the dated milestone plan and phase gates.
-4. Open a post-v1 backlog epic for TypeScript with explicit parity acceptance criteria.
-5. Enforce go/no-go release gates: required tests green, security sign-off, compliance sign-off, signed-release verification.
+4. Enforce go/no-go release gates: required tests green, security sign-off, compliance sign-off, signed-release verification.
 
-This fork direction keeps only what is needed for verifiable, practical chat compliance workflows while reducing operational and maintenance complexity.
+This fork direction keeps only what is needed for verifiable, practical chat compliance workflows while reducing operational and maintenance complexity while supporting both major integration ecosystems.

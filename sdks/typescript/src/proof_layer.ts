@@ -164,7 +164,8 @@ class ChatProofSession {
 }
 
 const NON_CHAT_CAPTURE_DEPRECATION_MESSAGE =
-  "Non-chat capture convenience methods are deprecated on the default entrypoint. Import from @proof-layer/sdk/advanced instead.";
+  "Non-chat capture convenience methods are deprecated on the default entrypoint. " +
+  'Import { ProofLayer } from "@proof-layer/sdk/advanced" for compliance/lifecycle capture APIs.';
 
 const warnedNonChatCaptureMethods = new Set<string>();
 

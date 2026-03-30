@@ -75,6 +75,14 @@ Intentionally **out of scope** for the chatbot-first path:
 
 If you are starting fresh, complete the chatbot flow first (`get_started.md`) before using these advanced paths.
 
+## Compatibility Matrix (Chatbot Focus v1)
+
+| Status | Surface | Support level | Import path / docs |
+| --- | --- | --- | --- |
+| **chatbot-first stable** | Chat transcript capture + verification (`ProofLayer.capture`, `start_chat_session/startChatSession`, `LocalChatProofSession`, chat provider wrappers) | Fully supported as the primary onboarding path for v1 and future minors. | Default SDK entrypoints (`proofsdk`, `@proof-layer/sdk`) and `get_started.md`. |
+| **advanced supported** | Non-chat lifecycle/compliance capture builders, tooling helpers, local/native helpers, vault/completeness operations | Supported, but designated advanced. New adopters should use these only after chatbot flows are in place. | `proofsdk.advanced` and `@proof-layer/sdk/advanced`; see `docs/migration/chatbot-focus-v1.md`. |
+| **legacy/deprecated** | Non-chat APIs imported from default SDK surface (`proofsdk.<non-chat>`, `@proof-layer/sdk` non-chat builders/helpers) | Runtime deprecation warnings in v1; compatibility maintained during transition window only. | Migrate to advanced imports above; timeline in `docs/migration/chatbot-focus-v1.md`. |
+
 ## Root Docs Example Ordering
 
 Chatbot-first references in root docs:

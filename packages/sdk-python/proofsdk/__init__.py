@@ -43,6 +43,17 @@ _DEPRECATED_DEFAULT_EXPORTS = {
     "prove_llm_call": ("proofsdk.decorators", "prove_llm_call"),
 }
 
+_ADVANCED_IMPORT_HINTS = {
+    "ProofLayerClient": "from proofsdk.advanced import ProofLayerClient",
+    "LocalProofLayerClient": "from proofsdk.advanced import LocalProofLayerClient",
+    "select_pack_readiness": "from proofsdk.advanced import select_pack_readiness",
+    "create_disclosure_policy": "from proofsdk.advanced import create_disclosure_policy",
+    "create_disclosure_policy_template": "from proofsdk.advanced import create_disclosure_policy_template",
+    "DISCLOSURE_POLICY_TEMPLATE_NAMES": "from proofsdk.advanced import DISCLOSURE_POLICY_TEMPLATE_NAMES",
+    "DISCLOSURE_REDACTION_GROUPS": "from proofsdk.advanced import DISCLOSURE_REDACTION_GROUPS",
+    "prove_llm_call": "from proofsdk.advanced import prove_llm_call",
+}
+
 for _name in (
     "create_adversarial_test_request",
     "create_authority_notification_request",
@@ -88,9 +99,10 @@ def __getattr__(name: str):
 
     if name in _DEPRECATED_DEFAULT_EXPORTS:
         module_name, attr_name = _DEPRECATED_DEFAULT_EXPORTS[name]
+        advanced_hint = _ADVANCED_IMPORT_HINTS.get(name, f"from proofsdk.advanced import {name}")
         warnings.warn(
             f"proofsdk.{name} is deprecated on the default import path. "
-            "Import advanced helpers from proofsdk.advanced instead.",
+            f"Use {advanced_hint} instead.",
             DeprecationWarning,
             stacklevel=2,
         )

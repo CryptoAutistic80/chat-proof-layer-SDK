@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import warnings
 from typing import Any, Callable
 
 from proofsdk.client import ProofLayerClient
@@ -98,6 +99,8 @@ class ChatProofSession:
         return {"transcript": list(self._transcript), "proof": proof}
 
 class ProofLayer:
+    _warned_non_chat_capture_methods: set[str] = set()
+
     def __init__(
         self,
         *,
@@ -381,8 +384,21 @@ class ProofLayer:
             created_at=created_at,
         )
 
-    @staticmethod
-    def _split_local_options(kwargs: dict[str, Any]) -> tuple[dict[str, Any], str | None, str | None]:
+    @classmethod
+    def _split_local_options(
+        cls,
+        kwargs: dict[str, Any],
+        *,
+        method_name: str = "non_chat_capture",
+    ) -> tuple[dict[str, Any], str | None, str | None]:
+        if method_name not in cls._warned_non_chat_capture_methods:
+            cls._warned_non_chat_capture_methods.add(method_name)
+            warnings.warn(
+                f"ProofLayer.{method_name} is deprecated on the default import path. "
+                "Use proofsdk.advanced for non-chat lifecycle/compliance captures.",
+                DeprecationWarning,
+                stacklevel=3,
+            )
         params = dict(kwargs)
         bundle_id = params.pop("bundle_id", None)
         created_at = params.pop("created_at", None)
@@ -445,7 +461,7 @@ class ProofLayer:
         )
 
     def capture_tool_call(self, **kwargs: Any) -> dict[str, Any]:
-        params, bundle_id, created_at = self._split_local_options(kwargs)
+        params, bundle_id, created_at = self._split_local_options(kwargs, method_name="capture_tool_call")
         return self._submit_capture(
             create_tool_call_request(
                 key_id=self.key_id,
@@ -461,7 +477,7 @@ class ProofLayer:
         )
 
     def capture_retrieval(self, **kwargs: Any) -> dict[str, Any]:
-        params, bundle_id, created_at = self._split_local_options(kwargs)
+        params, bundle_id, created_at = self._split_local_options(kwargs, method_name="capture_retrieval")
         return self._submit_capture(
             create_retrieval_request(
                 key_id=self.key_id,
@@ -477,7 +493,7 @@ class ProofLayer:
         )
 
     def capture_human_oversight(self, **kwargs: Any) -> dict[str, Any]:
-        params, bundle_id, created_at = self._split_local_options(kwargs)
+        params, bundle_id, created_at = self._split_local_options(kwargs, method_name="capture_human_oversight")
         return self._submit_capture(
             create_human_oversight_request(
                 key_id=self.key_id,
@@ -493,7 +509,7 @@ class ProofLayer:
         )
 
     def capture_policy_decision(self, **kwargs: Any) -> dict[str, Any]:
-        params, bundle_id, created_at = self._split_local_options(kwargs)
+        params, bundle_id, created_at = self._split_local_options(kwargs, method_name="capture_policy_decision")
         return self._submit_capture(
             create_policy_decision_request(
                 key_id=self.key_id,
@@ -509,7 +525,7 @@ class ProofLayer:
         )
 
     def capture_risk_assessment(self, **kwargs: Any) -> dict[str, Any]:
-        params, bundle_id, created_at = self._split_local_options(kwargs)
+        params, bundle_id, created_at = self._split_local_options(kwargs, method_name="capture_risk_assessment")
         return self._submit_capture(
             create_risk_assessment_request(
                 key_id=self.key_id,
@@ -525,7 +541,7 @@ class ProofLayer:
         )
 
     def capture_data_governance(self, **kwargs: Any) -> dict[str, Any]:
-        params, bundle_id, created_at = self._split_local_options(kwargs)
+        params, bundle_id, created_at = self._split_local_options(kwargs, method_name="capture_data_governance")
         return self._submit_capture(
             create_data_governance_request(
                 key_id=self.key_id,
@@ -541,7 +557,7 @@ class ProofLayer:
         )
 
     def capture_technical_doc(self, **kwargs: Any) -> dict[str, Any]:
-        params, bundle_id, created_at = self._split_local_options(kwargs)
+        params, bundle_id, created_at = self._split_local_options(kwargs, method_name="capture_technical_doc")
         return self._submit_capture(
             create_technical_doc_request(
                 key_id=self.key_id,
@@ -557,7 +573,7 @@ class ProofLayer:
         )
 
     def capture_literacy_attestation(self, **kwargs: Any) -> dict[str, Any]:
-        params, bundle_id, created_at = self._split_local_options(kwargs)
+        params, bundle_id, created_at = self._split_local_options(kwargs, method_name="capture_literacy_attestation")
         return self._submit_capture(
             create_literacy_attestation_request(
                 key_id=self.key_id,
@@ -573,7 +589,7 @@ class ProofLayer:
         )
 
     def capture_incident_report(self, **kwargs: Any) -> dict[str, Any]:
-        params, bundle_id, created_at = self._split_local_options(kwargs)
+        params, bundle_id, created_at = self._split_local_options(kwargs, method_name="capture_incident_report")
         return self._submit_capture(
             create_incident_report_request(
                 key_id=self.key_id,
@@ -589,7 +605,7 @@ class ProofLayer:
         )
 
     def capture_model_evaluation(self, **kwargs: Any) -> dict[str, Any]:
-        params, bundle_id, created_at = self._split_local_options(kwargs)
+        params, bundle_id, created_at = self._split_local_options(kwargs, method_name="capture_model_evaluation")
         return self._submit_capture(
             create_model_evaluation_request(
                 key_id=self.key_id,
@@ -605,7 +621,7 @@ class ProofLayer:
         )
 
     def capture_adversarial_test(self, **kwargs: Any) -> dict[str, Any]:
-        params, bundle_id, created_at = self._split_local_options(kwargs)
+        params, bundle_id, created_at = self._split_local_options(kwargs, method_name="capture_adversarial_test")
         return self._submit_capture(
             create_adversarial_test_request(
                 key_id=self.key_id,
@@ -621,7 +637,7 @@ class ProofLayer:
         )
 
     def capture_training_provenance(self, **kwargs: Any) -> dict[str, Any]:
-        params, bundle_id, created_at = self._split_local_options(kwargs)
+        params, bundle_id, created_at = self._split_local_options(kwargs, method_name="capture_training_provenance")
         return self._submit_capture(
             create_training_provenance_request(
                 key_id=self.key_id,
@@ -637,7 +653,7 @@ class ProofLayer:
         )
 
     def capture_compute_metrics(self, **kwargs: Any) -> dict[str, Any]:
-        params, bundle_id, created_at = self._split_local_options(kwargs)
+        params, bundle_id, created_at = self._split_local_options(kwargs, method_name="capture_compute_metrics")
         return self._submit_capture(
             create_compute_metrics_request(
                 key_id=self.key_id,
@@ -653,7 +669,7 @@ class ProofLayer:
         )
 
     def capture_conformity_assessment(self, **kwargs: Any) -> dict[str, Any]:
-        params, bundle_id, created_at = self._split_local_options(kwargs)
+        params, bundle_id, created_at = self._split_local_options(kwargs, method_name="capture_conformity_assessment")
         return self._submit_capture(
             create_conformity_assessment_request(
                 key_id=self.key_id,
@@ -669,7 +685,7 @@ class ProofLayer:
         )
 
     def capture_declaration(self, **kwargs: Any) -> dict[str, Any]:
-        params, bundle_id, created_at = self._split_local_options(kwargs)
+        params, bundle_id, created_at = self._split_local_options(kwargs, method_name="capture_declaration")
         return self._submit_capture(
             create_declaration_request(
                 key_id=self.key_id,
@@ -685,7 +701,7 @@ class ProofLayer:
         )
 
     def capture_registration(self, **kwargs: Any) -> dict[str, Any]:
-        params, bundle_id, created_at = self._split_local_options(kwargs)
+        params, bundle_id, created_at = self._split_local_options(kwargs, method_name="capture_registration")
         return self._submit_capture(
             create_registration_request(
                 key_id=self.key_id,
@@ -701,7 +717,7 @@ class ProofLayer:
         )
 
     def capture_instructions_for_use(self, **kwargs: Any) -> dict[str, Any]:
-        params, bundle_id, created_at = self._split_local_options(kwargs)
+        params, bundle_id, created_at = self._split_local_options(kwargs, method_name="capture_instructions_for_use")
         return self._submit_capture(
             create_instructions_for_use_request(
                 key_id=self.key_id,
@@ -717,7 +733,7 @@ class ProofLayer:
         )
 
     def capture_qms_record(self, **kwargs: Any) -> dict[str, Any]:
-        params, bundle_id, created_at = self._split_local_options(kwargs)
+        params, bundle_id, created_at = self._split_local_options(kwargs, method_name="capture_qms_record")
         return self._submit_capture(
             create_qms_record_request(
                 key_id=self.key_id,
@@ -733,7 +749,7 @@ class ProofLayer:
         )
 
     def capture_fundamental_rights_assessment(self, **kwargs: Any) -> dict[str, Any]:
-        params, bundle_id, created_at = self._split_local_options(kwargs)
+        params, bundle_id, created_at = self._split_local_options(kwargs, method_name="capture_fundamental_rights_assessment")
         return self._submit_capture(
             create_fundamental_rights_assessment_request(
                 key_id=self.key_id,
@@ -749,7 +765,7 @@ class ProofLayer:
         )
 
     def capture_standards_alignment(self, **kwargs: Any) -> dict[str, Any]:
-        params, bundle_id, created_at = self._split_local_options(kwargs)
+        params, bundle_id, created_at = self._split_local_options(kwargs, method_name="capture_standards_alignment")
         return self._submit_capture(
             create_standards_alignment_request(
                 key_id=self.key_id,
@@ -765,7 +781,7 @@ class ProofLayer:
         )
 
     def capture_post_market_monitoring(self, **kwargs: Any) -> dict[str, Any]:
-        params, bundle_id, created_at = self._split_local_options(kwargs)
+        params, bundle_id, created_at = self._split_local_options(kwargs, method_name="capture_post_market_monitoring")
         return self._submit_capture(
             create_post_market_monitoring_request(
                 key_id=self.key_id,
@@ -781,7 +797,7 @@ class ProofLayer:
         )
 
     def capture_corrective_action(self, **kwargs: Any) -> dict[str, Any]:
-        params, bundle_id, created_at = self._split_local_options(kwargs)
+        params, bundle_id, created_at = self._split_local_options(kwargs, method_name="capture_corrective_action")
         return self._submit_capture(
             create_corrective_action_request(
                 key_id=self.key_id,
@@ -797,7 +813,7 @@ class ProofLayer:
         )
 
     def capture_authority_notification(self, **kwargs: Any) -> dict[str, Any]:
-        params, bundle_id, created_at = self._split_local_options(kwargs)
+        params, bundle_id, created_at = self._split_local_options(kwargs, method_name="capture_authority_notification")
         return self._submit_capture(
             create_authority_notification_request(
                 key_id=self.key_id,
@@ -813,7 +829,7 @@ class ProofLayer:
         )
 
     def capture_authority_submission(self, **kwargs: Any) -> dict[str, Any]:
-        params, bundle_id, created_at = self._split_local_options(kwargs)
+        params, bundle_id, created_at = self._split_local_options(kwargs, method_name="capture_authority_submission")
         return self._submit_capture(
             create_authority_submission_request(
                 key_id=self.key_id,
@@ -829,7 +845,7 @@ class ProofLayer:
         )
 
     def capture_reporting_deadline(self, **kwargs: Any) -> dict[str, Any]:
-        params, bundle_id, created_at = self._split_local_options(kwargs)
+        params, bundle_id, created_at = self._split_local_options(kwargs, method_name="capture_reporting_deadline")
         return self._submit_capture(
             create_reporting_deadline_request(
                 key_id=self.key_id,
@@ -845,7 +861,7 @@ class ProofLayer:
         )
 
     def capture_regulator_correspondence(self, **kwargs: Any) -> dict[str, Any]:
-        params, bundle_id, created_at = self._split_local_options(kwargs)
+        params, bundle_id, created_at = self._split_local_options(kwargs, method_name="capture_regulator_correspondence")
         return self._submit_capture(
             create_regulator_correspondence_request(
                 key_id=self.key_id,
@@ -861,7 +877,7 @@ class ProofLayer:
         )
 
     def capture_downstream_documentation(self, **kwargs: Any) -> dict[str, Any]:
-        params, bundle_id, created_at = self._split_local_options(kwargs)
+        params, bundle_id, created_at = self._split_local_options(kwargs, method_name="capture_downstream_documentation")
         return self._submit_capture(
             create_downstream_documentation_request(
                 key_id=self.key_id,
@@ -877,7 +893,7 @@ class ProofLayer:
         )
 
     def capture_copyright_policy(self, **kwargs: Any) -> dict[str, Any]:
-        params, bundle_id, created_at = self._split_local_options(kwargs)
+        params, bundle_id, created_at = self._split_local_options(kwargs, method_name="capture_copyright_policy")
         return self._submit_capture(
             create_copyright_policy_request(
                 key_id=self.key_id,
@@ -893,7 +909,7 @@ class ProofLayer:
         )
 
     def capture_training_summary(self, **kwargs: Any) -> dict[str, Any]:
-        params, bundle_id, created_at = self._split_local_options(kwargs)
+        params, bundle_id, created_at = self._split_local_options(kwargs, method_name="capture_training_summary")
         return self._submit_capture(
             create_training_summary_request(
                 key_id=self.key_id,

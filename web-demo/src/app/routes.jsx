@@ -3,6 +3,7 @@ import { Navigate, Route, Routes, useParams } from "react-router-dom";
 import { SiteShell } from "../components/site/SiteShell";
 import { DemoShell } from "../components/site/DemoShell";
 import { HomePage } from "../pages/HomePage";
+import { ChatDemoPage } from "../pages/ChatDemoPage";
 import { SDKPlaygroundPage } from "../pages/SDKPlaygroundPage";
 import { AdvancedPlaygroundPage } from "../pages/AdvancedPlaygroundPage";
 import { RecordsExplorerPage } from "../pages/RecordsExplorerPage";
@@ -13,16 +14,20 @@ export function AppRoutes() {
     <Routes>
       <Route element={<SiteShell />}>
         <Route path="/" element={<HomePage />} />
+        <Route path="/chat-demo" element={<ChatDemoPage />} />
         <Route path="/verify" element={<VerifyPage />} />
+        <Route path="/share" element={<Navigate to="/records?view=share" replace />} />
 
         <Route element={<DemoShell />}>
-          <Route path="/playground" element={<SDKPlaygroundPage />} />
-          <Route path="/playground/advanced" element={<AdvancedPlaygroundPage />} />
+          <Route path="/advanced" element={<SDKPlaygroundPage />} />
+          <Route path="/advanced/legacy" element={<AdvancedPlaygroundPage />} />
           <Route path="/records" element={<RecordsExplorerPage />} />
           <Route path="/records/:bundleId" element={<RecordsExplorerPage />} />
         </Route>
 
-        <Route path="/guided" element={<Navigate to="/playground" replace />} />
+        <Route path="/playground" element={<Navigate to="/chat-demo" replace />} />
+        <Route path="/playground/advanced" element={<Navigate to="/advanced/legacy" replace />} />
+        <Route path="/guided" element={<Navigate to="/chat-demo" replace />} />
         <Route path="/product" element={<Navigate to="/" replace />} />
         <Route path="/use-cases" element={<Navigate to="/" replace />} />
         <Route path="/docs" element={<Navigate to="/" replace />} />

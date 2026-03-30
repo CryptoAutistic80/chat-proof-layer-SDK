@@ -51,7 +51,7 @@ export function VerifyPage() {
         <aside className="studio-hero-side">
           <span className="section-label">Boundary</span>
           <p>{LEGAL_BOUNDARY}</p>
-          <Link to="/playground" className="text-link">
+          <Link to="/chat-demo" className="text-link">
             Need the full vault-connected playground?
           </Link>
         </aside>

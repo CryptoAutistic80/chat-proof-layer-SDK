@@ -25,16 +25,19 @@ export function SiteNav() {
 
       <nav className="site-nav" aria-label="Primary">
         <NavLink to="/" end className={linkClass(pathname === "/")}>
-          What it is
+          Home
         </NavLink>
-        <NavLink to="/playground" className={linkClass(pathname.startsWith("/playground"))}>
-          Playground
-        </NavLink>
-        <NavLink to="/records" className={linkClass(pathname.startsWith("/records"))}>
-          Explore records
+        <NavLink to="/chat-demo" className={linkClass(pathname === "/chat-demo")}>
+          Chat demo
         </NavLink>
         <NavLink to="/verify" className={linkClass(pathname === "/verify")}>
           Verify
+        </NavLink>
+        <NavLink to="/share" className={linkClass(pathname === "/share" || pathname.startsWith("/records"))}>
+          Share
+        </NavLink>
+        <NavLink to="/advanced" className={linkClass(pathname.startsWith("/advanced"))}>
+          Advanced/legacy
         </NavLink>
       </nav>
 

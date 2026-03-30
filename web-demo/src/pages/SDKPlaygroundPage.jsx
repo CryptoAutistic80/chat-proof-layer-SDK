@@ -79,8 +79,8 @@ export function SDKPlaygroundPage() {
     <section className="page-stack sdk-playground-page">
       <section className="panel studio-hero">
         <div className="studio-hero-copy">
-          <span className="section-label">Developer playground</span>
-          <h1>See how Proof Layer fits into common AI workflows</h1>
+          <span className="section-label">Advanced / legacy playground</span>
+          <h1>Legacy multi-workflow studio for full configuration</h1>
           <p className="studio-lead">
             Pick a language, choose a common workflow, tweak a few inputs, and run the real
             vault-backed flow. The page then shows what was recorded, why that helps with review,
@@ -90,8 +90,8 @@ export function SDKPlaygroundPage() {
         <aside className="studio-hero-side">
           <span className="section-label">Important boundary</span>
           <p>{LEGAL_BOUNDARY}</p>
-          <Link to="/playground/advanced" className="text-link">
-            Need every raw control? Open the advanced playground.
+          <Link to="/advanced/legacy" className="text-link">
+            Need raw vault knobs too? Open the legacy controls page.
           </Link>
         </aside>
       </section>

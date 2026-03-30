@@ -352,7 +352,7 @@ describe("AppRoutes", () => {
     expect(
       await screen.findByRole("heading", {
         level: 1,
-        name: "Keep a clear record of what your AI system did and what controls were around it."
+        name: "Prove each conversation without slowing down your app team"
       })
     ).toBeTruthy();
   });
@@ -362,7 +362,7 @@ describe("AppRoutes", () => {
     expect(
       await screen.findByRole("heading", {
         level: 1,
-        name: "See how Proof Layer fits into common AI workflows"
+        name: "Run a chat, seal it, and get proof metadata instantly"
       })
     ).toBeTruthy();
 
@@ -371,24 +371,24 @@ describe("AppRoutes", () => {
     expect(
       await screen.findByRole("heading", {
         level: 1,
-        name: "Keep a clear record of what your AI system did and what controls were around it."
+        name: "Prove each conversation without slowing down your app team"
       })
     ).toBeTruthy();
   });
 
   test("playground loads the sdk view and advanced route keeps raw controls", async () => {
-    renderApp(["/playground"]);
+    renderApp(["/advanced"]);
     expect(
       await screen.findByRole("heading", {
         level: 1,
-        name: "See how Proof Layer fits into common AI workflows"
+        name: "Legacy multi-workflow studio for full configuration"
       })
     ).toBeTruthy();
-    expect(screen.getByRole("link", { name: /advanced playground/i })).toBeTruthy();
+    expect(screen.getByRole("link", { name: /legacy controls page/i })).toBeTruthy();
 
     cleanup();
 
-    renderApp(["/playground/advanced"]);
+    renderApp(["/advanced/legacy"]);
     expect(
       await screen.findByRole("heading", {
         level: 2,
@@ -399,7 +399,7 @@ describe("AppRoutes", () => {
 
   test("playground lane switching updates scenario cards and script pane", async () => {
     const user = userEvent.setup();
-    renderApp(["/playground"]);
+    renderApp(["/advanced"]);
 
     expect(
       await screen.findByRole("heading", { level: 2, name: "Customer support chatbot" })
@@ -420,11 +420,11 @@ describe("AppRoutes", () => {
 
   test("running a packless playground scenario reveals record and compliance views", async () => {
     const user = userEvent.setup();
-    renderApp(["/playground"]);
+    renderApp(["/advanced"]);
 
     await screen.findByRole("heading", {
       level: 1,
-      name: "See how Proof Layer fits into common AI workflows"
+      name: "Legacy multi-workflow studio for full configuration"
     });
 
     await user.click(screen.getByRole("button", { name: "Run example" }));
@@ -444,11 +444,11 @@ describe("AppRoutes", () => {
 
   test("annex iv scenarios surface exported pack readiness after export", async () => {
     const user = userEvent.setup();
-    renderApp(["/playground"]);
+    renderApp(["/advanced"]);
 
     await screen.findByRole("heading", {
       level: 1,
-      name: "See how Proof Layer fits into common AI workflows"
+      name: "Legacy multi-workflow studio for full configuration"
     });
 
     await user.click(screen.getByRole("button", { name: /Annex IV governance pack/i }));
@@ -497,11 +497,11 @@ describe("AppRoutes", () => {
 
   test("records explorer loads a bundle and honors the selected view", async () => {
     const user = userEvent.setup();
-    renderApp(["/playground"]);
+    renderApp(["/advanced"]);
 
     await screen.findByRole("heading", {
       level: 1,
-      name: "See how Proof Layer fits into common AI workflows"
+      name: "Legacy multi-workflow studio for full configuration"
     });
     await user.click(screen.getByRole("button", { name: "Run example" }));
     await screen.findByRole("heading", { level: 2, name: "What was recorded" });

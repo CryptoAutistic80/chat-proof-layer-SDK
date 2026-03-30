@@ -37,7 +37,7 @@ export function AdvancedPlaygroundPage() {
       <section className="panel">
         <div className="panel-head">
           <div>
-            <span className="section-label">Advanced Playground</span>
+            <span className="section-label">Advanced / legacy controls</span>
             <h2>Configure the full proof workflow</h2>
           </div>
           <button

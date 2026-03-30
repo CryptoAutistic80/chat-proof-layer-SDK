@@ -395,7 +395,7 @@ class ProofLayer:
             cls._warned_non_chat_capture_methods.add(method_name)
             warnings.warn(
                 f"ProofLayer.{method_name} is deprecated on the default import path. "
-                "Use proofsdk.advanced for non-chat lifecycle/compliance captures.",
+                "Use `from proofsdk.advanced import ProofLayer` for non-chat lifecycle/compliance captures.",
                 DeprecationWarning,
                 stacklevel=3,
             )

@@ -52,8 +52,8 @@ const completion = await wrapped.chat.completions.create({
 console.log(completion.proofLayer.bundleId);
 ```
 
-For lifecycle/compliance captures (risk, QMS, declarations, etc.), import from `@proof-layer/sdk/advanced`.
+For lifecycle/compliance captures (risk, QMS, declarations, etc.), use the separate expert-track guidance in `docs/migration/chatbot-focus-v1.md`.
 
 ## Advanced Usage
 
-Use `@proof-layer/sdk/advanced` for non-chat builders and lifecycle capture workflows.
+Use the expert-track migration guide for non-chat builders and lifecycle capture workflows after your chat path is in production.

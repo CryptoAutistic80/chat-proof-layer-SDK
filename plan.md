@@ -8,6 +8,12 @@
 **Date**: March 2026
 **Regulatory context**: AI literacy obligations already apply from February 2, 2025; GPAI obligations already apply from August 2, 2025; most AI Act obligations apply from August 2, 2026; some Annex I pathways apply from August 2, 2027. The Commission proposed later high-risk dates on November 19, 2025, but that proposal is not yet the law.
 
+### Chat-first acceptance criteria (release gate metrics)
+
+- **Quickstarts are chat-session-first**: every quickstart in `README.md`, `get_started.md`, `sdks/typescript/README.md`, and `packages/sdk-python/README.md` leads with a chat-session workflow and includes chat-focused wording (`chat`, `chat session`, `chat proof`, or `chatbot`).
+- **Default SDK docs avoid non-chat APIs**: primary docs above must not reference advanced-only flows (for example `/advanced`, `advanced playground`, or `legacy playground`) on the main path.
+- **Default web demo path is short and end-to-end**: the default route sequence (`/chat-demo` → `/verify` → `/share`) is covered by smoke tests and remains completable in **<= 3 top-level page transitions** from the first chat interaction to the share view.
+
 ---
 
 ## Table of Contents
